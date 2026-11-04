@@ -1,7 +1,7 @@
 // What kind of session a `rome_sessions` row is, as its readers see it.
 //
-// A guardian chat is a channel row on the webchat channel: `type = 'channel'`
-// with `source_channel = 'webchat'`. The API still reports it as `webchat`, so
+// A guardian chat is a channel row in a dashboard chat: `type = 'channel'`
+// with `chat_platform = 'webchat'`. The API still reports it as `webchat`, so
 // readers go through these helpers rather than reading `type` directly.
 
 import { and, eq, sql, type SQL } from "drizzle-orm";
@@ -16,16 +16,18 @@ export function channelChatId(channel: string, threadId: string): string {
 }
 
 /**
- * Whether a row is a guardian chat. Every chat writer also sets
- * `source_thread_id = id`, and the Dream and Showcases raw SQL matches chats on
- * that, so a writer that breaks it hides the chat from those apps only.
+ * Whether a row is a guardian chat: its session is a speaker in a dashboard
+ * chat. Every chat writer also sets `source_thread_id = id`, and the Dream and
+ * Showcases raw SQL matches chats on that, so a writer that breaks it hides
+ * the chat from those apps only.
  */
 export const isWebchatChat: SQL = webchatChatWhere(romeSessions);
 
-/** Whether a row is a conversation on a messaging channel, chats excluded. */
+/** Whether a row is a conversation on a messaging channel, chats excluded. A
+ *  row whose session is a speaker nowhere yet is one. */
 export const isChannelConversation: SQL = and(
   eq(romeSessions.type, "channel"),
-  sql`coalesce(${romeSessions.sourceChannel}, '') <> 'webchat'`,
+  sql`coalesce(${romeSessions.chatPlatform}, '') <> 'webchat'`,
 ) as SQL;
 
 /** The row's type, with a chat reading as `webchat`. */
@@ -33,12 +35,12 @@ export const romeSessionKind = sql<string>`case when ${isWebchatChat} then 'webc
 
 type SessionKindFields = {
   type: string;
-  sourceChannel?: string | null;
+  chatPlatform?: string | null;
 };
 
 /** {@link romeSessionKind} for a row already in memory. */
 export function sessionKindOf(row: SessionKindFields): string {
-  return row.type === "channel" && row.sourceChannel === "webchat" ? "webchat" : row.type;
+  return row.type === "channel" && row.chatPlatform === "webchat" ? "webchat" : row.type;
 }
 
 /** The `type` stored for a session of this kind. A chat is a channel row. */

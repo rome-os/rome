@@ -478,15 +478,14 @@ export const projectSyncLinks = sqliteTable("project_sync_links", {
 });
 
 /**
- * Whether a `rome_sessions` row is a guardian chat: a channel row on the
- * webchat channel. The chat indexes below use it as their WHERE, and
- * `isWebchatChat` in `db/session-kind.ts` is the same text, which is what lets
- * SQLite page the sidebar off them. That needs the constants inlined rather
- * than bound, and the unary `+` keeps SQLite off the `source_channel` indexes,
- * which would find the chats but then sort them all.
+ * Whether a `rome_sessions` row is a guardian chat: a channel row whose
+ * session is a speaker in a dashboard chat. The chat indexes below use it as
+ * their WHERE, and `isWebchatChat` in `db/session-kind.ts` is the same text,
+ * which is what lets SQLite page the sidebar off them. That needs the
+ * constants inlined rather than bound.
  */
-export function webchatChatWhere(table: { type: SQLiteColumn; sourceChannel: SQLiteColumn }) {
-  return sql`(${table.type} = 'channel' and +${table.sourceChannel} = 'webchat')`;
+export function webchatChatWhere(table: { type: SQLiteColumn; chatPlatform: SQLiteColumn }) {
+  return sql`(${table.type} = 'channel' and ${table.chatPlatform} = 'webchat')`;
 }
 
 export const romeSessions = sqliteTable(
