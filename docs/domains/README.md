@@ -96,6 +96,7 @@ Diffs still owed to the model, each a change of its own:
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
+- A sign-in to Rome makes no connection and changes none. Today a sign-in with GitHub or Google still connects that provider when Rome holds no connection to it, and renews the grant of a connection that reaches the same account (#1667).
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
