@@ -29,7 +29,7 @@ import { sendThrough, type ChannelOf } from "../chats/connected-accounts/connect
 import type { ConnectionPacing } from "../participation/reply-delivery/connection-pacing.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import { parseMessageCursor } from "@rome/api-types/message";
-import { channelMessageCursor } from "../chats/history/messages.js";
+import { channelMessageCursor, type Messages } from "../chats/history/messages.js";
 import { accountLabel, isAccount, type RomeAccounts } from "./rome-accounts.js";
 
 // TODO(0.8): remove, with the service's and the proxy's uses.
@@ -51,6 +51,9 @@ export interface ChannelsServiceDeps {
   /** The kinds whose history `query` reads, by the name the history is
    *  stored under. Absent, nothing reads messages. */
   kinds?: () => ConnectionKinds | undefined;
+  /** What was said in the places Rome serves itself, such as the dashboard
+   *  chat, by the name of the channel that sends there. */
+  ownMessages?: Readonly<Record<string, Messages>>;
   /** The Connections that back sending. */
   registry: Pick<ConnectionRegistry, "all">;
   /** Names the channel each Connection backs. A Connection it answers null
@@ -132,7 +135,8 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     read: ChannelMessageQuery = {},
   ): Promise<ChannelMessage[]> {
     const { channel, account } = resolve(target);
-    const messages = kindNamed(deps.kinds?.() ?? [], channel)?.messages;
+    const messages =
+      kindNamed(deps.kinds?.() ?? [], channel)?.messages ?? deps.ownMessages?.[channel] ?? null;
     if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
     const { after: cursor, ...rest } = read;
     // Paging walks back through one chat; across every chat it has no use.

@@ -104,7 +104,7 @@ import {
   WEBCHAT_CHANNEL,
   WEBCHAT_SURFACE,
   webchatChannel,
-  webchatKind,
+  webchatMessages,
 } from "./chats/dashboard/dashboard-account.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
@@ -600,6 +600,7 @@ async function main() {
     channels: () => builtChannels,
     kinds: () => builtKinds,
     own: [webchat],
+    ownMessages: { [WEBCHAT_CHANNEL]: webchatMessages(webchatRepo) },
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
@@ -1566,16 +1567,13 @@ async function main() {
   // its channel's send and inbound ports.
   // The kinds that answer a read: who their accounts can reach, and what was
   // said there.
-  const kinds: ConnectionKinds = [
-    ...connectionKinds({
-      db,
-      whatsAppAccounts,
-      linkedInAccounts,
-      ...(wechatUserReader ? { wechatUserReader } : {}),
-      accounts: { [AGENTS_KIND]: agentsAccounts(listedAgents) },
-    }),
-    webchatKind(webchatRepo),
-  ];
+  const kinds = connectionKinds({
+    db,
+    whatsAppAccounts,
+    linkedInAccounts,
+    ...(wechatUserReader ? { wechatUserReader } : {}),
+    accounts: { [AGENTS_KIND]: agentsAccounts(listedAgents) },
+  });
   builtKinds = kinds;
   const channels = channelList({
     kinds,

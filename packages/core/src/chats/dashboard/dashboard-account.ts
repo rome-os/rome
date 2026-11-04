@@ -5,9 +5,8 @@
 
 import type { ChannelSurface } from "../../core/agent-session.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
-import type { ConnectionKind } from "../../connections/connection-kind.js";
 import type { Channel } from "../connected-accounts/connected-account.js";
-import { queryPage } from "../history/messages.js";
+import { type Messages, queryPage } from "../history/messages.js";
 import { readWebchatMessages, WebChatAdapter } from "./webchat.js";
 
 export const WEBCHAT_CHANNEL = "webchat";
@@ -24,7 +23,7 @@ const DEFAULT_WINDOW_MS = 24 * 3_600_000;
  * The webchat channel. It sends by storing the reply in its chat. Nothing
  * arrives on it through a port: a guardian turn starts from webchat's own
  * HTTP routes. It has no conversation directory, and what was said in it is
- * read through {@link webchatKind}.
+ * read through {@link webchatMessages}.
  */
 export function webchatChannel(webchatRepo: WebChatRepository): Channel {
   const adapter = new WebChatAdapter(webchatRepo);
@@ -41,25 +40,22 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
   };
 }
 
-/** The dashboard chat's reads: what was said in it, from the store its
- *  replies are written to. It has no address book. */
-export function webchatKind(webchatRepo: WebChatRepository): ConnectionKind {
+/** What was said in the dashboard chat, from the store its replies are
+ *  written to. The dashboard is a platform of Rome's own, not a kind of
+ *  connection, so this read sits beside the kinds' reads, not among them. */
+export function webchatMessages(webchatRepo: WebChatRepository): Messages {
   return {
-    name: WEBCHAT_CHANNEL,
-    accounts: null,
-    messages: {
-      async query({ chatId, since, after, limit }) {
-        const from = since ?? new Date(Date.now() - DEFAULT_WINDOW_MS);
-        const lines = await readWebchatMessages(webchatRepo, chatId ?? null, from);
-        // Reversed before the sort, so lines sharing a timestamp come newest
-        // first too.
-        const newestFirst = lines
-          .filter((message) => message.timestamp.getTime() >= from.getTime())
-          .reverse()
-          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-        return queryPage(newestFirst, { after, limit });
-      },
-      byAccount: null,
+    async query({ chatId, since, after, limit }) {
+      const from = since ?? new Date(Date.now() - DEFAULT_WINDOW_MS);
+      const lines = await readWebchatMessages(webchatRepo, chatId ?? null, from);
+      // Reversed before the sort, so lines sharing a timestamp come newest
+      // first too.
+      const newestFirst = lines
+        .filter((message) => message.timestamp.getTime() >= from.getTime())
+        .reverse()
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      return queryPage(newestFirst, { after, limit });
     },
+    byAccount: null,
   };
 }

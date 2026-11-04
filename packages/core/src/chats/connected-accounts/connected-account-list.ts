@@ -48,17 +48,14 @@ export function channelList(deps: {
       return backed ? [[connectionKind, backed] as const] : [];
     }),
   );
-  const own = deps.own ?? [];
-  const reading = (deps.kinds ?? []).filter(
-    (kind) => kind.messages !== null && !own.some((channel) => channel.name === kind.name),
-  );
+  const reading = (deps.kinds ?? []).filter((kind) => kind.messages !== null);
   const channels: Channel[] = reading.map(({ name }) => ({
     name,
     send: ports.get(name)?.send ?? null,
     inbound: ports.get(name)?.inbound ?? null,
     directory: ports.get(name)?.directory ?? null,
   }));
-  channels.push(...own);
+  channels.push(...(deps.own ?? []));
   for (const [name, backed] of ports) {
     if (reading.some((kind) => kind.name === name)) continue;
     if (!backed.send && !backed.inbound) continue;

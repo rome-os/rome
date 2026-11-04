@@ -260,7 +260,7 @@ describe("ChannelsService — by account", () => {
     const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
     const channelsService = createChannelsService({
       channels: () => channels as Channels,
-    kinds: () => channels as ConnectionKinds,
+      kinds: () => channels as ConnectionKinds,
       registry: registryOf(CONNECTIONS, send),
       channelOf: kindChannelOf,
       accounts,
@@ -339,6 +339,22 @@ describe("ChannelsService — a channel Rome serves itself", () => {
     expect(await channelsService.list()).toEqual([
       { name: "webchat", platform: "webchat", sendable: true },
     ]);
+  });
+
+  it("reads what was said there from Rome's own store, which is no kind's", async () => {
+    const query = rs.fn(async () => [line("w", 1_000)]);
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      kinds: () => [],
+      ownMessages: { webchat: { query, byAccount: null } },
+      registry: { all: () => [] },
+      channelOf: () => null,
+    });
+
+    const page = await channelsService.query("webchat", { limit: 1 });
+
+    expect(page.map((m) => m.messageId)).toEqual(["w"]);
+    expect(query).toHaveBeenCalledWith({ limit: 1 });
   });
 
   it("sends inbound mail to the email account, whatever its record is called", () => {
