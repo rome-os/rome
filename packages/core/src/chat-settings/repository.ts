@@ -84,14 +84,16 @@ export class ChatSettingsRepository {
   ): SpeakerRow | undefined {
     const account = this.deps.adapters.knownAccountOn(channel);
     if (!account) return undefined;
-    const first = (...where: SQL[]) =>
+    const first = (reached: string, ...where: SQL[]) =>
       exec
         .select()
         .from(romeSessions)
         .where(and(isChannelConversation, eq(romeSessions.accountId, account.id), ...where))
-        // The session messages through `channel` at the address go to, when
-        // the account holds more than one there, as after a reconnect.
+        // The session messages through `channel` reach there, when the
+        // account holds more than one, as after a reconnect, or at a direct
+        // message it reached at another address before.
         .orderBy(
+          desc(sql`${romeSessions.id} = ${reached}`),
           desc(sql`${romeSessions.id} = ${channelChatId(channel, address)}`),
           asc(romeSessions.createdAt),
           asc(romeSessions.id),
@@ -100,13 +102,29 @@ export class ChatSettingsRepository {
         .get();
     for (const kind of ["group", "dm"] as const) {
       const chat = this.chatOf(channel, address, kind);
-      const row = chat && first(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId));
+      const row =
+        chat &&
+        first(
+          this.reachedIn(channel, chat, address),
+          eq(romeSessions.chatId, chat.id),
+          isNull(romeSessions.threadId),
+        );
       if (row) return row;
     }
     return first(
+      channelChatId(channel, address),
       eq(romeSessions.threadId, address),
       sql`${romeSessions.chatId} in ${chatIdsOn(account.platform)}`,
     );
+  }
+
+  /** The id of the session messages through `channel` reach in `chat`,
+   *  which Rome holds at `address`. A direct message is reached at the
+   *  address its platform last placed it, which an address the account
+   *  reached it at before, as a person's id, is not. */
+  private reachedIn(channel: string, chat: ChatRef, address: ChatId): string {
+    if (this.deps.chats.find(chat.id)?.kind !== "dm") return channelChatId(channel, address);
+    return channelChatId(channel, this.deps.adapters.addressAt(channel, placeIn(chat)));
   }
 
   /** The channel the speaker `row` speaks through: the one that is its
@@ -190,7 +208,7 @@ export class ChatSettingsRepository {
     const own = this.speakerAt(this.db, channel, chatId);
     if (own === undefined && !isShared(kind)) return null;
     if (!isShared(kind) && (own === undefined || this.stored(own).kind !== "group")) {
-      return own?.channelSettings ?? null;
+      return own ? this.directRuleOf(own) : null;
     }
     if (!this.deps.adapters.knownAccountOn(channel)) return own?.channelSettings ?? null;
     // The group's rule is the newest any of Rome's speakers there holds,
@@ -212,6 +230,32 @@ export class ChatSettingsRepository {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const rule = held[0] ?? null;
     return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
+  }
+
+  /** The rule of the direct message or thread speaker `own` stands in: in a
+   *  direct message, the newest its account holds there, as one set at an
+   *  address the account reached it at before its platform placed it at
+   *  another. */
+  private directRuleOf(own: SpeakerRow): StoredChatSettings | null {
+    if (own.threadId !== null || own.chatId === null || own.accountId === null) {
+      return own.channelSettings ?? null;
+    }
+    const held = this.db
+      .select({ settings: romeSessions.channelSettings })
+      .from(romeSessions)
+      .where(
+        and(
+          isChannelConversation,
+          eq(romeSessions.chatId, own.chatId),
+          isNull(romeSessions.threadId),
+          eq(romeSessions.accountId, own.accountId),
+          isNotNull(romeSessions.channelSettings),
+        ),
+      )
+      .all()
+      .map((row) => row.settings as StoredChatSettings)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return held[0] ?? null;
   }
 
   /** The kind platform address `chatId` names by itself on `channel`'s
@@ -294,7 +338,7 @@ export class ChatSettingsRepository {
         }
         // The session messages through `channel` at the address reach, which
         // a retired one left by a reconnect is not.
-        const id = channelChatId(channel, descriptor.ref.chatId);
+        const id = this.reachedIn(channel, chat, descriptor.ref.chatId);
         const now = new Date();
         // A speaker first placed here starts a second before now, so the first
         // message, heard within the second, is one it has not seen. Where the
@@ -359,6 +403,21 @@ export class ChatSettingsRepository {
           })
           .where(eq(romeSessions.id, id))
           .run();
+        // A direct message's rule is its account's there: a speaker the
+        // account stood in it at another address takes it too, so a rule
+        // cleared here is cleared there.
+        if (this.deps.chats.find(chat.id)?.kind === "dm") {
+          tx.update(romeSessions)
+            .set({ channelSettings: input.settings })
+            .where(
+              and(
+                eq(romeSessions.chatId, chat.id),
+                isNull(romeSessions.threadId),
+                eq(romeSessions.accountId, via.id),
+              ),
+            )
+            .run();
+        }
         // A group's rule is the group's: every other speaker there takes it,
         // keeping its own routing marker.
         if (isShared(descriptor.kind) && kindKnown) {

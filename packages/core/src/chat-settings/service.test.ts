@@ -14,6 +14,7 @@ import { openChannelChat } from "../connections/open-chat.js";
 import { startChannelChat } from "../connections/channel-chat.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
+import { ChatAddresses } from "../connections/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -985,6 +986,46 @@ describe("ChatSettingsService", () => {
     expect(repository.find("feishu", "oc_group" as ChatId)!.createdAt.getTime()).toBeLessThan(
       sentAt.getTime(),
     );
+  });
+
+  it("reads and writes one rule in a direct message its platform placed at another address", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const atPerson = { ...throughSales, chatId: "ou_ray" as ChatId };
+    const atChat = { ...throughSales, chatId: "oc_ray" as ChatId };
+    const reset = (mode: { mode: "none" } | { mode: "daily"; atHour: number }) =>
+      service.update({
+        ref: atPerson,
+        set: { session: { reset: mode } },
+        clear: [],
+        actor: { kind: "guardian" },
+      });
+    await reset({ mode: "none" });
+    const dm = repository.find("feishu", "ou_ray" as ChatId)!;
+    // Ray's first message reaches the direct message at its chat id, where
+    // the platform places it from then on, and opens a session there.
+    const key = wired.adapters.keyOf(wired.chats.find(dm.chatId!)!.ref);
+    new ChatAddresses(testDb!.db).bind(
+      { platform: "feishu", id: "ou_sales" },
+      key.externalId,
+      "oc_ray",
+    );
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "oc_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+    expect(opened.id).not.toBe(dm.id);
+
+    // The rule set before the message holds there.
+    expect((await service.get(atChat)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+
+    await reset({ mode: "daily", atHour: 4 });
+    for (const ref of [atPerson, atChat]) {
+      expect((await service.get(ref)).overrides).toEqual({
+        session: { reset: { mode: "daily", atHour: 4 } },
+      });
+    }
+    expect(repository.find("feishu", "oc_ray" as ChatId)?.id).toBe(opened.id);
   });
 
   it("names no chat after the placeholder a session opened without a name took", async () => {
