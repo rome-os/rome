@@ -8,7 +8,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import { refuseUnshownParts, replyToShaped } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
@@ -354,7 +354,7 @@ export class EmailAdapter {
     // The mail transport has no attachment field. Reject before sending a body
     // that would falsely appear to deliver the requested files.
     if (message.attachments?.length) {
-      throw new ChannelSendRefused(
+      throw new SendRefused(
         "attachment_unsupported",
         "Email attachments are not supported by the mail transport. No email was sent.",
       );
@@ -362,7 +362,7 @@ export class EmailAdapter {
     refuseUnshownParts("email", message);
     const email = message.kind === "email" ? message : undefined;
     if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
-      throw new ChannelSendRefused(
+      throw new SendRefused(
         "reply_unaddressable",
         "Email inReplyToMessageId must not be blank. No email was sent.",
       );
@@ -390,10 +390,7 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
-      throw new ChannelSendRefused(
-        "empty",
-        "Email requires non-empty text or HTML. No email was sent.",
-      );
+      throw new SendRefused("empty", "Email requires non-empty text or HTML. No email was sent.");
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;

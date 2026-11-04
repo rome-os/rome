@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   type Channel,
-  ChannelSendRefused,
+  SendRefused,
   type ChatId,
   type MessageReceipt,
   type OutgoingMessage,
@@ -156,7 +156,7 @@ describe("recordedSends", () => {
   it("hand the port a part only Rome's host makes, and record nothing when it refuses", async () => {
     beforeSend = (message) => {
       if (message.parts?.some((part) => part.type === "routine_draft_card")) {
-        throw new ChannelSendRefused("part_unsupported", "Telegram shows text only");
+        throw new SendRefused("part_unsupported", "Telegram shows text only");
       }
     };
     await expect(
@@ -469,7 +469,7 @@ describe("recordedSends", () => {
 
   it("record nothing when the port refuses a message with nothing in it", async () => {
     beforeSend = () => {
-      throw new ChannelSendRefused("empty", "A message needs text or an attachment");
+      throw new SendRefused("empty", "A message needs text or an attachment");
     };
     for (const name of ["telegram", "email"]) {
       await expect(send(name).send("thread-1" as ChatId, { text: "  " })).rejects.toMatchObject({
@@ -558,7 +558,7 @@ describe("recordedSends", () => {
   it("hand the port a blank email to reply to as given, and record nothing when it refuses", async () => {
     beforeSend = (message) => {
       if (message.kind === "email" && message.inReplyToMessageId === " ") {
-        throw new ChannelSendRefused("reply_unaddressable", "inReplyToMessageId is blank");
+        throw new SendRefused("reply_unaddressable", "inReplyToMessageId is blank");
       }
     };
     await expect(
