@@ -7,11 +7,7 @@ import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
 import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
-import {
-  romeAgentMessages,
-  romeSessions,
-  romeAgentTraceBlocks,
-} from "../schema.js";
+import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import {
   INTERRUPTED_TURN_ERROR,
   WebChatRepository,
