@@ -105,7 +105,7 @@ export class ChatSettingsRepository {
       const row =
         chat &&
         first(
-          this.reachedIn(channel, chat, address),
+          channelChatId(channel, this.reachedAt(channel, chat, address)),
           eq(romeSessions.chatId, chat.id),
           isNull(romeSessions.threadId),
         );
@@ -118,13 +118,13 @@ export class ChatSettingsRepository {
     );
   }
 
-  /** The id of the session messages through `channel` reach in `chat`,
-   *  which Rome holds at `address`. A direct message is reached at the
-   *  address its platform last placed it, which an address the account
-   *  reached it at before, as a person's id, is not. */
-  private reachedIn(channel: string, chat: ChatRef, address: ChatId): string {
-    if (this.deps.chats.find(chat.id)?.kind !== "dm") return channelChatId(channel, address);
-    return channelChatId(channel, this.deps.adapters.addressAt(channel, placeIn(chat)));
+  /** The address messages through `channel` reach `chat` at, which Rome
+   *  holds at `address`. A direct message is reached at the address its
+   *  platform last placed it, which an address the account reached it at
+   *  before, as a person's id, is not. */
+  private reachedAt(channel: string, chat: ChatRef, address: ChatId): ChatId {
+    if (this.deps.chats.find(chat.id)?.kind !== "dm") return address;
+    return this.deps.adapters.addressAt(channel, placeIn(chat));
   }
 
   /** The channel the speaker `row` speaks through: the one that is its
@@ -333,12 +333,14 @@ export class ChatSettingsRepository {
           this.startChat(descriptor, channel, kindKnown);
         // An address standing in for a name the platform has not given is no
         // name: the first message there names the chat.
-        if (!isPlaceholderName(channel, descriptor)) {
-          this.deps.chats.rename(chat, descriptor.displayName);
-        }
-        // The session messages through `channel` at the address reach, which
-        // a retired one left by a reconnect is not.
-        const id = this.reachedIn(channel, chat, descriptor.ref.chatId);
+        const placeholder = isPlaceholderName(channel, descriptor);
+        if (!placeholder) this.deps.chats.rename(chat, descriptor.displayName);
+        // The session messages through `channel` reach the chat at: its id
+        // and its stored address name the same address, as the session the
+        // first message there opens would.
+        const at = this.reachedAt(channel, chat, descriptor.ref.chatId);
+        const id = channelChatId(channel, at);
+        const name = placeholder ? at : descriptor.displayName;
         const now = new Date();
         // A speaker first placed here starts a second before now, so the first
         // message, heard within the second, is one it has not seen. Where the
@@ -364,7 +366,7 @@ export class ChatSettingsRepository {
         tx.insert(romeSessions)
           .values({
             id,
-            name: descriptor.displayName,
+            name,
             personaId: null,
             projectName: DEFAULT_WEBCHAT_PROJECT_NAME,
             projectPath: null,
@@ -372,8 +374,8 @@ export class ChatSettingsRepository {
             agentName: null,
             type: "channel",
             sourceChannel: channel,
-            sourceThreadId: descriptor.ref.chatId,
-            sourceThreadName: descriptor.displayName,
+            sourceThreadId: at,
+            sourceThreadName: name,
             sourceThreadType,
             chatId: chat.id,
             chatPlatform: chat.platform,
@@ -386,7 +388,8 @@ export class ChatSettingsRepository {
           .run();
         tx.update(romeSessions)
           .set({
-            name: descriptor.displayName,
+            // A placeholder leaves the name the session has.
+            ...(placeholder ? {} : { name }),
             ...(sourceThreadType === null ? {} : { sourceThreadType }),
             // The row is this account's speaker in this chat. One stored
             // before it stood in a chat stands here now, and one left by the

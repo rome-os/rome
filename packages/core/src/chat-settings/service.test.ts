@@ -1028,6 +1028,39 @@ describe("ChatSettingsService", () => {
     expect(repository.find("feishu", "oc_ray" as ChatId)?.id).toBe(opened.id);
   });
 
+  it("stores a rule set at a person's id where messages from them will arrive", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    // A send reached Ray's direct message at its chat id, with no session.
+    const { key } = startChannelChat(wired, {
+      channel: "feishu",
+      threadId: "ou_ray",
+      threadType: "private",
+    });
+    new ChatAddresses(testDb!.db).bind(
+      { platform: "feishu", id: "ou_sales" },
+      key.externalId,
+      "oc_ray",
+    );
+
+    await service.update({
+      ref: { ...throughSales, chatId: "ou_ray" as ChatId },
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    // Ray's first reply arrives at the chat id and finds the rule's session.
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "oc_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+
+    expect(opened.id).toBe("channel:feishu:oc_ray");
+    expect((await service.get({ ...throughSales, chatId: "oc_ray" as ChatId })).overrides).toEqual({
+      session: { reset: { mode: "none" } },
+    });
+  });
+
   it("names no chat after the placeholder a session opened without a name took", async () => {
     const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
     const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
