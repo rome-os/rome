@@ -17,7 +17,6 @@ import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-o
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
-import { heldByAnother } from "../connections/chat-ids.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/place.js";
@@ -818,9 +817,10 @@ function storedLine(row: LineRow): TranscriptLine {
 
 /**
  * The transcript lines of `sessionIds`, as one table: what was said where
- * each session stands, from Chats, read as the session sees it, beside the
- * session's own lines (traces, and the lines of a session that stands in no
- * chat). A line is the session's prompt or answer by its turn link; a line
+ * each session stands, from Chats, beside the session's traces. Every
+ * message recorded there is a line, so each of Rome's accounts' copies in a
+ * Telegram basic group is one (#1670); a session that stands in no chat has
+ * only its traces (#1671); a dashboard notice is not a line (#1672). A line is the session's prompt or answer by its turn link; a line
  * with none, or only caught up on, is its agent's when its account said it,
  * the guardian's on the dashboard, and a notification elsewhere.
  * Lines keep the order they were said in; within one second, `line_order`
@@ -859,8 +859,6 @@ export function sessionLines(sessionIds: readonly string[]) {
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       AND l.role IN ('prompt', 'answer')
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
-      -- Where each account holds its own copy, the session reads its own.
-      AND NOT ${heldByAnother(sql`c.platform`, sql`c.key`, sql`m.key`, sql`s.account_id`)}
     UNION ALL
     SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,
       CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
@@ -868,35 +866,24 @@ export function sessionLines(sessionIds: readonly string[]) {
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
       json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
-      -- A session in no chat keeps its rows in the order they were written;
-      -- beside a chat's lines, a trace goes after its turn's first prompt.
-      CASE WHEN s.chat_id IS NULL THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
+      -- A trace goes after its turn's first prompt.
+      1 AS line_order,
       r.rowid AS seq
-    FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
-    WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
-      AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant'))
-      -- A channel chat's notifications are its lines in Chats; only the
-      -- dashboard keeps notices of its own.
-      AND NOT (r.role = 'notification' AND s.chat_id IS NOT NULL
-        AND s.chat_platform IS NOT ${WEBCHAT_PLATFORM})
+    FROM rome_agent_messages r
+    WHERE r.session_id IN (SELECT value FROM json_each(${ids})) AND r.role = 'trace'
   )`;
 }
 
 /**
  * How many lines the session in the current `rome_sessions` row draws, as
  * {@link sessionLines} does: what was said where it stands since it started
- * there, and its own rows that Chats does not hold. For a select over
- * `rome_sessions`.
+ * there, and its traces. For a select over `rome_sessions`.
  */
 const chatsSessionMessageCount = sql<number>`((
-  select count(*) from ${CHAT_MESSAGES} m join ${CHATS} c on c.id = m.chat_id
+  select count(*) from ${CHAT_MESSAGES} m
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
     and m."said_at" >= "rome_sessions"."created_at"
-    and not ${heldByAnother(sql`c.platform`, sql`c.key`, sql`m.key`, sql`"rome_sessions"."account_id"`)}
 ) + (
   select count(*) from "rome_agent_messages" r
-  where r."session_id" = "rome_sessions"."id"
-    and ("rome_sessions"."chat_id" is null or r."role" not in ('user', 'assistant'))
-    and not (r."role" = 'notification' and "rome_sessions"."chat_id" is not null
-      and "rome_sessions"."chat_platform" is not ${WEBCHAT_PLATFORM})
+  where r."session_id" = "rome_sessions"."id" and r."role" = 'trace'
 ))`.mapWith(Number);

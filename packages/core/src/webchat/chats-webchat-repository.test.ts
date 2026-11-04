@@ -278,13 +278,16 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
-  it("keeps the lines of a session in no chat as its own", async () => {
+  // A session in no chat has no messages in Chats, so its transcript holds
+  // only its traces (#1671).
+  it("reads no prompt or answer for a session in no chat", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
 
     expect(session("fork-1")?.chatId).toBeNull();
     expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
-    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+    expect(await repo.getMessages("fork-1")).toEqual([]);
+    expect(await repo.getMessageCount("fork-1")).toBe(0);
   });
 
   it("moves a promoted fork's lines into its new chat, linked to their turns", async () => {
@@ -485,14 +488,13 @@ describe("ChatsWebChatRepository", () => {
     expect(session("handoff-1")?.chatId).toBeNull();
   });
 
-  it("keeps a chat's notifications in its transcript", async () => {
+  // A dashboard notice is not a message in Chats yet (#1672).
+  it("leaves a dashboard notice out of its chat's transcript", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set"));
 
-    expect((await repo.getMessages("chat-1")).map((line) => [line.id, line.role])).toEqual([
-      ["note-1", "notification"],
-    ]);
-    expect(await repo.getMessageCount("chat-1")).toBe(1);
+    expect(await repo.getMessages("chat-1")).toEqual([]);
+    expect(await repo.getMessageCount("chat-1")).toBe(0);
   });
   it("reads a channel chat's notification once, from Chats, though its old row stays", async () => {
     const telegram = new ChatRepository(testDb.db).start(
@@ -534,7 +536,9 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
   });
 
-  it("reads its own account's copy of a message where each account holds one", async () => {
+  // Each of Rome's accounts records its own copy (#1670), and every message
+  // recorded in the place is a line.
+  it("reads every account's copy of a message where each account holds one", async () => {
     // A Telegram basic group numbers its messages per member account.
     const group = new ChatRepository(testDb.db).start(
       chatKey("telegram", "-42" as ChatId),
@@ -571,8 +575,9 @@ describe("ChatsWebChatRepository", () => {
 
     expect((await repo.getMessages("channel:tg-sales:-42")).map((line) => line.id)).toEqual([
       "111:5",
+      "222:7",
     ]);
-    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(1);
+    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(2);
   });
 
   it("reads a steered input after the card it answers, in the same turn", async () => {
@@ -613,18 +618,6 @@ describe("ChatsWebChatRepository", () => {
 
     await repo.addMessage("in-1", "chat-1", "user", text("Back again"), "turn-2");
     expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual([]);
-  });
-  it("reads a session in no chat in the order its rows were written", async () => {
-    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
-    await repo.addMessage("in-1", "fork-1", "user", text("Plan a trip"), "turn-1");
-    await repo.addMessage("card-1", "fork-1", "assistant", text("Which city?"), "turn-1");
-    await repo.addMessage("in-2", "fork-1", "user", text("Lisbon"), "turn-1");
-
-    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual([
-      "in-1",
-      "card-1",
-      "in-2",
-    ]);
   });
   it("keeps a promoted fork's inputs where they stand, queued or run", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
