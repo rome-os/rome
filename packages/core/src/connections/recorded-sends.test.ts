@@ -422,6 +422,19 @@ describe("recordedSends", () => {
         }),
       ).rejects.toMatchObject({ reason: "reply_unaddressable" });
     }
+    // An email that names its own recipients is a new email, even in the
+    // thread that holds the quote.
+    await expect(
+      send("email").send(
+        "thread-7" as ChatId,
+        {
+          kind: "email",
+          to: "bob@example.com",
+          text: "Thanks",
+          replyToMessageId: "<m-1@mail.example.com>",
+        } as OutgoingMessage,
+      ),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
     // An email Rome does not hold sits in a thread only the provider knows.
     await expect(
       send("email").send("thread-7" as ChatId, {

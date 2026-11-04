@@ -120,7 +120,7 @@ export function recordedSends<C extends Channel>(
         const answers = email?.inReplyToMessageId;
         const chatQuote = emails && answers === undefined ? message.replyToMessageId : undefined;
         if (chatQuote !== undefined) {
-          refuseQuoteElsewhere(local, channel.name, address, chatQuote);
+          refuseQuoteElsewhere(local, channel.name, address, chatQuote, email?.to !== undefined);
         }
         const quoted = emails ? (answers ?? chatQuote) : message.replyToMessageId;
         let at = address;
@@ -248,7 +248,7 @@ function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string
 /**
  * Refuses a chat-style quote on email channel `channel` that the message to
  * `address` cannot carry: an id that is not an email's Message-ID, a quote on
- * a new email or at a blank address, and a quote of an email Rome does not
+ * a new email, on one that names its own recipients, or at a blank address, and a quote of an email Rome does not
  * hold in that thread. The provider sends a reply into the thread of the
  * email it answers, so an email Rome holds elsewhere, or does not hold, could
  * take the message out of the chat it is sent to. As on every platform, a
@@ -260,10 +260,16 @@ function refuseQuoteElsewhere(
   channel: string,
   address: string,
   quote: string,
+  namesRecipients: boolean,
 ): void {
   replyToShaped("email", quote, EMAIL_MESSAGE_ID);
   const held = threadOf(deps, channel, quote);
-  if (!address.trim() || namesNewEmail(deps, channel, address) || held !== address) {
+  if (
+    namesRecipients ||
+    !address.trim() ||
+    namesNewEmail(deps, channel, address) ||
+    held !== address
+  ) {
     throw new SendRefused(
       "reply_unaddressable",
       `email ${JSON.stringify(quote)} is not in the thread this message goes to. ` +
