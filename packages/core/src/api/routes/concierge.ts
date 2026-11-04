@@ -1,7 +1,15 @@
-import { CONCIERGE_DONE_DAYS, type ConciergeTasksResponse } from "@rome/api-types/concierge";
+import {
+  CONCIERGE_ALERT_KINDS,
+  CONCIERGE_DONE_DAYS,
+  type ConciergeAlertKind,
+  type ConciergeAlertsResponse,
+  type ConciergeTasksResponse,
+} from "@rome/api-types/concierge";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import { validateRulesChange } from "../../concierge/alert-events.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -77,6 +85,65 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
       sse.onAbort(finish);
       await closed;
     });
+  });
+
+  // The Alerts tab: the repos the Concierge watches, with each event kind, and
+  // the rules that bound how often alerts wake it. Read from the alert
+  // routines and the `conciergeAlerts` setting. Guardian-only; 404 while off.
+  const alertsOf = async (c: Context) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return { error: c.json({ error: "Not authenticated" }, 401) };
+    }
+    const concierge = deps.concierge;
+    if (!concierge || !(await concierge.isEnabled())) {
+      return { error: c.json({ error: "Concierge is off" }, 404) };
+    }
+    return { alerts: concierge.alerts };
+  };
+  const repoParam = (c: Context) => `${c.req.param("owner")}/${c.req.param("name")}`;
+
+  app.get("/concierge/alerts", async (c) => {
+    const { alerts, error } = await alertsOf(c);
+    if (error) return error;
+    return c.json({
+      repos: await alerts.list(),
+      rules: await alerts.rules(),
+    } satisfies ConciergeAlertsResponse);
+  });
+
+  app.put("/concierge/alerts/repos/:owner/:name/kinds/:kind", async (c) => {
+    const { alerts, error } = await alertsOf(c);
+    if (error) return error;
+    const kind = c.req.param("kind");
+    const body = await c.req.json<{ enabled?: unknown }>().catch(() => null);
+    if (!(CONCIERGE_ALERT_KINDS as readonly string[]).includes(kind)) {
+      return c.json({ error: `Unknown event kind ${kind}` }, 400);
+    }
+    if (typeof body?.enabled !== "boolean")
+      return c.json({ error: "enabled must be a boolean" }, 400);
+    const repo = await alerts.setKind(repoParam(c), kind as ConciergeAlertKind, body.enabled);
+    if (!repo) return c.json({ error: "Not watched" }, 404);
+    return c.json({ repo });
+  });
+
+  app.delete("/concierge/alerts/repos/:owner/:name", async (c) => {
+    const { alerts, error } = await alertsOf(c);
+    if (error) return error;
+    const result = await alerts.unwatch(repoParam(c));
+    if (result.removed === 0) return c.json({ error: "Not watched" }, 404);
+    return c.json(result);
+  });
+
+  app.put("/concierge/alerts/rules", async (c) => {
+    const { alerts, error } = await alertsOf(c);
+    if (error) return error;
+    const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ error: "Invalid request body" }, 400);
+    try {
+      return c.json({ rules: await alerts.setRules(validateRulesChange(body)) });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
   });
 
   return app;

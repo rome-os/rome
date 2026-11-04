@@ -3,20 +3,25 @@
 // batch, so a burst of events is one turn rather than one per event.
 //
 //   batch       a flush waits BATCH_DELAY_MS after the first event of a batch
-//   rate limit  at most MAX_TURNS_PER_HOUR alert turns in any hour, and
-//               MIN_SPACING_MS between two of them; events wait for the next slot
+//   rate limit  at most `maxTurnsPerHour` alert turns in any hour, and
+//               `minSpacingMinutes` between two of them (by default 2 and 15);
+//               events wait for the next slot
 //   quiet hours the guardian's quiet window holds every event until it ends,
 //               then they arrive as one batch marked as held
 //
 // Held events live in memory only: a restart drops them.
 
+import {
+  CONCIERGE_ALERT_DEFAULT_RULES,
+  type ConciergeAlertRules,
+  type ConciergeQuietHours,
+} from "@rome/api-types/concierge";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("concierge-alerts");
 
 export const BATCH_DELAY_MS = 60_000;
-export const MIN_SPACING_MS = 15 * 60_000;
-export const MAX_TURNS_PER_HOUR = 2;
+export const MIN_SPACING_MS = CONCIERGE_ALERT_DEFAULT_RULES.minSpacingMinutes * 60_000;
 export const HOUR_MS = 60 * 60_000;
 /** Events a batch shows; the rest are given as a count. */
 export const MAX_EVENTS_PER_BATCH = 20;
@@ -54,6 +59,8 @@ export interface AlertDeps {
   quietUntil(at: number): Promise<number | null>;
   /** Runs the batch as a system turn and settles when the turn ends. */
   deliver(batch: AlertBatch): Promise<void>;
+  /** The rate limit now. Read on every scheduling, so a change applies at once. */
+  limits?(): Pick<ConciergeAlertRules, "maxTurnsPerHour" | "minSpacingMinutes">;
 }
 
 export class AlertCoalescer {
@@ -97,16 +104,23 @@ export class AlertCoalescer {
   nextFlushAt(): number | null {
     if (this.firstAt === null) return null;
     const now = this.deps.now();
+    const { maxTurnsPerHour, minSpacingMinutes } =
+      this.deps.limits?.() ?? CONCIERGE_ALERT_DEFAULT_RULES;
     const recent = this.turns.filter((start) => start > now - HOUR_MS);
     const last = recent.at(-1);
-    const oldest = recent[0];
+    // The oldest turn whose hour must pass before one more fits.
+    const blocking =
+      recent.length >= maxTurnsPerHour ? recent[recent.length - maxTurnsPerHour] : undefined;
     return Math.max(
       this.firstAt + BATCH_DELAY_MS,
-      last === undefined ? Number.NEGATIVE_INFINITY : last + MIN_SPACING_MS,
-      recent.length >= MAX_TURNS_PER_HOUR && oldest !== undefined
-        ? oldest + HOUR_MS
-        : Number.NEGATIVE_INFINITY,
+      last === undefined ? Number.NEGATIVE_INFINITY : last + minSpacingMinutes * 60_000,
+      blocking === undefined ? Number.NEGATIVE_INFINITY : blocking + HOUR_MS,
     );
+  }
+
+  /** Schedules the next flush again, after the rate limit or quiet hours changed. */
+  rearm(): void {
+    if (!this.flushing) this.arm();
   }
 
   stop(): void {
@@ -175,10 +189,7 @@ export class AlertCoalescer {
 }
 
 /** A daily quiet window in the guardian's zone, `HH:mm` to `HH:mm`. It may wrap midnight. */
-export interface QuietHours {
-  start: string;
-  end: string;
-}
+export type QuietHours = ConciergeQuietHours;
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 

@@ -75,6 +75,30 @@
         "email": "Summarize my unread email",
         "task": "Build me a simple habit tracker app"
       }
+    },
+    "alerts": {
+      "tab": "Alerts",
+      "tabsLabel": "Tasks and alerts",
+      "emptyTitle": "No repos watched",
+      "emptyDescription": "Ask the Concierge to tell you about a GitHub repo, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
+      "asLogin": "For @{{login}}",
+      "stopRepo": "Stop watching {{repo}}",
+      "stopped": "Stopped watching {{repo}}",
+      "kinds": {
+        "pull_request": "Review requests for you",
+        "pull_request_review": "Reviews of your PRs",
+        "issue_comment": "Comments and mentions",
+        "pull_request_review_comment": "Review comments on your PRs",
+        "workflow_run": "Your failed CI runs"
+      },
+      "rules": "Rules",
+      "maxTurnsPerHour": "Most alerts per hour",
+      "minSpacingMinutes": "Minutes between alerts",
+      "quietHours": "Quiet hours",
+      "quietHoursHint": "Events wait until quiet hours end, then arrive as one summary.",
+      "quietStart": "From",
+      "quietEnd": "Until",
+      "saveFailed": "Could not save"
     }
   },
   "reply": {

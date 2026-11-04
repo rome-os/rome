@@ -115,6 +115,31 @@ describe("githubAlertOf", () => {
   });
 });
 
+describe("githubAlertOf and an app posting as the guardian", () => {
+  // The Code Review app posts reviews and replies under the guardian's own
+  // GitHub identity, so its posts carry the guardian's login as their sender.
+  it("drops a review and a review comment the app posted as the guardian, even on the guardian's PR", () => {
+    const pr = { number: 7, title: "Fix it", user: { login: "octo-me" } };
+    const review = {
+      action: "submitted",
+      repository,
+      sender: { login: "octo-me" },
+      pull_request: pr,
+      review: { id: 21, state: "COMMENTED", body: "Automated review: looks fine" },
+    };
+    const reply = {
+      action: "created",
+      repository,
+      sender: { login: "Octo-Me" },
+      pull_request: pr,
+      comment: { id: 22, body: "Fixed in the next commit, @octo-me" },
+    };
+    expect(githubAlertOf("pull_request_review", review, me)).toBeNull();
+    expect(githubAlertOf("pull_request_review_comment", reply, me)).toBeNull();
+    expect(githubAlertOf("issue_comment", { ...reply, issue: pr }, me)).toBeNull();
+  });
+});
+
 describe("githubLoginReader", () => {
   it("reads the login once per token, and null without one", async () => {
     let token: string | null = "t1";

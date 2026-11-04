@@ -57,3 +57,49 @@ export interface ConciergeTasksResponse {
 export interface ConciergeTaskUpsertEvent {
   task: ConciergeTaskDto;
 }
+
+/** The GitHub event kinds an alert watch covers, by GitHub's event name. */
+export const CONCIERGE_ALERT_KINDS = [
+  "pull_request",
+  "pull_request_review",
+  "issue_comment",
+  "pull_request_review_comment",
+  "workflow_run",
+] as const;
+export type ConciergeAlertKind = (typeof CONCIERGE_ALERT_KINDS)[number];
+
+/** A daily window in the guardian's timezone, `HH:mm` to `HH:mm`; it may wrap midnight. */
+export interface ConciergeQuietHours {
+  start: string;
+  end: string;
+}
+
+/** How often outside events may wake the Concierge. */
+export interface ConciergeAlertRules {
+  maxTurnsPerHour: number;
+  minSpacingMinutes: number;
+  /** Off when null. */
+  quietHours: ConciergeQuietHours | null;
+}
+
+export const CONCIERGE_ALERT_DEFAULT_RULES: ConciergeAlertRules = {
+  maxTurnsPerHour: 2,
+  minSpacingMinutes: 15,
+  quietHours: null,
+};
+export const CONCIERGE_ALERT_MAX_TURNS_PER_HOUR = 12;
+export const CONCIERGE_ALERT_MAX_SPACING_MINUTES = 120;
+
+/** One watched repo with its event kinds. */
+export interface ConciergeAlertRepoDto {
+  repo: string;
+  /** The GitHub login the alerts are judged against. */
+  login: string;
+  kinds: { kind: ConciergeAlertKind; enabled: boolean }[];
+}
+
+/** `GET /concierge/alerts`. */
+export interface ConciergeAlertsResponse {
+  repos: ConciergeAlertRepoDto[];
+  rules: ConciergeAlertRules;
+}

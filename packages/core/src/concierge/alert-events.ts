@@ -4,6 +4,15 @@
 // coalescer (alerts.ts) hands batches to the Concierge as quiet system turns.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  CONCIERGE_ALERT_DEFAULT_RULES,
+  CONCIERGE_ALERT_KINDS,
+  CONCIERGE_ALERT_MAX_SPACING_MINUTES,
+  CONCIERGE_ALERT_MAX_TURNS_PER_HOUR,
+  type ConciergeAlertKind,
+  type ConciergeAlertRepoDto,
+  type ConciergeAlertRules,
+} from "@rome/api-types/concierge";
 import type { Action } from "../actions/types.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -12,13 +21,7 @@ import type { RoutineEngine } from "../routines/engine.js";
 import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
 import type { EventFilterCondition, Routine } from "../routines/types.js";
 import { createLogger } from "../logger.js";
-import {
-  type AlertBatch,
-  AlertCoalescer,
-  parseQuietHours,
-  type QuietHours,
-  quietWindowEnd,
-} from "./alerts.js";
+import { type AlertBatch, AlertCoalescer, parseQuietHours, quietWindowEnd } from "./alerts.js";
 import {
   GITHUB_ALERT_TYPES,
   GITHUB_EVENT_PREFIX,
@@ -60,17 +63,83 @@ export interface WatchResult {
   login: string;
   /** `github`: read off the guardian's connected account; `given`: passed in. */
   loginSource: "github" | "given";
-  events: string[];
+  kinds: ConciergeAlertKind[];
   warnings?: string[];
 }
 
-/** What the Concierge's alert tools reach. */
+/** What the Concierge's alert tools and the dashboard's Alerts tab reach. */
 export interface ConciergeAlerts {
   watch(input: { repo: string; login?: string }): Promise<WatchResult>;
+  /** Deletes the repo's alert routines. The repo's webhook stays: another app may share it. */
   unwatch(repo: string): Promise<{ repo: string; removed: number }>;
-  list(): Promise<{ repo: string; login: string; events: string[]; enabled: boolean }[]>;
-  configure(input: { quietHours: QuietHours | null }): Promise<{ quietHours: QuietHours | null }>;
-  settings(): Promise<{ quietHours: QuietHours | null }>;
+  list(): Promise<ConciergeAlertRepoDto[]>;
+  /** Turns one kind of a watched repo on or off. Null when the repo is not watched. */
+  setKind(
+    repo: string,
+    kind: ConciergeAlertKind,
+    enabled: boolean,
+  ): Promise<ConciergeAlertRepoDto | null>;
+  rules(): Promise<ConciergeAlertRules>;
+  /** Changes the fields given and answers the rules as stored. */
+  setRules(input: Partial<ConciergeAlertRules>): Promise<ConciergeAlertRules>;
+  /** Subscribes every watched repo again, for one whose webhook another app removed. */
+  reconcile(): Promise<void>;
+}
+
+const isKind = (value: unknown): value is ConciergeAlertKind =>
+  (CONCIERGE_ALERT_KINDS as readonly unknown[]).includes(value);
+
+const boundedInt = (value: unknown, min: number, max: number): number | undefined =>
+  typeof value === "number" && Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : undefined;
+
+/** The rules as stored, with the defaults for anything missing or out of bounds. */
+export function parseAlertRules(value: unknown): ConciergeAlertRules {
+  const stored = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const defaults = CONCIERGE_ALERT_DEFAULT_RULES;
+  return {
+    maxTurnsPerHour:
+      boundedInt(stored.maxTurnsPerHour, 1, CONCIERGE_ALERT_MAX_TURNS_PER_HOUR) ??
+      defaults.maxTurnsPerHour,
+    minSpacingMinutes:
+      boundedInt(stored.minSpacingMinutes, 0, CONCIERGE_ALERT_MAX_SPACING_MINUTES) ??
+      defaults.minSpacingMinutes,
+    quietHours: parseQuietHours(stored.quietHours),
+  };
+}
+
+/** Checks a change of the rules. Throws with what is wrong. */
+export function validateRulesChange(input: Record<string, unknown>): Partial<ConciergeAlertRules> {
+  const change: Partial<ConciergeAlertRules> = {};
+  if (input.maxTurnsPerHour !== undefined) {
+    const value = boundedInt(input.maxTurnsPerHour, 1, CONCIERGE_ALERT_MAX_TURNS_PER_HOUR);
+    if (value === undefined) {
+      throw new Error(
+        `maxTurnsPerHour must be a whole number from 1 to ${CONCIERGE_ALERT_MAX_TURNS_PER_HOUR}`,
+      );
+    }
+    change.maxTurnsPerHour = value;
+  }
+  if (input.minSpacingMinutes !== undefined) {
+    const value = boundedInt(input.minSpacingMinutes, 0, CONCIERGE_ALERT_MAX_SPACING_MINUTES);
+    if (value === undefined) {
+      throw new Error(
+        `minSpacingMinutes must be a whole number from 0 to ${CONCIERGE_ALERT_MAX_SPACING_MINUTES}`,
+      );
+    }
+    change.minSpacingMinutes = value;
+  }
+  if (input.quietHours !== undefined) {
+    if (input.quietHours === null) change.quietHours = null;
+    else {
+      const quietHours = parseQuietHours(input.quietHours);
+      if (!quietHours)
+        throw new Error("quietHours needs start and end as different HH:mm times, or null");
+      change.quietHours = quietHours;
+    }
+  }
+  return change;
 }
 
 function attr(value: string): string {
@@ -105,12 +174,13 @@ export function renderAlertBatch(batch: AlertBatch): string {
   ].join("\n");
 }
 
-async function readSettings(
-  settings: Pick<SettingsRepository, "get">,
-): Promise<{ quietHours: QuietHours | null }> {
-  const stored = await settings.get<{ quietHours?: unknown }>(CONCIERGE_ALERTS_SETTING_KEY);
-  return { quietHours: parseQuietHours(stored?.quietHours) };
+async function readRules(settings: Pick<SettingsRepository, "get">): Promise<ConciergeAlertRules> {
+  return parseAlertRules(await settings.get(CONCIERGE_ALERTS_SETTING_KEY));
 }
+
+/** How long after boot the watched repos are subscribed again, and how often after. */
+const RECONCILE_DELAY_MS = 60_000;
+const RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
 
 /** Starts alert delivery and registers `concierge_alert`. Returns the stop. */
 export function startConciergeAlerts(
@@ -122,12 +192,20 @@ export function startConciergeAlerts(
   // coalescer's timer later starts a Concierge turn, which must not inherit
   // that context, so events join the queue in the context of boot.
   const outsideAction = AsyncLocalStorage.snapshot();
+  // Read at boot and kept current by `setRules`, since scheduling reads it synchronously.
+  let rules = CONCIERGE_ALERT_DEFAULT_RULES;
+  void readRules(deps.settings)
+    .then((stored) => {
+      rules = stored;
+    })
+    .catch(() => undefined);
 
   const coalescer = new AlertCoalescer({
     now,
     isEnabled: () => service.isEnabled(),
+    limits: () => rules,
     quietUntil: async (at) => {
-      const { quietHours } = await readSettings(deps.settings);
+      const { quietHours } = rules;
       if (!quietHours) return null;
       return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(deps.settings));
     },
@@ -179,6 +257,40 @@ export function startConciergeAlerts(
       routine.key?.startsWith(ROUTINE_KEY_PREFIX),
     );
 
+  const reactivate = async (id: string) => {
+    await deps.routineEngine.deactivate(id);
+    const row = await deps.routines.findById(id);
+    if (row?.enabled) await deps.routineEngine.activate(toRoutine(row));
+  };
+
+  const subscribe = (repo: string, kind: ConciergeAlertKind) =>
+    deps.prepareWait(`${GITHUB_EVENT_PREFIX}${kind}`, [
+      { field: "repository.full_name", equals: repo },
+    ]);
+
+  const list = async (): Promise<ConciergeAlertRepoDto[]> => {
+    const byRepo = new Map<string, ConciergeAlertRepoDto>();
+    for (const routine of await alertRoutines()) {
+      const repo = repoOf(routine);
+      const kind = routine.args.type;
+      if (!repo || !isKind(kind)) continue;
+      const entry = byRepo.get(repo) ?? {
+        repo,
+        login: String(routine.args.login ?? ""),
+        kinds: [],
+      };
+      entry.kinds.push({ kind, enabled: routine.enabled });
+      byRepo.set(repo, entry);
+    }
+    const order = (kind: ConciergeAlertKind) => CONCIERGE_ALERT_KINDS.indexOf(kind);
+    return [...byRepo.values()]
+      .map((entry) => ({
+        ...entry,
+        kinds: entry.kinds.sort((a, b) => order(a.kind) - order(b.kind)),
+      }))
+      .sort((a, b) => a.repo.localeCompare(b.repo));
+  };
+
   const alerts: ConciergeAlerts = {
     async watch({ repo: rawRepo, login: given }) {
       const repo = rawRepo.trim();
@@ -198,13 +310,11 @@ export function startConciergeAlerts(
           "No GitHub account is connected, so I cannot tell which GitHub user the guardian is. Ask for their GitHub username once, remember it, and pass it as login.",
         );
       }
-      // Subscribe every type first: a refusal (no admin rights for a webhook)
+      // Subscribe every kind first: a refusal (no admin rights for a webhook)
       // leaves no routine behind that would never fire.
       const warnings: string[] = [];
       for (const type of GITHUB_ALERT_TYPES) {
-        const result = await deps.prepareWait(`${GITHUB_EVENT_PREFIX}${type.type}`, [
-          { field: "repository.full_name", equals: repo },
-        ]);
+        const result = await subscribe(repo, type.type);
         if (!result.ok) throw new Error(`Could not subscribe to ${repo}: ${result.error}`);
         if (result.warning) warnings.push(result.warning);
       }
@@ -217,34 +327,29 @@ export function startConciergeAlerts(
           filter: githubTriggerFilter(repo, type),
         };
         const existing = await deps.routines.findByKey(key);
-        let id: string;
-        if (existing) {
-          id = existing.id;
-          await deps.routines.update(id, { args, trigger, enabled: true });
-        } else {
-          id = await deps.routines.create({
-            name: `Concierge alert: ${repo} ${type.type}`,
-            key,
-            trigger,
-            actionName: CONCIERGE_ALERT_ACTION,
-            args,
-          });
-        }
-        const routine = await deps.routines.findById(id);
-        if (routine) {
-          await deps.routineEngine.deactivate(id);
-          await deps.routineEngine.activate(toRoutine(routine));
-        }
+        // A kind the guardian turned off stays off when the repo is watched again.
+        const id = existing
+          ? (await deps.routines.update(existing.id, { args, trigger }), existing.id)
+          : await deps.routines.create({
+              name: `Concierge alert: ${repo} ${type.type}`,
+              key,
+              trigger,
+              actionName: CONCIERGE_ALERT_ACTION,
+              args,
+            });
+        await reactivate(id);
       }
       return {
         repo,
         login,
         loginSource,
-        events: GITHUB_ALERT_TYPES.map((type) => type.type),
+        kinds: GITHUB_ALERT_TYPES.map((type) => type.type),
         ...(warnings.length ? { warnings: [...new Set(warnings)] } : {}),
       };
     },
 
+    // The repo's webhook is left in place: the connector keeps one hook per
+    // repo for every app that watches it, and removing it would cut them off.
     async unwatch(rawRepo) {
       const repo = rawRepo.trim();
       let removed = 0;
@@ -265,39 +370,72 @@ export function startConciergeAlerts(
       return { repo, removed };
     },
 
-    async list() {
-      const byRepo = new Map<
-        string,
-        { repo: string; login: string; events: string[]; enabled: boolean }
-      >();
-      for (const routine of await alertRoutines()) {
-        const repo = repoOf(routine);
-        if (!repo) continue;
-        const entry = byRepo.get(repo) ?? {
-          repo,
-          login: String(routine.args.login ?? ""),
-          events: [],
-          enabled: false,
-        };
-        entry.events.push(String(routine.args.type ?? ""));
-        entry.enabled ||= routine.enabled;
-        byRepo.set(repo, entry);
-      }
-      return [...byRepo.values()];
+    list,
+
+    async setKind(rawRepo, kind, enabled) {
+      const repo = rawRepo.trim();
+      const existing = await deps.routines.findByKey(routineKey(repo, kind));
+      if (!existing) return null;
+      await deps.routines.update(existing.id, { enabled });
+      await reactivate(existing.id);
+      return (await list()).find((entry) => entry.repo === repo) ?? null;
     },
 
-    async configure({ quietHours }) {
+    rules: async () => {
+      rules = await readRules(deps.settings);
+      return rules;
+    },
+
+    async setRules(change) {
       const stored =
         (await deps.settings.get<Record<string, unknown>>(CONCIERGE_ALERTS_SETTING_KEY)) ?? {};
-      await deps.settings.set(CONCIERGE_ALERTS_SETTING_KEY, { ...stored, quietHours });
-      return { quietHours };
+      const next = parseAlertRules({ ...parseAlertRules(stored), ...change });
+      await deps.settings.set(CONCIERGE_ALERTS_SETTING_KEY, { ...stored, ...next });
+      rules = next;
+      outsideAction(() => coalescer.rearm());
+      return next;
     },
 
-    settings: () => readSettings(deps.settings),
+    async reconcile() {
+      if (!(await service.isEnabled())) return;
+      for (const entry of await list()) {
+        for (const { kind, enabled } of entry.kinds) {
+          if (!enabled) continue;
+          const result = await subscribe(entry.repo, kind).catch((error: unknown) => ({
+            ok: false as const,
+            error: error instanceof Error ? error.message : String(error),
+          }));
+          if (!result.ok) {
+            log.warn("alert subscription not restored", {
+              repo: entry.repo,
+              kind,
+              error: result.error,
+            });
+          } else if (result.subscription === "created") {
+            log.info("alert subscription restored", { repo: entry.repo, kind });
+          }
+        }
+      }
+    },
   };
   service.attachAlerts(alerts);
 
+  // Another app watching the same repo may remove its shared webhook, which
+  // stops these alerts without a word. Subscribing again restores it.
+  const runReconcile = () =>
+    void alerts.reconcile().catch((error: unknown) =>
+      log.warn("alert reconcile failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  const firstReconcile = setTimeout(runReconcile, RECONCILE_DELAY_MS);
+  const reconcileTimer = setInterval(runReconcile, RECONCILE_INTERVAL_MS);
+  firstReconcile.unref?.();
+  reconcileTimer.unref?.();
+
   return () => {
+    clearTimeout(firstReconcile);
+    clearInterval(reconcileTimer);
     coalescer.stop();
     service.attachAlerts(null);
   };

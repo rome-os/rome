@@ -75,6 +75,30 @@
         "email": "总结一下我的未读邮件",
         "task": "帮我做一个简单的习惯打卡 app"
       }
+    },
+    "alerts": {
+      "tab": "提醒",
+      "tabsLabel": "任务和提醒",
+      "emptyTitle": "没有关注的仓库",
+      "emptyDescription": "让 Concierge 关注一个 GitHub 仓库，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
+      "asLogin": "按 @{{login}} 判断",
+      "stopRepo": "停止关注 {{repo}}",
+      "stopped": "已停止关注 {{repo}}",
+      "kinds": {
+        "pull_request": "请你审查",
+        "pull_request_review": "你的 PR 收到审查",
+        "issue_comment": "评论和提及",
+        "pull_request_review_comment": "你的 PR 收到行内评论",
+        "workflow_run": "你的 CI 失败"
+      },
+      "rules": "规则",
+      "maxTurnsPerHour": "每小时最多提醒次数",
+      "minSpacingMinutes": "两次提醒间隔（分钟）",
+      "quietHours": "免打扰时段",
+      "quietHoursHint": "这段时间内的事件会等到结束后汇总成一条。",
+      "quietStart": "从",
+      "quietEnd": "到",
+      "saveFailed": "保存失败"
     }
   },
   "reply": {

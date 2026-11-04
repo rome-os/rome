@@ -208,3 +208,123 @@ describe("GET /concierge/tasks", () => {
     await stream.body?.cancel();
   });
 });
+
+describe("/concierge/alerts", () => {
+  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
+  let testDb: TestDb;
+  let enabled: boolean;
+  const calls: unknown[][] = [];
+
+  const app = () => {
+    const alerts = {
+      list: async () => [
+        {
+          repo: "acme/widgets",
+          login: "octo-me",
+          kinds: [{ kind: "workflow_run", enabled: true }],
+        },
+      ],
+      rules: async () => ({ maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null }),
+      setKind: async (...args: unknown[]) => {
+        calls.push(["setKind", ...args]);
+        return args[0] === "acme/widgets"
+          ? { repo: "acme/widgets", login: "octo-me", kinds: [] }
+          : null;
+      },
+      unwatch: async (repo: string) => {
+        calls.push(["unwatch", repo]);
+        return { repo, removed: repo === "acme/widgets" ? 5 : 0 };
+      },
+      setRules: async (change: unknown) => {
+        calls.push(["setRules", change]);
+        return {
+          maxTurnsPerHour: 2,
+          minSpacingMinutes: 15,
+          quietHours: null,
+          ...(change as object),
+        };
+      },
+    };
+    const concierge = { isEnabled: async () => enabled, alerts } as unknown as ConciergeService;
+    return new Hono().route(
+      "/",
+      conciergeRoutes({ concierge, db: testDb.db, webchatRepo: new WebChatRepository(testDb.db) }),
+    );
+  };
+  const send = (path: string, method: string, body?: unknown) =>
+    app().request(path, {
+      method,
+      headers: { ...guardian.headers, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    enabled = true;
+    calls.length = 0;
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  it("lists the watched repos and the rules for the guardian only, while the Concierge is on", async () => {
+    expect((await app().request("/concierge/alerts")).status).toBe(401);
+    const response = await app().request("/concierge/alerts", guardian);
+    await expect(response.json()).resolves.toEqual({
+      repos: [
+        {
+          repo: "acme/widgets",
+          login: "octo-me",
+          kinds: [{ kind: "workflow_run", enabled: true }],
+        },
+      ],
+      rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
+    });
+    enabled = false;
+    expect((await app().request("/concierge/alerts", guardian)).status).toBe(404);
+  });
+
+  it("turns a kind on or off, and refuses an unknown kind or repo", async () => {
+    expect(
+      (
+        await send("/concierge/alerts/repos/acme/widgets/kinds/workflow_run", "PUT", {
+          enabled: false,
+        })
+      ).status,
+    ).toBe(200);
+    expect(calls).toEqual([["setKind", "acme/widgets", "workflow_run", false]]);
+    expect(
+      (await send("/concierge/alerts/repos/acme/widgets/kinds/push", "PUT", { enabled: false }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await send("/concierge/alerts/repos/acme/other/kinds/workflow_run", "PUT", {
+          enabled: true,
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("stops a repo", async () => {
+    expect((await send("/concierge/alerts/repos/acme/widgets", "DELETE")).status).toBe(200);
+    expect((await send("/concierge/alerts/repos/acme/other", "DELETE")).status).toBe(404);
+  });
+
+  it("changes the rules and refuses values out of bounds", async () => {
+    const response = await send("/concierge/alerts/rules", "PUT", {
+      quietHours: { start: "22:00", end: "08:00" },
+    });
+    await expect(response.json()).resolves.toEqual({
+      rules: {
+        maxTurnsPerHour: 2,
+        minSpacingMinutes: 15,
+        quietHours: { start: "22:00", end: "08:00" },
+      },
+    });
+    expect((await send("/concierge/alerts/rules", "PUT", { maxTurnsPerHour: 99 })).status).toBe(
+      400,
+    );
+  });
+});

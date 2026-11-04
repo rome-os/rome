@@ -20,12 +20,19 @@ const event = (id: string): AlertEvent => ({
   fields: { repo: "acme/widgets" },
 });
 
-function setup(options: { quietUntil?: (at: number) => number | null; enabled?: boolean } = {}) {
+function setup(
+  options: {
+    quietUntil?: (at: number) => number | null;
+    enabled?: boolean;
+    limits?: () => { maxTurnsPerHour: number; minSpacingMinutes: number };
+  } = {},
+) {
   const batches: (AlertBatch & { deliveredAt: number })[] = [];
   const coalescer = new AlertCoalescer({
     now: () => Date.now(),
     isEnabled: async () => options.enabled ?? true,
     quietUntil: async (at) => options.quietUntil?.(at) ?? null,
+    ...(options.limits ? { limits: options.limits } : {}),
     deliver: async (batch) => {
       batches.push({ ...batch, deliveredAt: Date.now() });
     },
@@ -98,6 +105,21 @@ describe("AlertCoalescer", () => {
     await rs.advanceTimersByTimeAsync(1);
     expect(s.batches.map(ids)).toEqual([["a"], ["b"], ["c"]]);
     expect(s.batches[2]!.deliveredAt).toBe(firstAt + HOUR_MS);
+  });
+
+  it("applies a changed rate limit to what already waits", async () => {
+    let limits = { maxTurnsPerHour: 1, minSpacingMinutes: 0 };
+    const s = setup({ limits: () => limits });
+    s.coalescer.add(event("a"));
+    await rs.advanceTimersByTimeAsync(BATCH_DELAY_MS);
+    s.coalescer.add(event("b"));
+    await rs.advanceTimersByTimeAsync(10 * 60_000);
+    // One turn an hour: b waits for the hour.
+    expect(s.batches.map(ids)).toEqual([["a"]]);
+    limits = { maxTurnsPerHour: 6, minSpacingMinutes: 0 };
+    s.coalescer.rearm();
+    await rs.advanceTimersByTimeAsync(0);
+    expect(s.batches.map(ids)).toEqual([["a"], ["b"]]);
   });
 
   it("holds events through quiet hours and delivers them as one held batch", async () => {

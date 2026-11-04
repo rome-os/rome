@@ -2,7 +2,11 @@
 
 import type { FacadeToolDef } from "../core/mcp-facade.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
-import { parseQuietHours } from "./alerts.js";
+import {
+  CONCIERGE_ALERT_MAX_SPACING_MINUTES,
+  CONCIERGE_ALERT_MAX_TURNS_PER_HOUR,
+} from "@rome/api-types/concierge";
+import { validateRulesChange } from "./alert-events.js";
 import type { ConciergeService } from "./service.js";
 
 export function buildAlertTools(service: ConciergeService): FacadeToolDef[] {
@@ -48,21 +52,23 @@ export function buildAlertTools(service: ConciergeService): FacadeToolDef[] {
     },
     {
       name: "alerts_list",
-      description: "List the repos you watch for the guardian, and the quiet hours.",
+      description:
+        "List the repos you watch for the guardian, with each event kind on or off, and the alert rules (rate limit, quiet hours).",
       inputSchema: { type: "object", properties: {} },
       handler: (input) =>
         runFacadeTool("alerts_list", input, async () => ({
           watching: await service.alerts.list(),
-          ...(await service.alerts.settings()),
+          rules: await service.alerts.rules(),
         })),
     },
     {
       name: "alerts_configure",
       description:
-        "Set the guardian's quiet hours for alerts, in their own timezone. Events during quiet hours wait and arrive as one batch when they end. Pass null to turn quiet hours off.",
+        "Change the alert rules when the guardian asks. Fields you leave out stay. " +
+        "quietHours is a daily window in their own timezone: events then wait and arrive as one batch when it ends; null turns it off. " +
+        "maxTurnsPerHour and minSpacingMinutes bound how often alerts may reach you.",
       inputSchema: {
         type: "object",
-        required: ["quietHours"],
         properties: {
           quietHours: {
             type: ["object", "null"],
@@ -72,17 +78,22 @@ export function buildAlertTools(service: ConciergeService): FacadeToolDef[] {
               end: { type: "string", description: "HH:mm, 24-hour, e.g. 08:00" },
             },
           },
+          maxTurnsPerHour: {
+            type: "integer",
+            minimum: 1,
+            maximum: CONCIERGE_ALERT_MAX_TURNS_PER_HOUR,
+          },
+          minSpacingMinutes: {
+            type: "integer",
+            minimum: 0,
+            maximum: CONCIERGE_ALERT_MAX_SPACING_MINUTES,
+          },
         },
       },
       handler: (input) =>
-        runFacadeTool("alerts_configure", input, async (args) => {
-          if (args.quietHours === null) return service.alerts.configure({ quietHours: null });
-          const quietHours = parseQuietHours(args.quietHours);
-          if (!quietHours) {
-            throw new Error("quietHours needs start and end as different HH:mm times, or null");
-          }
-          return service.alerts.configure({ quietHours });
-        }),
+        runFacadeTool("alerts_configure", input, async (args) =>
+          service.alerts.setRules(validateRulesChange(args)),
+        ),
     },
   ];
 }

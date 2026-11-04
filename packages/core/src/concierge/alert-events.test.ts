@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Action } from "../actions/types.js";
 import type { Routine } from "../routines/types.js";
-import { type ConciergeAlertDeps, renderAlertBatch, startConciergeAlerts } from "./alert-events.js";
+import {
+  type ConciergeAlertDeps,
+  renderAlertBatch,
+  startConciergeAlerts,
+  validateRulesChange,
+} from "./alert-events.js";
 import type { ConciergeAlerts } from "./alert-events.js";
 import type { ConciergeService } from "./service.js";
 
@@ -10,6 +15,7 @@ function setup(options: { login?: string | null; refuse?: string } = {}) {
   const active = new Set<string>();
   const settings = new Map<string, unknown>();
   const actions: Action[] = [];
+  const waits: string[] = [];
   let alerts: ConciergeAlerts | null = null;
   let nextId = 0;
   const deps: ConciergeAlertDeps = {
@@ -41,8 +47,12 @@ function setup(options: { login?: string | null; refuse?: string } = {}) {
       deactivate: async (id) => void active.delete(id),
     },
     actions: { register: (action) => void actions.push(action) },
-    prepareWait: async () =>
-      options.refuse ? { ok: false, error: options.refuse } : { ok: true, subscription: "created" },
+    prepareWait: async (eventName) => {
+      waits.push(eventName);
+      return options.refuse
+        ? { ok: false, error: options.refuse }
+        : { ok: true, subscription: "created" };
+    },
     settings: {
       get: (async (key: string) =>
         settings.get(key) ?? null) as ConciergeAlertDeps["settings"]["get"],
@@ -57,7 +67,7 @@ function setup(options: { login?: string | null; refuse?: string } = {}) {
     attachAlerts: (attached: ConciergeAlerts | null) => (alerts = attached),
   } as unknown as ConciergeService;
   const stop = startConciergeAlerts(service, deps);
-  return { routines, active, actions, settings, alerts: () => alerts!, stop };
+  return { routines, active, actions, settings, waits, alerts: () => alerts!, stop };
 }
 
 describe("Concierge alert subscriptions", () => {
@@ -84,14 +94,13 @@ describe("Concierge alert subscriptions", () => {
       {
         repo: "acme/widgets",
         login: "octo-me",
-        events: [
-          "pull_request",
-          "pull_request_review",
-          "issue_comment",
-          "pull_request_review_comment",
-          "workflow_run",
+        kinds: [
+          { kind: "pull_request", enabled: true },
+          { kind: "pull_request_review", enabled: true },
+          { kind: "issue_comment", enabled: true },
+          { kind: "pull_request_review_comment", enabled: true },
+          { kind: "workflow_run", enabled: true },
         ],
-        enabled: true,
       },
     ]);
     expect((await s.alerts().unwatch("acme/widgets")).removed).toBe(5);
@@ -152,11 +161,60 @@ describe("Concierge alert subscriptions", () => {
     s.stop();
   });
 
-  it("stores quiet hours, off by default", async () => {
+  it("turns one kind off, keeps it off when the repo is watched again, and drops its trigger", async () => {
     const s = setup();
-    expect(await s.alerts().settings()).toEqual({ quietHours: null });
-    await s.alerts().configure({ quietHours: { start: "22:00", end: "08:00" } });
-    expect(await s.alerts().settings()).toEqual({ quietHours: { start: "22:00", end: "08:00" } });
+    await s.alerts().watch({ repo: "acme/widgets" });
+    const updated = await s.alerts().setKind("acme/widgets", "workflow_run", false);
+    expect(updated?.kinds.find((k) => k.kind === "workflow_run")).toEqual({
+      kind: "workflow_run",
+      enabled: false,
+    });
+    expect(s.active.size).toBe(4);
+    await s.alerts().watch({ repo: "acme/widgets" });
+    expect(s.active.size).toBe(4);
+    await s.alerts().setKind("acme/widgets", "workflow_run", true);
+    expect(s.active.size).toBe(5);
+    expect(await s.alerts().setKind("acme/other", "workflow_run", true)).toBeNull();
+  });
+
+  it("subscribes the enabled kinds of watched repos again on reconcile", async () => {
+    const s = setup();
+    await s.alerts().watch({ repo: "acme/widgets" });
+    await s.alerts().setKind("acme/widgets", "issue_comment", false);
+    s.waits.length = 0;
+    await s.alerts().reconcile();
+    expect(s.waits).toEqual([
+      "provider:event:github.pull_request",
+      "provider:event:github.pull_request_review",
+      "provider:event:github.pull_request_review_comment",
+      "provider:event:github.workflow_run",
+    ]);
+  });
+
+  it("keeps the rules with defaults: 2 turns an hour, 15 minutes apart, no quiet hours", async () => {
+    const s = setup();
+    expect(await s.alerts().rules()).toEqual({
+      maxTurnsPerHour: 2,
+      minSpacingMinutes: 15,
+      quietHours: null,
+    });
+    await s.alerts().setRules({ quietHours: { start: "22:00", end: "08:00" } });
+    await s.alerts().setRules({ maxTurnsPerHour: 4 });
+    expect(await s.alerts().rules()).toEqual({
+      maxTurnsPerHour: 4,
+      minSpacingMinutes: 15,
+      quietHours: { start: "22:00", end: "08:00" },
+    });
+  });
+
+  it("refuses rules out of bounds", () => {
+    expect(() => validateRulesChange({ maxTurnsPerHour: 0 })).toThrow(/1 to 12/);
+    expect(() => validateRulesChange({ minSpacingMinutes: 1.5 })).toThrow(/0 to 120/);
+    expect(() => validateRulesChange({ quietHours: { start: "8", end: "9" } })).toThrow(/HH:mm/);
+    expect(validateRulesChange({ quietHours: null, minSpacingMinutes: 0 })).toEqual({
+      quietHours: null,
+      minSpacingMinutes: 0,
+    });
   });
 });
 
