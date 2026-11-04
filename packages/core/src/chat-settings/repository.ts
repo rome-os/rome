@@ -1,7 +1,7 @@
 // Reply rules, kept on each of Rome's speakers. Vocabulary:
 // docs/domains/participation.md#speaker and docs/domains/chats.md#chat.
 
-import { and, asc, eq, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { chatIdsOn, type ChatRepository } from "../chats/storage/chat-repository.js";
@@ -89,7 +89,13 @@ export class ChatSettingsRepository {
         .select()
         .from(romeSessions)
         .where(and(isChannelConversation, eq(romeSessions.accountId, account.id), ...where))
-        .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+        // The session messages through `channel` at the address go to, when
+        // the account holds more than one there, as after a reconnect.
+        .orderBy(
+          desc(sql`${romeSessions.id} = ${channelChatId(channel, address)}`),
+          asc(romeSessions.createdAt),
+          asc(romeSessions.id),
+        )
         .limit(1)
         .get();
     for (const kind of ["group", "dm"] as const) {

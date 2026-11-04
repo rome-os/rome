@@ -695,14 +695,15 @@ describe("ChatSettingsService", () => {
     registry.register(directoryDescriptor("wechat", () => []));
     const sales = await connectLive(registry, "feishu");
     const support = await connectLive(registry, "wechat");
+    // The account the sales channel is paired as, which a re-pairing
+    // changes, and the channel it is, which a reconnect changes.
+    const paired = { sales: "ou_sales", salesChannel: "feishu" };
     const channelOf = (connection: { id: string }) =>
-      connection.id === sales.id ? "feishu" : "feishu-2";
-    // The account the sales channel is paired as, which a re-pairing changes.
-    const paired = { sales: "ou_sales" };
+      connection.id === sales.id ? paired.salesChannel : "feishu-2";
     const wired = chatsWiring(testDb.db, {
-      channelsOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
+      channelsOn: (platform) => (platform === "feishu" ? [paired.salesChannel, "feishu-2"] : []),
       accountOf: (name) =>
-        name === "feishu"
+        name === paired.salesChannel
           ? { platform: "feishu", id: paired.sales }
           : name === "feishu-2"
             ? { platform: "feishu", id: "ou_support" }
@@ -950,6 +951,34 @@ describe("ChatSettingsService", () => {
     expect(after).toMatchObject({ id: before.id, accountId: "ou_sales_again", kind: "dm" });
     expect(after!.chatId).not.toBe(before.chatId);
     expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("sets the rule on the speaker a reconnected channel speaks through", async () => {
+    const { service, repository, wired, paired, standIn, throughSales } =
+      await twoAccountsInOneGroup(["pm-assistant"]);
+    await standIn("feishu");
+    const retired = repository.find("feishu", "oc_group" as ChatId)!;
+    testDb!.db.run(sql`UPDATE rome_sessions SET created_at = 1 WHERE id = ${retired.id}`);
+    // Reconnected, the account speaks through a channel of a new name, and
+    // its first message there opens a session of its own in the same chat.
+    paired.salesChannel = "feishu-3";
+    const active = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu-3", threadId: "oc_group", agentName: "main" },
+      wired,
+    );
+
+    await service.update({
+      ref: throughSales,
+      set: { routing: { agentName: "pm-assistant" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(repository.find("feishu-3", "oc_group" as ChatId)).toMatchObject({
+      id: active.id,
+      agentName: "pm-assistant",
+    });
   });
 
   it("finds a speaker by the name of its chat, whatever its session is titled", async () => {
