@@ -306,7 +306,6 @@ function mainChannel(name: string, service: Pick<ChannelsService, "send">): Chan
         direct: null,
       },
       inbound: null,
-
       directory: null,
     };
     mainChannels.set(name, channel);

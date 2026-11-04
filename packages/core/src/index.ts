@@ -1563,8 +1563,6 @@ async function main() {
     // connection. Its key recovery runs a local debugger in this container.
     ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
-  // Built after every descriptor is registered: each connection kind with a Talk backs
-  // its channel's send and inbound ports.
   // The kinds that answer a read: who their accounts can reach, and what was
   // said there.
   const kinds = connectionKinds({
@@ -1575,6 +1573,8 @@ async function main() {
     accounts: { [AGENTS_KIND]: agentsAccounts(listedAgents) },
   });
   builtKinds = kinds;
+  // Built after every descriptor is registered: each connection kind with a Talk backs
+  // its channel's send and inbound ports.
   const channels = channelList({
     kinds,
     connections: {
