@@ -829,11 +829,11 @@ describe("ChatSettingsService", () => {
         clear: [],
         actor: { kind: "guardian" },
       }),
-    ).rejects.toThrow("cannot tell whether it is a group or a direct message");
+    ).rejects.toThrow("is a group or a direct message");
     expect(wired.chats.list("feishu")).toEqual([]);
   });
 
-  it("reads no group's rule at an address an account has no speaker at and no kind for", async () => {
+  it("reads a group's rule through an account with no speaker there, once Rome holds the group", async () => {
     const { service, standIn, throughSales, throughSupport } = await twoAccountsInOneGroup(
       [],
       false,
@@ -846,19 +846,48 @@ describe("ChatSettingsService", () => {
       actor: { kind: "guardian" },
     });
 
-    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    // The group Rome holds there through Sales has its kind, so Support's
-    // rule is set in it, as Support's own.
+    // Rome holds a group there through Sales, so the address is a group.
+    expect((await service.get(throughSupport)).effective.enabled).toBe(false);
     await service.update({
       ref: throughSupport,
       set: { session: { reset: { mode: "none" } } },
       clear: [],
       actor: { kind: "guardian" },
     });
-    expect((await service.get(throughSupport)).overrides).toEqual({
-      session: { reset: { mode: "none" } },
-    });
-    expect((await service.get(throughSales)).effective.enabled).toBe(false);
+    for (const ref of [throughSales, throughSupport]) {
+      expect((await service.get(ref)).effective).toMatchObject({
+        enabled: false,
+        session: { reset: { mode: "none" } },
+      });
+    }
+  });
+
+  it("reads a group's rule as the newest one Rome's speakers there hold", async () => {
+    const { service, repository, standIn, throughSales, throughSupport } =
+      await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await standIn("feishu-2");
+    // Rows from before the rule was shared hold rules of their own.
+    const rule = (enabled: boolean, updatedAt: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        overrides: { enabled },
+        updatedAt,
+        updatedBy: { kind: "guardian" },
+      });
+    const [sales, support] = ["feishu", "feishu-2"].map(
+      (channel) => repository.find(channel, "oc_group" as ChatId)!,
+    );
+    testDb!.db.run(
+      sql`UPDATE rome_sessions SET channel_settings = ${rule(true, "2026-01-01T00:00:00.000Z")} WHERE id = ${sales!.id}`,
+    );
+    testDb!.db.run(
+      sql`UPDATE rome_sessions SET channel_settings = ${rule(false, "2026-02-01T00:00:00.000Z")} WHERE id = ${support!.id}`,
+    );
+
+    for (const ref of [throughSales, throughSupport]) {
+      expect((await service.get(ref)).effective.enabled).toBe(false);
+    }
   });
 
   it("starts the direct message an address names when a rule is set before anything is said", async () => {

@@ -559,16 +559,22 @@ export class ChatSettingsService implements ChatSettingsControl {
     ];
   }
 
-  /** The kind of the conversation as its speaker's chat or its platform
-   *  states it, or null when `descriptor.kind` is only the guess made for an
-   *  address with no speaker, which must not join a group on that guess. */
+  /** The kind of the conversation as its speaker's chat, its platform or a
+   *  group Rome holds there states it, or null when `descriptor.kind` is only
+   *  the guess made for an address with no speaker, which must not join a
+   *  group on that guess. */
   private knownKind(
     ref: ChatRef,
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): ChatDescriptor["kind"] | null {
     if (row !== null) return descriptor.kind;
-    return this.describedKinds.get(this.key(ref)) ?? null;
+    const described = this.describedKinds.get(this.key(ref));
+    if (described !== undefined) return described;
+    // A group Rome holds there through another of its accounts is a group.
+    const live = this.deps.connections.all().some((c) => c.id === ref.connectionId);
+    const channel = live ? this.channelName(ref) : null;
+    return channel === null ? null : this.deps.repository.heldKind(channel, ref.chatId);
   }
 
   private async discover(

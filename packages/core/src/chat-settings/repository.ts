@@ -183,15 +183,15 @@ export class ChatSettingsRepository {
   ): StoredChatSettings | null {
     const own = this.speakerAt(this.db, channel, chatId);
     if (own === undefined && !isShared(kind)) return null;
-    if (own?.channelSettings && hasRule(own.channelSettings)) return own.channelSettings;
     if (!isShared(kind) && (own === undefined || this.stored(own).kind !== "group")) {
       return own?.channelSettings ?? null;
     }
     if (!this.deps.adapters.knownAccountOn(channel)) return own?.channelSettings ?? null;
-    // Another of Rome's speakers in the group may have set the group's rule.
+    // The group's rule is the newest any of Rome's speakers there holds,
+    // whichever of them set it.
     const chat = this.chatOf(channel, chatId, "group");
     if (!chat) return own?.channelSettings ?? null;
-    const shared = this.db
+    const held = this.db
       .select({ settings: romeSessions.channelSettings })
       .from(romeSessions)
       .where(
@@ -201,10 +201,19 @@ export class ChatSettingsRepository {
           isNotNull(romeSessions.channelSettings),
         ),
       )
-      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
-      .all();
-    const rule = shared.map((row) => row.settings as StoredChatSettings).find(hasRule) ?? null;
+      .all()
+      .map((row) => row.settings as StoredChatSettings)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const rule = held[0] ?? null;
     return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
+  }
+
+  /** "group" when Rome holds a group at address `chatId` on `channel`'s
+   *  platform, through any of its accounts, whose kind is then fixed; else
+   *  null. */
+  heldKind(channel: string, chatId: ChatId): "group" | null {
+    if (!this.deps.adapters.knownAccountOn(channel)) return null;
+    return this.chatOf(channel, chatId, "group") ? "group" : null;
   }
 
   /** The platform channel `channel`'s account lives on. */
@@ -339,19 +348,15 @@ export class ChatSettingsRepository {
    * The chat at the address `descriptor` names, started as an incoming
    * message there would start it ({@link startChannelChat}): of the kind the
    * address names where it names one, else of the kind `descriptor` states.
-   * Refuses when that kind is only a guess (`kindKnown` false), the address
-   * names none and Rome holds no group there, since a chat's kind never changes and a wrong one
+   * Refuses when that kind is only a guess (`kindKnown` false) and the
+   * address names none, since a chat's kind never changes and a wrong one
    * would hold the session the first message opens.
    */
   private startChat(descriptor: ChatDescriptor, channel: string, kindKnown: boolean): ChatRef {
     const address = descriptor.ref.chatId;
     if (!kindKnown && kindNamedBy(this.accountOn(channel).platform, address) === null) {
-      // A group Rome already holds there, through another of its accounts,
-      // has its kind already.
-      const held = this.chatOf(channel, address, "group");
-      if (held) return held;
       throw new Error(
-        `Rome has not heard the chat at ${address} on ${channel} and cannot tell whether it is a group or a direct message; its rule can be set once a message there arrives or its platform lists it`,
+        `Rome cannot tell whether the chat at ${address} on ${channel} is a group or a direct message: no message there has reached Rome and its platform has not listed it. Its rule can be set once either happens`,
       );
     }
     return startChannelChat(this.deps, {
@@ -448,11 +453,6 @@ function newLookups(): StoredLookups {
 
 function isShared(kind: ChatDescriptor["kind"] | null): boolean {
   return kind === "group" || kind === "channel";
-}
-
-/** Whether `settings` holds a rule beyond its routing marker. */
-function hasRule(settings: StoredChatSettings): boolean {
-  return Object.keys(withoutRouting(settings).overrides).length > 0;
 }
 
 /**
