@@ -15,22 +15,35 @@ const APPROVAL_HEADING: Record<ApprovalCardStatus, string> = {
   failed: "Approved, but it failed",
 };
 
-function previewLines(preview: PreviewPayload): string[] {
+/** The lines `preview` says. An app's preview and a stored card are not
+ *  checked, so a field of the wrong shape reads as nothing. */
+function previewLines(preview: PreviewPayload): unknown[] {
   if (preview.kind === "sensitive_message") {
-    return [preview.text, ...(preview.reason ? [`Why: ${preview.reason}`] : [])];
+    return [
+      preview.text,
+      ...(typeof preview.reason === "string" ? [`Why: ${preview.reason}`] : []),
+    ];
   }
+  const fields: unknown[] = Array.isArray(preview.fields) ? preview.fields : [];
   return [
     preview.summary,
-    ...(preview.fields ?? []).map((field) => `${field.label}: ${field.value}`),
+    ...fields.flatMap((field) => {
+      const { label, value } = (field ?? {}) as { label?: unknown; value?: unknown };
+      return typeof label === "string" && typeof value === "string" ? [`${label}: ${value}`] : [];
+    }),
   ];
 }
 
 /** The plain-text version of an approval card: what its preview says the
  *  agent wants to do, and, while it waits, where the guardian answers it. */
 export function approvalCardText(card: ApprovalCard): string {
-  const title = card.preview.kind === "generic" ? card.preview.title : "send this message";
+  const title =
+    card.preview.kind === "generic"
+      ? typeof card.preview.title === "string"
+        ? card.preview.title
+        : card.actionName
+      : "send this message";
   const lines = [`${APPROVAL_HEADING[card.status] ?? APPROVAL_HEADING.pending}: ${title}`];
-  // An app's preview is not checked, so a field it left out reads as nothing.
   lines.push(
     ...previewLines(card.preview).filter(
       (line): line is string => typeof line === "string" && line.trim() !== "",
@@ -50,6 +63,8 @@ export function approvalCardText(card: ApprovalCard): string {
 export function widgetText(part: MessagePart): string | undefined {
   // A card that arrived without its preview has nothing to say, so it is
   // refused like any part with no line.
-  if (part.type === "approval_card" && part.preview) return approvalCardText(part);
+  if (part.type === "approval_card" && typeof part.preview === "object" && part.preview) {
+    return approvalCardText(part);
+  }
   return undefined;
 }

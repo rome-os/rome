@@ -25,4 +25,22 @@ describe("messageContentText", () => {
 
     expect(messageContentText(content)).toBe(`Before I go on:\n${widgetText(card)}`);
   });
+
+  it("reads a card whose stored preview is malformed without losing the text beside it", () => {
+    const content = JSON.stringify([
+      { type: "text", content: "Before I go on:" },
+      {
+        type: "approval_card",
+        approvalId: "a-1",
+        actionName: "deploy",
+        preview: { kind: "generic", title: "Deploy", fields: {} },
+        status: "pending",
+      },
+      { type: "text", content: "Back soon." },
+    ]);
+
+    const text = messageContentText(content);
+    expect(text?.startsWith("Before I go on:\nApproval needed: Deploy")).toBe(true);
+    expect(text?.endsWith("Back soon.")).toBe(true);
+  });
 });
