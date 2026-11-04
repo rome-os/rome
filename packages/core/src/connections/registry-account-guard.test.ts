@@ -97,6 +97,29 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
+  it("tells the caller which Connection it ended, when it filled the service's own", async () => {
+    const { registry, close } = setupRegistry();
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      const ended: string[] = [];
+
+      const next = await registry.giveGrant(
+        SERVICE,
+        undefined,
+        "bot",
+        credentialFor("t-9"),
+        { botId: "900" },
+        { onEnded: (id) => ended.push(id) },
+      );
+
+      expect(next.id).not.toBe(first.id);
+      expect(ended).toEqual([first.id]);
+    } finally {
+      close();
+    }
+  });
+
   it("lets the same Connection grant its own bot again", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {

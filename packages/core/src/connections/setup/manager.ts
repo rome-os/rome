@@ -347,19 +347,20 @@ export class SetupManager {
           : {}),
         ...(target.another ? { another: true } : {}),
       };
+      let ended: string | undefined;
       const connection = await this.#deps.registry.giveGrant(
         target.connectionKind,
         target.connectionId,
         grant,
         given.credential,
         given.profile,
-        Object.keys(opts).length > 0 ? opts : undefined,
+        {
+          ...opts,
+          onEnded: (id) => {
+            ended = id;
+          },
+        },
       );
-      // A fix that reached another account ended the connection it addressed.
-      const ended =
-        target.connectionId !== undefined && target.connectionId !== connection.id
-          ? target.connectionId
-          : undefined;
       return { connectionId: connection.id, ...(ended ? { ended } : {}) };
     });
   }

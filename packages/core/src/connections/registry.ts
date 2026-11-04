@@ -72,6 +72,9 @@ export interface GiveGrantOptions {
   /** Mint another account of the connection kind rather than fill its first one. Only
    *  read when no connection id is addressed. */
   another?: boolean;
+  /** Told the id of the connection the grant ended, when the grant reached
+   *  another account than the one that connection reaches. */
+  onEnded?: (id: ConnectionId) => void;
 }
 
 export interface ConnectionRegistryDeps {
@@ -477,24 +480,17 @@ export class ConnectionRegistry {
 
     // One transaction spanning every durable write of the grant: mint (if a
     // placeholder), the credential/profile, and the caller's participant.
-    const commit = () =>
-      this.store.transaction((tx) => {
-        if (ending) {
-          this.store.remove(tx, ending.id);
-          this.raise(tx, {
-            kind: "disconnected",
-            connection: { id: ending.id, connectionKind: ending.connectionKind },
-          });
-        }
-        this.store.save(tx, { ...record, grant: grantValue });
-        this.raise(
-          tx,
-          minting
-            ? { kind: "connected", connection: record, profile, account }
-            : { kind: "fixed", connection: { id, connectionKind }, account },
-        );
-        opts.inTx?.(tx);
-      });
+    const write = (tx: DrizzleTx) => {
+      this.store.save(tx, { ...record, grant: grantValue });
+      this.raise(
+        tx,
+        minting
+          ? { kind: "connected", connection: record, profile, account }
+          : { kind: "fixed", connection: { id, connectionKind }, account },
+      );
+      opts.inTx?.(tx);
+    };
+    const commit = () => this.store.transaction(write);
     const logActivationFailure = (err: unknown) => {
       this.log.error("grant committed but adapter activation failed", {
         connectionKind,
@@ -511,10 +507,16 @@ export class ConnectionRegistry {
     // lock, so a renewal in flight on the same grant finishes before this
     // grant writes and can never land over it.
     if (minting) {
-      commit();
       if (ending) {
-        ending.teardownAll();
+        // The ended connection goes the way every disconnect goes, under its
+        // grant's lock, so a renewal in flight on it finishes first and none
+        // can revive it. The new connection is written in the same
+        // transaction.
+        await ending.disconnect(ending.descriptor.grant, { inTx: write });
         this.connections.delete(ending.id);
+        opts.onEnded?.(ending.id);
+      } else {
+        commit();
       }
       try {
         conn = new ConnectionImpl(record, registered!.descriptor, this);
@@ -1343,14 +1345,17 @@ class ConnectionImpl implements Connection {
 
   /** Remove this connection and its grant in one transaction that raises
    *  disconnected, then drop the grant in memory, stop every capability and
-   *  clear the custody artifacts. The store comes first, so a failed write
-   *  throws with nothing changed in memory. */
-  disconnect(grant: GrantName): Promise<void> {
+   *  clear the custody artifacts. `opts.inTx` joins the transaction, so a fix
+   *  that reaches another account writes the new connection with it. The
+   *  store comes first, so a failed write throws with nothing changed in
+   *  memory. */
+  disconnect(grant: GrantName, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     return this.withGrantLock(grant, async () => {
       const connection = { id: this.id, connectionKind: this.connectionKind };
       this.store.transaction((tx) => {
         this.store.remove(tx, this.id);
         this.registry.raise(tx, { kind: "disconnected", connection });
+        opts.inTx?.(tx);
       });
       this.grantState.set(grant, "unauthorized");
       this.liveCreds.delete(grant);
