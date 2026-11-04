@@ -194,7 +194,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { mapGuardianToChannel } from "./people/guardian-mapping.js";
+import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
@@ -1541,7 +1541,7 @@ async function main() {
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
-      mapGuardianToChannel(peopleRepo, "whatsapp", selfJid).catch((err) => {
+      linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {
           error: err instanceof Error ? err.message : String(err),
         });

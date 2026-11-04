@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiDeps } from "../deps.js";
 import {
-  filterChannelApiResponseHeaders,
-  type ChannelApiRequest,
-  type ChannelApiResult,
+  filterConnectionApiResponseHeaders,
+  type ConnectionApiRequest,
+  type ConnectionApiResult,
 } from "../../apps/platform-requests.js";
 import { createLogger } from "../../logger.js";
 import {
@@ -50,7 +50,7 @@ export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: str
   const app = new Hono();
 
   app.get("/_internal/discord/auth", async (c) => {
-    const request: ChannelApiRequest = {
+    const request: ConnectionApiRequest = {
       method: "GET",
       path: "/users/@me",
       query: [],
@@ -109,7 +109,7 @@ export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: str
 
 async function execute(
   deps: DiscordCliRouteDeps,
-  request: ChannelApiRequest,
+  request: ConnectionApiRequest,
   channel: string | undefined,
 ): Promise<{ status: number; body: DiscordBrokerEnvelope }> {
   const startedAt = Date.now();
@@ -124,13 +124,13 @@ async function execute(
     const result = (await act.invoke({
       operation: "discord.api.request",
       input: request,
-    })) as ChannelApiResult;
+    })) as ConnectionApiResult;
     if (result.error) return projectFailure(result);
 
     const responseEnvelope: DiscordBrokerEnvelope = {
       version: DISCORD_BROKER_VERSION,
       status: result.response.status,
-      headers: filterChannelApiResponseHeaders(Object.entries(result.response.headers)),
+      headers: filterConnectionApiResponseHeaders(Object.entries(result.response.headers)),
       body: result.response.body,
     };
     discordStatus = result.response.status;
@@ -197,7 +197,7 @@ function discordBotFor(
   };
 }
 
-function projectFailure(result: Extract<ChannelApiResult, { error: unknown }>): {
+function projectFailure(result: Extract<ConnectionApiResult, { error: unknown }>): {
   status: number;
   body: DiscordBrokerEnvelope;
 } {
@@ -212,7 +212,7 @@ function projectFailure(result: Extract<ChannelApiResult, { error: unknown }>): 
   };
 }
 
-function toChannelApiRequest(request: DiscordBrokerRequest): ChannelApiRequest {
+function toChannelApiRequest(request: DiscordBrokerRequest): ConnectionApiRequest {
   return {
     method: request.method,
     path: request.endpoint,

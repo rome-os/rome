@@ -26,7 +26,7 @@ import {
   type Sent as SdkSent,
 } from "@rome-os/app-runtime/chats";
 import {
-  ChannelNotConnected,
+  AccountNotConnected,
   type ChannelSend,
 } from "../chats/connected-accounts/connected-account.js";
 import { DeliveryFailure } from "./sending.js";
@@ -165,7 +165,7 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
     if (error instanceof SendError) throw error;
     if (isSendRefused(error)) throw new SendError("unsupported", error.message);
     if (
-      error instanceof ChannelNotConnected ||
+      error instanceof AccountNotConnected ||
       (error instanceof DeliveryFailure && error.kind === "unauthorized")
     ) {
       throw new SendError("not_connected", `No Connection reaches ${describe(sender.account)} now`);
@@ -355,7 +355,7 @@ async function dm(
   try {
     address = await direct.chatFor(account.id);
   } catch (error) {
-    if (error instanceof ChannelNotConnected) {
+    if (error instanceof AccountNotConnected) {
       throw new SendError("not_connected", `No Connection reaches ${describe(sender.account)}`);
     }
     throw new SendError("no_dm", error instanceof Error ? error.message : String(error));

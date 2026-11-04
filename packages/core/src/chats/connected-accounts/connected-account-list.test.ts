@@ -13,7 +13,7 @@ import { tokenPaste } from "../../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../../connections/types.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../../test/helpers.js";
 import type { Accounts } from "../accounts/accounts.js";
-import { ChannelNotConnected } from "./connected-account.js";
+import { AccountNotConnected } from "./connected-account.js";
 import { channelList, joinLaterChannel } from "./connected-account-list.js";
 import type { ConnectionPortsDeps } from "./connection-ports.js";
 import { ConnectionPacing } from "../../participation/reply-delivery/connection-pacing.js";
@@ -207,7 +207,7 @@ describe("channelList", () => {
     const discord = channels.find((channel) => channel.name === "discord")!;
 
     // Nothing backs either channel yet: the lookup says so, as a send would.
-    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(AccountNotConnected);
 
     for (const service of ["telegram", "discord"]) {
       const connection = await registry.connect(service);

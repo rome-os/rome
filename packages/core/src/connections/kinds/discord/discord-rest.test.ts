@@ -10,10 +10,10 @@ import {
   type RateLimitData,
   type ResponseLike,
 } from "discord.js";
-import type { ChannelApiRequest } from "../../../apps/platform-requests.js";
+import type { ConnectionApiRequest } from "../../../apps/platform-requests.js";
 import { DiscordAdapter } from "./discord.js";
 
-const BASE_REQUEST: ChannelApiRequest = {
+const BASE_REQUEST: ConnectionApiRequest = {
   method: "GET",
   path: "/users/@me",
   query: [],

@@ -5,7 +5,7 @@ import {
   recordedChannelOf,
   type ConnectionPortsDeps,
 } from "./connection-ports.js";
-import { ChannelNotConnected } from "./connected-account.js";
+import { AccountNotConnected } from "./connected-account.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { makePasteTalk } from "../../connections/test-fixtures.js";
@@ -54,7 +54,7 @@ describe("connection-backed send, across epochs", () => {
     await expect(direct.conversationFor("7")).resolves.toBe("first");
 
     await connection.auth.revoke("bot");
-    await expect(direct.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(direct.chatFor("7")).rejects.toBeInstanceOf(AccountNotConnected);
 
     await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
     offerDirect("second");
@@ -74,7 +74,7 @@ describe("connection-backed send, across epochs", () => {
     const direct = connectionPorts({ registry, channelOf: kindChannelOf }, "fake-telegram")?.send
       ?.direct;
     expect(direct).not.toBeNull();
-    await expect(direct!.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(direct!.chatFor("7")).rejects.toBeInstanceOf(AccountNotConnected);
 
     await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
     const talker = fx.talkerFactory.instances.at(-1);
@@ -312,11 +312,11 @@ describe("a Connection with no channel record", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([]);
     await expect(ports.send!.send("dm-1" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
-      ChannelNotConnected,
+      AccountNotConnected,
     );
     expect(talker.state.sends).toHaveLength(0);
     for (const lookup of [ports.send!.direct!.chatFor, ports.send!.direct!.conversationFor]) {
-      await expect(lookup("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+      await expect(lookup("7")).rejects.toBeInstanceOf(AccountNotConnected);
     }
   });
 });
@@ -412,7 +412,7 @@ describe("reply streaming ports", () => {
   it("refuses a send while talk is locked as not connected", async () => {
     const { send, live } = portsFor({});
     live.talker = false;
-    await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(AccountNotConnected);
   });
 
   it("writes a reply through the live talker, and refuses while talk is locked", async () => {

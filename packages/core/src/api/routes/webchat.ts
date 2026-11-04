@@ -13,7 +13,7 @@ import {
   type Link as OtelLink,
 } from "@opentelemetry/api";
 import { createLogger } from "../../logger.js";
-import { logInboundChannelMessage } from "../../telemetry.js";
+import { logInboundMessage } from "../../telemetry.js";
 import { getGuardianProfileFile } from "../../profile-memory.js";
 import { toTraceEvent, toWebchatSessionResponse, type TraceableEvent } from "../helpers.js";
 import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
@@ -3565,7 +3565,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         inputState: existing.inputState,
       });
     }
-    logInboundChannelMessage({
+    logInboundMessage({
       channel: "webchat",
       threadId: sessionId,
       channelUserId,

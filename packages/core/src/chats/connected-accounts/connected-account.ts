@@ -28,9 +28,9 @@ import type { DeliveryTransport } from "../../connections/sending.js";
 import type { Accounts } from "../accounts/accounts.js";
 import type { AccountMessages, Messages } from "../history/messages.js";
 
-/** Streaming a reply into a conversation: the platform's writes, and the
- *  pacer every write of the channel's account goes through. */
-export interface ChannelReplies {
+/** Streaming a reply into a chat: the platform's writes, and the pacer
+ *  every write of the account goes through. */
+export interface AccountReplies {
   readonly transport: DeliveryTransport;
   readonly pacer: Pacer;
 }
@@ -44,23 +44,23 @@ export interface ChannelSend extends AppChannelSend {
    * caller reads. Each write reaches the Connection's live talker when it
    * runs, and fails `unauthorized` while none is live.
    */
-  readonly replies?: ChannelReplies | null;
+  readonly replies?: AccountReplies | null;
   /**
    * Reaching one account directly rather than replying in a conversation that
    * exists, or null where the channel cannot. When no Connection
    * exists for the channel, `chatFor` rejects with
-   * {@link ChannelNotConnected}, as `send` does, and so does it while the
+   * {@link AccountNotConnected}, as `send` does, and so does it while the
    * Connection has no live talker (locked, awaiting re-authorization).
    */
   readonly direct: ChannelDirectMessaging | null;
 }
 
 /**
- * The conversations a channel can see, for conversation settings. Each
- * descriptor carries its `ChatRef`, so a caller addresses a
- * conversation it found here the way it addresses one an inbound event named.
+ * The chats an account can see, for chat settings. Each descriptor carries
+ * its `ChatRef`, so a caller addresses a chat it found here the way it
+ * addresses one an inbound event named.
  */
-export interface ChannelDirectory {
+export interface AccountChats {
   /**
    * Up to `limit` conversations from the Connection backing the channel, or
    * none when `connectionId` names another. A read that fails is logged and
@@ -74,11 +74,12 @@ export interface ChannelDirectory {
   }): Promise<ChatDescriptor[]>;
 }
 
-/** A send, or a direct-conversation lookup, on a channel nothing backs now. */
-export class ChannelNotConnected extends Error {
+/** A send, or a direct-message lookup, through one of Rome's accounts that
+ *  no connection reaches now. */
+export class AccountNotConnected extends Error {
   constructor(readonly channel: string) {
     super(`No connection backs channel "${channel}"`);
-    this.name = "ChannelNotConnected";
+    this.name = "AccountNotConnected";
   }
 }
 
@@ -148,7 +149,7 @@ export interface Channel extends AppChannel {
 
   /** The conversations the channel can see, or null where it cannot list
    *  them. */
-  readonly directory: ChannelDirectory | null;
+  readonly directory: AccountChats | null;
 }
 
 /**

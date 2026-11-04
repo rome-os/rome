@@ -31,10 +31,10 @@ import type {
 } from "discord.js";
 import { isCoreMainAgentId } from "../../../apps/artifact-id.js";
 import {
-  filterChannelApiResponseHeaders,
-  isProtectedChannelApiRequestHeader,
-  type ChannelApiRequest,
-  type ChannelApiResult,
+  filterConnectionApiResponseHeaders,
+  isProtectedConnectionApiRequestHeader,
+  type ConnectionApiRequest,
+  type ConnectionApiResult,
 } from "../../../apps/platform-requests.js";
 import type {
   ChannelMessage,
@@ -286,14 +286,14 @@ export interface GuildChannelInfo {
  */
 export interface DiscordAdapterLike {
   listGuildChannels(): GuildChannelInfo[];
-  executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult>;
+  executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
 }
 
 function projectDiscordBody(
   status: number,
   headers: ResponseLike["headers"],
   bytes: Uint8Array,
-): ChannelApiResult {
+): ConnectionApiResult {
   if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
     return {
       error: {
@@ -316,7 +316,7 @@ function projectDiscordBody(
   return {
     response: {
       status,
-      headers: filterChannelApiResponseHeaders(headers.entries()),
+      headers: filterConnectionApiResponseHeaders(headers.entries()),
       body,
     },
   };
@@ -453,10 +453,10 @@ export class DiscordAdapter {
   /** Execute a provider-relative request through the epoch-owned discord.js
    * REST manager. This boundary pins the path to Discord API v10, rejects
    * caller-owned auth headers, and returns only serializable safe response data. */
-  async executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult> {
+  async executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult> {
     const path = normalizeDiscordEndpoint(request.path);
     for (const name of Object.keys(request.headers)) {
-      if (isProtectedChannelApiRequestHeader(name)) {
+      if (isProtectedConnectionApiRequestHeader(name)) {
         throw new Error(`header ${name} is owned by the channel provider`);
       }
     }
@@ -573,12 +573,15 @@ export class DiscordAdapter {
     }
   }
 
-  private async projectDiscordResponse(response: ResponseLike): Promise<ChannelApiResult> {
+  private async projectDiscordResponse(response: ResponseLike): Promise<ConnectionApiResult> {
     const bytes = new Uint8Array(await response.arrayBuffer());
     return projectDiscordBody(response.status, response.headers, bytes);
   }
 
-  private projectDiscordApiError(error: DiscordAPIError, response: ResponseLike): ChannelApiResult {
+  private projectDiscordApiError(
+    error: DiscordAPIError,
+    response: ResponseLike,
+  ): ConnectionApiResult {
     // discord.js keeps parsed JSON, or raw bytes for a non-JSON error body.
     const raw: unknown = error.rawError;
     if (raw instanceof ArrayBuffer) {
@@ -587,7 +590,7 @@ export class DiscordAdapter {
     return {
       response: {
         status: error.status,
-        headers: filterChannelApiResponseHeaders(response.headers.entries()),
+        headers: filterConnectionApiResponseHeaders(response.headers.entries()),
         body: raw,
       },
     };
