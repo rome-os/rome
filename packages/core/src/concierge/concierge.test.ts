@@ -1391,17 +1391,24 @@ describe("Concierge reminder", () => {
 });
 
 describe("Concierge chat", () => {
-  const serviceWith = (state: Record<string, unknown>, exists: boolean) => {
+  const serviceWith = (
+    state: Record<string, unknown>,
+    exists: boolean,
+    stored: string | null = null,
+  ) => {
     const createSession = rs.fn(async () => {});
+    const update = rs.fn(async () => {});
     const service = new ConciergeService({
       settingsRepo: { get: async () => true },
       webchatRepo: {
-        getSession: async (id: string) => (exists && id === CONCIERGE_CHAT_ID ? { id } : null),
+        getSession: async (id: string) =>
+          exists && id === CONCIERGE_CHAT_ID ? { id, largeModelSelection: stored } : null,
         createSession,
+        updateSessionLargeModelSelection: update,
       },
       aiToolState: { get: () => state },
     } as unknown as ConciergeDeps);
-    return { service, createSession };
+    return { service, createSession, update };
   };
   const signedOut = { loggedIn: false, quotaExhausted: false };
   const codexOnly = {
@@ -1426,9 +1433,43 @@ describe("Concierge chat", () => {
   });
 
   it("leaves an existing chat and its model alone", async () => {
-    const { service, createSession } = serviceWith(codexOnly, true);
+    const { service, createSession, update } = serviceWith(codexOnly, true, "claude-sonnet");
     expect(await service.ensureChatId()).toBe("concierge");
     expect(createSession).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("gives a chat created before any login its model once a provider is signed in", async () => {
+    const { service, update } = serviceWith(codexOnly, true, null);
+    await service.ensureChatId();
+    expect(update).toHaveBeenCalledWith("concierge", "gpt-6-luna");
+  });
+
+  it("falls back to Terra without Luna access, and to Sonnet on a Claude login", async () => {
+    const terra = serviceWith(
+      { claude: signedOut, codex: { ...codexOnly.codex, lunaAccess: false } },
+      true,
+      null,
+    );
+    await terra.service.ensureChatId();
+    expect(terra.update).toHaveBeenCalledWith("concierge", "gpt-5-6-terra");
+    const claude = serviceWith(
+      { claude: { loggedIn: true, quotaExhausted: false }, codex: codexOnly.codex },
+      true,
+      null,
+    );
+    await claude.service.ensureChatId();
+    expect(claude.update).toHaveBeenCalledWith("concierge", "claude-sonnet");
+  });
+
+  it("stores nothing for an existing chat while no provider is signed in", async () => {
+    const { service, update } = serviceWith(
+      { claude: signedOut, codex: { ...codexOnly.codex, loggedIn: false } },
+      true,
+      null,
+    );
+    expect(await service.ensureChatId()).toBe("concierge");
+    expect(update).not.toHaveBeenCalled();
   });
 });
 

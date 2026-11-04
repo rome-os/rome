@@ -127,10 +127,21 @@ export class ConciergeService {
   /**
    * The Concierge chat's id. Creates the chat on first use; concurrent calls
    * share one creation. The initial model is picked here; later selections
-   * and quota failover are stored on the chat.
+   * and quota failover are stored on the chat. A chat created before any
+   * provider was signed in has no model, so it gets one the first time a
+   * provider is available.
    */
   async ensureChatId(): Promise<string> {
-    if (await this.findChatId()) return CONCIERGE_CHAT_ID;
+    const existing = await this.deps.webchatRepo.getSession(CONCIERGE_CHAT_ID);
+    if (existing) {
+      if (!existing.largeModelSelection) {
+        const picked = this.pickModel();
+        if (picked) {
+          await this.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT_ID, picked);
+        }
+      }
+      return CONCIERGE_CHAT_ID;
+    }
     this.creating ??= this.createChat().finally(() => {
       this.creating = null;
     });
