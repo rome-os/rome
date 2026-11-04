@@ -65,10 +65,7 @@ export function personMessageStores(deps: {
 }): AccountMessages[] {
   const transcript =
     deps.transcript === "chats"
-      ? chatsAgentMessages(deps.db, (channel) => {
-          const account = deps.accountOf?.(channel);
-          return account ? [account] : [];
-        })
+      ? chatsAgentMessages(deps.db, (channel) => deps.accountOf?.(channel) ?? null)
       : agentMessages(deps.db);
   return [...messageStores(deps.channels), transcript];
 }
