@@ -470,10 +470,13 @@ export class EmailAdapter {
       throw refused("cannot be answered by a new email");
     }
     if (this.threadReplyTarget.get(threadId)?.messageId === quote) return;
-    // An email the provider does not know is in no thread. Any other failure
-    // to look it up is the provider's, and passes on.
+    // An email the provider does not know is in no thread, whether Rome Cloud
+    // or the provider behind it says so. Any other failure to look it up is
+    // the provider's, and passes on.
     const quoted = await this.provider.getMessage(quote).catch((err: unknown) => {
-      if (err instanceof MailProviderError && err.status === 404) return undefined;
+      if (err instanceof MailProviderError && (err.status === 404 || err.providerStatus === 404)) {
+        return undefined;
+      }
       throw err;
     });
     if (quoted?.threadId !== threadId) {

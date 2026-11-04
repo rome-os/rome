@@ -310,6 +310,14 @@ describe("EmailAdapter.send", () => {
     await expect(
       adapter.send("t1" as ChatId, { ...quote, replyToMessageId: "<unknown@mail.example.com>" }),
     ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    // Rome Cloud may answer an email its provider does not know with its own
+    // status, forwarding the provider's beside it.
+    provider.getMessage = rs.fn(async () => {
+      throw new MailProviderError("mail_provider_error", 502, "mail_provider_error", 404);
+    });
+    await expect(adapter.send("t1" as ChatId, quote)).rejects.toMatchObject({
+      reason: "reply_unaddressable",
+    });
     expect(provider.send).not.toHaveBeenCalled();
   });
 
