@@ -19,7 +19,7 @@ import {
   ChannelSendRefused,
   type OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { refuseUnshownParts } from "../outbound/send-refusals.js";
+import { partsAsText, refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -104,9 +104,7 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
 
 function outgoingText(message: OutgoingMessage): string {
   if (message.text?.trim()) return message.text;
-  return (message.parts ?? [])
-    .flatMap((part) => (part.type === "text" ? [part.content] : []))
-    .join("\n\n");
+  return partsAsText(message.parts);
 }
 
 /** Whether Cloud refused the instance token itself, which no retry fixes: the

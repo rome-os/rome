@@ -8,8 +8,8 @@ import type { ApprovalCreatedEvent } from "./engine.js";
 /**
  * Put an approval's card in the conversation the approval came from. Nothing
  * is sent for an approval with no conversation or on a channel that cannot
- * send. A channel that cannot show a card refuses it, and the refusal
- * rejects here so the engine logs it.
+ * send. A platform that cannot draw the card sends its plain-text version. A
+ * send that fails rejects here, so the engine logs it.
  */
 export async function sendApprovalCard(
   channels: Pick<ChannelsService, "list" | "send">,

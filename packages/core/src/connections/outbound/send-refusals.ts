@@ -9,19 +9,31 @@ import {
   type OutgoingAttachment,
   type OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { widgetText } from "../../chats/widget-text.js";
+
+/**
+ * What `parts` say on a channel that shows text only: each text part, and
+ * each widget's own plain-text line in its place.
+ */
+export function partsAsText(parts: OutgoingMessage["parts"]): string {
+  return (parts ?? [])
+    .flatMap((part) => {
+      const said = part.type === "text" ? part.content : widgetText(part);
+      return said === undefined ? [] : [said];
+    })
+    .join("\n\n");
+}
 
 /**
  * The text a channel named `channel`, which shows text and no other part,
- * sends for `message`: its `text` when it has any, else its text parts.
- * Refuses a part of any other type, and a message with no text and no
+ * sends for `message`: its `text` when it has any, else what its parts say,
+ * a widget by its plain-text line. Refuses a part that is neither text nor a
+ * widget with a line of its own, and a message with no text and no
  * attachment.
  */
 export function textToSend(channel: string, message: OutgoingMessage): string {
   refuseUnshownParts(channel, message);
-  const parts = message.parts ?? [];
-  const text = message.text?.trim()
-    ? message.text
-    : parts.flatMap((part) => (part.type === "text" ? [part.content] : [])).join("\n\n");
+  const text = message.text?.trim() ? message.text : partsAsText(message.parts);
   if (text.trim()) return text;
   if (!message.attachments?.length) {
     throw new ChannelSendRefused("empty", `A message to ${channel} needs text or an attachment`);
@@ -56,10 +68,16 @@ export function numericReplyTo(channel: string, replyTo: string | undefined): nu
 }
 
 /** Refuses a part other than text, on a channel named `channel` that shows
- *  text only. */
+ *  text only, unless it is a widget that reads as a plain-text line. */
 export function refuseUnshownParts(channel: string, message: OutgoingMessage): void {
   const parts = message.parts ?? [];
-  const unshown = [...new Set(parts.filter((part) => part.type !== "text").map((p) => p.type))];
+  const unshown = [
+    ...new Set(
+      parts
+        .filter((part) => part.type !== "text" && widgetText(part) === undefined)
+        .map((part) => part.type),
+    ),
+  ];
   if (unshown.length > 0) {
     throw new ChannelSendRefused(
       "part_unsupported",

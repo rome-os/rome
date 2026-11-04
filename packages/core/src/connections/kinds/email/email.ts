@@ -9,7 +9,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
 import { ChannelSendRefused } from "@rome-os/app-runtime";
-import { refuseUnshownParts } from "../../outbound/send-refusals.js";
+import { partsAsText, refuseUnshownParts } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import { mapGuardianToChannel } from "../../../people/guardian-mapping.js";
@@ -125,15 +125,6 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
     mimeType: p.type,
     fileName: p.name,
   }));
-}
-
-function textFromParts(parts: OutgoingMessage["parts"]): string {
-  if (!parts) return "";
-  return parts
-    .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-    .map((p) => p.content)
-    .join("\n\n")
-    .trim();
 }
 
 /**
@@ -363,7 +354,7 @@ export class EmailAdapter {
       );
     }
     // Blank text says nothing, so the text parts speak, as on every channel.
-    const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
+    const bodyText = (message.text?.trim() ? message.text : partsAsText(message.parts)).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.

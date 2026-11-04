@@ -4,6 +4,23 @@ import { numericReplyTo, refuseAttachments, refuseReplies, textToSend } from "./
 const refused = (reason: string) => ({ name: "ChannelSendRefused", reason });
 
 describe("textToSend", () => {
+  it("sends a widget it cannot draw as its plain-text line, and refuses a part with none", () => {
+    const card = {
+      type: "approval_card",
+      approvalId: "a-1",
+      actionName: "deploy",
+      preview: { kind: "generic", title: "Deploy", summary: "Ship it to production" },
+      status: "pending",
+    } as const;
+    const said = textToSend("telegram", { parts: [{ type: "text", content: "One thing:" }, card] });
+    expect(said).toBe(
+      "One thing:\n\nApproval needed: Deploy\nShip it to production\nApprove or deny it on Rome's dashboard.",
+    );
+    expect(() =>
+      textToSend("telegram", { parts: [{ type: "turn_recap", turnId: "t", content: "Recap" }] }),
+    ).toThrow(expect.objectContaining(refused("part_unsupported")));
+  });
+
   it("sends the message's text, else its text parts", () => {
     expect(textToSend("telegram", { text: "Hi" })).toBe("Hi");
     expect(
