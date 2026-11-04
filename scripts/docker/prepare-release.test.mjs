@@ -26,7 +26,6 @@ function fixture(t) {
     GITHUB_RUN_ID: "100",
     GITHUB_REPOSITORY: "rome-os/rome",
     GITHUB_OUTPUT: join(root, "output"),
-    CI_RESULT: "completed:success",
     GH_CALLS: join(root, "gh-calls"),
   };
   const git = (...args) =>
@@ -43,12 +42,13 @@ function fixture(t) {
   git("commit", "--allow-empty", "-m", "Initial commit");
   const sha = git("rev-parse", "HEAD");
   env.GITHUB_SHA = sha;
+  env.GREEN_SHAS = sha;
   git("remote", "add", "origin", remote);
   git("tag", "v1.1.9");
   git("push", "origin", "main", "--tags");
   writeFileSync(
     join(bin, "gh"),
-    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$GH_CALLS"\nif [ "$CI_RESULT" = api-error ]; then exit 1; fi\nprintf "%s\\n" "$CI_RESULT"\n',
+    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$GH_CALLS"\nif [ "$GREEN_SHAS" = api-error ]; then exit 1; fi\nprintf "%s\\n" "$GREEN_SHAS"\n',
     { mode: 0o755 },
   );
 
@@ -75,7 +75,7 @@ test("a weekday release increments the stable patch and pins the checked CI comm
   assert.equal(f.git("--git-dir", f.remote, "rev-parse", "v1.1.10^{commit}"), f.sha);
   assert.match(
     readFileSync(f.env.GH_CALLS, "utf8"),
-    new RegExp(`branch=main&event=push&head_sha=${f.sha}&per_page=1`),
+    /branch=main&event=push&status=success&per_page=100/,
   );
 });
 
@@ -94,22 +94,79 @@ test("stable versions sort numerically across minor and major versions", (t) => 
   assert.match(f.output(), /^tag=v2\.10\.13\n/);
 });
 
-for (const ci of [
-  "null:null",
-  "completed:failure",
-  "completed:cancelled",
-  "in_progress:null",
-  "queued:null",
-  "api-error",
+for (const [name, green] of [
+  ["no green commit", ""],
+  ["an API error", "api-error"],
+  ["a green commit outside this history", "0".repeat(40)],
 ]) {
-  test(`CI ${ci} creates no release tag`, (t) => {
+  test(`${name} creates no release tag`, (t) => {
     const f = fixture(t);
-    assert.notEqual(f.run({ CI_RESULT: ci }).status, 0);
+    assert.notEqual(f.run({ GREEN_SHAS: green }).status, 0);
     assert.equal(f.git("tag", "--list"), "v1.1.9");
     assert.equal(f.git("ls-remote", "--tags", "origin", "v1.1.10"), "");
     assert.equal(f.output(), "");
   });
 }
+
+// main moves on from the tagged commit: one commit passes CI, the newest has not.
+function unfinishedHead(f) {
+  f.git("commit", "--allow-empty", "-m", "Passed CI");
+  const green = f.git("rev-parse", "HEAD");
+  f.git("commit", "--allow-empty", "-m", "Not passed CI");
+  const head = f.git("rev-parse", "HEAD");
+  f.git("push", "origin", "main");
+  return { green, head };
+}
+
+test("a newest commit that has not passed CI releases the newest green commit and says so", (t) => {
+  const f = fixture(t);
+  const { green, head } = unfinishedHead(f);
+  const result = f.run({ GITHUB_SHA: head, GREEN_SHAS: `${green}\n${f.sha}` });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.output(), `tag=v1.1.10\nsha=${green}\n`);
+  assert.equal(f.git("--git-dir", f.remote, "rev-parse", "v1.1.10^{commit}"), green);
+  assert.match(result.stdout, new RegExp(`::warning::v1\\.1\\.10 releases ${green}.*${head}`));
+});
+
+test("a commit that went green after the run started is not released", (t) => {
+  const f = fixture(t);
+  const { green, head } = unfinishedHead(f);
+  f.git("checkout", "--detach", green);
+  const result = f.run({ GITHUB_SHA: green, GREEN_SHAS: `${head}\n${green}` });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.output(), `tag=v1.1.10\nsha=${green}\n`);
+  assert.doesNotMatch(result.stdout, /::warning::/);
+});
+
+test("a rerun of a release from an older green commit keeps its version and commit", (t) => {
+  const f = fixture(t);
+  const { green, head } = unfinishedHead(f);
+  assert.equal(f.run({ GITHUB_SHA: head, GREEN_SHAS: green }).status, 0);
+  const result = f.run({ GITHUB_SHA: head, GREEN_SHAS: "api-error" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.output(), `tag=v1.1.10\nsha=${green}\n`);
+});
+
+test("a newest green commit that is already released creates no release tag", (t) => {
+  const f = fixture(t);
+  const { head } = unfinishedHead(f);
+  assert.notEqual(f.run({ GITHUB_SHA: head, GREEN_SHAS: f.sha }).status, 0);
+  assert.equal(f.git("tag", "--list"), "v1.1.9");
+  assert.equal(f.output(), "");
+});
+
+test("a manual run does not fall back from a commit that has not passed CI", (t) => {
+  const f = fixture(t);
+  const { green, head } = unfinishedHead(f);
+  const result = f.run({
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_SHA: head,
+    GREEN_SHAS: green,
+  });
+  assert.notEqual(result.status, 0);
+  assert.equal(f.git("tag", "--list"), "v1.1.9");
+  assert.equal(f.output(), "");
+});
 
 test("a rerun reuses its tag after another release, and a new run still increments without new commits", (t) => {
   const f = fixture(t);
@@ -129,7 +186,7 @@ test("tag pushes retain their version without allocating a patch or querying CI"
   const result = f.run({
     GITHUB_EVENT_NAME: "push",
     GITHUB_REF: "refs/tags/v2.0.0-rc.1",
-    CI_RESULT: "api-error",
+    GREEN_SHAS: "api-error",
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(f.output(), `tag=v2.0.0-rc.1\nsha=${f.sha}\n`);
