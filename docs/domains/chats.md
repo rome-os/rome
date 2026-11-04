@@ -147,7 +147,7 @@ What a platform says about an [account](#account): its display name, handle and 
 
 The feature's name: linking agents to accounts so they can take part in chats on platforms. Not a thing in the model. The things are the two kinds of link below. The dashboard's use of the name as a page title is branding.
 
-- Envoy is not a context either, and the code has no envoy folder (Ouou, 2026-11-04). Linking an agent to a connected account, the kind of link, and whether Rome listens to an account are Chats' rules and live under Chats. The [reply rule](#reply-rule) is a Chats setting; the wake it decides, and the mention check, are [Participation](participation.md#wake)'s.
+- Envoy is not a context either, and the code has no envoy folder (Ouou, 2026-11-04). Linking an agent to a connected account, the kind of link, and whether Rome listens to an account are Chats' rules and live under Chats. The [reply rule](#reply-rule) is a Chats setting. The wake it decides, and the mention check, are [Participation](participation.md#wake)'s.
 
 ## Own account
 
