@@ -22,6 +22,7 @@ import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
   type ResolvedEmailReplyTarget,
+  REPLY_LOOKUP_BUDGET_MS,
   resolveEmailReplyTarget,
 } from "./email-reply-target.js";
 import type {
@@ -472,13 +473,29 @@ export class EmailAdapter {
     if (this.threadReplyTarget.get(threadId)?.messageId === quote) return;
     // An email the provider does not know is in no thread, whether Rome Cloud
     // or the provider behind it says so. Any other failure to look it up is
-    // the provider's, and passes on.
-    const quoted = await this.provider.getMessage(quote).catch((err: unknown) => {
+    // the provider's, and passes on. The lookup keeps to a thread lookup's
+    // budget, so the send after it still fits the caller's deadline.
+    const lookup = this.provider.getMessage(quote).catch((err: unknown) => {
       if (err instanceof MailProviderError && (err.status === 404 || err.providerStatus === 404)) {
         return undefined;
       }
       throw err;
     });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `Looking up email ${JSON.stringify(quote)} took longer than ` +
+                `${REPLY_LOOKUP_BUDGET_MS / 1000}s. No email was sent. Retry, or name the ` +
+                "email to answer in inReplyToMessageId.",
+            ),
+          ),
+        REPLY_LOOKUP_BUDGET_MS,
+      );
+    });
+    const quoted = await Promise.race([lookup, expired]).finally(() => clearTimeout(timer));
     if (quoted?.threadId !== threadId) {
       throw refused("is not in the thread this message goes to");
     }
