@@ -31,7 +31,7 @@ const TODAY: Record<
 > = {
   telegram: { linksReply: true, longText: "message is too long", streams: true },
   // Discord answers a message only in a thread, which a DM has none of.
-  discord: { linksReply: false, longText: [2000, 2000, 1000], streams: true },
+  discord: { linksReply: true, longText: [2000, 2000, 1000], streams: true },
   // iLink has no reply reference, so a reply is refused, and it documents no
   // length limit for the peer to model.
   wechat: { linksReply: false, longText: null, streams: false },
@@ -83,7 +83,7 @@ describe.each(platforms)("%s", (platform) => {
         ? await step("Rome answers", quoted)
         : await step("Rome answers without the quote the platform refuses", async () => {
             await expect(quoted()).rejects.toMatchObject({
-              name: "SendRefused",
+              name: "ChannelSendRefused",
               reason: "reply_unaddressable",
             });
             return channel.send({ text: "hi there" });

@@ -243,11 +243,17 @@ export function createRomeAppContext(
         throw err;
       }
       const message = err instanceof Error ? err.message : String(err);
-      log.warn("action invocation failed", {
-        action: name,
-        error: message,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
+      if (isSendRefused(err)) {
+        // A refused send is an answer the caller acts on, such as sending
+        // again without the quote, not a fault.
+        log.info("action refused a send", { action: name, reason: err.reason, error: message });
+      } else {
+        log.warn("action invocation failed", {
+          action: name,
+          error: message,
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
       if (err instanceof Error && err.name === "ActionNotFoundError") {
         throw new ActionInvocationError(name, "not_found", message);
       }

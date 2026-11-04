@@ -1,3 +1,4 @@
+import { isSendRefused, SendRefused, type SendRefusedReason } from "@rome-os/app-runtime";
 import type { ActionRunContext } from "./engine.js";
 import type { ActionRuntimeEvent } from "./runtime-events.js";
 import type { ActionResult } from "./types.js";
@@ -44,7 +45,33 @@ export interface ActionWorkerFailure {
    * identity matches what an in-process caller would have seen — IPC cannot
    * ship the instance itself.
    */
-  error: { name: string; message: string };
+  error: WireError;
+}
+
+/** An error as it crosses the worker boundary. `refusal` is the reason of a
+ *  refused send, so the caller can tell it from any other failure. */
+export interface WireError {
+  name: string;
+  message: string;
+  refusal?: SendRefusedReason;
+}
+
+/** `err` as it crosses the worker boundary. */
+export function toWireError(err: unknown): WireError {
+  if (!(err instanceof Error)) return { name: "Error", message: String(err) };
+  return {
+    name: err.name,
+    message: err.message,
+    ...(isSendRefused(err) ? { refusal: err.reason } : {}),
+  };
+}
+
+/** The error `wire` describes, with the name and message an in-process
+ *  caller would have seen, and a refused send rebuilt as one. */
+export function fromWireError(wire: WireError): Error {
+  const err = wire.refusal ? new SendRefused(wire.refusal, wire.message) : new Error(wire.message);
+  err.name = wire.name;
+  return err;
 }
 
 export interface ActionWorkerRuntimeEvent {

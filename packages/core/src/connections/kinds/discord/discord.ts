@@ -12,6 +12,7 @@ import {
   Routes,
   SlashCommandBuilder,
   type Message,
+  type MessageCreateOptions,
   type TextChannel,
   type DMChannel,
   type NewsChannel,
@@ -1413,15 +1414,18 @@ Use \`/channel agent clear\` to undo.`,
     }
 
     const targetChannel = await this.replyChannel(channel as SendableChannel, replyTo);
-    // Rome answers a Discord message only in a thread opened on it. Anywhere
-    // else the answer would land unquoted, so it is refused before anything
-    // goes out.
-    if (replyTo && targetChannel === channel) {
-      throw new SendRefused(
-        "reply_unaddressable",
-        "discord answers a message only in a thread opened on it, which this chat does not allow",
-      );
-    }
+    // A reply that opened no thread on the message quotes it instead, on the
+    // first message that goes out. Discord refuses a quote of a message it
+    // cannot find, and nothing has gone out then.
+    let quote: MessageCreateOptions["reply"] =
+      replyTo && targetChannel === channel
+        ? { messageReference: replyTo, failIfNotExists: true }
+        : undefined;
+    const quoting = <T extends object>(options: T): T => {
+      const quoted = quote ? { ...options, reply: quote } : options;
+      quote = undefined;
+      return quoted;
+    };
 
     try {
       let messageId: string | undefined;
@@ -1430,13 +1434,13 @@ Use \`/channel agent clear\` to undo.`,
         // Discord has a 2000 character limit per message
         const chunks = splitMessage(text);
         for (const chunk of chunks) {
-          const sent = await targetChannel.send({ content: chunk });
+          const sent = await sendQuoting(targetChannel, quoting({ content: chunk }), replyTo);
           messageId ??= sent.id;
         }
       }
 
       for (const att of attachments) {
-        const attachmentMessageId = await this.sendAttachment(targetChannel, att);
+        const attachmentMessageId = await this.sendAttachment(targetChannel, att, quoting);
         messageId ??= attachmentMessageId;
       }
 
@@ -1566,17 +1570,48 @@ Use \`/channel agent clear\` to undo.`,
     return attachments;
   }
 
-  private async sendAttachment(channel: SendableChannel, att: OutgoingAttachment): Promise<string> {
+  private async sendAttachment(
+    channel: SendableChannel,
+    att: OutgoingAttachment,
+    quoting: <T extends object>(options: T) => T = (options) => options,
+  ): Promise<string> {
     const isUrl = att.source.startsWith("http");
     const file = isUrl
       ? new AttachmentBuilder(att.source, { name: basename(att.source) })
       : new AttachmentBuilder(createReadStream(att.source), { name: basename(att.source) });
 
-    const sent = await channel.send({
-      content: att.caption,
-      files: [file],
-    });
+    const sent = await sendQuoting(
+      channel,
+      quoting({ content: att.caption, files: [file] }),
+      undefined,
+    );
     return sent.id;
+  }
+}
+
+/** Discord's error codes for a quote of a message it cannot find: unknown
+ *  message, and a form whose message reference names none. */
+const UNKNOWN_QUOTE_CODES = new Set([10008, 50035]);
+
+/** Sends `options` on `channel`, refusing as `reply_unaddressable` the quote
+ *  Discord cannot find. Only the first message of a send quotes, so nothing
+ *  has gone out when it is refused. */
+async function sendQuoting(
+  channel: SendableChannel,
+  options: MessageCreateOptions,
+  replyTo: string | undefined,
+): Promise<Message> {
+  try {
+    return await channel.send(options);
+  } catch (err) {
+    const quoted = options.reply !== undefined;
+    if (quoted && err instanceof DiscordAPIError && UNKNOWN_QUOTE_CODES.has(Number(err.code))) {
+      throw new SendRefused(
+        "reply_unaddressable",
+        `discord cannot find message ${JSON.stringify(replyTo)} to answer`,
+      );
+    }
+    throw err;
   }
 }
 

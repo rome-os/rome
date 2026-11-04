@@ -1842,9 +1842,8 @@ export interface ChannelDirectMessaging {
  * - `attachment_unsupported`: an attachment the channel cannot carry.
  * - `reply_unaddressable`: `replyToMessageId` names no message the channel
  *   can answer, so the reply would land somewhere else. That includes any
- *   reply on a platform Rome cannot quote on, such as WhatsApp or WeChat,
- *   and a Discord reply its chat keeps out of a thread. The sender drops the
- *   quote and sends again.
+ *   reply on a platform Rome cannot quote on, such as WhatsApp or WeChat.
+ *   The sender drops the quote and sends again.
  */
 export type SendRefusedReason =
   | "empty"

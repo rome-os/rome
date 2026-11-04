@@ -62,10 +62,17 @@ export function discordTransport({
             : failure;
         }
       }
+      // A reply that opened no thread on the message quotes it, as a whole
+      // reply does.
+      const quote =
+        replyTo && target === chat
+          ? { message_reference: { message_id: replyTo, fail_if_not_exists: true } }
+          : {};
       const body = {
         content: text,
         nonce: randomBytes(12).toString("base64url"),
         enforce_nonce: true,
+        ...quote,
       };
       const post = () =>
         call(async () => {

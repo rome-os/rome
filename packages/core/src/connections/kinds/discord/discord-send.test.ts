@@ -1,4 +1,4 @@
-import { ChannelType } from "discord.js";
+import { ChannelType, DiscordAPIError } from "discord.js";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { DiscordAdapter } from "./discord.js";
@@ -69,23 +69,85 @@ describe("DiscordAdapter.send", () => {
     expect(channel.send).not.toHaveBeenCalled();
   });
 
-  it("refuses a reply where it would land outside a thread, and sends nothing", async () => {
+  /** A chat of `type` and the adapter over it, noting every message sent. */
+  function chatOf(type: ChannelType, send = rs.fn().mockResolvedValue({ id: "sent-1" })) {
     const channel = {
-      id: "discord-dm-1",
-      type: ChannelType.DM,
+      id: "discord-chat-1",
+      type,
       isTextBased: () => true,
-      isThread: () => false,
-      send: rs.fn(),
+      isThread: () => type === ChannelType.PublicThread,
+      parentId: type === ChannelType.PublicThread ? "parent-1" : null,
+      send,
     };
     const adapter = new DiscordAdapter({ botToken: "test-token" });
     Object.assign(adapter, {
       client: { channels: { fetch: rs.fn().mockResolvedValue(channel) } },
     });
+    return { channel, adapter, send };
+  }
+
+  for (const [where, type] of [
+    ["a DM", ChannelType.DM],
+    ["a thread", ChannelType.PublicThread],
+  ] as const) {
+    it(`quotes the message a reply answers in ${where}, on its first message only`, async () => {
+      const { channel, adapter, send } = chatOf(type);
+      const replyToMessageId = "123456789012345678";
+
+      await adapter.send(channel.id as ChatId, {
+        text: `${"a".repeat(1990)}\n${"b".repeat(20)}`,
+        replyToMessageId,
+      });
+
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[0]?.[0]).toMatchObject({
+        reply: { messageReference: replyToMessageId, failIfNotExists: true },
+      });
+      expect(send.mock.calls[1]?.[0]).not.toHaveProperty("reply");
+    });
+  }
+
+  it("quotes on the attachment when a reply has no text", async () => {
+    const { channel, adapter, send } = chatOf(ChannelType.DM);
+
+    await adapter.send(channel.id as ChatId, {
+      replyToMessageId: "123456789012345678",
+      attachments: [{ type: "image", source: "https://example.com/a.png" }],
+    });
+
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      reply: { messageReference: "123456789012345678" },
+    });
+  });
+
+  it("refuses a reply to a message Discord cannot find", async () => {
+    const unknown = new DiscordAPIError(
+      { code: 50035, message: "Invalid Form Body" },
+      50035,
+      400,
+      "POST",
+      "/channels/discord-chat-1/messages",
+      {},
+    );
+    const { channel, adapter } = chatOf(ChannelType.DM, rs.fn().mockRejectedValue(unknown));
 
     await expect(
       adapter.send(channel.id as ChatId, { text: "Re", replyToMessageId: "123456789012345678" }),
-    ).rejects.toMatchObject({ name: "SendRefused", reason: "reply_unaddressable" });
-    expect(channel.send).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+  });
+
+  it("passes on a failure of a send that quotes nothing", async () => {
+    const unknown = new DiscordAPIError(
+      { code: 50035, message: "Invalid Form Body" },
+      50035,
+      400,
+      "POST",
+      "/channels/discord-chat-1/messages",
+      {},
+    );
+    const { channel, adapter } = chatOf(ChannelType.DM, rs.fn().mockRejectedValue(unknown));
+
+    await expect(adapter.send(channel.id as ChatId, { text: "Hi" })).rejects.toBe(unknown);
   });
 });
 
