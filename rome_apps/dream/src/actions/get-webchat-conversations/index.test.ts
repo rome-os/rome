@@ -233,10 +233,16 @@ describe("get_webchat_conversations against the system schema", () => {
     return { appContext: { db: { connection: testDb.db } } } as unknown as AppActionRuntimeDeps;
   }
 
-  function seedSession(id: string, name: string, type: string, createdAt: number): void {
+  function seedSession(
+    id: string,
+    name: string,
+    type: string,
+    createdAt: number,
+    chatPlatform: string | null = null,
+  ): void {
     testDb.db.run(sql`
-      INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-      VALUES (${id}, ${name}, ${type}, ${createdAt}, ${createdAt})
+      INSERT INTO rome_sessions (id, name, type, chat_platform, created_at, activity_at)
+      VALUES (${id}, ${name}, ${type}, ${chatPlatform}, ${createdAt}, ${createdAt})
     `);
   }
 
@@ -260,7 +266,9 @@ describe("get_webchat_conversations against the system schema", () => {
     const now = Math.floor(Date.now() / 1000);
     seedSession("web", "Web chat", "webchat", now - 60);
     seedSession("handoff", "Handoff chat", "webchat_handoff", now - 60);
-    seedSession("group", "Group chat", "channel", now - 60);
+    // A dashboard chat as Chats stores it: a channel row in a chat on webchat.
+    seedSession("dashboard", "Dashboard chat", "channel", now - 60, "webchat");
+    seedSession("group", "Group chat", "channel", now - 60, "telegram");
     seedSession("bg", "Dream run", "action", now - 60);
     seedMessage("m1", "web", "user", text("web question"), now - 50);
     seedMessage("m2", "web", "trace", "[]", now - 45);
@@ -272,6 +280,7 @@ describe("get_webchat_conversations against the system schema", () => {
       now - 40,
     );
     seedMessage("m5", "handoff", "user", text("handoff question"), now - 35);
+    seedMessage("m8", "dashboard", "user", text("dashboard question"), now - 33);
     seedMessage("m6", "group", "user", text("group member message"), now - 30);
     seedMessage("m7", "bg", "user", text("dream prompt"), now - 20);
 
@@ -279,12 +288,13 @@ describe("get_webchat_conversations against the system schema", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { messageCount: number; content: string };
-    expect(data.messageCount).toBe(4);
+    expect(data.messageCount).toBe(5);
     expect(data.content).toContain("### Conversation: Web chat");
     expect(data.content).toContain("**Guardian**: web question");
     expect(data.content).toContain("**Agent**: web answer");
     expect(data.content).toContain("### Conversation: Handoff chat");
     expect(data.content).toContain("**Guardian**: handoff question");
+    expect(data.content).toContain("**Guardian**: dashboard question");
     expect(data.content).not.toContain("group member message");
     expect(data.content).not.toContain("dream prompt");
   });

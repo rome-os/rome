@@ -51,10 +51,15 @@ const text = (value: string) => JSON.stringify([{ type: "text", content: value }
 
 // One turn as core stores it: the guardian's input, a '[]' trace stub whose
 // blocks live in rome_agent_trace_blocks, and the assistant reply.
-function seedSession(id: string, type: string, at: number): void {
+function seedSession(
+  id: string,
+  type: string,
+  at: number,
+  chatPlatform: string | null = null,
+): void {
   testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-    VALUES (${id}, ${`${id} chat`}, ${type}, ${at}, ${at})
+    INSERT INTO rome_sessions (id, name, type, chat_platform, created_at, activity_at)
+    VALUES (${id}, ${`${id} chat`}, ${type}, ${chatPlatform}, ${at}, ${at})
   `);
   const message = (role: string, content: string, offset: number) =>
     testDb.db.run(sql`
@@ -75,14 +80,16 @@ describe("showcases webchat sources", () => {
   it("lists webchat and handoff sessions, not channel or background runs", async () => {
     seedSession("web", "webchat", 1700000000);
     seedSession("handoff", "webchat_handoff", 1700000100);
-    seedSession("group", "channel", 1700000200);
+    seedSession("group", "channel", 1700000200, "telegram");
     seedSession("bg", "action", 1700000300);
+    // A dashboard chat as Chats stores it: a channel row in a chat on webchat.
+    seedSession("dashboard", "channel", 1700000050, "webchat");
 
     const res = await handler().handle(request("GET", "sources/sessions"));
 
     expect(res.status).toBe(200);
     const { sessions } = (await res.json()) as { sessions: Array<{ id: string }> };
-    expect(sessions.map((s) => s.id)).toEqual(["handoff", "web"]);
+    expect(sessions.map((s) => s.id)).toEqual(["handoff", "dashboard", "web"]);
   });
 
   it("imports a webchat session with its prompt, steps and reply", async () => {

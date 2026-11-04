@@ -441,7 +441,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
         ws.created_at
       FROM rome_sessions ws
       JOIN rome_agent_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
-      WHERE (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
+      WHERE (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.chat_platform = 'webchat'))
       GROUP BY ws.id, ws.name, ws.project_name, ws.project_path, ws.agent_name, ws.created_at
       ORDER BY max(wm.created_at) DESC
       LIMIT 100
@@ -680,7 +680,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       JOIN rome_sessions ws ON ws.id = wm.session_id
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'trace'
-        AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
+        AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.chat_platform = 'webchat'))
       ORDER BY wm.created_at ASC
     `) as SourceTraceRow[];
     const contents = this.traceContentsByMessage(sessionId);
