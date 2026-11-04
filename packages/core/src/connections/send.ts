@@ -72,7 +72,7 @@ export interface SendRecording {
     | "directMessageReached"
     | "openedDirectMessageAt"
   >;
-  chats: Pick<ChatRepository, "start" | "byKey">;
+  chats: Pick<ChatRepository, "start" | "byKey" | "rename">;
   messages: Pick<MessageRepository, "send">;
 }
 

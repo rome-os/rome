@@ -286,9 +286,17 @@ export class ChatSettingsRepository {
         const chat =
           (existing?.chatId ? this.deps.chats.find(existing.chatId)?.ref : null) ??
           this.startChat(descriptor, channel, kindKnown);
-        this.deps.chats.rename(chat, descriptor.displayName);
-        const id = existing?.id ?? channelChatId(channel, descriptor.ref.chatId);
+        // An address standing in for a name the platform has not given is no
+        // name: the first message there names the chat.
+        const named = descriptor.displayName !== descriptor.ref.chatId;
+        if (named) this.deps.chats.rename(chat, descriptor.displayName);
+        // The session messages through `channel` at the address reach, which
+        // a retired one left by a reconnect is not.
+        const id = channelChatId(channel, descriptor.ref.chatId);
         const now = new Date();
+        // Placed before anything was said, it starts a second early, so the
+        // first message, heard within the second, is one it has not seen.
+        const placedAt = new Date(Math.floor(now.getTime() / 1000) * 1000 - 1000);
         // The legacy source columns are still written for readers that have
         // not moved to the speaker's chat and account.
         const sourceThreadType = !kindKnown
@@ -313,7 +321,7 @@ export class ChatSettingsRepository {
             chatId: chat.id,
             chatPlatform: chat.platform,
             accountId: via.id,
-            createdAt: now,
+            createdAt: placedAt,
             activityAt: now,
             lastSeenActivityAt: null,
           })
@@ -376,7 +384,7 @@ export class ChatSettingsRepository {
     return startChannelChat(this.deps, {
       channel,
       threadId: address,
-      threadName: descriptor.displayName,
+      ...(descriptor.displayName !== address ? { threadName: descriptor.displayName } : {}),
       ...(kindKnown ? { threadType: descriptor.kind === "dm" ? "private" : "group" } : {}),
     }).chat;
   }
@@ -425,13 +433,12 @@ export class ChatSettingsRepository {
         .onConflictDoNothing({ target: romeSessions.id })
         .run();
 
-      const current =
-        this.speakerAt(tx, channel, descriptor.ref.chatId) ??
-        tx
-          .select()
-          .from(romeSessions)
-          .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
-          .get();
+      // As in `mutate`, the session messages through `channel` reach.
+      const current = tx
+        .select()
+        .from(romeSessions)
+        .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+        .get();
       if (!current) {
         throw new Error(`Failed to resolve conversation ${channel}:${descriptor.ref.chatId}`);
       }

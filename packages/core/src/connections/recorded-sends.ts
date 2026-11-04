@@ -46,7 +46,7 @@ export interface RecordedSendsDeps {
     ChatAdapters,
     "of" | "chatAt" | "accountOn" | "platformOn" | "addressAt" | "keyOf" | "openedDirectMessageAt"
   >;
-  chats: Pick<ChatRepository, "byKey" | "start">;
+  chats: Pick<ChatRepository, "byKey" | "start" | "rename">;
   speakers: Pick<Speakers, "speakerOf" | "speakerIn" | "speakerInThread">;
   replies: Pick<SpeakerReplies, "send">;
   messages: Pick<MessageRepository, "send" | "idOf" | "chatHolding">;

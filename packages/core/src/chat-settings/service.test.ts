@@ -912,16 +912,28 @@ describe("ChatSettingsService", () => {
       actor: { kind: "guardian" },
     });
     const ruled = repository.find("feishu", "ou_ray" as ChatId);
-    expect(ruled).toMatchObject({ kind: "dm" });
+    expect(ruled).toMatchObject({ kind: "dm", placeName: null });
+    // It starts a second before it was placed, so a first message heard in
+    // that same second is one it has not seen.
+    expect(ruled!.createdAt.getTime()).toBeLessThan(Math.floor(Date.now() / 1000) * 1000);
 
     // The first message from the other end finds the same speaker, in the
     // same direct message.
     const opened = await openSpeaker(
       testDb!.db,
-      { channel: "feishu", threadId: "ou_ray", threadType: "private", agentName: "main" },
+      {
+        channel: "feishu",
+        threadId: "ou_ray",
+        threadName: "Ray",
+        threadType: "private",
+        agentName: "main",
+      },
       wired,
     );
     expect(opened.id).toBe(ruled!.id);
+    // The address stood in for a name; the first message names the chat.
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
+    expect(repository.listKnown({ query: "Ray" }).map((row) => row.id)).toEqual([ruled!.id]);
     expect(repository.find("feishu", "ou_ray" as ChatId)).toMatchObject({
       kind: "dm",
       chatId: ruled!.chatId,
@@ -979,6 +991,28 @@ describe("ChatSettingsService", () => {
       id: active.id,
       agentName: "pm-assistant",
     });
+  });
+
+  it("keeps a rule set after a reconnect for the first message through the new channel", async () => {
+    const { service, repository, wired, paired, standIn, throughSales } =
+      await twoAccountsInOneGroup(["pm-assistant"]);
+    await standIn("feishu");
+    paired.salesChannel = "feishu-3";
+
+    await service.update({
+      ref: throughSales,
+      set: { routing: { agentName: "pm-assistant" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu-3", threadId: "oc_group", agentName: "main" },
+      wired,
+    );
+
+    expect(opened.agentName).toBe("pm-assistant");
+    expect(repository.find("feishu-3", "oc_group" as ChatId)?.id).toBe(opened.id);
   });
 
   it("finds a speaker by the name of its chat, whatever its session is titled", async () => {

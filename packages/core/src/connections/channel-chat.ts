@@ -8,7 +8,7 @@ import type { ChatKey, ChatRef } from "../chats/storage/place.js";
 import { type ChatAdapters, kindNamedBy } from "./chat-adapter.js";
 
 export interface StartChannelChatDeps {
-  chats: Pick<ChatRepository, "start">;
+  chats: Pick<ChatRepository, "start" | "rename">;
   /** The adapters, which name the chat at a channel address. */
   adapters: Pick<ChatAdapters, "chatAt" | "accountOn" | "openedDirectMessageAt">;
 }
@@ -36,7 +36,11 @@ export function startChannelChat(
     : kindNamedBy(deps.adapters.accountOn(input.channel).platform, input.threadId);
   const kind = named ?? (input.threadType === "private" ? "dm" : "group");
   const key = deps.adapters.chatAt(input.channel, parent ?? input.threadId, kind);
-  const chat = deps.chats.start(key, kind, parent ? null : (input.threadName ?? null));
+  const name = parent ? null : (input.threadName ?? null);
+  const chat = deps.chats.start(key, kind, name);
+  // A chat started before its platform named it, as one a reply rule was
+  // set in, takes the first name a message there gives.
+  if (chat.name === null && name !== null) deps.chats.rename(chat.ref, name);
   // Opened at its address, the direct message is kept there, so the other
   // end's first message finds it.
   if (kind === "dm") deps.adapters.openedDirectMessageAt(input.channel, input.threadId, key);
