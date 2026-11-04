@@ -140,6 +140,22 @@ describe("DiscordAdapter.send", () => {
     ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
   });
 
+  it("refuses a reply where the bot may not read the chat's history", async () => {
+    const noHistory = new DiscordAPIError(
+      { code: 160002, message: "Cannot reply without permission to read message history" },
+      160002,
+      403,
+      "POST",
+      "/channels/discord-chat-1/messages",
+      {},
+    );
+    const { channel, adapter } = chatOf(ChannelType.DM, rs.fn().mockRejectedValue(noHistory));
+
+    await expect(
+      adapter.send(channel.id as ChatId, { text: "Re", replyToMessageId: "123456789012345678" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+  });
+
   it("passes on an invalid form that is not the quote's fault", async () => {
     const tooLong = new DiscordAPIError(
       {

@@ -1588,12 +1588,13 @@ Use \`/channel agent clear\` to undo.`,
   }
 }
 
-/** Whether `err` is Discord saying it cannot find the message a send quotes:
- *  an unknown message, or an invalid form whose fault is the message
- *  reference. Any other invalid form is the send's own fault. */
-function isUnknownQuote(err: unknown): boolean {
+/** Whether `err` is Discord refusing the quote of a send: an unknown message,
+ *  a bot that may not read the chat's history and so may not quote it, or an
+ *  invalid form whose fault is the message reference. Any other invalid form
+ *  is the send's own fault. */
+function isRefusedQuote(err: unknown): boolean {
   if (!(err instanceof DiscordAPIError)) return false;
-  if (Number(err.code) === 10008) return true;
+  if (Number(err.code) === 10008 || Number(err.code) === 160002) return true;
   const errors = (err.rawError as { errors?: Record<string, unknown> }).errors;
   return Number(err.code) === 50035 && errors?.message_reference !== undefined;
 }
@@ -1609,10 +1610,10 @@ async function sendQuoting(
     return await channel.send(options);
   } catch (err) {
     const quoted = options.reply?.messageReference;
-    if (quoted && isUnknownQuote(err)) {
+    if (quoted && isRefusedQuote(err)) {
       throw new SendRefused(
         "reply_unaddressable",
-        `discord cannot find message ${JSON.stringify(quoted)} to answer`,
+        `discord cannot quote message ${JSON.stringify(quoted)} here`,
       );
     }
     throw err;
