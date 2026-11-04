@@ -148,8 +148,8 @@ describe("appChats", () => {
       expect(lines()).toEqual([
         { chat_id: group.id, thread_id: null, text: "Deploy done", agent: "main" },
       ]);
-      expect(result.message.chat).toEqual(group);
-      expect(result.message.id).toBeGreaterThan(0);
+      expect(result.message?.chat).toEqual(group);
+      expect(result.message?.id).toBeGreaterThan(0);
       expect(result.platformMessageId).toBe("m-1");
       expect(result.thread).toBeUndefined();
     });
@@ -251,7 +251,7 @@ describe("appChats", () => {
       const result = await chats.send({ chat: group, id: said }, { text: "In a thread." });
 
       expect(sent[0]?.message.replyToMessageId).toBe("q-1");
-      expect(result.thread).toEqual({ chat: group, id: result.message.id });
+      expect(result.thread).toEqual({ chat: group, id: result.message?.id });
 
       await chats.send(result.thread!, { text: "And again." });
       expect(sent.map((send) => send.address)).toEqual(["guild-chan", "thread-new"]);
@@ -365,6 +365,7 @@ describe("appChats", () => {
       const result = await chats.send(group, { text: "Deploy done" });
 
       expect(result.delivery.state).toBe("sent");
+      expect(result.message).toBeUndefined();
       expect(sent).toHaveLength(1);
     });
 

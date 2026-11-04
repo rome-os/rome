@@ -82,12 +82,13 @@ describe("chatsOver", () => {
     const { port, sends } = fakePort();
     const chat = chatsOver(port).byRef(slack);
 
-    const first = await chat.send({ text: "Status?" });
-    const thread = chat.thread(first.message);
+    const { message } = await chat.send({ text: "Status?" });
+    if (!message) throw new Error("expected the send on record");
+    const thread = chat.thread(message);
     await thread.send({ text: "Second line." });
 
-    expect(thread.ref).toEqual({ chat: slack, id: first.message.id });
-    expect(sends[1]?.place).toEqual({ chat: slack, id: first.message.id });
+    expect(thread.ref).toEqual({ chat: slack, id: message.id });
+    expect(sends[1]?.place).toEqual({ chat: slack, id: message.id });
   });
 
   it("refuses a thread at a message of another chat, before any send", () => {
