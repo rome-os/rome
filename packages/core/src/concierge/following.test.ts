@@ -164,8 +164,6 @@ function setup(
     gmailStatus?: WatchSource["status"];
     /** The connectors a second provider app lists. */
     second?: ProviderSources;
-    /** What the Concierge says in an important turn; by default every link it was given. */
-    says?: (prompt: string) => string;
     /** Triage's decision per event id; important when not named. */
     triage?: Record<string, "important" | "digest" | "ignore">;
   } = {},
@@ -177,7 +175,6 @@ function setup(
   const calls: [string, Record<string, unknown>][] = [];
   const changes: number[] = [];
   const turns: string[] = [];
-  const said: string[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
   const testDb = createTestDb();
@@ -298,7 +295,6 @@ function setup(
       set: async (key, value) => void settings.set(key, value),
     },
     connections: async () => connectionViews(),
-    saidSince: async () => said.join("\n"),
     items,
     agentRunner,
   };
@@ -307,8 +303,6 @@ function setup(
     findChatId: async () => "concierge",
     runSystemTurn: async (_chatId: string, prompt: string) => {
       turns.push(prompt);
-      said.length = 0;
-      said.push(options.says ? options.says(prompt) : prompt);
     },
     followingChanged: () => void changes.push(1),
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
@@ -705,8 +699,9 @@ describe("the follow pipeline", () => {
     expect(s.turns[0]).toContain('delivery="important"');
     expect(s.turns[0]).toContain("line for e1");
     expect(s.turns[0]).not.toContain("e2");
-    expect(await s.items.owed("important")).toEqual([]);
-    expect((await s.items.owed("digest")).map((i) => i.eventId)).toEqual(["e2"]);
+    expect(await s.items.owedToConcierge()).toEqual([]);
+    // The digest owes both kept items: the important one the Concierge had, and e2.
+    expect((await s.items.owedToDigest()).map((i) => i.eventId)).toEqual(["e1", "e2"]);
     // A repeat of a stored event is not triaged again.
     await fire(s, "e1");
     await rs.advanceTimersByTimeAsync(5 * 60_000);
@@ -714,37 +709,32 @@ describe("the follow pipeline", () => {
     s.stop();
   });
 
-  it("marks only what the Concierge told as done, and gives the digest the rest, ranked first", async () => {
+  it("gives every item to the next digest, important ones first, and offers each once", async () => {
     rs.useFakeTimers();
-    // The Concierge tells e1, with its link, and stays silent on e2.
-    const s = setup({
-      triage: { e3: "digest" },
-      says: () => "alice wants your review: https://github.com/acme/widgets/pull/e1",
-    });
+    const s = setup({ triage: { e3: "digest" } });
     await s.following().follow({ source: "github", target: "acme/widgets" });
     for (const id of ["e1", "e2", "e3"]) await fire(s, id);
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     expect(s.turns).toHaveLength(1);
-    expect(await s.items.owed("important")).toEqual([]);
-    expect((await s.items.owed("digest")).map((i) => [i.eventId, i.decision])).toEqual([
-      ["e2", "important"],
-      ["e3", "digest"],
-    ]);
-    // The untold important item is not offered again with the next batch.
+    expect(s.turns[0]).toContain("line for e1");
+    expect(s.turns[0]).toContain("line for e2");
+    // The important ones are not offered again with the next batch.
     await fire(s, "e4");
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     expect(s.turns[1]).toContain("line for e4");
-    expect(s.turns[1]).not.toContain("line for e2");
+    expect(s.turns[1]).not.toContain("line for e1");
 
     const digest = await s.action("core:concierge_digest").execute({}, {} as never);
-    expect(digest).toMatchObject({ status: "ok", data: { items: 3 } });
+    expect(digest).toMatchObject({ status: "ok", data: { items: 4 } });
     const turn = s.turns.at(-1)!;
     expect(turn).toContain('delivery="digest"');
-    // Important ones first, marked; e1, which was told, is not in it.
-    expect(turn.indexOf("line for e2")).toBeLessThan(turn.indexOf("line for e3"));
-    expect(turn).toMatch(/important="true"[^>]*>line for e2</);
-    expect(turn).not.toContain("line for e1");
-    expect(await s.items.owed("digest")).toEqual([]);
+    // Every item, told or not, with the important ones first and marked.
+    for (const id of ["e1", "e2", "e4"]) {
+      expect(turn).toMatch(new RegExp(`important="true"[^>]*>line for ${id}<`));
+    }
+    expect(turn.indexOf("line for e4")).toBeLessThan(turn.indexOf("line for e3"));
+    expect(turn).not.toMatch(/important="true"[^>]*>line for e3</);
+    expect(await s.items.owedToDigest()).toEqual([]);
     s.stop();
   });
 
@@ -801,7 +791,7 @@ describe("the follow pipeline", () => {
     expect(await digest.execute({}, {} as never)).toEqual({ status: "ok", data: { items: 1 } });
     expect(s.turns[0]).toContain('delivery="digest"');
     expect(s.turns[0]).toContain("Ana cc'd you on the offsite plan");
-    expect(await s.items.owed("digest")).toEqual([]);
+    expect(await s.items.owedToDigest()).toEqual([]);
     s.stop();
   });
 

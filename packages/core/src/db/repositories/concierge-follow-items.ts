@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
 import { conciergeFollowItems } from "../schema.js";
 
@@ -18,9 +18,9 @@ export interface FollowItemInput {
 }
 
 /**
- * The events the Concierge's triage kept, each owed until the guardian was
- * told: `important` ones go to the Concierge after their batch, and `digest`
- * ones, with the important ones it did not tell, at the next digest.
+ * The events the Concierge's triage kept. An `important` one is owed to the
+ * Concierge after its batch, and every one is owed to the next digest, whether
+ * the Concierge told the guardian of it or not.
  */
 export class ConciergeFollowItemsRepository {
   constructor(private db: DrizzleDb) {}
@@ -58,48 +58,47 @@ export class ConciergeFollowItemsRepository {
     return new Set(rows.map((row) => row.eventId));
   }
 
-  /**
-   * What is owed, oldest first. `important`: important items the Concierge has
-   * not had yet. `digest`: digest items, and important items left for the
-   * digest, which keep their decision so the digest can rank them first.
-   */
-  async owed(to: FollowItemDecision): Promise<ConciergeFollowItemRow[]> {
-    const items = conciergeFollowItems;
+  /** Important items the Concierge has not had yet, oldest first. */
+  async owedToConcierge(): Promise<ConciergeFollowItemRow[]> {
     return this.db
       .select()
-      .from(items)
+      .from(conciergeFollowItems)
       .where(
-        and(
-          isNull(items.deliveredAt),
-          to === "important"
-            ? and(eq(items.decision, "important"), isNull(items.deferredAt))
-            : or(eq(items.decision, "digest"), isNotNull(items.deferredAt)),
-        ),
+        and(eq(conciergeFollowItems.decision, "important"), isNull(conciergeFollowItems.offeredAt)),
       )
-      .orderBy(asc(items.createdAt));
+      .orderBy(asc(conciergeFollowItems.createdAt));
   }
 
-  async markDelivered(ids: string[], at: Date): Promise<void> {
+  /** Every item no digest has included yet, important or not, oldest first. */
+  async owedToDigest(): Promise<ConciergeFollowItemRow[]> {
+    return this.db
+      .select()
+      .from(conciergeFollowItems)
+      .where(isNull(conciergeFollowItems.digestedAt))
+      .orderBy(asc(conciergeFollowItems.createdAt));
+  }
+
+  /** Important items that went to the Concierge, or that the hourly cap skipped. */
+  async markOffered(ids: string[], at: Date): Promise<void> {
     if (ids.length === 0) return;
     await this.db
       .update(conciergeFollowItems)
-      .set({ deliveredAt: at })
+      .set({ offeredAt: at })
       .where(inArray(conciergeFollowItems.id, ids));
   }
 
-  /** Leaves owed important items for the digest. They stay important. */
-  async deferToDigest(ids: string[], at: Date): Promise<void> {
+  /** Items a digest included. */
+  async markDigested(ids: string[], at: Date): Promise<void> {
     if (ids.length === 0) return;
     await this.db
       .update(conciergeFollowItems)
-      .set({ deferredAt: at })
-      .where(and(inArray(conciergeFollowItems.id, ids), isNull(conciergeFollowItems.deliveredAt)));
+      .set({ digestedAt: at })
+      .where(inArray(conciergeFollowItems.id, ids));
   }
 
   /**
-   * Important items the Concierge told the guardian since `since`, newest
-   * first, so triage knows what was already told. One left for the digest is
-   * not among them.
+   * Important items the Concierge had since `since`, newest first, so triage
+   * knows what was already raised.
    */
   async recentImportant(since: Date, limit: number): Promise<ConciergeFollowItemRow[]> {
     return this.db
@@ -108,8 +107,7 @@ export class ConciergeFollowItemsRepository {
       .where(
         and(
           eq(conciergeFollowItems.decision, "important"),
-          isNotNull(conciergeFollowItems.deliveredAt),
-          isNull(conciergeFollowItems.deferredAt),
+          isNotNull(conciergeFollowItems.offeredAt),
           gte(conciergeFollowItems.createdAt, since),
         ),
       )
@@ -117,14 +115,14 @@ export class ConciergeFollowItemsRepository {
       .limit(limit);
   }
 
-  /** Deletes delivered items older than `before`. */
+  /** Deletes digested items older than `before`. */
   async prune(before: Date): Promise<void> {
     await this.db
       .delete(conciergeFollowItems)
       .where(
         and(
-          isNotNull(conciergeFollowItems.deliveredAt),
-          lt(conciergeFollowItems.deliveredAt, before),
+          isNotNull(conciergeFollowItems.digestedAt),
+          lt(conciergeFollowItems.digestedAt, before),
         ),
       );
   }

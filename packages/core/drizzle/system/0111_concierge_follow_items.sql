@@ -1,4 +1,5 @@
--- Events the Concierge's triage kept from what it follows, owed until delivered
+-- Events the Concierge's triage kept from what it follows, owed to the
+-- Concierge and to the digest until offered and digested
 -- (src/concierge/following.ts).
 CREATE TABLE `concierge_follow_items` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -11,8 +12,9 @@ CREATE TABLE `concierge_follow_items` (
 	`line` text NOT NULL,
 	`url` text,
 	`created_at` integer NOT NULL,
-	`delivered_at` integer
+	`offered_at` integer,
+	`digested_at` integer
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_concierge_follow_items_event` ON `concierge_follow_items` (`event_id`);--> statement-breakpoint
-CREATE INDEX `idx_concierge_follow_items_owed` ON `concierge_follow_items` (`decision`,`delivered_at`);
+CREATE INDEX `idx_concierge_follow_items_digest` ON `concierge_follow_items` (`digested_at`);

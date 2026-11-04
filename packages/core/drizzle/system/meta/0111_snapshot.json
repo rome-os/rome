@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fd8fc5e7-5b2a-4439-996f-7c4541775037",
+  "id": "8c193c70-325e-40b9-9805-828077d410f7",
   "prevId": "583e8533-4893-471a-8e94-ec09c7df945e",
   "tables": {
     "account_profiles": {
@@ -1155,8 +1155,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "delivered_at": {
-          "name": "delivered_at",
+        "offered_at": {
+          "name": "offered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "digested_at": {
+          "name": "digested_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -1171,11 +1178,10 @@
           ],
           "isUnique": true
         },
-        "idx_concierge_follow_items_owed": {
-          "name": "idx_concierge_follow_items_owed",
+        "idx_concierge_follow_items_digest": {
+          "name": "idx_concierge_follow_items_digest",
           "columns": [
-            "decision",
-            "delivered_at"
+            "digested_at"
           ],
           "isUnique": false
         }

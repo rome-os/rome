@@ -5,14 +5,14 @@
 //   batch       a fixed window: a batch closes BATCH_WINDOW_MS after its
 //               first event, and is triaged in runs of at most 50 events
 //   important   goes to the Concierge after each batch, as one quiet turn; it
-//               tells the guardian now or stays silent, and an item it did not
-//               tell goes to the next digest, still marked important
+//               tells the guardian now or stays silent
 //   breaker     a fixed cap, not a rule: past IMPORTANT_TURNS_PER_HOUR
-//               important turns in the last hour, a batch's important items go
-//               to the digest, still marked important
+//               important turns in the last hour, a batch's important items
+//               skip the Concierge
+//   digest      every item, important or not and told or not, goes to the
+//               Concierge at the guardian's digest times, important ones first
 //   quiet hours important items wait until the guardian's quiet window ends,
 //               then arrive as one turn marked as held
-//   digest      goes to the Concierge at the guardian's digest times
 //
 // The open batch lives in memory, so a restart drops it; stored items survive.
 // A batch that fails (triage or storing it) is tried again with the next one,
@@ -137,8 +137,8 @@ export interface ImportantDeliveryDeps {
   quietUntil(at: number): Promise<number | null>;
   /** The important items owed, oldest first. */
   owed(): Promise<ConciergeFollowItemRow[]>;
-  /** Moves items to the digest. */
-  toDigest(items: ConciergeFollowItemRow[]): Promise<void>;
+  /** Marks items the hourly cap keeps from the Concierge; the digest still has them. */
+  skip(items: ConciergeFollowItemRow[]): Promise<void>;
   /** Runs one important turn of the Concierge with the items; settles when it ends. */
   send(items: ConciergeFollowItemRow[], held: boolean): Promise<void>;
 }
@@ -214,11 +214,11 @@ export class ImportantDelivery {
     }
     this.turns = this.turns.filter((start) => start > now - HOUR_MS);
     if (this.turns.length >= IMPORTANT_TURNS_PER_HOUR) {
-      log.warn("important breaker open: items go to the digest", {
+      log.warn("important breaker open: items wait for the digest", {
         items: owed.length,
         turnsLastHour: this.turns.length,
       });
-      await this.deps.toDigest(owed);
+      await this.deps.skip(owed);
       return;
     }
     const items = owed.slice(0, MAX_IMPORTANT_LINES);
@@ -267,8 +267,8 @@ export function renderImportantTurn(items: ConciergeFollowItemRow[], held: boole
 }
 
 /**
- * The quiet turn of a digest. Important items the Concierge did not tell come
- * first and are always listed, marked as such. A large digest shows a few lines
+ * The quiet turn of a digest: every item since the last one. Important items
+ * come first and are always listed, marked as such. A large digest shows a few lines
  * of the rest per source and kind and counts the others, so the conversation
  * is not flooded.
  */

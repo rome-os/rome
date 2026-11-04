@@ -180,10 +180,15 @@ export interface ConciergeFollowingDeps {
   /** What triage kept, owed to the Concierge until delivered. */
   items: Pick<
     ConciergeFollowItemsRepository,
-    "add" | "known" | "owed" | "markDelivered" | "deferToDigest" | "recentImportant" | "prune"
+    | "add"
+    | "known"
+    | "owedToConcierge"
+    | "owedToDigest"
+    | "markOffered"
+    | "markDigested"
+    | "recentImportant"
+    | "prune"
   >;
-  /** What the Concierge said in its chat since `since` (epoch ms), as text. */
-  saidSince(chatId: string, since: number): Promise<string>;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
   now?: () => number;
@@ -341,17 +346,6 @@ const failure = (name: string, outcome: ActionOutcome) =>
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/**
- * Whether the Concierge told the guardian an item, by its link in what the
- * Concierge said. An item it told without the link reads as untold, which
- * costs a line in the digest, never a lost item.
- */
-export function toldIn(said: string, item: { url: string | null }): boolean {
-  if (!item.url) return false;
-  const url = item.url.replace(/\/+$/, "");
-  return said.includes(url) || said.includes(url.replaceAll("&", "&amp;"));
-}
-
 /** An event as its connection put it in the common shape. */
 type NormalizedEvent = Omit<FollowEvent, "target" | "account" | "at">;
 
@@ -464,9 +458,10 @@ export function startConciergeFollowing(
     now,
     isEnabled: () => service.isEnabled(),
     quietUntil,
-    owed: () => deps.items.owed("important"),
-    toDigest: (items) =>
-      deps.items.deferToDigest(
+    owed: () => deps.items.owedToConcierge(),
+    // Past the hourly cap the Concierge does not get them now; the digest still does.
+    skip: (items) =>
+      deps.items.markOffered(
         items.map((item) => item.id),
         new Date(now()),
       ),
@@ -476,27 +471,14 @@ export function startConciergeFollowing(
         log.info("following important", { items: items.length, held, delivered: false });
         return;
       }
-      const startedAt = now();
+      // The Concierge decides whether to tell each item now. Either way every
+      // item also goes into the next digest.
       await service.runSystemTurn(chatId, renderImportantTurn(items, held), { quiet: true });
-      // The Concierge decides whether to tell each item now. What it told is
-      // done; what it left untold goes to the next digest, still important.
-      const said = await deps.saidSince(chatId, startedAt);
-      const told = items.filter((item) => toldIn(said, item));
-      const untold = items.filter((item) => !told.includes(item));
-      await deps.items.markDelivered(
-        told.map((item) => item.id),
+      await deps.items.markOffered(
+        items.map((item) => item.id),
         new Date(now()),
       );
-      await deps.items.deferToDigest(
-        untold.map((item) => item.id),
-        new Date(now()),
-      );
-      log.info("following important", {
-        items: items.length,
-        held,
-        told: told.length,
-        leftForDigest: untold.length,
-      });
+      log.info("following important", { items: items.length, held, delivered: true });
     },
   });
 
@@ -587,7 +569,7 @@ export function startConciergeFollowing(
   /** Hands the owed digest to the Concierge as one turn, or does nothing when none is owed. */
   const deliverDigest = async (): Promise<{ items: number }> => {
     if (!(await service.isEnabled())) return { items: 0 };
-    const owed = await deps.items.owed("digest");
+    const owed = await deps.items.owedToDigest();
     if (owed.length === 0) return { items: 0 };
     const chatId = await service.findChatId();
     log.info("following digest", { items: owed.length, delivered: chatId !== null });
@@ -595,7 +577,7 @@ export function startConciergeFollowing(
     await outsideAction(() =>
       service.runSystemTurn(chatId, renderDigestTurn(owed), { quiet: true }),
     );
-    await deps.items.markDelivered(
+    await deps.items.markDigested(
       owed.map((item) => item.id),
       new Date(now()),
     );

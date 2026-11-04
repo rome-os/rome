@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow-items.js";
-import { toldIn } from "./following.js";
 import {
   BATCH_WINDOW_MS,
   FollowBatcher,
@@ -40,8 +39,8 @@ const item = (over: Partial<ConciergeFollowItemRow> = {}): ConciergeFollowItemRo
   line: "alice asked you to review #7",
   url: "https://github.com/acme/widgets/pull/7",
   createdAt: new Date(START),
-  deferredAt: null,
-  deliveredAt: null,
+  offeredAt: null,
+  digestedAt: null,
   ...over,
 });
 
@@ -127,14 +126,14 @@ describe("ImportantDelivery", () => {
   const setup = (options: { quietUntil?: (at: number) => number | null } = {}) => {
     let owed: ConciergeFollowItemRow[] = [];
     const sent: { items: string[]; held: boolean }[] = [];
-    const digested: string[] = [];
+    const skipped: string[] = [];
     const delivery = new ImportantDelivery({
       now: () => Date.now(),
       isEnabled: async () => true,
       quietUntil: async (at) => options.quietUntil?.(at) ?? null,
       owed: async () => owed,
-      toDigest: async (items) => {
-        digested.push(...items.map((i) => i.id));
+      skip: async (items) => {
+        skipped.push(...items.map((i) => i.id));
         owed = owed.filter((o) => !items.includes(o));
       },
       send: async (items, held) => {
@@ -145,7 +144,7 @@ describe("ImportantDelivery", () => {
     return {
       delivery,
       sent,
-      digested,
+      skipped,
       owe: (...items: ConciergeFollowItemRow[]) => void owed.push(...items),
     };
   };
@@ -160,7 +159,7 @@ describe("ImportantDelivery", () => {
     expect(s.sent).toEqual([{ items: [a!.id, b!.id], held: false }]);
   });
 
-  it("sends a batch's important items to the digest past 12 turns in an hour", async () => {
+  it("keeps a batch's important items from the Concierge past 12 turns in an hour", async () => {
     const s = setup();
     for (let i = 0; i < IMPORTANT_TURNS_PER_HOUR; i++) {
       s.owe(item());
@@ -172,7 +171,7 @@ describe("ImportantDelivery", () => {
     s.owe(over);
     await s.delivery.deliver();
     expect(s.sent).toHaveLength(IMPORTANT_TURNS_PER_HOUR);
-    expect(s.digested).toEqual([over.id]);
+    expect(s.skipped).toEqual([over.id]);
     // An hour after the first turn, there is room again.
     await rs.advanceTimersByTimeAsync(HOUR_MS);
     const later = item();
@@ -205,7 +204,7 @@ describe("ImportantDelivery", () => {
       isEnabled: async () => true,
       quietUntil: async () => null,
       owed: async () => owed.filter((i) => !sent.includes(i.id)),
-      toDigest: async () => undefined,
+      skip: async () => undefined,
       send: async (items) => {
         if (failing) throw new Error("no such table");
         sent.push(...items.map((i) => i.id));
@@ -309,15 +308,5 @@ describe("quiet hours", () => {
     expect(parseQuietHours({ start: "22:00", end: "22:00" })).toBeNull();
     expect(parseQuietHours({ start: "9:00", end: "18:00" })).toBeNull();
     expect(parseQuietHours(null)).toBeNull();
-  });
-});
-
-describe("toldIn", () => {
-  it("finds an item told by its link, with or without a trailing slash or escaping", () => {
-    const item = { url: "https://github.com/acme/widgets/pull/7?a=1&b=2" };
-    expect(toldIn("see [#7](https://github.com/acme/widgets/pull/7?a=1&b=2)", item)).toBe(true);
-    expect(toldIn("see https://github.com/acme/widgets/pull/7?a=1&amp;b=2", item)).toBe(true);
-    expect(toldIn("see https://github.com/acme/widgets/pull/8", item)).toBe(false);
-    expect(toldIn("anything", { url: null })).toBe(false);
   });
 });

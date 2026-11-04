@@ -719,11 +719,11 @@ export const conciergeTasks = sqliteTable(
 );
 
 /**
- * Events from what the Concierge follows that its triage kept: `important` ones
- * go to the Concierge after their batch, `digest` ones (and important ones it
- * did not tell) at the next digest time.
- * Only the triage's one-line description is kept, never the event's text. A
- * row is owed until `deliveredAt` is set, so a restart loses none.
+ * Events from what the Concierge follows that its triage kept. An `important`
+ * one goes to the Concierge after its batch, and every one, important or not,
+ * goes into the next digest. Only the triage's one-line description is kept,
+ * never the event's text. A row is owed until it was offered and digested, so
+ * a restart loses none.
  */
 export const conciergeFollowItems = sqliteTable(
   "concierge_follow_items",
@@ -741,18 +741,14 @@ export const conciergeFollowItems = sqliteTable(
     line: text("line").notNull(),
     url: text("url"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    /**
-     * Set on an important item left for the digest: the Concierge got it and
-     * told the guardian nothing about it, or the hourly cap held it back. It
-     * stays important, so the digest ranks it first.
-     */
-    deferredAt: integer("deferred_at", { mode: "timestamp_ms" }),
-    /** Set once the guardian was told: by the Concierge, or in a digest. */
-    deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+    /** Set once an important item went to the Concierge, or the hourly cap skipped it. */
+    offeredAt: integer("offered_at", { mode: "timestamp_ms" }),
+    /** Set once a digest included the item. */
+    digestedAt: integer("digested_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     uniqueIndex("idx_concierge_follow_items_event").on(table.eventId),
-    index("idx_concierge_follow_items_owed").on(table.decision, table.deliveredAt),
+    index("idx_concierge_follow_items_digest").on(table.digestedAt),
   ],
 );
 
