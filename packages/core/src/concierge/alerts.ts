@@ -12,6 +12,9 @@
 //   digest      goes to the Concierge at the guardian's digest times
 //
 // The open batch lives in memory, so a restart drops it; stored items survive.
+// A batch that fails (triage or storing it) is tried again with the next one,
+// up to BATCH_ATTEMPTS times. A notify turn that fails leaves its items owed
+// and is tried again RETRY_MS later.
 
 import type { ConciergeQuietHours } from "@rome/api-types/concierge";
 import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow-items.js";
@@ -24,6 +27,10 @@ export const BATCH_WINDOW_MS = 5 * 60_000;
 export const HOUR_MS = 60 * 60_000;
 /** Notify turns in the last hour past which a batch's notify items go to the digest. */
 export const NOTIFY_TURNS_PER_HOUR = 12;
+/** How often a batch is tried before its events are given up, with a warning. */
+export const BATCH_ATTEMPTS = 3;
+/** When a failed notify turn is tried again. */
+export const RETRY_MS = 5 * 60_000;
 /** Event ids remembered so a repeat delivery is not batched twice. */
 const MAX_SEEN_IDS = 2_000;
 /** Notify lines one turn shows; the rest wait for the next one. */
@@ -43,6 +50,10 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export class FollowBatcher {
   private queue: FollowEvent[] = [];
   private seen = new Set<string>();
+  /** Failed tries per event id, for events put back after a failed batch. */
+  private attempts = new Map<string, number>();
+  /** After a failed batch, the next one waits a whole window from the failure. */
+  private notBefore = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
 
@@ -79,10 +90,8 @@ export class FollowBatcher {
   private arm(): void {
     if (this.timer || this.flushing || this.queue.length === 0) return;
     const first = this.queue[0]?.at ?? this.deps.now();
-    this.timer = setTimeout(
-      () => void this.run(),
-      Math.max(0, first + BATCH_WINDOW_MS - this.deps.now()),
-    );
+    const at = Math.max(first + BATCH_WINDOW_MS, this.notBefore);
+    this.timer = setTimeout(() => void this.run(), Math.max(0, at - this.deps.now()));
   }
 
   private async run(): Promise<void> {
@@ -93,8 +102,24 @@ export class FollowBatcher {
     this.queue = [];
     try {
       await this.deps.flush(batch);
+      for (const event of batch) this.attempts.delete(event.id);
     } catch (error) {
-      log.warn("follow batch failed", { events: batch.length, error: message(error) });
+      const retry = batch.filter((event) => {
+        const tries = (this.attempts.get(event.id) ?? 0) + 1;
+        this.attempts.set(event.id, tries);
+        if (tries < BATCH_ATTEMPTS) return true;
+        this.attempts.delete(event.id);
+        return false;
+      });
+      log.warn("follow batch failed", {
+        events: batch.length,
+        retried: retry.length,
+        givenUp: batch.length - retry.length,
+        error: message(error),
+      });
+      // Put back in front, so they lead the next batch.
+      this.queue = [...retry, ...this.queue];
+      this.notBefore = this.deps.now() + BATCH_WINDOW_MS;
     } finally {
       this.flushing = false;
       this.arm();
@@ -136,7 +161,11 @@ export class NotifyDelivery {
       return this.running;
     }
     this.running = this.once()
-      .catch((error: unknown) => log.warn("notify delivery failed", { error: message(error) }))
+      .catch((error: unknown) => {
+        // The items stay owed until a turn takes them.
+        log.warn("notify delivery failed; trying again later", { error: message(error) });
+        this.schedule(this.deps.now() + RETRY_MS);
+      })
       .finally(() => {
         this.running = null;
         if (this.again) {

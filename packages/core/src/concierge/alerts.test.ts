@@ -3,6 +3,7 @@ import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow
 import {
   BATCH_WINDOW_MS,
   FollowBatcher,
+  RETRY_MS,
   HOUR_MS,
   MAX_DIGEST_LINES,
   NOTIFY_TURNS_PER_HOUR,
@@ -70,6 +71,35 @@ describe("FollowBatcher", () => {
     await rs.advanceTimersByTimeAsync(1);
     // Nothing is omitted or counted: every event is in the batch.
     expect(s.batches.map((b) => b.length)).toEqual([121]);
+  });
+
+  it("tries a failed batch again with the next window, and gives up after three tries", async () => {
+    const tries: string[][] = [];
+    let fail = true;
+    const batcher = new FollowBatcher({
+      now: () => Date.now(),
+      flush: async (events) => {
+        tries.push(events.map((e) => e.id));
+        if (fail) throw new Error("no such table");
+      },
+    });
+    batcher.add(event("a"));
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    expect(tries).toEqual([["a"]]);
+    // Not at once: a whole window later, with what came meanwhile.
+    batcher.add(event("b"));
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS - 1);
+    expect(tries).toHaveLength(1);
+    await rs.advanceTimersByTimeAsync(1);
+    expect(tries[1]).toEqual(["a", "b"]);
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    // "a" failed three times and is given up; "b" has one try left.
+    expect(tries[2]).toEqual(["a", "b"]);
+    fail = false;
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    expect(tries[3]).toEqual(["b"]);
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    expect(tries).toHaveLength(4);
   });
 
   it("drops a repeat, and starts the next batch with the next event", async () => {
@@ -161,6 +191,30 @@ describe("NotifyDelivery", () => {
     expect(s.sent).toHaveLength(1);
     expect(s.sent[0]).toMatchObject({ held: true });
     expect(s.sent[0]?.items).toHaveLength(2);
+  });
+
+  it("keeps the items owed when a turn fails, and tries again later", async () => {
+    const s = setup();
+    let failing = true;
+    const owed = [item()];
+    const sent: string[] = [];
+    const delivery = new NotifyDelivery({
+      now: () => Date.now(),
+      isEnabled: async () => true,
+      quietUntil: async () => null,
+      owed: async () => owed.filter((i) => !sent.includes(i.id)),
+      toDigest: async () => undefined,
+      send: async (items) => {
+        if (failing) throw new Error("no such table");
+        sent.push(...items.map((i) => i.id));
+      },
+    });
+    await delivery.deliver();
+    expect(sent).toEqual([]);
+    failing = false;
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(sent).toEqual([owed[0]!.id]);
+    expect(s.sent).toEqual([]);
   });
 
   it("delivers what was owed before a restart, after the boot delay", async () => {
