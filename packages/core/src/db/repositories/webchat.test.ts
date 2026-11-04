@@ -8,7 +8,6 @@ import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
 import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
 import {
-  romeAgentMessagePlatformIds,
   romeAgentMessages,
   romeSessions,
   romeAgentTraceBlocks,
