@@ -97,6 +97,54 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
+  it("lets a renewal in flight on the ended Connection finish, and never revives it", async () => {
+    let finishRenewal: (cred: Credential) => void = () => {};
+    const { descriptor } = { descriptor: botIdDescriptor() };
+    const slowRenew: ConnectionDescriptor = {
+      ...descriptor,
+      auth: {
+        ...descriptor.auth,
+        renew: () =>
+          new Promise<Credential>((resolve) => {
+            finishRenewal = resolve;
+          }),
+      },
+    };
+    const db = createTestDb();
+    const ledger = new DrizzleConnectionsRepository(db.db);
+    const registry = new ConnectionRegistry({ repository: ledger });
+    registry.register(slowRenew);
+    try {
+      const first = await registry.connect(SERVICE);
+      const expiring: Credential = {
+        material: { token: "t-1" },
+        expiresAt: new Date(Date.now() + 1_000),
+      };
+      await registry.giveGrant(SERVICE, first.id, "bot", expiring, { botId: "100" });
+      const renewal = registry.renewExpiring(60_000);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const fix = registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
+        botId: "900",
+      });
+      // Give the fix every chance to commit before the renewal answers.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      finishRenewal(credentialFor("t-1-renewed"));
+      const next = await fix;
+      await renewal;
+
+      expect(registry.all().map((connection) => connection.id)).toEqual([next.id]);
+      await expect(ledger.grantOf(first.id)).resolves.toBeNull();
+      expect(first.isUnlocked("chat")).toBe(false);
+      expect(next.isUnlocked("chat")).toBe(true);
+      await expect(ledger.grantOf(next.id)).resolves.toMatchObject({
+        account: { accountId: "900" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("tells the caller which Connection it ended, when it filled the service's own", async () => {
     const { registry, close } = setupRegistry();
     try {
