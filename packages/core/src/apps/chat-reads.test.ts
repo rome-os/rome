@@ -138,8 +138,11 @@ describe("appChatReads", () => {
       const link = (agent: string | null) =>
         testDb.db
           .insert(connectedAccounts)
-          .values({ connectionId: "conn-1", agent })
-          .onConflictDoUpdate({ target: connectedAccounts.connectionId, set: { agent } })
+          .values({ platform: "telegram", accountId: "rome-bot", agent })
+          .onConflictDoUpdate({
+            target: [connectedAccounts.platform, connectedAccounts.accountId],
+            set: { agent },
+          })
           .run();
       const dm = fixture.chat("telegram", "dm:rome-bot:42", "dm", "Wei");
       fixture.speaker({ id: "s-1", chat: dm, accountId: "rome-bot", createdAt: at(0) });

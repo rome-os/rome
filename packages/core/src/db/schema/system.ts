@@ -1168,16 +1168,20 @@ export const channels = sqliteTable(
   ],
 );
 
-// Chats' record of a connected account: one row per connection that lets
-// Rome chat, keyed by that connection and holding the agent that speaks
-// through the account, null for none. It lives exactly as long as its
-// connection. Vocabulary: docs/domains/chats.md#connected-account.
-export const connectedAccounts = sqliteTable("connected_accounts", {
-  connectionId: text("connection_id")
-    .primaryKey()
-    .references(() => connections.id, { onDelete: "cascade" }),
-  agent: text("agent"),
-});
+// Chats' record of a connected account: one row per account Rome holds a
+// connection to that lets it chat, keyed by the account (the platform and the
+// platform's own id) and holding the agent that speaks through it, null for
+// none. A connection whose grant has not reported its account yet has no row.
+// Vocabulary: docs/domains/chats.md#connected-account.
+export const connectedAccounts = sqliteTable(
+  "connected_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    agent: text("agent"),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
+);
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope

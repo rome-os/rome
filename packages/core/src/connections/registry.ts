@@ -342,11 +342,13 @@ export class ConnectionRegistry {
     await this.connectionMutex.runExclusive(conn.connectionKind, async () => {
       const current = this.connections.get(id);
       if (!current) throw new Error(`unknown connection "${id}"`);
+      const account = (await this.store.grantOf(id))?.account;
       this.store.transaction((tx) => {
         this.store.remove(tx, id);
         this.raise(tx, {
           kind: "disconnected",
           connection: { id, connectionKind: current.connectionKind },
+          ...(account ? { account } : {}),
         });
         opts.inTx?.(tx);
       });
@@ -1329,9 +1331,14 @@ class ConnectionImpl implements Connection {
   disconnect(grant: GrantName): Promise<void> {
     return this.withGrantLock(grant, async () => {
       const connection = { id: this.id, connectionKind: this.connectionKind };
+      const account = (await this.store.grantOf(this.id))?.account;
       this.store.transaction((tx) => {
         this.store.remove(tx, this.id);
-        this.registry.raise(tx, { kind: "disconnected", connection });
+        this.registry.raise(tx, {
+          kind: "disconnected",
+          connection,
+          ...(account ? { account } : {}),
+        });
       });
       this.grantState.set(grant, "unauthorized");
       this.liveCreds.delete(grant);

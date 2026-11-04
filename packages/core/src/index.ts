@@ -531,7 +531,7 @@ async function main() {
           return;
         case "disconnected":
           channelRecords.vacate(tx, connection.id);
-          connectedAccounts.remove(tx, connection.id);
+          if (event.account) connectedAccounts.remove(tx, event.account);
           return;
       }
     },

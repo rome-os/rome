@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { eq } from "drizzle-orm";
+import { givenGrant } from "../../connections/connection.js";
 import { NO_GRANT } from "../../connections/grant.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
-import { connections } from "../schema.js";
+import type { Credential } from "../../connections/types.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ConnectedAccountNotFound, ConnectedAccountsRepository } from "./connected-accounts.js";
 
@@ -20,13 +20,27 @@ describe("ConnectedAccountsRepository", () => {
     const db = testDb.db;
     const ledger = new DrizzleConnectionsRepository(db);
     const accounts = new ConnectedAccountsRepository(db);
-    const connect = (id: string, connectionKind = "telegram") =>
+    // A connection whose grant reaches the account `bot-<id>` on Telegram,
+    // or none with `reaching: null`.
+    const connect = (id: string, reaching: string | null = `bot-${id}`) =>
       ledger.save(db, {
         id,
-        connectionKind,
-        label: connectionKind,
+        connectionKind: "telegram",
+        label: "telegram",
         createdAt: NOW,
-        grant: NO_GRANT,
+        grant:
+          reaching === null
+            ? NO_GRANT
+            : givenGrant(
+                NOW,
+                { material: { token: "t" } } as unknown as Credential,
+                "epoch",
+                undefined,
+                {
+                  platform: "telegram",
+                  accountId: reaching,
+                },
+              ),
       });
     return { db, accounts, connect };
   }
@@ -78,6 +92,16 @@ describe("ConnectedAccountsRepository", () => {
     expect(accounts.agentOf("c1")).toBe("core:main");
   });
 
+  it("keys a connected account by the account its connection reaches", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1", "bot-1");
+    accounts.link("c1", "sales:agent");
+
+    expect(accounts.accountOf(db, "c1")).toEqual({ platform: "telegram", accountId: "bot-1" });
+    accounts.remove(db, { platform: "telegram", accountId: "bot-1" });
+    expect(accounts.agentOf("c1")).toBeNull();
+  });
+
   it("links a connection Rome holds that has no connected account recorded", () => {
     const { accounts, connect } = setup();
     connect("c1");
@@ -100,20 +124,18 @@ describe("ConnectedAccountsRepository", () => {
     accounts.add(db, "c1");
     accounts.link("c1", "sales:agent");
 
-    accounts.remove(db, "c1");
+    accounts.remove(db, { platform: "telegram", accountId: "bot-c1" });
 
     expect(accounts.agentOf("c1")).toBeNull();
   });
 
-  it("leaves no agent behind on a connection that is gone, even when nothing removes it", () => {
+  it("makes none for a connection that has not reported its account, and refuses its link", () => {
     const { db, accounts, connect } = setup();
-    connect("c1");
-    accounts.add(db, "c1");
-    accounts.link("c1", "sales:agent");
+    connect("c1", null);
 
-    db.delete(connections).where(eq(connections.id, "c1")).run();
-    connect("c1");
+    accounts.add(db, "c1");
 
     expect(accounts.agentOf("c1")).toBeNull();
+    expect(() => accounts.link("c1", "sales:agent")).toThrow(ConnectedAccountNotFound);
   });
 });

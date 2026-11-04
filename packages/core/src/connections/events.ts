@@ -34,7 +34,12 @@ export type ConnectionEvent =
   | { kind: "fixed"; connection: ConnectionRef; account?: GrantAccount }
   | { kind: "broken"; connection: ConnectionRef; reason: string }
   | { kind: "revoked"; connection: ConnectionRef }
-  | { kind: "disconnected"; connection: ConnectionRef };
+  | {
+      kind: "disconnected";
+      connection: ConnectionRef;
+      /** The account the connection reached, when its grant named one. */
+      account?: GrantAccount;
+    };
 
 /** A subscriber to connection events. It runs synchronously inside the
  *  transaction, and a throw rolls the connection's write back. */
