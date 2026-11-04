@@ -250,8 +250,17 @@ describe("EmailAdapter.send", () => {
     expect(receipt).toEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
+  /** A mailbox holding one email, `<CAF123@mail.example.com>`, in thread t1. */
+  const holding = () =>
+    makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [{ threadId: "t1", providerMessageId: "<CAF123@mail.example.com>" }] as never,
+        nextPageToken: undefined,
+      })),
+    });
+
   it("answers the email a reply names, in In-Reply-To", async () => {
-    const provider = makeProvider();
+    const provider = holding();
     const adapter = makeAdapter(provider);
 
     await adapter.send("t1" as ChatId, {
@@ -261,7 +270,25 @@ describe("EmailAdapter.send", () => {
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0].inReplyToMessageId).toBe("<CAF123@mail.example.com>");
-    expect(provider.listMessages).not.toHaveBeenCalled();
+  });
+
+  it("refuses a chat-style reply to an email outside the thread it goes to, and sends nothing", async () => {
+    const provider = holding();
+    const adapter = makeAdapter(provider);
+    const quote = { text: "On it", replyToMessageId: "<CAF123@mail.example.com>" };
+
+    for (const address of ["t2", "bob@example.com", "guardian", "  "]) {
+      await expect(adapter.send(address as ChatId, quote)).rejects.toMatchObject({
+        reason: "reply_unaddressable",
+      });
+    }
+    await expect(
+      adapter.send("t1" as ChatId, { kind: "email", to: "bob@example.com", ...quote }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    await expect(
+      adapter.send("t1" as ChatId, { ...quote, replyToMessageId: "<unknown@mail.example.com>" }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    expect(provider.send).not.toHaveBeenCalled();
   });
 
   it("answers inReplyToMessageId over a chat-style reply", async () => {

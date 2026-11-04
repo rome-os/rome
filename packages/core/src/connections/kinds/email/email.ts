@@ -5,6 +5,7 @@ import type {
   ChannelMessage,
   ChatId,
   MessageReceipt,
+  OutgoingEmailMessage,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
@@ -21,6 +22,7 @@ import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
   type ResolvedEmailReplyTarget,
+  findEmailThread,
   resolveEmailReplyTarget,
 } from "./email-reply-target.js";
 import type {
@@ -373,6 +375,11 @@ export class EmailAdapter {
     const inReplyTo =
       email?.inReplyToMessageId ??
       replyToShaped("email", message.replyToMessageId, EMAIL_MESSAGE_ID);
+    // A chat-style quote answers an email in the chat it is sent to, as on
+    // every platform. Only the email field reaches into another thread.
+    if (inReplyTo && email?.inReplyToMessageId === undefined) {
+      await this.refuseQuoteOutside(threadId, email, inReplyTo);
+    }
     // Blank text says nothing, so the text parts speak, as on every channel.
     const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
 
@@ -434,6 +441,37 @@ export class EmailAdapter {
     const subject = email?.subject?.trim() || "Message from Rome";
     const sent = await this.provider.send({ to: recipients, cc, bcc, subject, text, html });
     return { sent, startedThread: true };
+  }
+
+  /**
+   * Refuses a chat-style quote of `quote` on a send to `threadId` unless the
+   * thread holds that email. The provider sends a reply into the thread of
+   * the email it answers, so a quote on a new email, at a blank address, or of
+   * an email in another thread would reach people the send does not name.
+   */
+  private async refuseQuoteOutside(
+    threadId: string,
+    email: OutgoingEmailMessage | undefined,
+    quote: string,
+  ): Promise<void> {
+    const refused = (why: string) =>
+      new SendRefused(
+        "reply_unaddressable",
+        `email ${JSON.stringify(quote)} ${why}. No email was sent. ` +
+          "Name it in inReplyToMessageId to answer an email in another thread.",
+      );
+    const namesAddress =
+      !!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian";
+    if (
+      !threadId.trim() ||
+      email?.to !== undefined ||
+      (namesAddress && !this.threadReplyTarget.has(threadId))
+    ) {
+      throw refused("cannot be answered by a new email");
+    }
+    if (this.threadReplyTarget.get(threadId)?.messageId === quote) return;
+    const held = await findEmailThread(this.provider, quote);
+    if (held !== threadId) throw refused("is not in the thread this message goes to");
   }
 
   private noRecipientMessage(to: string | string[]): string {
