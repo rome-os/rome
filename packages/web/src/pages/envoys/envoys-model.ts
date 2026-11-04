@@ -5,6 +5,7 @@ import {
   canonicalAgent,
 } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
+import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
 import type { ApiConnection } from "@/lib/connections-api";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 
@@ -31,11 +32,26 @@ export interface EnvoyAccount {
   route: string | null;
 }
 
+/** A connected account no connection reaches now, which keeps its agent.
+ *  Connecting the same account again finds it with that agent, and it can be
+ *  unlinked meanwhile. */
+export interface DisconnectedAccount {
+  platform: string;
+  /** The platform's own id for the account. */
+  accountId: string;
+  /** The name the platform last gave the account, else its id. */
+  name: string;
+  /** Canonical id of the account's agent. */
+  agent: string;
+}
+
 export interface Envoy {
   /** Canonical agent id, as an account stores it. */
   agent: string;
   description: string | null;
   accounts: EnvoyAccount[];
+  /** The agent's accounts that are disconnected, agent kept. */
+  disconnected: DisconnectedAccount[];
 }
 
 export interface AgentListing {
@@ -88,18 +104,48 @@ function compareAgents(a: string, b: string): number {
 /** The query key of the connections Envoys reads. */
 export const CONNECTIONS_KEY = ["envoys", "connections"] as const;
 
+/** The query key of the connected accounts Envoys reads, for the ones that are
+ *  disconnected. */
+export const CONNECTED_ACCOUNTS_KEY = ["envoys", "connected-accounts"] as const;
+
+function toDisconnected(entry: ConnectedAccountEntry): DisconnectedAccount | null {
+  if (entry.connection !== null || entry.agent === null) return null;
+  return {
+    platform: entry.account.platform,
+    accountId: entry.account.id,
+    name: entry.name ?? entry.account.id,
+    agent: canonicalAgent(entry.agent),
+  };
+}
+
 /** Groups the connected accounts by the agent speaking through them. Agents
  *  sort by name with main first, and accounts with no agent are listed apart.
- *  `agents` is every agent an account can be linked to, in the same order.
- *  Pass null for `loaded` while the agent list is missing. */
+ *  A disconnected account that keeps its agent is listed under that agent, by
+ *  `connectedAccounts`. `agents` is every agent an account can be linked to,
+ *  in the same order. Pass null for `loaded` while the agent list is
+ *  missing. */
 export function buildEnvoys(
   connections: readonly ApiConnection[],
   loaded: readonly AgentListing[] | null,
+  connectedAccounts: readonly ConnectedAccountEntry[] = [],
 ): { envoys: Envoy[]; unlinked: EnvoyAccount[]; agents: string[] } {
   const descriptions = new Map(
     (loaded ?? []).map((agent) => [canonicalAgent(agent.name), agent.description ?? null]),
   );
   const byAgent = new Map<string, Envoy>();
+  const envoyOf = (agent: string): Envoy => {
+    let envoy = byAgent.get(agent);
+    if (!envoy) {
+      envoy = {
+        agent,
+        description: descriptions.get(agent) ?? null,
+        accounts: [],
+        disconnected: [],
+      };
+      byAgent.set(agent, envoy);
+    }
+    return envoy;
+  };
   const unlinked: EnvoyAccount[] = [];
   for (const connection of connections) {
     const account = toAccount(connection);
@@ -108,16 +154,11 @@ export function buildEnvoys(
       unlinked.push(account);
       continue;
     }
-    let envoy = byAgent.get(account.agent);
-    if (!envoy) {
-      envoy = {
-        agent: account.agent,
-        description: descriptions.get(account.agent) ?? null,
-        accounts: [],
-      };
-      byAgent.set(account.agent, envoy);
-    }
-    envoy.accounts.push(account);
+    envoyOf(account.agent).accounts.push(account);
+  }
+  for (const entry of connectedAccounts) {
+    const account = toDisconnected(entry);
+    if (account) envoyOf(account.agent).disconnected.push(account);
   }
   const envoys = [...byAgent.values()].sort((a, b) => compareAgents(a.agent, b.agent));
   // Core links only loaded agents, and main always. Without the list, the

@@ -13,19 +13,20 @@ import {
 } from "@/components/ui/select";
 import { linkAccountAgent, revokeConnectionGrant } from "@/lib/connections-api";
 import { AgentText } from "./agent-text";
-import { CONNECTIONS_KEY, type EnvoyAccount } from "./envoys-model";
+import { CONNECTED_ACCOUNTS_KEY, CONNECTIONS_KEY, type EnvoyAccount } from "./envoys-model";
 
 /** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
 const NO_AGENT = "__none__";
 
-/** Envoys and the Connections cards (ConnectionDetailPage's connections key)
- *  are stale once a change to an account lands. */
+/** Envoys, its disconnected accounts and the Connections cards
+ *  (ConnectionDetailPage's connections key) are stale once a change to an
+ *  account lands. */
 function useRefetchAccounts() {
   const queryClient = useQueryClient();
   return () =>
     Promise.all(
-      [CONNECTIONS_KEY, ["connection-detail", "connections"]].map((queryKey) =>
-        queryClient.invalidateQueries({ queryKey }),
+      [CONNECTIONS_KEY, CONNECTED_ACCOUNTS_KEY, ["connection-detail", "connections"]].map(
+        (queryKey) => queryClient.invalidateQueries({ queryKey }),
       ),
     );
 }
@@ -41,7 +42,8 @@ function useLinkAgent() {
   });
 }
 
-/** Disconnects an account, which removes it. */
+/** Disconnects an account. Its agent stays, and Envoys lists it as
+ *  disconnected. */
 function useDisconnect() {
   const { t } = useTranslation("envoys");
   const refetch = useRefetchAccounts();

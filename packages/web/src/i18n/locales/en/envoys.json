@@ -51,9 +51,17 @@
     "action": "Disconnect",
     "pending": "Disconnecting…",
     "accountLabel": "Disconnect {{account}}",
-    "confirm": "Disconnect {{account}}? Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
-    "delegateConfirm": "Disconnect {{account}}, your own account? Rome loses access to it and stops answering in your personal chats for you.",
+    "confirm": "Disconnect {{account}}? Rome loses access to the account and stops answering in its chats. It keeps its agent and its chats, and connecting the same account again picks them up.",
+    "delegateConfirm": "Disconnect {{account}}, your own account? Rome loses access to it and stops answering in your personal chats for you. It keeps its agent, and connecting it again picks it up.",
     "failed": "Failed to disconnect the account"
+  },
+  "disconnected": {
+    "badge": "Disconnected",
+    "count_one": "{{count}} disconnected",
+    "count_other": "{{count}} disconnected",
+    "description": "Rome has no access to this account now. It keeps its agent, and connecting the same account again picks it up.",
+    "unlinkLabel": "Unlink the agent from {{account}}",
+    "unlinkConfirm": "Unlink <agent>{{agent}}</agent> from {{account}}? If you connect the account again, it starts with no agent."
   },
   "connect": {
     "title": "Connect an account",

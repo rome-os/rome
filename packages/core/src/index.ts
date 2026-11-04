@@ -530,8 +530,9 @@ async function main() {
           channelRecords.forget();
           return;
         case "disconnected":
+          // The connected account and its agent stay: a disconnect removes
+          // only Rome's reach (docs/domains/chats.md#connected-account).
           channelRecords.vacate(tx, connection.id);
-          if (event.account) connectedAccounts.remove(tx, event.account);
           return;
       }
     },

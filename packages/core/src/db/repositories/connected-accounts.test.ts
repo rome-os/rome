@@ -4,6 +4,7 @@ import { NO_GRANT } from "../../connections/grant.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import type { Credential } from "../../connections/types.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { accountProfiles } from "../schema.js";
 import { ConnectedAccountNotFound, ConnectedAccountsRepository } from "./connected-accounts.js";
 
 const NOW = new Date("2026-10-26T00:00:00.000Z");
@@ -42,7 +43,7 @@ describe("ConnectedAccountsRepository", () => {
                 },
               ),
       });
-    return { db, accounts, connect };
+    return { db, accounts, connect, ledger };
   }
 
   it("starts a connected account with no agent", () => {
@@ -98,8 +99,7 @@ describe("ConnectedAccountsRepository", () => {
     accounts.link("c1", "sales:agent");
 
     expect(accounts.accountOf(db, "c1")).toEqual({ platform: "telegram", accountId: "bot-1" });
-    accounts.remove(db, { platform: "telegram", accountId: "bot-1" });
-    expect(accounts.agentOf("c1")).toBeNull();
+    expect(accounts.connectionTo({ platform: "telegram", accountId: "bot-1" })).toBe("c1");
   });
 
   it("links a connection Rome holds that has no connected account recorded", () => {
@@ -118,15 +118,73 @@ describe("ConnectedAccountsRepository", () => {
     expect(accounts.agentOf("gone")).toBeNull();
   });
 
-  it("goes when its connection is disconnected", () => {
-    const { db, accounts, connect } = setup();
+  it("keeps the account and its agent when its connection is disconnected", () => {
+    const { db, accounts, connect, ledger } = setup();
     connect("c1");
     accounts.add(db, "c1");
     accounts.link("c1", "sales:agent");
 
-    accounts.remove(db, { platform: "telegram", accountId: "bot-c1" });
+    ledger.remove(db, "c1");
 
-    expect(accounts.agentOf("c1")).toBeNull();
+    expect(accounts.all()).toEqual([
+      {
+        platform: "telegram",
+        accountId: "bot-c1",
+        agent: "sales:agent",
+        connectionId: null,
+        name: null,
+      },
+    ]);
+  });
+
+  it("finds the same account's agent when it is connected again", () => {
+    const { db, accounts, connect, ledger } = setup();
+    connect("c1", "bot-1");
+    accounts.add(db, "c1");
+    accounts.link("c1", "sales:agent");
+    ledger.remove(db, "c1");
+
+    connect("c2", "bot-1");
+    accounts.add(db, "c2");
+
+    expect(accounts.agentOf("c2")).toBe("sales:agent");
+    expect(accounts.all()).toMatchObject([{ accountId: "bot-1", connectionId: "c2" }]);
+  });
+
+  it("lists each account with the connection that reaches it and its name", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1", "bot-1");
+    accounts.add(db, "c1");
+    db.insert(accountProfiles)
+      .values({
+        platform: "telegram",
+        accountId: "bot-1",
+        displayName: "Sales bot",
+        source: "address_book",
+        updatedAt: NOW,
+      })
+      .run();
+
+    expect(accounts.all()).toEqual([
+      {
+        platform: "telegram",
+        accountId: "bot-1",
+        agent: null,
+        connectionId: "c1",
+        name: "Sales bot",
+      },
+    ]);
+  });
+
+  it("unlinks a disconnected account's agent, and reports an account it has no record of", () => {
+    const { db, accounts, connect, ledger } = setup();
+    connect("c1", "bot-1");
+    accounts.link("c1", "sales:agent");
+    ledger.remove(db, "c1");
+
+    expect(accounts.unlink({ platform: "telegram", accountId: "bot-1" })).toBe(true);
+    expect(accounts.all()).toMatchObject([{ accountId: "bot-1", agent: null }]);
+    expect(accounts.unlink({ platform: "telegram", accountId: "nobody" })).toBe(false);
   });
 
   it("makes none for a connection that has not reported its account, and refuses its link", () => {

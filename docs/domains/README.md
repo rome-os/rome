@@ -78,13 +78,16 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - A fix that reaches another account is refused, the sign-ins such as GitHub included.
 - Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
-- Chats keeps a connected account by its connection, holding only its agent. It is made with the connection and goes with it.
+- Chats keeps a connected account by its account, the platform and the platform's own id, holding its agent. It is made when a connection first reaches the account, and it outlives the connection.
+- A disconnected account's record stays, as disconnected with its agent, and every chat keeps its whole history. Connecting the same account again finds its agent.
 - The own-account and delegate kinds of link follow from the kind of connection, which alone says whether an account takes an agent, and the dashboard shows them.
-- Linking, switching and unlinking name the connected account by its connection, and the dashboard lists accounts by connection.
+- Linking, switching and unlinking can name the connected account by its account, and Envoys lists a disconnected account under its agent, as disconnected. A disconnected account can be unlinked, and takes a new agent once it is connected again.
 - The code says chat, act and watch for what a connection lets Rome do.
 
 Diffs still owed to the model, each a change of its own:
 
+- A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
+- A send bound to a connection that is gone or broken is refused as not connected.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
 - One group is one chat across all of Rome's accounts in it.
@@ -93,7 +96,6 @@ Diffs still owed to the model, each a change of its own:
 - Adapters deliver every message, and the reply rule is applied after delivery.
 - A thread's messages are the parent chat's, marked by thread.
 - Messages are stored as text, attachments and widgets from one catalog, each readable as plain text, and a press on a widget is a message of its own. Each platform draws the widget kinds it can.
-- A disconnected account's record stays, as disconnected with its agent, and every chat keeps its whole history.
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.

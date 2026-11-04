@@ -214,4 +214,41 @@ describe("EnvoysPage", () => {
     expect(screen.getByRole("button", { name: "Disconnect Sales TG" })).toBeTruthy();
     expect(location()).toBe("/envoys/sales:agent/settings");
   });
+
+  it("lists a disconnected account under its agent, and unlinks it by its account", async () => {
+    const disconnected = [
+      {
+        account: { platform: "feishu", id: "app-1" },
+        name: "Old sales app",
+        agent: "sales:agent" as string | null,
+        connection: null,
+      },
+    ];
+    const unlinked: string[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/agents") return Response.json({ agents: [{ name: "sales:agent" }] });
+      if (url === "/api/connections") {
+        return Response.json({ connections: [connection("discord", "Sales", "sales:agent")] });
+      }
+      if (url === "/api/connected-accounts") return Response.json({ accounts: disconnected });
+      if (url === "/api/connected-accounts/feishu/app-1/agent" && init?.method === "PUT") {
+        unlinked.push(String(init.body));
+        disconnected[0]!.agent = null;
+        return Response.json({ account: disconnected[0] });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    renderAt("/envoys/sales:agent/settings");
+
+    expect(await screen.findByText("Old sales app")).toBeTruthy();
+    expect(screen.getByText("Disconnected")).toBeTruthy();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Unlink the agent from Old sales app" }));
+    await user.click(screen.getByRole("button", { name: "Unlink" }));
+
+    await rs.waitFor(() => expect(screen.queryByText("Old sales app")).toBeNull());
+    expect(unlinked).toEqual([JSON.stringify({ agent: null })]);
+    expect(location()).toBe("/envoys/sales:agent/settings");
+  });
 });
