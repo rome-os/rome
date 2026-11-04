@@ -3,7 +3,6 @@
 // docs/domains/connections.md.
 
 import { domainOf, domainOfGrant, platformOf } from "./platform.js";
-import { DifferentAccountError } from "./errors.js";
 import type { GrantAccount, GrantValue, PersistedCredential } from "./grant.js";
 import type { ConnectionDescriptor, ConnectionId, Credential, ProfileRecord } from "./types.js";
 
@@ -83,21 +82,15 @@ export function sameAccount(a: GrantAccount, b: GrantAccount): boolean {
   return a.platform === b.platform && a.accountId === b.accountId;
 }
 
-/** Throws DifferentAccountError when `held`, the grant connection `id` holds,
- *  reaches an account and `account`, the one a fix reaches, is another. A
- *  revoked grant reaches none, so it never refuses. */
-export function refuseDifferentAccount(
+/** Whether `held`, the grant a connection holds, reaches an account and
+ *  `account`, the one a fix reaches, is another. A connection's account never
+ *  changes, so such a fix ends the connection and starts a new one. A revoked
+ *  grant reaches none, so it never does. */
+export function reachesAnotherAccount(
   descriptor: ConnectionDescriptor,
-  id: ConnectionId,
   held: GrantValue,
   account: GrantAccount,
-): void {
+): boolean {
   const reached = reachedAccount(descriptor, held);
-  if (reached && !sameAccount(reached, account)) {
-    throw new DifferentAccountError(
-      descriptor.connectionKind,
-      id,
-      descriptor.severalAccounts === true,
-    );
-  }
+  return reached !== undefined && !sameAccount(reached, account);
 }

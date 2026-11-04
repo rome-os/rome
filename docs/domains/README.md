@@ -65,7 +65,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Disconnecting the last of Rome's accounts on a platform keeps every link on it.
 - The grant names the account it reaches, by platform and the platform's own id.
 - At most one connection reaches an account across every kind of connection on its platform.
-- A fix that reaches another account is refused for every kind of connection that connects through a setup flow, email and WhatsApp included.
+- A fix that reaches another account ends the connection and starts a new one to that account, in one step, for every kind of connection, email, WhatsApp and the sign-ins such as GitHub included. The dashboard says so when the setup finishes.
 - Connecting through a setup flow is one step: the connection exists only once setup succeeds.
 - What a connection lets Rome do is fixed by its kind.
 - Working and broken are states of the connection, and the dashboard shows them.
@@ -75,7 +75,6 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Every kind of connection declares one grant, and everything a connection lets Rome do needs that grant.
 - Rome saves a connection whole, with its one grant.
 - Renewing or fixing replaces a connection's grant whole.
-- A fix that reaches another account is refused, the sign-ins such as GitHub included.
 - Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - Chats keeps a connected account by its account, the platform and the platform's own id, holding its agent. It is made when a connection first reaches the account, and it outlives the connection.
@@ -98,6 +97,7 @@ Diffs still owed to the model, each a change of its own:
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
+- A sign-in to Rome makes no connection and changes none. Today a sign-in with GitHub or Google still connects that provider when Rome holds no connection to it, and renews the grant of a connection that reaches the same account (#1667).
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
