@@ -4,7 +4,7 @@ import { NO_GRANT } from "../../connections/grant.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import type { Credential } from "../../connections/types.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { accountProfiles } from "../schema.js";
+import { accountProfiles, channels, connectedAccountsUnplaced } from "../schema.js";
 import { ConnectedAccountNotFound, ConnectedAccountsRepository } from "./connected-accounts.js";
 
 const NOW = new Date("2026-10-26T00:00:00.000Z");
@@ -195,5 +195,56 @@ describe("ConnectedAccountsRepository", () => {
 
     expect(accounts.agentOf("c1")).toBeNull();
     expect(() => accounts.link("c1", "sales:agent")).toThrow(ConnectedAccountNotFound);
+  });
+
+  it("places a link the move left unplaced once its connection reaches an account", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1");
+    connect("c2", null);
+    connect("c3", null);
+    db.insert(connectedAccountsUnplaced)
+      .values([
+        { connectionId: "c1", agent: "sales:agent" },
+        { connectionId: "c2", agent: "support:agent" },
+        { connectionId: "gone", agent: "old:agent" },
+      ])
+      .run();
+
+    accounts.placeUnplaced();
+
+    expect(accounts.agentOf("c1")).toBe("sales:agent");
+    // c2 still reaches no account, so its link waits, and the gone one goes.
+    expect(db.select().from(connectedAccountsUnplaced).all()).toEqual([
+      { connectionId: "c2", agent: "support:agent" },
+    ]);
+  });
+
+  it("gives a connection that reports its account later the link the move left unplaced", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1", null);
+    db.insert(connectedAccountsUnplaced).values({ connectionId: "c1", agent: "sales:agent" }).run();
+
+    connect("c1");
+    accounts.add(db, "c1");
+
+    expect(accounts.agentOf("c1")).toBe("sales:agent");
+    expect(db.select().from(connectedAccountsUnplaced).all()).toEqual([]);
+  });
+
+  it("reads a revoked connection's account from its channel record", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1", null);
+    db.insert(channels)
+      .values({
+        id: "telegram",
+        connectionKind: "telegram",
+        platform: "telegram",
+        connectionId: "c1",
+        platformAccountId: "bot-9",
+        createdAt: NOW,
+      })
+      .run();
+
+    expect(accounts.accountOf(db, "c1")).toEqual({ platform: "telegram", accountId: "bot-9" });
   });
 });

@@ -529,11 +529,15 @@ async function main() {
         case "revoked":
           channelRecords.forget();
           return;
-        case "disconnected":
+        case "disconnected": {
           // The connected account and its agent stay: a disconnect removes
-          // only Rome's reach (docs/domains/chats.md#connected-account).
+          // only Rome's reach (docs/domains/chats.md#connected-account). A
+          // link the move to account keys never placed has no account to stay
+          // on, so it goes with the connection.
           channelRecords.vacate(tx, connection.id);
+          connectedAccounts.forgetUnplaced(tx, connection.id);
           return;
+        }
       }
     },
   });
@@ -1752,6 +1756,9 @@ async function main() {
   // A grant from before grants named their account learns it now, so the next
   // connect of that account is refused.
   await recordGrantAccounts(connectionRegistry);
+  // Agent links the move to account keys could not place go to the accounts
+  // their connections now reach.
+  connectedAccounts.placeUnplaced();
   // Connections minted before channels were recorded get theirs now. Each
   // connection kind held one, so each takes its connection kind's name.
   await claimChannels(

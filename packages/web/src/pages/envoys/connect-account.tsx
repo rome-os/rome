@@ -32,7 +32,12 @@ import { type ApiConnection, linkAccountAgent } from "@/lib/connections-api";
 import { Avatar } from "../people/avatar";
 import { AgentText } from "./agent-text";
 import { BackLink } from "./back-link";
-import { CONNECTIONS_KEY, type ConnectChoice, connectChoices } from "./envoys-model";
+import {
+  CONNECTED_ACCOUNTS_KEY,
+  CONNECTIONS_KEY,
+  type ConnectChoice,
+  connectChoices,
+} from "./envoys-model";
 
 /**
  * Connect an account: pick the agent that speaks through it, then the
@@ -235,8 +240,8 @@ function ConnectOn({
 
   const refetch = () =>
     Promise.all(
-      [CONNECTIONS_KEY, ["connection-detail", "connections"]].map((queryKey) =>
-        queryClient.invalidateQueries({ queryKey }),
+      [CONNECTIONS_KEY, CONNECTED_ACCOUNTS_KEY, ["connection-detail", "connections"]].map(
+        (queryKey) => queryClient.invalidateQueries({ queryKey }),
       ),
     );
 

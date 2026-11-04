@@ -86,6 +86,29 @@ describe("buildEnvoys", () => {
     expect(unlinked).toEqual([]);
   });
 
+  it("leaves out a disconnected entry for an account a connection reaches again", () => {
+    const { envoys } = buildEnvoys(
+      [
+        connection({
+          connectionKind: "telegram",
+          agent: "sales:agent",
+          account: { platform: "telegram", id: "bot-1" },
+        }),
+      ],
+      [],
+      [
+        {
+          account: { platform: "telegram", id: "bot-1" },
+          name: null,
+          agent: "sales:agent",
+          connection: null,
+        },
+      ],
+    );
+    expect(envoys[0]!.accounts).toHaveLength(1);
+    expect(envoys[0]!.disconnected).toEqual([]);
+  });
+
   it("names an account with no name after its platform, Lark apart from Feishu", () => {
     const { unlinked } = buildEnvoys(
       [
