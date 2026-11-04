@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SessionQueryService } from "./query-service.js";
@@ -23,6 +23,19 @@ describe("SessionQueryService", () => {
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
     testDb = createTestDb();
+    // Each channel records its account, `<channel>-bot` on a platform of its name.
+    for (const channel of [...Object.keys(links), "email"]) {
+      testDb.db
+        .insert(channels)
+        .values({
+          id: channel,
+          connectionKind: channel,
+          platform: channel,
+          platformAccountId: `${channel}-bot`,
+          createdAt: new Date(0),
+        })
+        .run();
+    }
     webchat = new ChatsWebChatRepository(testDb.db);
     const codeReviewAgent = {
       metadata: { ownerType: "app" as const, ownerId: "code-review" },
@@ -39,12 +52,7 @@ describe("SessionQueryService", () => {
       ["code-review-agent", codeReviewAgent] as const,
     ]);
     service = new SessionQueryService({
-      repository: new SessionQueryRepository(testDb.db, "legacy", () =>
-        [...Object.keys(links), "email"].map((channel) => ({
-          channel,
-          account: { platform: channel, id: `${channel}-bot` },
-        })),
-      ),
+      repository: new SessionQueryRepository(testDb.db),
       agentLoader: {
         getRecord: (name) => {
           const record = resolvableRecords.get(name);

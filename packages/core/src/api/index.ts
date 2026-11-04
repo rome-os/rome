@@ -218,14 +218,7 @@ export function buildApp(
     accounts: new ConnectedAccountsRepository(deps.db),
   };
   const sessionQueries = new SessionQueryService({
-    // Every recorded channel that knows its account, a released one that kept
-    // it included, so its speakers still read their channel.
-    repository: new SessionQueryRepository(deps.db, "chats", () =>
-      sessionChannelRecords.all().flatMap((record) => {
-        const account = sessionChannelRecords.accountOf(record.id);
-        return account ? [{ channel: record.id, account }] : [];
-      }),
-    ),
+    repository: new SessionQueryRepository(deps.db, "chats"),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>

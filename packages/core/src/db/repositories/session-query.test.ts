@@ -63,9 +63,6 @@ describe("SessionQueryRepository", () => {
 
   describe("reading where a speaker stands", () => {
     const at = new Date(0);
-    const channels = () => [
-      { channel: "telegram", account: { platform: "telegram", id: "bot-sales" } },
-    ];
 
     function seeded() {
       const fixture = speakerFixture(testDb.db);
@@ -82,7 +79,7 @@ describe("SessionQueryRepository", () => {
         threadId: "7",
         name: "Launch topic",
       });
-      // A speaker of an account no recorded connection holds still reads its platform.
+      // A speaker of an account Rome no longer records still reads its platform.
       fixture.speaker({ id: "stray", chat: group, accountId: "bot-gone" });
       testDb.db
         .insert(romeSessions)
@@ -115,7 +112,7 @@ describe("SessionQueryRepository", () => {
 
     it("reads where each session stands from its speaker's chat and account", async () => {
       seeded();
-      const repository = new SessionQueryRepository(testDb.db, "legacy", channels);
+      const repository = new SessionQueryRepository(testDb.db);
 
       const rows = Object.fromEntries(
         (await page(repository)).rows.map((row) => [
@@ -141,7 +138,7 @@ describe("SessionQueryRepository", () => {
 
     it("filters and counts sessions by the platform of the chat they stand in", async () => {
       seeded();
-      const repository = new SessionQueryRepository(testDb.db, "legacy", channels);
+      const repository = new SessionQueryRepository(testDb.db);
 
       const onTelegram = await page(repository, { platforms: ["telegram"] });
       const noChat = await page(repository, { includeNoChat: true, platforms: [] });

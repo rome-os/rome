@@ -21,8 +21,8 @@ import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { DrizzleDb } from "../index.js";
 import { chats, romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 import { romeSessionKind, withSessionKind } from "../session-kind.js";
-import { chatIdsOfKind, chatIdsOn } from "../../chats/storage/chat-repository.js";
-import type { Account } from "@rome-os/app-runtime";
+import { chatIdsOfKind } from "../../chats/storage/chat-repository.js";
+import { channelOfAccountSql } from "./channel-records.js";
 import { CHAT_MESSAGES, CHATS } from "../../chats/storage/messages-sql.js";
 import { messageHolder, type MessageHolder } from "../../connections/chat-adapter.js";
 import { occurrencesOf, type CopiedMessage } from "../../sessions/turn-links.js";
@@ -51,15 +51,14 @@ const pinnedToMain = sql`coalesce(json_type(${romeSessions.channelSettings}, '$.
 function answeringAgentName(scope: SessionQueryStorageScope): SQL<string | null> {
   const links = Object.entries(scope.accountAgents ?? {});
   if (links.length === 0) return sql<string | null>`${romeSessions.agentName}`;
-  const channel = speakerChannel(scope);
   const onLinkedChannel = and(
     sql`${romeSessionKind} = 'channel'`,
     inArray(
-      channel,
+      speakerChannel,
       links.map(([name]) => name),
     ),
   );
-  const accountAgent = sql`case ${channel} ${sql.join(
+  const accountAgent = sql`case ${speakerChannel} ${sql.join(
     links.map(
       ([name, agent]) => sql`when ${name} then ${isCoreMainAgentId(agent) ? sql`null` : agent}`,
     ),
@@ -77,33 +76,14 @@ function normalizedAgentName(scope: SessionQueryStorageScope): SQL<string> {
   return sql<string>`coalesce(${answeringAgentName(scope)}, 'main')`;
 }
 
-/** One of Rome's channels and the account it is: a speaker speaks through
- *  the channel that is its account on its chat's platform. */
-export interface SpeakerChannel {
-  readonly channel: string;
-  readonly account: Account;
-}
-
 /**
- * The channel a session's speaker speaks through, by its account and its
- * chat's platform: `webchat` for a dashboard chat, null for a session that
- * stands in no chat or whose account no channel is. It only finds the agent
- * of the account a speaker speaks as, which is still keyed by channel; the
- * explorer shows the chat's platform. Vocabulary:
- * docs/domains/participation.md#speaker.
+ * The channel a session's speaker speaks through: the one that records its
+ * account on its chat's platform, null for a session in no chat or a
+ * dashboard chat. It only finds the agent of the account a speaker speaks
+ * as, which is still keyed by channel; the explorer shows the chat's
+ * platform. Vocabulary: docs/domains/participation.md#speaker.
  */
-function speakerChannel(
-  scope: Pick<SessionQueryStorageScope, "speakerChannels">,
-): SQL<string | null> {
-  const whens = [
-    sql`when ${romeSessions.chatId} in ${chatIdsOn("webchat")} then 'webchat'`,
-    ...(scope.speakerChannels ?? []).map(
-      ({ channel, account }) =>
-        sql`when ${romeSessions.accountId} = ${account.id} and ${romeSessions.chatId} in ${chatIdsOn(account.platform)} then ${channel}`,
-    ),
-  ];
-  return sql<string | null>`(case ${sql.join(whens, sql` `)} end)`;
-}
+const speakerChannel = channelOfAccountSql(romeSessions.chatPlatform, romeSessions.accountId);
 
 /** The kind of place a session stands in: a thread when its speaker stands
  *  in one, else its chat's kind; null for a session in no chat. */
@@ -122,9 +102,6 @@ const placeName = sql<string | null>`(case
 const SQL_LIKE_ESCAPE = "\\";
 
 export interface SessionQueryStorageScope {
-  /** Rome's channels and their accounts, which name the channel each
-   *  speaker speaks through. The repository fills it in. */
-  speakerChannels?: readonly SpeakerChannel[];
   from: Date | null;
   to: Date;
   sessionIds?: string[];
@@ -396,14 +373,7 @@ export class SessionQueryRepository {
   constructor(
     private db: DrizzleDb,
     private readonly lines: SessionLines = "legacy",
-    /** Rome's channels and their accounts, read per query. */
-    private readonly channels: () => readonly SpeakerChannel[] = () => [],
   ) {}
-
-  /** `scope` with Rome's channels, which name each speaker's channel. */
-  private withChannels<T extends SessionQueryStorageScope>(scope: T): T {
-    return { ...scope, speakerChannels: this.channels() };
-  }
 
   /** `rows` with each session's line count read from Chats, counted in one
    *  statement over just these sessions. */
@@ -506,7 +476,7 @@ export class SessionQueryRepository {
   }
 
   async querySessionPage(input: SessionPageStorageQuery) {
-    const query = { ...input, scope: this.withChannels(input.scope) };
+    const query = input;
     const runStats = this.runStats(query.scope);
     const messageCounts = this.db
       .select({ sessionId: romeAgentMessages.sessionId, count: count().as("message_count") })
@@ -540,7 +510,7 @@ export class SessionQueryRepository {
         type: romeSessionKind,
         // Where the speaker stands, read from its chat. `channel` only
         // finds the agent of the account it speaks as.
-        channel: speakerChannel(query.scope),
+        channel: speakerChannel,
         placeKind,
         placeName,
         messageCount,
@@ -600,7 +570,7 @@ export class SessionQueryRepository {
   }
 
   async queryRunAggregates(input: SessionQueryStorageScope): Promise<RawSessionRunAggregate[]> {
-    const scope = this.withChannels(input);
+    const scope = input;
     const interval = sql<number>`cast(${romeAgentMessages.createdAt} / 900 as integer)`;
     const agentName = answeringAgentName(scope);
     const rows = await this.db
@@ -691,7 +661,7 @@ export class SessionQueryRepository {
     // Each row with where its speaker stands, read from its chat.
     const columns = {
       ...getTableColumns(romeSessions),
-      channel: speakerChannel({ speakerChannels: this.channels() }),
+      channel: speakerChannel,
       placeKind,
       placeName,
     };
