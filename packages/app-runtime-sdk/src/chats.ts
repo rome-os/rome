@@ -53,7 +53,8 @@ export interface ChatMessage extends Omit<OutgoingChatMessage, "replyToMessageId
   replyTo?: MessageRef;
 }
 
-/** A message the platform took. Chats has recorded it before this answers. */
+/** A message the platform took. Chats records it before this answers, unless
+ *  the record could not be read back; see {@link Sent.message}. */
 export interface Sent {
   /** Rome's record of the message. Absent when the platform took the message
    *  but Rome could not read its record back, so the app is not handed an id
