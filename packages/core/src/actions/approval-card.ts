@@ -33,9 +33,11 @@ export function recordedCardChannels(
   return {
     list: () => service.list(),
     send: (target, chatId, message) => {
+      // A connection that joins again is listed again, and its latest entry
+      // is the live one.
       const send =
         typeof target === "string"
-          ? recorded().find((channel) => channel.name === target)?.send
+          ? [...recorded()].reverse().find((channel) => channel.name === target)?.send
           : undefined;
       return send ? send.send(chatId, message) : service.send(target, chatId, message);
     },

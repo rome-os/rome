@@ -585,9 +585,10 @@ async function main() {
   // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
-  // The built channels, recording what is sent on them in Chats. An approval's
-  // card goes out on these, so it is on record as the platform shows it.
-  let recordedChannels: readonly Channel[] = [];
+  // The built channels, and each that joins later, recording what is sent on
+  // them in Chats. An approval's card goes out on these, so it is on record as
+  // the platform shows it.
+  const recordedChannels: Channel[] = [];
   // Reply streaming is off until the guardian turns it on under
   // Experimental features in Advanced settings. Off, sends go out unpaced and
   // replies go out whole. On, a channel that can stream paces every write of its
@@ -1608,7 +1609,7 @@ async function main() {
     own: [webchat],
   });
   builtChannels = channels;
-  recordedChannels = chatsWired.recordedSends(channels);
+  recordedChannels.push(...chatsWired.recordedSends(channels));
   const accountNames = createAccountNames({
     channels,
     sentinelLogRepo,
@@ -1731,6 +1732,7 @@ async function main() {
       connection,
     );
     if (!channel) return;
+    recordedChannels.push(...chatsWired.recordedSends([channel]));
     const added = legacyChatIdChannels(
       chatsWired.recordedSends(withInboundSpans([channel], "channel-message")),
     );

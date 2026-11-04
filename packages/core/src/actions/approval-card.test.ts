@@ -158,4 +158,18 @@ describe("recordedCardChannels", () => {
     expect(service.send).toHaveBeenCalledTimes(1);
     expect(service.send).toHaveBeenCalledWith("webchat", "w1", message);
   });
+
+  it("sends on the latest entry of a connection that joined again", async () => {
+    const stale = rs.fn(async () => RECEIPT);
+    const live = rs.fn(async () => RECEIPT);
+    const recorded = [{ name: "slack", send: { send: stale } } as never];
+    const service = { list: async () => [], send: rs.fn<ChannelsService["send"]>() };
+    const channels = recordedCardChannels(service, () => recorded);
+    recorded.push({ name: "slack", send: { send: live } } as never);
+
+    await channels.send("slack", "c1" as ChatId, { text: "Approval needed" });
+
+    expect(live).toHaveBeenCalledTimes(1);
+    expect(stale).not.toHaveBeenCalled();
+  });
 });
