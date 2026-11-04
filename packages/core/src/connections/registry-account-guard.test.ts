@@ -145,8 +145,42 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
-  it("tells the caller which Connection it ended, when it filled the service's own", async () => {
+  it("adds a bot beside the first one when a grant addresses no Connection of a kind with several", async () => {
     const { registry, close } = setupRegistry();
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      const ended: string[] = [];
+
+      const next = await registry.giveGrant(
+        SERVICE,
+        undefined,
+        "bot",
+        credentialFor("t-9"),
+        { botId: "900" },
+        { onEnded: (id) => ended.push(id) },
+      );
+
+      expect(next.id).not.toBe(first.id);
+      expect(ended).toEqual([]);
+      expect(
+        registry
+          .all()
+          .map((connection) => connection.id)
+          .sort(),
+      ).toEqual([first.id, next.id].sort());
+    } finally {
+      close();
+    }
+  });
+
+  it("tells the caller which Connection it ended, when it filled a single-account kind's own", async () => {
+    const db = createTestDb();
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(db.db),
+    });
+    registry.register({ ...botIdDescriptor(), severalAccounts: false });
+    const close = db.close;
     try {
       const first = await registry.connect(SERVICE);
       await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });

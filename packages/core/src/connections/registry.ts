@@ -462,7 +462,9 @@ export class ConnectionRegistry {
       const held = (await this.store.grantOf(conn.id)) ?? NO_GRANT;
       if (reachesAnotherAccount(registered.descriptor, held, account)) {
         if (opts.signIn) return conn;
-        ending = conn;
+        // A grant that addresses no connection, on a kind that holds several
+        // accounts, is adding an account: it mints beside the one it found.
+        if (connectionId || !registered.descriptor.severalAccounts) ending = conn;
         conn = undefined;
       }
     }
