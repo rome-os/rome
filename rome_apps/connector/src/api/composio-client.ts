@@ -778,10 +778,13 @@ export class ComposioClient {
     triggerSlug: string,
     opts: { connectedAccountId: string; triggerConfig: Record<string, unknown> },
   ): Promise<{ triggerInstanceId: string }> {
+    // A project with 2FA on refuses a trigger that names no user. The typed
+    // client predates the field, so it is passed through as an extra body key.
     const created = await this.rest.triggerInstances.upsert(triggerSlug, {
       connected_account_id: opts.connectedAccountId,
       trigger_config: opts.triggerConfig,
-    });
+      user_id: userId,
+    } as Parameters<typeof this.rest.triggerInstances.upsert>[1]);
     return { triggerInstanceId: created.trigger_id };
   }
 

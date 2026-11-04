@@ -104,6 +104,29 @@ describe("proxyTool query serialization", () => {
   });
 });
 
+describe("createTrigger", () => {
+  afterEach(() => rs.restoreAllMocks());
+
+  it("names the user, which a project with 2FA requires", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ trigger_id: "ti_1" }));
+    const client = new ComposioClient({ apiKey: "ak_test" });
+
+    const created = await client.createTrigger("rome-user", "GMAIL_NEW_GMAIL_MESSAGE", {
+      connectedAccountId: "ca_1",
+      triggerConfig: { labelIds: "INBOX" },
+    });
+
+    expect(created).toEqual({ triggerInstanceId: "ti_1" });
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
+      connected_account_id: "ca_1",
+      trigger_config: { labelIds: "INBOX" },
+      user_id: "rome-user",
+    });
+  });
+});
+
 /** A connected-account row in the shape Composio's list endpoint returns. */
 function accountRow(id: string, slug: string, status: string, alias: string | null = null) {
   return { id, toolkit: { slug }, status, alias };

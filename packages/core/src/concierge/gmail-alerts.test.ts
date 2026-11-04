@@ -114,7 +114,7 @@ describe("gmailConnector", () => {
     expect(calls).toEqual([
       [
         "connector_event_subscribe",
-        { toolkit: "gmail", slug: "GMAIL_NEW_GMAIL_MESSAGE", config: { labelIds: ["INBOX"] } },
+        { toolkit: "gmail", slug: "GMAIL_NEW_GMAIL_MESSAGE", config: { labelIds: "INBOX" } },
       ],
       ["connector_proxy", { toolkit: "gmail", method: "GET", path: "/gmail/v1/users/me/profile" }],
     ]);

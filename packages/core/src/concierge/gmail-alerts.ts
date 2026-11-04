@@ -9,7 +9,7 @@ import type { AlertEvent } from "./alerts.js";
 export const GMAIL_TRIGGER_SLUG = "GMAIL_NEW_GMAIL_MESSAGE";
 export const GMAIL_EVENT_NAME = "provider:event:gmail.gmail_new_gmail_message";
 /** The trigger watches the inbox only. */
-export const GMAIL_TRIGGER_CONFIG = { labelIds: ["INBOX"] };
+export const GMAIL_TRIGGER_CONFIG = { labelIds: "INBOX" };
 
 const EXCERPT_CHARS = 300;
 /** Gmail's own sorting: mail it filed as promotions or the like is not personal. */
