@@ -2,6 +2,7 @@
 // address, else in the chat Rome holds there, recorded once either way.
 // Contract: docs/architecture/channels.md#chat-adapters.
 
+import { messageAsText } from "./outbound/send-refusals.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   type Channel,
@@ -40,6 +41,8 @@ describe("recordedSends", () => {
   let afterSend: () => void;
   /** Runs before the port takes a send, as an adapter checks one. */
   let beforeSend: (message: OutgoingMessage) => void;
+  /** The id the port gives its `n`th message. */
+  let idOf: (n: number) => string;
 
   beforeEach(() => {
     testDb = createTestDb();
@@ -47,6 +50,7 @@ describe("recordedSends", () => {
     landsAt = {};
     afterSend = () => {};
     beforeSend = () => {};
+    idOf = (n) => `m-${n}`;
     let next = 0;
     /** A channel whose send port answers each message with the next id, at
      *  the address it names, or at a new email thread when it names none. */
@@ -61,7 +65,7 @@ describe("recordedSends", () => {
             afterSend();
             return {
               chatId: (landsAt[address] ?? (address || "thread-new")) as ChatId,
-              messageId: `m-${++next}`,
+              messageId: idOf(++next),
             } satisfies MessageReceipt;
           },
         },
@@ -391,14 +395,80 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([{ chat: "thread-real", text: "Thanks", sender_agent: "sales" }]);
   });
 
-  it("quote on an email channel only the email a reply names, not a chat's quote hint", async () => {
+  it("read a chat-style quote on an email channel as the email it answers in that thread", async () => {
+    idOf = (n) => `<m-${n}@mail.example.com>`;
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    const receipt = await send("email").send("thread-7" as ChatId, {
+      text: "Thanks",
+      replyToMessageId: "<m-1@mail.example.com>",
+    });
+
+    expect(receipt.chatId).toBe("thread-7");
+    expect(sent[1]).toMatchObject({
+      address: "thread-7",
+      message: { kind: "email", inReplyToMessageId: "<m-1@mail.example.com>" },
+    });
+  });
+
+  it("refuse a chat-style quote of an email Rome does not hold in the thread, on a new email, or at a blank address, and send nothing", async () => {
+    idOf = (n) => `<m-${n}@mail.example.com>`;
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    for (const address of ["thread-9", "bob@example.com", ""]) {
+      await expect(
+        send("email").send(address as ChatId, {
+          text: "Thanks",
+          replyToMessageId: "<m-1@mail.example.com>",
+        }),
+      ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    }
+    // An email that names its own recipients is a new email, even in the
+    // thread that holds the quote.
+    await expect(
+      send("email").send(
+        "thread-7" as ChatId,
+        {
+          kind: "email",
+          to: "bob@example.com",
+          text: "Thanks",
+          replyToMessageId: "<m-1@mail.example.com>",
+        } as OutgoingMessage,
+      ),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    // An email Rome does not hold sits in a thread only the provider knows.
+    await expect(
+      send("email").send("thread-7" as ChatId, {
+        text: "Thanks",
+        replyToMessageId: "<unheld@mail.example.com>",
+      }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("refuse a chat-style quote that is not an email's Message-ID, even of an email Rome holds", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    await expect(
+      send("email").send("thread-7" as ChatId, { text: "Thanks", replyToMessageId: "m-1" }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("answer the email a reply names over a chat-style quote, in whatever thread", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
     await send("email").send(
-      "thread-7" as ChatId,
-      { kind: "email", text: "Hi", replyToMessageId: "other-thread-mail" } as OutgoingMessage,
+      "thread-9" as ChatId,
+      {
+        kind: "email",
+        text: "Thanks",
+        inReplyToMessageId: "m-1",
+        replyToMessageId: "other-thread-mail",
+      } as OutgoingMessage,
     );
 
-    expect(sent[0]?.message).not.toHaveProperty("inReplyToMessageId");
-    expect(lines().map((line) => line.chat)).toEqual([chatAt("email", "thread-7").externalId]);
+    expect(sent[1]).toMatchObject({ address: "thread-7", message: { inReplyToMessageId: "m-1" } });
   });
 
   it("record an HTML-only email by its text with its links, and an attachment by a note", async () => {
@@ -445,6 +515,23 @@ describe("recordedSends", () => {
     expect(lines()[0]?.text).toBe("[image: sunset]");
   });
 
+  it("record a message's text in place of its text parts, beside the card it sends", async () => {
+    const card = {
+      type: "approval_card",
+      approvalId: "a-1",
+      actionName: "deploy",
+      preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+      status: "pending",
+    } as const;
+    await send("telegram").send("-100" as ChatId, {
+      text: "Look",
+      parts: [{ type: "text", content: "Unsent" }, card],
+    });
+
+    const [row] = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
+    expect(JSON.parse(row?.parts ?? "[]")).toEqual([{ type: "text", content: "Look" }, card]);
+  });
+
   it("record nothing when the port refuses a message with nothing in it", async () => {
     beforeSend = () => {
       throw new SendRefused("empty", "A message needs text or an attachment");
@@ -471,7 +558,7 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([]);
   });
 
-  it("send an email's reply recipients, and its text from its parts when it has none", async () => {
+  it("send an email's reply recipients, and and its parts as they are when it has no text", async () => {
     await send("email").send(
       "thread-7" as ChatId,
       {
@@ -483,10 +570,12 @@ describe("recordedSends", () => {
     );
 
     expect(sent[0]?.message).toMatchObject({
-      text: "From parts",
+      text: "",
+      parts: [{ type: "text", content: "From parts" }],
       cc: ["ann@example.com"],
       bcc: ["log@example.com"],
     });
+    expect(messageAsText(sent[0]?.message ?? {})).toBe("From parts");
   });
 
   it("keep a thread a plain message reaches on an email channel as a group", async () => {

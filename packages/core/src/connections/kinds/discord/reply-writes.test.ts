@@ -62,6 +62,28 @@ describe("discordTransport", () => {
     ]);
   });
 
+  it("quotes the message a reply answers where no thread was opened on it", async () => {
+    const { calls, create } = transportOver(() => ({ id: "41", channel_id: "7" }));
+
+    await create("7", "hello", "12");
+
+    expect(calls[0]?.body.message_reference).toEqual({
+      message_id: "12",
+      fail_if_not_exists: true,
+    });
+  });
+
+  it("quotes nothing in a thread opened on the message", async () => {
+    const { calls, create } = transportOver(
+      () => ({ id: "41", channel_id: "thread-1" }),
+      async () => "thread-1",
+    );
+
+    await create("7", "hello", "12");
+
+    expect(calls[0]?.body).not.toHaveProperty("message_reference");
+  });
+
   it("gives every create its own nonce of at most 25 characters", async () => {
     const { calls, create } = transportOver(() => ({ id: "41", channel_id: "7" }));
 

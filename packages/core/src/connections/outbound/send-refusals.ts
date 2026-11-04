@@ -5,19 +5,33 @@
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { SendRefused, type OutgoingAttachment, type OutgoingMessage } from "@rome-os/app-runtime";
+import { widgetText } from "../../chats/widget-text.js";
+
+/**
+ * What `message` says on a channel that shows text only. `text` that says
+ * anything takes the place of the text parts, and otherwise the text parts
+ * speak. Each widget adds its own plain-text line in either case, in its
+ * place among the parts.
+ */
+export function messageAsText(message: OutgoingMessage): string {
+  const said = message.text?.trim() ? message.text : undefined;
+  const lines = (message.parts ?? []).flatMap((part) => {
+    if (part.type === "text") return said === undefined ? [part.content] : [];
+    const line = widgetText(part);
+    return line === undefined ? [] : [line];
+  });
+  return [...(said === undefined ? [] : [said]), ...lines].join("\n\n");
+}
 
 /**
  * The text a channel named `channel`, which shows text and no other part,
- * sends for `message`: its `text` when it has any, else its text parts.
- * Refuses a part of any other type, and a message with no text and no
- * attachment.
+ * sends for `message`, as {@link messageAsText} reads it. Refuses a part that
+ * is neither text nor a widget with a line of its own, and a message with no
+ * text and no attachment.
  */
 export function textToSend(channel: string, message: OutgoingMessage): string {
   refuseUnshownParts(channel, message);
-  const parts = message.parts ?? [];
-  const text = message.text?.trim()
-    ? message.text
-    : parts.flatMap((part) => (part.type === "text" ? [part.content] : [])).join("\n\n");
+  const text = messageAsText(message);
   if (text.trim()) return text;
   if (!message.attachments?.length) {
     throw new SendRefused("empty", `A message to ${channel} needs text or an attachment`);
@@ -49,10 +63,16 @@ export function numericReplyTo(channel: string, replyTo: string | undefined): nu
 }
 
 /** Refuses a part other than text, on a channel named `channel` that shows
- *  text only. */
+ *  text only, unless it is a widget that reads as a plain-text line. */
 export function refuseUnshownParts(channel: string, message: OutgoingMessage): void {
   const parts = message.parts ?? [];
-  const unshown = [...new Set(parts.filter((part) => part.type !== "text").map((p) => p.type))];
+  const unshown = [
+    ...new Set(
+      parts
+        .filter((part) => part.type !== "text" && widgetText(part) === undefined)
+        .map((part) => part.type),
+    ),
+  ];
   if (unshown.length > 0) {
     throw new SendRefused(
       "part_unsupported",
@@ -131,6 +151,9 @@ export async function attachmentsToSend(
   }
   return attachments;
 }
+
+/** An email's Message-ID, `local@domain`, in angle brackets or without. */
+export const EMAIL_MESSAGE_ID = /^(?:<[^\s<>@]+@[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+)$/;
 
 /** Refuses a `replyTo` that is not of `pattern`, the shape of a message id on
  *  a channel named `channel`, and answers it otherwise. */

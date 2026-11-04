@@ -1,5 +1,6 @@
 // An app's writes to the chats its sessions stand in, kept in Chats.
 
+import { messageAsText } from "../connections/outbound/send-refusals.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Channel, ChatId, ChatRecord, OutgoingMessage } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
@@ -347,7 +348,7 @@ describe("appChatWrites", () => {
       expect(session!.activity_at).toBeGreaterThan(0);
     });
 
-    it("says a parts-only message's text parts as its text", async () => {
+    it("leaves a parts-only message's text to its parts, which a text-only connection reads in order", async () => {
       await writes.send({
         sessionId: "s1",
         channel: "telegram",
@@ -355,7 +356,8 @@ describe("appChatWrites", () => {
         knownToProvider: false,
       });
 
-      expect(sends[0]?.out.text).toBe("From parts");
+      expect(sends[0]?.out).toMatchObject({ text: "", parts: [{ content: "From parts" }] });
+      expect(messageAsText({ parts: [...(sends[0]?.out.parts ?? [])] })).toBe("From parts");
     });
 
     it("notes an attachment-only message's attachments on record", async () => {

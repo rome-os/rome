@@ -45,6 +45,7 @@ import {
   ChannelsServiceProxy,
   AppConnectionsProxy,
 } from "./service-proxies.js";
+import { callMain } from "./worker-rpc-client.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
@@ -58,7 +59,6 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import { sendApprovalCard } from "./approval-card.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
@@ -180,7 +180,15 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
-      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
+      // Main sends the card, on the connections it records sends on.
+      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
+        await callMain<void>("approvals.sendCard", {
+          approvalId,
+          actionName,
+          ...(preview ? { preview } : {}),
+          ...(channelContext ? { channelContext } : {}),
+        });
+      },
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);

@@ -183,6 +183,19 @@ export function testOpenSpeakerDeps(db: DrizzleDb): OpenSpeakerDeps {
   return { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers };
 }
 
+/** Chats over `db` as Rome wires it, reading the channel records `db`
+ *  holds. Every channel is active: one its record names no account for is
+ *  the account named like it, so tests need not record one per channel. */
+export function testChatsWiring(db: DrizzleDb) {
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
+  return chatsWiring(db, {
+    accountOf: (channel) =>
+      records.accountOf(channel) ?? { platform: records.platformOfChannel(channel), id: channel },
+    platformOfChannel: (name) => records.platformOfChannel(name),
+    channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
+  });
+}
+
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
 export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 

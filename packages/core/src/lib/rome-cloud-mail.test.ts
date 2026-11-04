@@ -46,4 +46,20 @@ describe("RomeCloudMailProvider.send", () => {
       await expect(result).rejects.toThrow("Check email history before retrying");
     }
   });
+
+  it("keeps the status of the provider behind Rome Cloud on a failure", async () => {
+    const fetch = rs.fn(async () =>
+      Response.json({ error: "mail_provider_error", providerStatus: 404 }, { status: 502 }),
+    );
+    const provider = new RomeCloudMailProvider({
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+
+    await expect(provider.getMessage("<gone@mail.example.com>")).rejects.toMatchObject({
+      name: "MailProviderError",
+      status: 502,
+      code: "mail_provider_error",
+      providerStatus: 404,
+    });
+  });
 });
