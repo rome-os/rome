@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelsService, ChatId, ChatRepository, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelsService, ChatId, ChatRepository } from "@rome-os/app-runtime";
 import { executeSendMessage } from "../../../../../../rome_apps/system/src/actions/send-message/index.js";
 import type { SendMessageEmailInput } from "../../../../../../rome_apps/system/src/actions/send-message/types.js";
 import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../../../actions/ipc.js";
@@ -96,17 +96,30 @@ async function harness(overrides: Partial<MailProvider> = {}) {
     send: rs.fn(send),
     query: async () => [],
   };
-  const ensureChannelChat = rs.fn(async () => ({ id: "session", agentName: null }));
-  const recordOutboundMessage = rs.fn(
-    async (_input: Parameters<ChatRepository["recordOutboundMessage"]>[0]) => undefined,
-  );
-  const deps = {
-    chats: {
-      ensureChannelChat,
-      recordOutboundMessage,
-    } as unknown as ChatRepository,
+  // What the host records: each email the provider took, once it took it.
+  const recorded = rs.fn((_messageId: string | undefined) => undefined);
+  // The host's `sendEmail`, cut down to the delivery these tests pin: the
+  // email goes through the account's channel, so the adapter picks what it
+  // answers, and is recorded once the channel took it.
+  const sendEmail: NonNullable<ChatRepository["sendEmail"]> = async (input) => {
+    const receipt = await h.channels.send(input.channel, (input.threadId ?? "") as ChatId, {
+      kind: "email",
+      text: input.text ?? "",
+      ...(input.parts ? { parts: input.parts } : {}),
+      ...input.email,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+    });
+    recorded(receipt.messageId);
+    return { messageId: receipt.messageId ?? null, threadId: receipt.chatId };
   };
-  return { provider, adapter, channels, deps, ensureChannelChat, recordOutboundMessage };
+  const h = {
+    provider,
+    adapter,
+    channels,
+    deps: { chats: { sendEmail } as unknown as ChatRepository },
+    recorded,
+  };
+  return h;
 }
 
 describe("email delivery through send_message", () => {
@@ -174,11 +187,7 @@ describe("email delivery through send_message", () => {
       expect.objectContaining({ inReplyToMessageId: "sent-2", text: "third" }),
     );
     expect(h.provider.listMessages).not.toHaveBeenCalled();
-    expect(h.recordOutboundMessage.mock.calls.map(([row]) => row.platformMessageId)).toEqual([
-      "sent-1",
-      "sent-2",
-      "sent-3",
-    ]);
+    expect(h.recorded.mock.calls.map(([id]) => id)).toEqual(["sent-1", "sent-2", "sent-3"]);
   });
 
   it("keeps replying to the inbound message after Rome's own replies on that thread", async () => {
@@ -212,7 +221,11 @@ describe("email delivery through send_message", () => {
 
     const next = inboundEvent("in-2");
     await h.adapter.ingestInbound(next, sign(next));
-    await executeSendMessage(h.channels, { channel: "email", threadId: THREAD, text: "third" });
+    await executeSendMessage(
+      h.channels,
+      { channel: "email", threadId: THREAD, text: "third" },
+      h.deps,
+    );
     expect(h.provider.send).toHaveBeenLastCalledWith(
       expect.objectContaining({ inReplyToMessageId: "in-2" }),
     );
@@ -220,11 +233,15 @@ describe("email delivery through send_message", () => {
 
   it("resolves an outbound-only thread after restart without fetching history", async () => {
     const original = await harness();
-    await executeSendMessage(original.channels, {
-      channel: "email",
-      to: "guardian",
-      text: "first",
-    });
+    await executeSendMessage(
+      original.channels,
+      {
+        channel: "email",
+        to: "guardian",
+        text: "first",
+      },
+      original.deps,
+    );
     await original.adapter.stop();
     const h = await harness({
       listMessages: rs.fn(async () => ({ messages: [listItem("persisted-send")] })),
@@ -250,7 +267,7 @@ describe("email delivery through send_message", () => {
       expect.objectContaining({ inReplyToMessageId: "persisted-send", text: "after restart" }),
     );
     expect(h.provider.getMessage).not.toHaveBeenCalled();
-    expect(h.recordOutboundMessage).toHaveBeenCalledTimes(1);
+    expect(h.recorded).toHaveBeenCalledTimes(1);
   });
 
   it("prefers the newest inbound message after restart over Rome's newer sends", async () => {
@@ -347,7 +364,11 @@ describe("email delivery through send_message", () => {
     await h.adapter.ingestInbound(raw, sign(raw));
     releasePage({ messages: [listItem("in-1", ["received"])] });
     await reply;
-    await executeSendMessage(h.channels, { channel: "email", threadId: THREAD, text: "second" });
+    await executeSendMessage(
+      h.channels,
+      { channel: "email", threadId: THREAD, text: "second" },
+      h.deps,
+    );
 
     expect(h.provider.send).toHaveBeenNthCalledWith(
       1,
@@ -436,14 +457,22 @@ describe("email delivery through send_message", () => {
 
   it("uses an explicit reply message before cached state or mailbox lookup", async () => {
     const h = await harness();
-    await executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "first" });
+    await executeSendMessage(
+      h.channels,
+      { channel: "email", to: "guardian", text: "first" },
+      h.deps,
+    );
     await expect(
-      executeSendMessage(h.channels, {
-        channel: "email",
-        threadId: THREAD,
-        replyToMessageId: "explicit",
-        text: "reply",
-      }),
+      executeSendMessage(
+        h.channels,
+        {
+          channel: "email",
+          threadId: THREAD,
+          replyToMessageId: "explicit",
+          text: "reply",
+        },
+        h.deps,
+      ),
     ).resolves.toEqual({ status: "ok", data: { messageId: "sent-2", threadId: THREAD } });
 
     expect(h.provider.send).toHaveBeenCalledTimes(2);
@@ -464,8 +493,7 @@ describe("email delivery through send_message", () => {
         ),
       ).rejects.toThrow("Cannot resolve email thread");
       expect(h.provider.send).not.toHaveBeenCalled();
-      expect(h.ensureChannelChat).not.toHaveBeenCalled();
-      expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+      expect(h.recorded).not.toHaveBeenCalled();
     }
   });
 
@@ -486,8 +514,7 @@ describe("email delivery through send_message", () => {
       ).rejects.toThrow("Email attachments are not supported");
       expect(h.provider.send).not.toHaveBeenCalled();
       expect(h.provider.listMessages).not.toHaveBeenCalled();
-      expect(h.ensureChannelChat).not.toHaveBeenCalled();
-      expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+      expect(h.recorded).not.toHaveBeenCalled();
     }
   });
 
@@ -507,7 +534,7 @@ describe("email delivery through send_message", () => {
       ),
     ).rejects.toThrow("No email was sent");
     expect(h.provider.send).not.toHaveBeenCalled();
-    expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+    expect(h.recorded).not.toHaveBeenCalled();
   });
 
   it("rejects empty bodies before delivery and accepts text parts when text is absent", async () => {
@@ -520,7 +547,7 @@ describe("email delivery through send_message", () => {
       ),
     ).rejects.toThrow("non-empty");
     expect(h.channels.send).not.toHaveBeenCalled();
-    expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+    expect(h.recorded).not.toHaveBeenCalled();
 
     await executeSendMessage(
       h.channels,
@@ -541,7 +568,7 @@ describe("email delivery through send_message", () => {
       );
       expect(h.provider.send).not.toHaveBeenCalled();
       expect(h.provider.listMessages).not.toHaveBeenCalled();
-      expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+      expect(h.recorded).not.toHaveBeenCalled();
     }
   });
 
@@ -555,7 +582,7 @@ describe("email delivery through send_message", () => {
     ).rejects.toBe(lookupError);
     expect(h.provider.listMessages).toHaveBeenCalledTimes(1);
     expect(h.provider.send).not.toHaveBeenCalled();
-    expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+    expect(h.recorded).not.toHaveBeenCalled();
 
     const sendError = new Error("send unavailable");
     const failed = await harness({
@@ -569,45 +596,11 @@ describe("email delivery through send_message", () => {
       ),
     ).rejects.toBe(sendError);
     expect(failed.provider.send).toHaveBeenCalledTimes(1);
-    expect(failed.ensureChannelChat).not.toHaveBeenCalled();
-    expect(failed.recordOutboundMessage).not.toHaveBeenCalled();
+    expect(failed.recorded).not.toHaveBeenCalled();
     await expect(failed.adapter.send(THREAD as ChatId, { text: "reply" })).rejects.toThrow(
       "Cannot resolve email thread",
     );
     expect(failed.provider.send).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects unconfirmed channel receipts before writing any local transcript", async () => {
-    for (const receipt of [
-      undefined,
-      {},
-      { chatId: THREAD },
-      { chatId: THREAD, messageId: " " },
-      { messageId: "sent" },
-      { messageId: "sent", chatId: " " },
-    ]) {
-      const h = await harness();
-      h.channels.send = rs.fn(async () => receipt as MessageReceipt);
-      await expect(
-        executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "hello" }, h.deps),
-      ).rejects.toThrow("Check email history before retrying");
-      expect(h.channels.send).toHaveBeenCalledTimes(1);
-      expect(h.ensureChannelChat).not.toHaveBeenCalled();
-      expect(h.recordOutboundMessage).not.toHaveBeenCalled();
-    }
-  });
-
-  it("keeps provider acceptance successful when the transcript write fails", async () => {
-    const h = await harness();
-    h.recordOutboundMessage.mockRejectedValue(new Error("database unavailable"));
-    await expect(
-      executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "hello" }, h.deps),
-    ).resolves.toEqual({
-      status: "ok",
-      data: { messageId: "sent-1", threadId: THREAD },
-    });
-    expect(h.provider.send).toHaveBeenCalledTimes(1);
-    expect(h.recordOutboundMessage).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -635,7 +628,8 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
       };
       return h.adapter.send(chatId, message);
     });
-    return { ...h, channels: new ChannelsServiceProxy() };
+    h.channels = new ChannelsServiceProxy();
+    return h;
   }
 
   function after<T>(ms: number, value: T): Promise<T> {
@@ -677,7 +671,7 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
     expect(h.provider.listMessages).toHaveBeenCalledTimes(
       Math.ceil(REPLY_LOOKUP_BUDGET_MS / PAGE_MS),
     );
-    expect(h.recordOutboundMessage).not.toHaveBeenCalled();
+    expect(h.recorded).not.toHaveBeenCalled();
   });
 
   it("finishes a slow lookup and a slow provider send inside the RPC deadline", async () => {

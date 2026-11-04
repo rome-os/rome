@@ -457,7 +457,6 @@ async function main() {
     settingsRepo,
     webchatRepo,
     chatRepo,
-    chatMessages,
     speakers: appSpeakers,
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.
@@ -590,7 +589,7 @@ async function main() {
   // Experimental features in Advanced settings. Off, sends go out unpaced and
   // replies go out whole. On, a channel that can stream paces every write of its
   // Connection, and the session bridge streams a guardian's direct replies
-  // through its replies port.
+  // through the session's speaker.
   const replyStreamingOn = replyStreamingSwitch(settingsRepo);
   const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
   const replyStreams = new ReplyStreams({

@@ -10,7 +10,6 @@ import type {
   ChatRecord,
   ChatRepository,
   EnsureChannelChatInput,
-  MessageReceipt,
   ChannelSummary,
   ChannelsService,
   PreviewPayload,
@@ -76,54 +75,6 @@ function outboundContent(input: SendMessageInput): string {
     parts.push({ type: "text", content: `[${attachment.type}] ${label}` });
   }
   return JSON.stringify(parts);
-}
-
-async function recordDeliveredConversationMessage(
-  deps: SendMessageRuntimeDeps,
-  input: SendMessageInput,
-  threadId: string,
-  delivery: MessageReceipt,
-): Promise<void> {
-  if (!deps.chats || !threadId) return;
-  // The webchat channel writes the line into the chat itself. Recording it
-  // again would leave a second copy under a separate channel row.
-  if (input.channel === "webchat") return;
-  const current = getCurrentActionContext();
-  const requestedThreadId = input.threadId;
-  const deliveryCreatedThread = !!requestedThreadId && requestedThreadId !== threadId;
-  const sameAmbientConversation =
-    current?.channelContext?.channel === input.channel &&
-    current.channelContext.threadId === threadId;
-  const explicitRomeSessionId = deliveryCreatedThread ? undefined : input.romeSessionId;
-  const ambientRomeSessionId = sameAmbientConversation
-    ? current?.channelContext?.romeSessionId
-    : undefined;
-  const boundRomeSessionId = explicitRomeSessionId ?? ambientRomeSessionId;
-  const conversation = boundRomeSessionId
-    ? { id: boundRomeSessionId, agentName: null }
-    : await ensureChannelChat(deps.chats, {
-        channel: input.channel,
-        threadId,
-        parentThreadId: deliveryCreatedThread ? requestedThreadId : undefined,
-        // A delivery must not implicitly bind an unclaimed conversation to
-        // whichever background/sentinel agent happened to send first.
-        agentName: "main",
-        threadType: deliveryCreatedThread ? "group" : "private",
-      });
-  const knownToProvider =
-    !deliveryCreatedThread &&
-    (input.knownToProvider ??
-      Boolean(input.turnId || (sameAmbientConversation && current?.turnId)));
-  await deps.chats.recordOutboundMessage({
-    sessionId: conversation.id,
-    content: outboundContent(input),
-    platformMessageId: delivery?.messageId,
-    senderId: "rome",
-    senderName: "Rome",
-    replyToPlatformMessageId: input.replyToMessageId,
-    turnId: input.turnId ?? current?.turnId,
-    knownToProvider,
-  });
 }
 
 /** Opens the chat for a channel thread, or finds the one already open. A host
@@ -233,26 +184,6 @@ async function emailThroughChats(
       (input.knownToProvider ??
         Boolean(input.turnId || (sameAmbientConversation && current?.turnId))),
   });
-}
-
-async function recordDeliveredConversationMessageBestEffort(
-  deps: SendMessageRuntimeDeps,
-  input: SendMessageInput,
-  threadId: string,
-  delivery: MessageReceipt,
-): Promise<void> {
-  try {
-    await recordDeliveredConversationMessage(deps, input, threadId, delivery);
-  } catch (err) {
-    // Transport delivery already succeeded. Do not convert a transcript-write
-    // failure into a retryable send error that could duplicate the message.
-    log.warn("message delivered but conversation recording failed", {
-      channel: input.channel,
-      threadId,
-      messageId: delivery?.messageId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
 }
 
 function readEnvPath(name: string): string | undefined {
@@ -512,58 +443,25 @@ export async function executeSendMessage(
       throw new Error("Email needs a `threadId`/`replyToMessageId` to reply, or a `to` recipient");
     }
 
+    // The host sends the email through the account's chat adapter and puts
+    // it on record once. A host that cannot record it gets no email to send.
     const sendEmail = deps.chats?.sendEmail?.bind(deps.chats);
-    if (sendEmail) {
-      log.info("sending email through Chats", {
-        threadId: email.threadId ?? null,
-        reply: !!(email.threadId || replyTarget),
-      });
-      const sent = await emailThroughChats(sendEmail, safeInput, {
-        ...(email.to !== undefined ? { to: email.to } : {}),
-        ...(email.cc !== undefined ? { cc: email.cc } : {}),
-        ...(email.bcc !== undefined ? { bcc: email.bcc } : {}),
-        ...(email.subject !== undefined ? { subject: email.subject } : {}),
-        ...(email.html !== undefined ? { html: email.html } : {}),
-        ...(replyTarget !== undefined ? { inReplyToMessageId: replyTarget } : {}),
-      });
-      return { status: "ok", data: { messageId: sent.messageId, threadId: sent.threadId } };
+    if (!sendEmail) {
+      throw new Error(`This host cannot record an email sent as "${channel}". No email was sent.`);
     }
-
-    const threadId = email.threadId ?? "";
     log.info("sending email", {
-      threadId: threadId || null,
+      threadId: email.threadId ?? null,
       reply: !!(email.threadId || replyTarget),
-      attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await channels.send(account, threadId as ChatId, {
-      kind: "email",
-      text,
-      parts,
-      attachments: safeInput.attachments,
-      turnId,
-      to: email.to,
-      cc: email.cc,
-      bcc: email.bcc,
-      subject: email.subject,
-      html: email.html,
-      inReplyToMessageId: replyTarget,
+    const sent = await emailThroughChats(sendEmail, safeInput, {
+      ...(email.to !== undefined ? { to: email.to } : {}),
+      ...(email.cc !== undefined ? { cc: email.cc } : {}),
+      ...(email.bcc !== undefined ? { bcc: email.bcc } : {}),
+      ...(email.subject !== undefined ? { subject: email.subject } : {}),
+      ...(email.html !== undefined ? { html: email.html } : {}),
+      ...(replyTarget !== undefined ? { inReplyToMessageId: replyTarget } : {}),
     });
-    // Checked here, not only at the mail provider: the receipt crosses the
-    // channel RPC, where `messageId` is optional for every channel.
-    if (
-      typeof delivery?.messageId !== "string" ||
-      !delivery.messageId.trim() ||
-      typeof delivery.chatId !== "string" ||
-      !delivery.chatId.trim()
-    ) {
-      throw new Error(
-        "Email delivery is unconfirmed: the channel did not return valid message and thread IDs. " +
-          "Check email history before retrying to avoid sending a duplicate.",
-      );
-    }
-    const deliveredThreadId = delivery.chatId;
-    await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
-    return { status: "ok", data: { messageId: delivery.messageId, threadId: deliveredThreadId } };
+    return { status: "ok", data: { messageId: sent.messageId, threadId: sent.threadId } };
   }
 
   const chat = input as SendMessageChatInput;
@@ -579,27 +477,28 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  // The dashboard writes its own lines. On a host that keeps chats in Chats,
-  // every other send goes through the session's chat adapter, which sends
-  // and records it as one step.
-  const send = deps.chats?.send?.bind(deps.chats);
-  if (send && deps.chats && channel !== "webchat") {
-    const said = await sendThroughChats(deps.chats, send, safeInput, threadId);
-    return said.messageId
-      ? { status: "ok", data: { messageId: said.messageId } }
+  // The dashboard writes its own messages, so a send there goes straight to
+  // its channel. Every other send goes through the session's chat adapter,
+  // which sends it and records it as one step. A host that cannot record it
+  // gets no message to send.
+  if (channel === "webchat") {
+    const delivery = await channels.send(account, threadId as ChatId, {
+      text,
+      parts,
+      attachments: safeInput.attachments,
+      replyToMessageId: chat.replyToMessageId,
+      turnId,
+    });
+    return delivery.messageId
+      ? { status: "ok", data: { messageId: delivery.messageId } }
       : { status: "ok" };
   }
-  const delivery = await channels.send(account, threadId as ChatId, {
-    text,
-    parts,
-    attachments: safeInput.attachments,
-    replyToMessageId: chat.replyToMessageId,
-    turnId,
-  });
-  await recordDeliveredConversationMessageBestEffort(deps, input, delivery.chatId, delivery);
-  return delivery.messageId
-    ? { status: "ok", data: { messageId: delivery.messageId } }
-    : { status: "ok" };
+  const send = deps.chats?.send?.bind(deps.chats);
+  if (!send || !deps.chats) {
+    throw new Error(`This host cannot record a message sent as "${channel}". No message was sent.`);
+  }
+  const said = await sendThroughChats(deps.chats, send, safeInput, threadId);
+  return said.messageId ? { status: "ok", data: { messageId: said.messageId } } : { status: "ok" };
 }
 
 /**

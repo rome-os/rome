@@ -66,8 +66,6 @@ import { WhatsAppAccounts } from "../chats/accounts/whatsapp.js";
 import { createAccountNames } from "../chats/accounts/account-names.js";
 import type { Accounts } from "../chats/accounts/accounts.js";
 import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
 import type {
   ChannelOf,
   ConnectionPortsDeps,
@@ -635,7 +633,6 @@ export async function buildTestDeps(
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1217,7 +1214,6 @@ export async function createAppLifecycleHarness(
       settingsRepo,
       webchatRepo,
       chatRepo: testChatRepository(db),
-      chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
