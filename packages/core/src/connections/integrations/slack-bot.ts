@@ -5,7 +5,7 @@
 // agents in one workspace are two apps. The guardian creates the app from a
 // prefilled manifest link, installs it, and pastes its two tokens back. Rome
 // never creates or configures Slack apps itself, so it holds no configuration
-// token. The transport is `SlackAdapter` (packages/core/src/channels/slack.ts),
+// token. The transport is `SlackAdapter` (packages/core/src/connected-accounts/slack.ts),
 // which opens its own Socket Mode connection. Only TERMINAL failures reach
 // `fault`:
 //   - a refused bot or app-level token, an uninstalled app, or revoked tokens
@@ -27,7 +27,7 @@ import {
   isSlackCredentialError,
   readSocketAppId,
   slackWebApi,
-} from "../../channels/slack.js";
+} from "../../connected-accounts/slack.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupForm, SetupFormField, SetupInteraction } from "../setup/types.js";

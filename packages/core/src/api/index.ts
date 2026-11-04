@@ -84,8 +84,8 @@ import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
-import { accountLinkOf, connectionKindOf } from "../channels/account-links.js";
-import { byChannel, readAccountAgent } from "../channels/account-agents.js";
+import { accountLinkOf, connectionKindOf } from "../connected-accounts/account-links.js";
+import { byChannel, readAccountAgent } from "../connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 

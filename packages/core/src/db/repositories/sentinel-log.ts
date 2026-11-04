@@ -1,7 +1,7 @@
 import type { Account } from "@rome-os/app-runtime";
 import { eq, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import type { PlatformOfChannel } from "../../channels/channel.js";
+import type { PlatformOfChannel } from "../../connected-accounts/channel.js";
 import { sentinelLog } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 

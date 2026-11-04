@@ -14,8 +14,8 @@ import {
   ConnectedAccountsRepository,
 } from "../../db/repositories/connected-accounts.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { AccountNotLinkable, linkAccountAgent } from "../../channels/account-agents.js";
-import { accountLinkOf, connectionKindOf } from "../../channels/account-links.js";
+import { AccountNotLinkable, linkAccountAgent } from "../../connected-accounts/account-agents.js";
+import { accountLinkOf, connectionKindOf } from "../../connected-accounts/account-links.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
 

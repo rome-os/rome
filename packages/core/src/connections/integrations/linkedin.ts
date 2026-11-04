@@ -29,10 +29,10 @@ import {
   runOpencli,
   type LinkedInWhoami,
   type RunOpencli,
-} from "../../channels/linkedin-cli.js";
-import { LinkedInInboxPoller } from "../../channels/linkedin.js";
-import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
-import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+} from "../../connected-accounts/linkedin-cli.js";
+import { LinkedInInboxPoller } from "../../connected-accounts/linkedin.js";
+import { linkedInMemberIdFromProfileUrl } from "../../connected-accounts/linkedin-sync.js";
+import type { LinkedInSyncSink } from "../../connected-accounts/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -45,7 +45,11 @@ import type {
   Talker,
 } from "../types.js";
 import { createLogger } from "../../logger.js";
-import { refuseAttachments, refuseReplies, textToSend } from "../../channels/send-refusals.js";
+import {
+  refuseAttachments,
+  refuseReplies,
+  textToSend,
+} from "../../connected-accounts/send-refusals.js";
 
 const log = createLogger("linkedin-reply");
 

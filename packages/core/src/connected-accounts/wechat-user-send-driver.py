@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sends one text from the guardian's own WeChat account by driving the desktop
-client through its accessibility tree, for channels/wechat-user.ts. Also locates a
+client through its accessibility tree, for connected-accounts/wechat-user.ts. Also locates a
 remembered account's sign-in button after a restart.
 
     send --chat <wxid> --name <display name> --text <body>
@@ -44,7 +44,7 @@ TITLE = ("Weixin", "微信")  # the main window's X title; the Chinese one is no
 # the client's other English label for it. The same window holds "Switch Account"
 # and "Transfer files only", which must never be pressed.
 SIGN_IN = ("Enter Weixin", "Log In", "进入微信", "登录")
-LOGIN_SIZE = (280, 380)  # the login window, as channels/wechat-user.ts detects it
+LOGIN_SIZE = (280, 380)  # the login window, as connected-accounts/wechat-user.ts detects it
 # Search sections that hold no chat of the account's own (English only, verified live).
 NONLOCAL_HEADERS = ("Internet search results", "More")
 KEYS = ("Down", "Up", "Return")  # every key this driver can press

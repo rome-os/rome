@@ -1,4 +1,4 @@
-import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE } from "../channels/webchat-channel.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE } from "../connected-accounts/webchat-channel.js";
 import type { ChannelSurface } from "../core/agent-session.js";
 
 /** The channel surfaces production declares, for session managers built in

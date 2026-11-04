@@ -1,6 +1,6 @@
 // The Discord descriptor. Two layers under test:
 //   1. isDiscordAuthError / descriptor shape / token-validate wiring — pure.
-//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../channels/discord.js)
+//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../connected-accounts/discord.js)
 //      captures the descriptor's `onGatewayFault` wiring and lets us drive a
 //      login rejection (DiscordjsError) and live gateway faults, asserting they
 //      surface as CredentialRejected{ grant: "bot" } vs. Disconnected.
@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
-import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
+import type { ChannelApiRequest, ChannelApiResult } from "../../connected-accounts/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
 
@@ -56,7 +56,7 @@ const fakeState: {
 
 const FAKE_REPLY_DELIVERY = { capabilities: { maxPartLength: 2000, edit: true } };
 
-rs.mock("../../channels/discord.js", () => ({
+rs.mock("../../connected-accounts/discord.js", () => ({
   DiscordAdapter: class {
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;

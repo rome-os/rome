@@ -12,13 +12,13 @@
 
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
-import { WechatUserStorePending } from "../../channels/wechat-user.js";
+import type { WechatUserRuntime, WechatUserStatus } from "../../connected-accounts/wechat-user.js";
+import { WechatUserStorePending } from "../../connected-accounts/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";
 import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
-import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.js";
+import { toWechatUserChannelMessage } from "../../connected-accounts/wechat-user-messages.js";
 import {
   createWechatUserDescriptor,
   makeWechatUserSetup,

@@ -1,4 +1,4 @@
-import type { ReplyOutcome } from "../../../channels/delivery/reply.js";
+import type { ReplyOutcome } from "../../../connected-accounts/delivery/reply.js";
 import type { Peer } from "./peer.js";
 import type { TraceCheck } from "./trace.js";
 

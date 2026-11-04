@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import type { TelegramAdapter } from "../../../channels/telegram.js";
+import type { TelegramAdapter } from "../../../connected-accounts/telegram.js";
 import { comparable, loadCapture } from "./capture.js";
 import textCapture from "./captures/telegram-text.capture.json" with { type: "json" };
 import { deferred } from "./peer.js";

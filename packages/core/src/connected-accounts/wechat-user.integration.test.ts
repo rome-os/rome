@@ -7,7 +7,7 @@
 //
 // Skipped unless `WECHAT_USER_TEST=1` and a client is installed, signed in, and
 // unlocked in this container:
-//   scripts/test-env.sh env WECHAT_USER_TEST=1 pnpm exec rstest -c packages/core/rstest.config.ts packages/core/src/channels/wechat-user.integration.test.ts
+//   scripts/test-env.sh env WECHAT_USER_TEST=1 pnpm exec rstest -c packages/core/rstest.config.ts packages/core/src/connected-accounts/wechat-user.integration.test.ts
 
 import { describe, expect, it } from "@rstest/core";
 import { WechatUserReader, WechatUserRuntime } from "./wechat-user.js";

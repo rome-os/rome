@@ -1,9 +1,9 @@
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
-import type { EmailInboundResult } from "../channels/email-control.js";
-import { emailConnection } from "../channels/channels-service.js";
-import type { ChannelOf } from "../channels/connection-ports.js";
+import type { EmailInboundResult } from "../connected-accounts/email-control.js";
+import { emailConnection } from "../connected-accounts/channels-service.js";
+import type { ChannelOf } from "../connected-accounts/connection-ports.js";
 import type {
   BackendTurnRunner,
   ChatId,
@@ -26,7 +26,7 @@ import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
-import type { AgentNamesService } from "../channels/agent-names.js";
+import type { AgentNamesService } from "../connected-accounts/agent-names.js";
 import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";

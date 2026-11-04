@@ -7,7 +7,7 @@ import {
   type HttpInstance,
   LoggerLevel,
 } from "@larksuiteoapi/node-sdk";
-import { FeishuAdapter } from "../../../channels/feishu.js";
+import { FeishuAdapter } from "../../../connected-accounts/feishu.js";
 import type { WebSocket } from "ws";
 import { exemplar, loadCapture } from "./capture.js";
 import { decodeFrame, encodeFrame, FRAME_CONTROL, FRAME_DATA } from "./feishu-ws.js";

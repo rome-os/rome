@@ -9,13 +9,13 @@
 //      stubbed fetch.
 
 import { mkdtemp, rm } from "node:fs/promises";
-import { sendThrough } from "../../channels/connection-ports.js";
+import { sendThrough } from "../../connected-accounts/connection-ports.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
-import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.js";
+import { WechatAdapter, type WechatAdapterConfig } from "../../connected-accounts/wechat.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
@@ -106,7 +106,7 @@ const validCred = () => ({
 
 describe("isWechatAuthError", () => {
   it("is true only for an HTTP 401/403 apiFetch error", async () => {
-    const { isWechatAuthError } = await import("../../channels/wechat.js");
+    const { isWechatAuthError } = await import("../../connected-accounts/wechat.js");
     expect(isWechatAuthError(new Error("HTTP 401: unauthorized"))).toBe(true);
     expect(isWechatAuthError(new Error("HTTP 403: forbidden"))).toBe(true);
     expect(isWechatAuthError(new Error("HTTP 500: boom"))).toBe(false);

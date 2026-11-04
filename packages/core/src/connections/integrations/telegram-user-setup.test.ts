@@ -22,7 +22,7 @@ import {
   type TelegramUserLoginHandle,
   type TelegramUserLoginOutcome,
   type TelegramUserSettings,
-} from "../../channels/telegram-user.js";
+} from "../../connected-accounts/telegram-user.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";

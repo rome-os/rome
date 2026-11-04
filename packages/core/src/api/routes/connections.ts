@@ -29,7 +29,7 @@ import type {
 import type { SetupManager } from "../../connections/setup/manager.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { accountLinkOf } from "../../channels/account-links.js";
+import { accountLinkOf } from "../../connected-accounts/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
 

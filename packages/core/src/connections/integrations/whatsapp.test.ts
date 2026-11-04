@@ -4,14 +4,14 @@
 // threading — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { sendThrough } from "../../channels/connection-ports.js";
+import { sendThrough } from "../../connected-accounts/connection-ports.js";
 import type { ChatId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
 import {
   WhatsAppAdapter,
   type WhatsAppAuthProvider,
   type WhatsAppSocketFactory,
-} from "../../channels/whatsapp.js";
-import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
+} from "../../connected-accounts/whatsapp.js";
+import type { WhatsAppSyncSink } from "../../connected-accounts/whatsapp-sync.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";

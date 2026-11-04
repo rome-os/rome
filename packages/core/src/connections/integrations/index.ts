@@ -1,13 +1,13 @@
 // Built-in connection integrations. `registerBuiltinConnections` is the boot-time entry point.
 
-import { feishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
-import type { EmailAdapter } from "../../channels/email.js";
+import { feishuStreamingStyle } from "../../connected-accounts/delivery/streaming-switch.js";
+import type { EmailAdapter } from "../../connected-accounts/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
-import type { WechatUserRuntime } from "../../channels/wechat-user.js";
-import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
+import type { LinkedInSyncSink } from "../../connected-accounts/linkedin-sync.js";
+import type { WechatUserRuntime } from "../../connected-accounts/wechat-user.js";
+import type { WhatsAppSyncSink } from "../../connected-accounts/whatsapp-sync.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../../lib/oauth-providers.js";
 import {

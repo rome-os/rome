@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { AgentNamesService as Core } from "../channels/agent-names.js";
+import type { AgentNamesService as Core } from "../connected-accounts/agent-names.js";
 import type { AgentNamesService as Action } from "../../../../rome_apps/system/src/actions/send-message/index.js";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2

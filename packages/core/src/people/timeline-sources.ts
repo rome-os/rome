@@ -19,7 +19,11 @@
 
 import type { Account } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
-import { foldAccounts, type AccountFold, type AddressBooks } from "../channels/account-fold.js";
+import {
+  foldAccounts,
+  type AccountFold,
+  type AddressBooks,
+} from "../connected-accounts/account-fold.js";
 import {
   addressBooks,
   storedOn,
@@ -27,9 +31,9 @@ import {
   messageStores,
   type Channels,
   type PlatformOfChannel,
-} from "../channels/channel.js";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
-import { agentMessages, chatsAgentMessages } from "../channels/messages-agent.js";
+} from "../connected-accounts/channel.js";
+import type { AccountMessages, MessageAccount } from "../connected-accounts/messages.js";
+import { agentMessages, chatsAgentMessages } from "../connected-accounts/messages-agent.js";
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { PeopleRepository } from "../db/repositories/people.js";

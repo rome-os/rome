@@ -4,7 +4,7 @@ import {
   SlackApiError,
   type SlackSocketLike,
   type SlackWebApi,
-} from "../../channels/slack.js";
+} from "../../connected-accounts/slack.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant, SetupState } from "../setup/types.js";

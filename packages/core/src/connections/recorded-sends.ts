@@ -12,7 +12,7 @@ import {
   type OutgoingEmailMessage,
   type OutgoingMessage,
 } from "@rome-os/app-runtime";
-import type { ChannelSend } from "../channels/channel.js";
+import type { ChannelSend } from "../connected-accounts/channel.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";

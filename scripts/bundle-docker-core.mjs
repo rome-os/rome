@@ -12,14 +12,14 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // getMemoryTemplateDir() in profile-memory.ts.
 //
 // The WeChat send driver is read at runtime relative to `import.meta.url`, which
-// is src/channels/ under tsx and dist/ in the image, so a compiled runtime finds
+// is src/connected-accounts/ under tsx and dist/ in the image, so a compiled runtime finds
 // it only if it is copied to the path below.
 export const bundledAssets = [
   ["packages/app-template/template", "dist/app-template", "app template"],
   ["packages/app-template/workflow", "dist/app-template-workflow", "app template"],
   ["packages/core/memory.example", "dist/memory.example", "memory template"],
   [
-    "packages/core/src/channels/wechat-user-send-driver.py",
+    "packages/core/src/connected-accounts/wechat-user-send-driver.py",
     "dist/wechat-user-send-driver.py",
     "WeChat send driver",
   ],

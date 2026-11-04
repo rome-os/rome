@@ -51,8 +51,8 @@ import type {
 import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
-import { agentMessageOutbound } from "../../channels/messages-agent.js";
+import { stripHostOnlyPartsFromContent } from "../../connected-accounts/host-only-parts.js";
+import { agentMessageOutbound } from "../../connected-accounts/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 

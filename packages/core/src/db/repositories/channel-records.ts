@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Account } from "@rome-os/app-runtime";
 import { and, asc, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
-import type { AccountLinkOf } from "../../channels/account-links.js";
-import { platformOf } from "../../channels/platform.js";
+import type { AccountLinkOf } from "../../connected-accounts/account-links.js";
+import { platformOf } from "../../connected-accounts/platform.js";
 import type { GrantAccount } from "../../connections/grant.js";
 import { channels, connectionGrants } from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";

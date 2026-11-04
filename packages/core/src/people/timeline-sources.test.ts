@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import type { Account, AccountId, Accounts } from "../channels/accounts.js";
-import type { Channels } from "../channels/channel.js";
+import type { Account, AccountId, Accounts } from "../connected-accounts/accounts.js";
+import type { Channels } from "../connected-accounts/channel.js";
 import { romeSessions } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
 import { romeAccountsOn, timelineAccounts } from "./timeline-sources.js";

@@ -21,7 +21,7 @@ import { SessionsRepository } from "../db/repositories/sessions.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
-import { channelList } from "../channels/channel-list.js";
+import { channelList } from "../connected-accounts/channel-list.js";
 import type { AgentEvent } from "../types.js";
 import {
   createTestConnections,

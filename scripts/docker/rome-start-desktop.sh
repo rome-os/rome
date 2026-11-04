@@ -116,7 +116,7 @@ fail() {
 
 wait_for_tcp_port() {
   local port="$1" label="$2" pid="$3" log_file="$4" tries=0
-  # 30 s per port. DESKTOP_START_TIMEOUT_MS in packages/core/src/channels/
+  # 30 s per port. DESKTOP_START_TIMEOUT_MS in packages/core/src/connected-accounts/
   # wechat-user.ts adds up these waits; change both together.
   while [ "$tries" -lt 30 ]; do
     tcp_port_listening "$port" && return 0

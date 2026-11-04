@@ -10,7 +10,7 @@
 // interrupts the in-flight poll wait.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { WechatSettings } from "../../channels/wechat.js";
+import type { WechatSettings } from "../../connected-accounts/wechat.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant, SetupState } from "../setup/types.js";
 import { makeWechatSetup, type WechatLoginService } from "./wechat.js";

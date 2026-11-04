@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
-import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../../channels/whatsapp.js";
+import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../../connected-accounts/whatsapp.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/helpers.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";

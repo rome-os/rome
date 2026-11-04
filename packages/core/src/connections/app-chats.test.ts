@@ -12,7 +12,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
-import { ChannelNotConnected } from "../channels/channel.js";
+import { ChannelNotConnected } from "../connected-accounts/channel.js";
 import { ChannelSendRefused } from "@rome-os/app-runtime";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";

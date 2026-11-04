@@ -13,7 +13,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import type { ChannelSend } from "../channels/channel.js";
+import type { ChannelSend } from "../connected-accounts/channel.js";
 import { ChatRepository } from "../chats/chat-repository.js";
 import { ChatEvents, type MessageSaid } from "../chats/events.js";
 import { inboundRecording } from "../chats/inbound.js";

@@ -24,8 +24,8 @@ import {
   type Channel,
   type Channels,
   type PlatformOfChannel,
-} from "../channels/channel.js";
-import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
+} from "../connected-accounts/channel.js";
+import { WEBCHAT_CHANNEL } from "../connected-accounts/webchat-channel.js";
 import { startChannelChat } from "./channel-chat.js";
 import { platformIdOfMessage, type ChatAdapters } from "./chat-adapter.js";
 import { kindAt } from "./recorded-sends.js";
