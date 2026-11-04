@@ -458,8 +458,11 @@ export class EmailAdapter {
         `email ${JSON.stringify(quote)} ${why}. No email was sent. ` +
           "Name it in inReplyToMessageId to answer an email in another thread.",
       );
+    // As in sendMail, only a chat-style send reads its conversation id as an
+    // address. An email message's id names a thread, even with an "@" in it.
     const namesAddress =
-      !!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian";
+      !email &&
+      (!!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian");
     if (
       !threadId.trim() ||
       email?.to !== undefined ||

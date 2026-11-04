@@ -321,6 +321,27 @@ describe("EmailAdapter.send", () => {
     expect(provider.send).not.toHaveBeenCalled();
   });
 
+  it("answers a quoted email in an email thread whose id holds an @", async () => {
+    const provider = makeProvider({
+      getMessage: rs.fn(
+        async (messageId: string) =>
+          ({ threadId: "opaque@thread-id", providerMessageId: messageId }) as never,
+      ),
+    });
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("opaque@thread-id" as ChatId, {
+      kind: "email",
+      text: "On it",
+      replyToMessageId: "<CAF123@mail.example.com>",
+    });
+
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].inReplyToMessageId).toBe("<CAF123@mail.example.com>");
+    expect(provider.sent[0].to).toBeUndefined();
+  });
+
   it("refuses an empty reply before looking the quoted email up", async () => {
     const provider = holding();
     const adapter = makeAdapter(provider);
