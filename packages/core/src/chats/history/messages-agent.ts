@@ -16,11 +16,9 @@ import { chatKey } from "../../connections/chat-ids.js";
 /**
  * The sender id Rome stamps on a message it sent itself.
  *
- * Written by every outbound path that records a channel message — the
- * `send_message` action and the backend turn — and already how
- * `loadConversationContext` picks Rome's own rows out of the pending
- * notifications. Read here for the same reason: it is the one persisted mark
- * that survives a row whose role does not say which way it went.
+ * Written by every outbound path that recorded a channel message in the old
+ * transcript rows. Read here because it is the one persisted mark that
+ * survives a row whose role does not say which way it went.
  */
 const ROME_SENDER_ID = "rome";
 
@@ -29,8 +27,8 @@ const ROME_SENDER_ID = "rome";
  *
  * The role alone cannot answer it. `assistant` is Rome's and `user` is the
  * person's, but `notification` is written in both directions:
- * `addConversationMessage` stores an inbound line that did not wake the agent
- * under it, and `recordOutboundConversationMessage` stores a *delivered* Rome
+ * `addConversationMessage` stores an inbound message that did not wake the
+ * agent under it, and rows written before Chats hold a *delivered* Rome
  * message under it whenever the send was not tied to a turn
  * (`knownToProvider: false`). Reading the role alone puts those replies on the
  * person's side of the conversation.
