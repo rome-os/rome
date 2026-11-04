@@ -7,16 +7,52 @@ import type { AppCatalog } from "../apps/catalog.js";
 import { listCoreAgents } from "../apps/core-artifacts.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
 import { AgentConfigSchema } from "../apps/packaging/index.js";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
+import {
+  artifactNamespace,
+  resolveArtifactId,
+  type ArtifactIdentityContext,
+} from "../apps/artifact-id.js";
 import { loadArtifactRecords } from "../apps/artifact-records.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-loader");
 
+interface MissingSubagentReason {
+  appId?: string;
+  reason: "disabled" | "broken" | "failed" | "artifact-not-loaded" | "unknown";
+  code?: string;
+}
+
+/**
+ * Says why a core agent's subagent did not load, or returns null while the
+ * owning app is between states. Boot fails in assertCoreRequiredAppsPacked
+ * when a core agent needs an app that is not packed, so an app absent from the
+ * catalog is one that hydration has not refreshed yet, not a lasting gap.
+ */
+function classifyMissingSubagent(
+  subagentId: string,
+  catalog: AppCatalog | undefined,
+): MissingSubagentReason | null {
+  const appId = artifactNamespace(subagentId);
+  if (appId === null) return { reason: "unknown" };
+  if (appId === "core") return { appId, reason: "artifact-not-loaded" };
+  if (!catalog) return { appId, reason: "unknown" };
+
+  const view = catalog.get(appId);
+  if (view === null || view.state === "installing" || view.state === "uninstalling") return null;
+  if (view.state === "broken" || view.state === "failed") {
+    const code = view.lastError?.code;
+    return { appId, reason: view.state, ...(code === undefined ? {} : { code }) };
+  }
+  if (!view.enabled) return { appId, reason: "disabled" };
+  return { appId, reason: "artifact-not-loaded" };
+}
+
 export class AgentLoader {
   private agents: Map<string, AgentConfig> = new Map();
   private records: Map<string, { config: AgentConfig; metadata: ArtifactMetadata }> = new Map();
   private registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
+  private reportedMissingSubagents = new Set<string>();
 
   constructor(private readonly identity: ArtifactIdentityContext) {}
 
@@ -44,7 +80,7 @@ export class AgentLoader {
   async loadFromCatalog(catalog: AppCatalog): Promise<Map<string, AgentConfig>> {
     const coreRefs = await listCoreAgents();
     const appRefs = catalog.listArtifacts("agent");
-    return this.loadRecords([...coreRefs, ...appRefs].map(toArtifactMetadata));
+    return this.loadRecords([...coreRefs, ...appRefs].map(toArtifactMetadata), catalog);
   }
 
   /** Get an agent config by name. Throws if not found. */
@@ -104,7 +140,10 @@ export class AgentLoader {
     return [...this.registryLoadFailures];
   }
 
-  private async loadRecords(sources: ArtifactMetadata[]): Promise<Map<string, AgentConfig>> {
+  private async loadRecords(
+    sources: ArtifactMetadata[],
+    catalog?: AppCatalog,
+  ): Promise<Map<string, AgentConfig>> {
     const { records, failures: registryLoadFailures } = await loadArtifactRecords({
       kind: "agent",
       sources,
@@ -116,6 +155,7 @@ export class AgentLoader {
     );
 
     const nameSet = new Set(nextRecords.keys());
+    const missingSubagents = new Set<string>();
     for (const [name, { config, metadata }] of nextRecords.entries()) {
       if (!config.allowedSubagents) continue;
       const resolvedSubagents: string[] = [];
@@ -131,10 +171,19 @@ export class AgentLoader {
           // or guardian-chosen: the agent loads without that subagent instead
           // of failing the whole reload.
           if (metadata.ownerType !== "app") {
-            log.warn("core agent loaded without unknown subagent", {
-              agent: config.name,
-              subagent,
-            });
+            const missing = classifyMissingSubagent(resolved, catalog);
+            const fields = { agent: config.name, subagent, ...missing };
+            if (missing === null) {
+              log.debug("core agent loaded without unknown subagent", fields);
+              continue;
+            }
+            // Every catalog event reloads agents, so a lasting gap is reported
+            // when it first appears rather than once per reload.
+            const key = `${config.name}|${subagent}|${missing.reason}|${missing.code ?? ""}`;
+            missingSubagents.add(key);
+            if (!this.reportedMissingSubagents.has(key)) {
+              log.warn("core agent loaded without unknown subagent", fields);
+            }
             continue;
           }
 
@@ -163,6 +212,7 @@ export class AgentLoader {
       Array.from(nextRecords.entries()).map(([name, record]) => [name, record.config]),
     );
     this.registryLoadFailures = registryLoadFailures;
+    this.reportedMissingSubagents = missingSubagents;
     return this.getAll();
   }
 

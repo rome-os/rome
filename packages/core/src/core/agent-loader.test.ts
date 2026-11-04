@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, rs } from "@rstest/core";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { AgentLoader } from "./agent-loader.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -6,9 +6,24 @@ import { tmpdir } from "node:os";
 import type { AppCatalog } from "../apps/catalog.js";
 import { createEmptyLegacyArtifactBindings, formatArtifactId } from "../apps/artifact-id.js";
 
-rs.mock("../apps/core-artifacts.js", () => ({
-  listCoreAgents: async () => [],
+const coreAgentRefs = rs.hoisted(() => ({ current: [] as unknown[] }));
+const log = rs.hoisted(() => ({
+  debug: rs.fn(),
+  info: rs.fn(),
+  warn: rs.fn(),
+  error: rs.fn(),
 }));
+
+rs.mock("../apps/core-artifacts.js", () => ({
+  listCoreAgents: async () => coreAgentRefs.current,
+}));
+rs.mock("../logger.js", () => ({
+  createLogger: () => log,
+}));
+
+const MISSING_SUBAGENT = "core agent loaded without unknown subagent";
+const missingSubagentCalls = (spy: typeof log.warn) =>
+  spy.mock.calls.filter(([message]) => message === MISSING_SUBAGENT);
 
 const FIXTURES_DIR = join(import.meta.dirname, "..", "test", "fixtures", "agents");
 
@@ -17,6 +32,8 @@ describe("AgentLoader", () => {
 
   beforeEach(() => {
     loader = new AgentLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
+    coreAgentRefs.current = [];
+    for (const spy of Object.values(log)) spy.mockClear();
   });
 
   it("uses the complete scoped app id as an agent namespace", async () => {
@@ -287,6 +304,125 @@ describe("AgentLoader", () => {
       const config = loader.get("test-main");
       expect(config.name).toBe("test-main");
       expect(config.tier).toBe("large");
+    });
+  });
+
+  describe("a core agent's missing app subagent", () => {
+    let root: string;
+
+    beforeEach(async () => {
+      root = await mkdtemp(join(tmpdir(), "rome-core-missing-subagent-"));
+      const mainPath = join(root, "main.yaml");
+      await writeFile(
+        mainPath,
+        [
+          "name: main",
+          "description: Core main fixture.",
+          "tier: small",
+          "permissionMode: bypassPermissions",
+          "tools: []",
+          "allowedSubagents: [assistant:explore]",
+          "systemPromptPrefix: Test agent.",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      coreAgentRefs.current = [
+        {
+          formatVersion: 2,
+          kind: "agent",
+          publicName: "main",
+          aliases: [],
+          ownerType: "core",
+          ownerId: "core",
+          absolutePath: mainPath,
+        },
+      ];
+    });
+
+    afterEach(async () => {
+      await rm(root, { recursive: true, force: true });
+    });
+
+    const catalogWith = (view: Record<string, unknown> | null) =>
+      ({
+        listArtifacts: () => [],
+        get: (appId: string) => (appId === "assistant" ? view : null),
+      }) as unknown as AppCatalog;
+
+    it("stays quiet while the owning app installs", async () => {
+      const agents = await loader.loadFromCatalog(catalogWith({ state: "installing" }));
+
+      expect(agents.get("core:main")!.allowedSubagents).toEqual([]);
+      expect(missingSubagentCalls(log.warn)).toEqual([]);
+      expect(missingSubagentCalls(log.debug)).toHaveLength(1);
+    });
+
+    it("stays quiet while catalog hydration has not reached the owning app", async () => {
+      const agents = await loader.loadFromCatalog(catalogWith(null));
+
+      expect(agents.get("core:main")!.allowedSubagents).toEqual([]);
+      expect(missingSubagentCalls(log.warn)).toEqual([]);
+    });
+
+    it("warns once with the reason when the owning app is disabled", async () => {
+      const catalog = catalogWith({ state: "installed", enabled: false });
+
+      await loader.loadFromCatalog(catalog);
+      await loader.loadFromCatalog(catalog);
+
+      expect(missingSubagentCalls(log.warn)).toEqual([
+        [
+          MISSING_SUBAGENT,
+          { agent: "main", subagent: "assistant:explore", appId: "assistant", reason: "disabled" },
+        ],
+      ]);
+    });
+
+    it("warns with the state and error code when the owning app is broken", async () => {
+      await loader.loadFromCatalog(
+        catalogWith({
+          state: "broken",
+          enabled: true,
+          lastError: { code: "RESOLVE_FAILED", message: "manifest unreadable" },
+        }),
+      );
+
+      expect(missingSubagentCalls(log.warn)).toEqual([
+        [
+          MISSING_SUBAGENT,
+          {
+            agent: "main",
+            subagent: "assistant:explore",
+            appId: "assistant",
+            reason: "broken",
+            code: "RESOLVE_FAILED",
+          },
+        ],
+      ]);
+    });
+
+    it("warns again when a broken app's error code changes", async () => {
+      const brokenWith = (code: string) =>
+        catalogWith({ state: "broken", enabled: true, lastError: { code, message: "failed" } });
+
+      await loader.loadFromCatalog(brokenWith("RESOLVE_FAILED"));
+      await loader.loadFromCatalog(brokenWith("MANIFEST_INVALID"));
+
+      expect(missingSubagentCalls(log.warn).map(([, fields]) => fields.code)).toEqual([
+        "RESOLVE_FAILED",
+        "MANIFEST_INVALID",
+      ]);
+    });
+
+    it("warns again for a gap that a later load did not report", async () => {
+      const disabled = catalogWith({ state: "installed", enabled: false });
+
+      await loader.loadFromCatalog(disabled);
+      await loader.loadFromCatalog(catalogWith({ state: "installing" }));
+      await loader.loadFromCatalog(disabled);
+
+      expect(missingSubagentCalls(log.warn)).toHaveLength(2);
     });
   });
 
