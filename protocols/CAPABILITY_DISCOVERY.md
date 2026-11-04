@@ -89,8 +89,9 @@ Host: <tailscale-ip>:9368
 **Response headers:**
 ```
 Content-Type: application/json
-Access-Control-Allow-Origin: *
 ```
+
+The response carries no CORS header. Discovery runs server side, and a browser page must not read the manifest.
 
 ### `GET /health` — Health Check
 

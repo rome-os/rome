@@ -5,6 +5,8 @@ import { hostname } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { isBrowserMutation } from "../lib/cross-site-loopback.js";
+import { toOriginRequest } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import {
   initTelemetry,
@@ -457,6 +459,19 @@ export class HealthCheckDaemon {
     req: IncomingMessage,
     res: ServerResponse<IncomingMessage>,
   ): Promise<void> {
+    // No browser page calls the daemon, and the in-container browser can reach
+    // it over loopback, so a mutation that carries browser headers is refused.
+    if (isBrowserMutation({ method: req.method ?? "GET", ...toOriginRequest(req) })) {
+      log.warn("refused a browser mutation", {
+        method: req.method ?? null,
+        path: (req.url ?? "/").split("?")[0],
+        origin: req.headers.origin ?? null,
+        secFetchSite: req.headers["sec-fetch-site"] ?? null,
+      });
+      this.writeJson(res, 403, { error: "Forbidden" });
+      return;
+    }
+
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
 
     if (req.method === "GET" && url.pathname === "/") {
@@ -799,10 +814,7 @@ export class HealthCheckDaemon {
   }
 
   private writeJson(res: ServerResponse<IncomingMessage>, status: number, body: unknown): void {
-    res.writeHead(status, {
-      "Access-Control-Allow-Origin": "*",
-      "Content-Type": "application/json",
-    });
+    res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
   }
 

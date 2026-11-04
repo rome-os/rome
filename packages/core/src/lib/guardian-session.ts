@@ -40,15 +40,29 @@ export async function resolveGuardianSessionFromMaterial(
   const session = material.sessionToken ? verifySession(material.sessionToken) : null;
   if (session) return { userId: session.userId, via: "cookie" };
 
-  // Same invariant as lib/trusted-loopback.ts: loopback peer + no XFF header
-  // (every fronting proxy stamps XFF; a client can only add one, which demotes
-  // it — never strip it).
-  if (!material.hasForwardedFor && isLoopbackAddress(material.peerAddress)) {
+  if (isTrustedLoopbackMaterial(material)) {
     const [guardian] = await db.select({ userId: guardianAuth.userId }).from(guardianAuth).limit(1);
     if (guardian) return { userId: guardian.userId, via: "loopback" };
   }
 
   return null;
+}
+
+// Same invariant as lib/trusted-loopback.ts: loopback peer + no XFF header
+// (every fronting proxy stamps XFF; a client can only add one, which demotes
+// it — never strip it).
+function isTrustedLoopbackMaterial(
+  material: Pick<GuardianSessionMaterial, "hasForwardedFor" | "peerAddress">,
+): boolean {
+  return !material.hasForwardedFor && isLoopbackAddress(material.peerAddress);
+}
+
+/**
+ * Whether the request is the trusted in-container caller of
+ * lib/trusted-loopback.ts: a loopback peer with no `X-Forwarded-For`.
+ */
+export function isTrustedLoopbackCaller(c: Context): boolean {
+  return isTrustedLoopbackMaterial(guardianSessionMaterial(c));
 }
 
 export function guardianSessionMaterial(c: Context): GuardianSessionMaterial {
