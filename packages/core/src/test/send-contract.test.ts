@@ -49,9 +49,10 @@ interface Subject {
   readonly attachments: "files" | "listed" | "none";
   /** Whether an attachment's source may be a web address. */
   readonly urls?: boolean;
-  /** `replyToMessageId`s the channel cannot answer, where it quotes at all. A
-   *  channel with no way to quote answers in place. */
+  /** `replyToMessageId`s the channel cannot answer, where it quotes at all. */
   readonly unanswerable?: readonly string[];
+  /** False for a channel Rome cannot quote on, which refuses every reply. */
+  readonly quotes?: false;
 }
 
 let dir: string;
@@ -319,8 +320,15 @@ const SUBJECTS: readonly Subject[] = [
     urls: true,
     unanswerable: ["", "abc", "12a", "123456789012345678901"],
   },
-  { channel: "whatsapp", make: whatsapp, shows: [], attachments: "files", urls: false },
-  { channel: "wechat", make: wechat, shows: [], attachments: "files", urls: false },
+  {
+    channel: "whatsapp",
+    make: whatsapp,
+    shows: [],
+    attachments: "files",
+    urls: false,
+    quotes: false,
+  },
+  { channel: "wechat", make: wechat, shows: [], attachments: "files", urls: false, quotes: false },
   {
     channel: "email",
     make: email,
@@ -424,6 +432,16 @@ describe.each(SUBJECTS)("$channel send", (subject) => {
           }),
         ).rejects.toMatchObject(refused("attachment_unsupported"));
       }
+      expect(harness.calls()).toBe(0);
+    });
+  }
+
+  if (subject.quotes === false) {
+    it("refuses any reply, since it cannot quote, and sends nothing", async () => {
+      const harness = subject.make();
+      await expect(harness.send({ text: "Re", replyToMessageId: "m-1" })).rejects.toMatchObject(
+        refused("reply_unaddressable"),
+      );
       expect(harness.calls()).toBe(0);
     });
   }

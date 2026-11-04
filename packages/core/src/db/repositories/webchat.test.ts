@@ -16,6 +16,7 @@ import {
   sessionLastTurnFailed,
   validateTurnRecapAudioUrl,
 } from "./webchat.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
 // Records which statement entry points (`select`, `insert`, `update`, `delete`,
 // `transaction`) a repository reaches for on the connection itself, so a test
@@ -48,7 +49,7 @@ describe("WebChatRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
   });
 
   afterEach(() => {
@@ -158,6 +159,8 @@ describe("WebChatRepository", () => {
     ["2026-10-17T12:00:00Z", true],
     ["2026-10-17T12:00:01Z", false],
   ] as const)("uses the session's last message at %s (archived: %s) for every trace", async (lastMessageAt, archived) => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-09-24T12:00:00Z"));
     await repo.createSession("retention", "Retention");
     const sessionActivityCutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
     const options = { sessionActivityCutoff };
@@ -181,12 +184,9 @@ describe("WebChatRepository", () => {
       JSON.stringify([{ type: "text", content: "Reply" }]),
       "old",
     );
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    rs.setSystemTime(new Date(lastMessageAt));
     await repo.addMessage("latest", "retention", "user", "More please", "latest");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date(lastMessageAt) })
-      .where(eq(romeAgentMessages.id, "latest"));
+    rs.useRealTimers();
 
     const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
     const traces = await repo.getTraceContents("retention", options);
@@ -207,10 +207,10 @@ describe("WebChatRepository", () => {
       options,
     );
     expect(children.map((row) => row.id).sort()).toEqual(archived ? [] : ["legacy", "old"]);
-    expect((await repo.getMessageContentForDisplay("prompt", options))?.content).toBe(
-      "Keep my question",
-    );
-    expect((await repo.getMessageContentForDisplay("reply", options))?.content).toContain("Reply");
+    // Only steps are archived: the chat's own messages read in full.
+    const said = await repo.getMessages("retention");
+    expect(said.find((row) => row.id === "prompt")?.content).toContain("Keep my question");
+    expect(said.find((row) => row.id === "reply")?.content).toContain("Reply");
     if (archived) {
       await testDb.db.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.messageId, "old"));
       expect(await repo.getTraceContents("retention", options)).toEqual(traces);
@@ -223,6 +223,8 @@ describe("WebChatRepository", () => {
     "trace",
     "notification",
   ])("counts a recent %s message as activity and restores all old steps", async (role) => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-09-24T12:00:00Z"));
     await repo.createSession("idle", "Idle");
     await repo.appendTraceBlocks({
       messageId: "idle-trace",
@@ -231,14 +233,13 @@ describe("WebChatRepository", () => {
       startSeq: 0,
       blocks: [{ type: "thinking", content: "old steps" }],
     });
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    rs.useRealTimers();
     const options = { sessionActivityCutoff: sessionTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
     expect((await repo.getTraceContents("idle", options))[0]?.traceArchived).toBe(true);
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-18T12:00:00Z"));
     await repo.addMessage("new-message", "idle", role, "[]", "new-turn");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-18T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "new-message"));
+    rs.useRealTimers();
     expect(await repo.getTraceArchivedSessionIds(["idle"], options.sessionActivityCutoff)).toEqual(
       [],
     );
@@ -248,6 +249,8 @@ describe("WebChatRepository", () => {
   });
 
   it("ignores session metadata and unknown message roles, and batches idle-session selection", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-09-24T12:00:00Z"));
     await repo.createSession("idle", "Idle");
     await repo.createSession("active", "Active");
     await repo.createSession("empty", "Empty");
@@ -260,13 +263,10 @@ describe("WebChatRepository", () => {
         "old-turn",
       );
     }
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    rs.setSystemTime(new Date("2026-10-18T12:00:00Z"));
     await repo.addMessage("active-reply", "active", "assistant", "Reply");
     await repo.addMessage("metadata", "idle", "system", "Metadata");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-18T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "active-reply"));
+    rs.useRealTimers();
     await repo.updateSessionName("idle", "Renamed");
     await repo.markSessionRead("idle");
     await testDb.db.update(romeSessions).set({
@@ -294,6 +294,8 @@ describe("WebChatRepository", () => {
     ["2026-10-17T12:00:00Z", true],
     ["2026-10-17T12:00:01Z", false],
   ] as const)("inherits ancestor activity at %s in a nested idle tree (archived: %s)", async (lastMessageAt, archived) => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-09-24T12:00:00Z"));
     await repo.createSession("root", "Root");
     await repo.createSession("unrelated", "Unrelated");
     for (const [id, parentSessionId] of [
@@ -318,12 +320,9 @@ describe("WebChatRepository", () => {
         blocks: [{ type: "thinking", content: `${id} steps` }],
       });
     }
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    rs.setSystemTime(new Date(lastMessageAt));
     await repo.addMessage("root-latest", "root", "user", "Continue");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date(lastMessageAt) })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    rs.useRealTimers();
     await repo.addMessage("unrelated-latest", "unrelated", "user", "Continue");
     const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
     const options = { sessionActivityCutoff: cutoff };
@@ -564,11 +563,7 @@ describe("WebChatRepository", () => {
     const actor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
     expect(await repo.recordUserInput("input", "chat", "[]", actor)).toBe(true);
     expect(await repo.recordUserInput("input", "chat", "[]", { kind: "anonymous" })).toBe(false);
-    const [message] = await testDb.db
-      .select()
-      .from(romeAgentMessages)
-      .where(eq(romeAgentMessages.id, "input"));
-    expect(message.actor).toEqual(actor);
+    expect((await repo.getUserMessageActors("chat")).get("input")).toEqual(actor);
     const guardian = {
       kind: "guardian" as const,
       userId: "seat",
@@ -577,16 +572,16 @@ describe("WebChatRepository", () => {
       email: "guardian@example.com",
     };
     await repo.recordUserInput("guardian-input", "chat", "[]", guardian);
-    const [guardianMessage] = await testDb.db
-      .select()
-      .from(romeAgentMessages)
-      .where(eq(romeAgentMessages.id, "guardian-input"));
-    expect(guardianMessage.actor).toEqual(guardian);
+    // A chat keeps who said a message by their account on it: the guardian's.
+    expect((await repo.getUserMessageActors("chat")).get("guardian-input")).toMatchObject({
+      kind: "guardian",
+    });
     expect(await repo.getSessionOwnerKey("chat")).toBeNull();
   });
 
   it("attributes a person-created fork and only its opening user input", async () => {
-    await repo.createSession("fork", "Fork");
+    // A fork stands in no chat until it is promoted, so it keeps its own lines.
+    await repo.ensureRomeSession({ id: "fork", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("prompt", "fork", "user", "[]", "fork-turn");
     await repo.addMessage("reply", "fork", "assistant", "[]", "fork-turn");
     const actor = { kind: "visitor" as const, accountId: "b", email: "b@example.com" };
@@ -1078,7 +1073,7 @@ describe("WebChatRepository", () => {
           agentName: "main",
         });
         const { db, statements } = trackStatements(testDb.db);
-        const trackedRepo = new WebChatRepository(db);
+        const trackedRepo = new ChatsWebChatRepository(db);
 
         await expect(
           trackedRepo.addConversationMessage({
@@ -1554,13 +1549,15 @@ describe("WebChatRepository", () => {
     it("reads the session ids inside the same transaction as the deletes", async () => {
       await repo.createSession("sess-tx", "Tx", undefined, "alpha", null, "alpha");
       const { db, statements } = trackStatements(testDb.db);
-      const trackedRepo = new WebChatRepository(db);
+      const trackedRepo = new ChatsWebChatRepository(db);
 
       await expect(trackedRepo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(1);
 
-      // A `select` on the connection itself means the id list was read in its
-      // own autocommit statement before the transaction opened.
-      expect(statements).toEqual(["transaction"]);
+      // A `select` on the connection before the transaction means the id list
+      // was read in its own autocommit statement. What runs on the connection
+      // once it is open is inside it: SQLite holds one transaction per
+      // connection.
+      expect(statements[0]).toBe("transaction");
     });
 
     it("deletes a session created for the project after the id read", async () => {
@@ -1828,7 +1825,8 @@ describe("WebChatRepository", () => {
       await repo.addMessage("m-2", "sess-card", "assistant", card);
       await repo.addMessage("m-3", "sess-card", "assistant", '[{"type":"text","text":"Done"}]');
       await repo.addMessage("m-4", "sess-answered", "assistant", card);
-      await repo.addMessage("m-5", "sess-answered", "user", answer);
+      // The guardian's answer is an input to the session, which clears the card.
+      await repo.recordUserInput("m-5", "sess-answered", answer);
       await repo.addMessage(
         "m-6",
         "sess-mention",
@@ -2429,11 +2427,13 @@ describe("WebChatRepository", () => {
   });
 
   it("treats messages with null turnId as singleton groups (legacy rows)", async () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     await repo.createSession("sess-legacy", "Chat Legacy");
 
     await repo.addMessage("first", "sess-legacy", "user", "[]");
-    await sleep(2);
+    // A chat's messages are said to the second.
+    rs.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
     await repo.addMessage("second", "sess-legacy", "trace", "[]");
 
     const messages = await repo.getMessages("sess-legacy");

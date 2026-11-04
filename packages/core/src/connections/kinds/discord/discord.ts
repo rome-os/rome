@@ -12,6 +12,7 @@ import {
   Routes,
   SlashCommandBuilder,
   type Message,
+  type MessageCreateOptions,
   type TextChannel,
   type DMChannel,
   type NewsChannel,
@@ -19,7 +20,8 @@ import {
   type ChatInputCommandInteraction,
   type AutocompleteInteraction,
 } from "discord.js";
-import { chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
+import { randomBytes } from "node:crypto";
+import { SendRefused, chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
 import type {
   APIRequest,
   RateLimitData,
@@ -1413,6 +1415,30 @@ Use \`/channel agent clear\` to undo.`,
     }
 
     const targetChannel = await this.replyChannel(channel as SendableChannel, replyTo);
+    // A reply that opened no thread on the message quotes it instead, on the
+    // first message that goes out. Discord refuses a quote of a message it
+    // cannot find, and nothing has gone out then.
+    let quote: MessageCreateOptions["reply"] =
+      replyTo && targetChannel === channel
+        ? { messageReference: replyTo, failIfNotExists: true }
+        : undefined;
+    // A quote does not mention its author, as an unquoted answer did not.
+    // discord.js resends a create whose answer it lost, and a quote refused
+    // on that resend would say nothing went out when the first one did. The
+    // nonce has Discord return the first message to a resend instead.
+    const quoting = <T extends object>(options: T): T => {
+      const quoted = quote
+        ? {
+            ...options,
+            reply: quote,
+            allowedMentions: { ...ALL_MENTIONS, repliedUser: false },
+            nonce: randomBytes(12).toString("base64url"),
+            enforceNonce: true,
+          }
+        : options;
+      quote = undefined;
+      return quoted;
+    };
 
     try {
       let messageId: string | undefined;
@@ -1421,13 +1447,13 @@ Use \`/channel agent clear\` to undo.`,
         // Discord has a 2000 character limit per message
         const chunks = splitMessage(text);
         for (const chunk of chunks) {
-          const sent = await targetChannel.send({ content: chunk });
+          const sent = await sendQuoting(targetChannel, quoting({ content: chunk }));
           messageId ??= sent.id;
         }
       }
 
       for (const att of attachments) {
-        const attachmentMessageId = await this.sendAttachment(targetChannel, att);
+        const attachmentMessageId = await this.sendAttachment(targetChannel, att, quoting);
         messageId ??= attachmentMessageId;
       }
 
@@ -1557,19 +1583,58 @@ Use \`/channel agent clear\` to undo.`,
     return attachments;
   }
 
-  private async sendAttachment(channel: SendableChannel, att: OutgoingAttachment): Promise<string> {
+  private async sendAttachment(
+    channel: SendableChannel,
+    att: OutgoingAttachment,
+    quoting: <T extends object>(options: T) => T = (options) => options,
+  ): Promise<string> {
     const isUrl = att.source.startsWith("http");
     const file = isUrl
       ? new AttachmentBuilder(att.source, { name: basename(att.source) })
       : new AttachmentBuilder(createReadStream(att.source), { name: basename(att.source) });
 
-    const sent = await channel.send({
-      content: att.caption,
-      files: [file],
-    });
+    const sent = await sendQuoting(channel, quoting({ content: att.caption, files: [file] }));
     return sent.id;
   }
 }
+
+/** Whether `err` is Discord refusing the quote of a send: an unknown message,
+ *  a bot that may not read the chat's history and so may not quote it, or an
+ *  invalid form whose fault is the message reference. Any other invalid form
+ *  is the send's own fault. */
+function isRefusedQuote(err: unknown): boolean {
+  if (!(err instanceof DiscordAPIError)) return false;
+  if (Number(err.code) === 10008 || Number(err.code) === 160002) return true;
+  const errors = (err.rawError as { errors?: Record<string, unknown> }).errors;
+  return Number(err.code) === 50035 && errors?.message_reference !== undefined;
+}
+
+/** Sends `options` on `channel`, refusing as `reply_unaddressable` the quote
+ *  Discord cannot find. Only the first message of a send quotes, so nothing
+ *  has gone out when it is refused. */
+async function sendQuoting(
+  channel: SendableChannel,
+  options: MessageCreateOptions,
+): Promise<Message> {
+  try {
+    return await channel.send(options);
+  } catch (err) {
+    const quoted = options.reply?.messageReference;
+    if (quoted && isRefusedQuote(err)) {
+      throw new SendRefused(
+        "reply_unaddressable",
+        `discord cannot quote message ${JSON.stringify(quoted)} here`,
+      );
+    }
+    throw err;
+  }
+}
+
+/** The mentions Discord parses when a message names none of its own, kept
+ *  when a quote turns off the mention of its author. */
+const ALL_MENTIONS = {
+  parse: ["users", "roles", "everyone"] as ("users" | "roles" | "everyone")[],
+};
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;

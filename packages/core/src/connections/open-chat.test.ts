@@ -9,6 +9,7 @@ import { ChannelWithoutAccount } from "./chat-adapter.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
 import { chatKey } from "../chats/place.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("openChannelChat", () => {
   let testDb: TestDb;
@@ -16,7 +17,10 @@ describe("openChannelChat", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    deps = { chats: testChatRepository(testDb.db), webchatRepo: new WebChatRepository(testDb.db) };
+    deps = {
+      chats: testChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
+    };
   });
   afterEach(() => testDb.close());
 
@@ -84,7 +88,7 @@ describe("openChannelChat as a speaker", () => {
       channelsOn: (platform) => [platform],
     });
     deps = {
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       speakers: { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers },
     };
   });

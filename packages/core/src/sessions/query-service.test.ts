@@ -5,6 +5,7 @@ import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SessionQueryService } from "./query-service.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("SessionQueryService", () => {
   let testDb: TestDb;
@@ -21,7 +22,7 @@ describe("SessionQueryService", () => {
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
     testDb = createTestDb();
-    webchat = new WebChatRepository(testDb.db);
+    webchat = new ChatsWebChatRepository(testDb.db);
     const codeReviewAgent = {
       metadata: { ownerType: "app" as const, ownerId: "code-review" },
     };

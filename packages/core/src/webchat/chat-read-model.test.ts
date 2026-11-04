@@ -14,6 +14,7 @@ import {
   type Transcript,
   type TranscriptCursor,
 } from "./chat-read-model.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
 
@@ -26,7 +27,7 @@ describe("ChatReadModel", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
     reads = new ChatReadModel(testDb.db);
     links = new TurnLinks(testDb.db);
     fixture = speakerFixture(testDb.db);

@@ -12,13 +12,13 @@ import type { ChannelChatAdapter, Outbound } from "../connections/chat-adapter.j
 import { chatKey } from "../connections/chat-ids.js";
 import { emailChatAdapter } from "../connections/email-chat-adapter.js";
 import { SpeakerMessages } from "../connections/speaker-messages.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { speakerFixture } from "../test/speakers.js";
 import { appChatWrites, type ChatWrites } from "./chat-writes.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const BOT = { platform: "telegram", id: "rome_bot" };
 const TELEGRAM = { name: "telegram" } as Channel;
@@ -111,7 +111,7 @@ describe("appChatWrites", () => {
     failKeysOnSend = false;
     threads = 0;
     writes = appChatWrites({
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       chats,
       messages,
       speakers,
