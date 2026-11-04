@@ -111,35 +111,89 @@ export class OpencliCommandError extends Error {
   }
 }
 
-// opencli prints structured errors (code/message/help) on failure; these
+// opencli prints structured errors (code/message/hint) on failure; these
 // markers cover both its typed AuthRequiredError surface and the plugin's
 // auth-wall phrasing (opencli-plugins/linkedin/thread-snapshot.js).
 const AUTH_MARKERS = /auth[\s_-]?required|authwall|auth wall|signed-in linkedin|not logged in/i;
 
+const envelopeSchema = z.union([
+  z.object({ ok: z.literal(true), data: z.unknown() }),
+  z.object({
+    ok: z.literal(false),
+    error: z
+      .object({
+        code: z.string().optional(),
+        message: z.string().optional(),
+        hint: z.string().optional(),
+        outcome: z.string().optional(),
+      })
+      .passthrough(),
+  }),
+]);
+
+type OpencliErrorBody = Extract<z.infer<typeof envelopeSchema>, { ok: false }>["error"];
+
+/**
+ * OpenCLI 2 prints one `{"ok":true,"data":...}` or `{"ok":false,"error":...}`
+ * line on stdout. Returns null for OpenCLI 1.8's bare JSON and for text.
+ */
+function parseEnvelope(stdout: string): z.infer<typeof envelopeSchema> | null {
+  const trimmed = stdout.trim();
+  if (!trimmed.startsWith("{")) return null;
+  try {
+    const parsed = envelopeSchema.safeParse(JSON.parse(trimmed));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function envelopeErrorDetail(error: OpencliErrorBody): string {
+  const message = error.message?.trim() || "no message";
+  const detail = error.code ? `${message} (${error.code})` : message;
+  return error.hint?.trim() ? `${detail}. ${error.hint.trim()}` : detail;
+}
+
 function failureDetail(result: OpencliResult): string {
+  const envelope = parseEnvelope(result.stdout);
+  if (envelope && !envelope.ok) return envelopeErrorDetail(envelope.error);
   const text = `${result.stderr}\n${result.stdout}`.trim();
   const firstLines = text.split("\n").slice(0, 6).join(" ").slice(0, 500);
   return firstLines || `exit code ${result.code ?? "none (killed)"}`;
 }
 
-/** Classify a non-zero exit into auth vs transient and throw accordingly. */
+/** Classify a failure into auth vs transient and throw accordingly. */
 function throwForFailure(command: string, result: OpencliResult): never {
+  const envelope = parseEnvelope(result.stdout);
+  if (envelope && !envelope.ok && envelope.error.code === "AUTH_REQUIRED") {
+    throw new OpencliAuthError(envelopeErrorDetail(envelope.error));
+  }
   const text = `${result.stderr}\n${result.stdout}`;
   if (AUTH_MARKERS.test(text)) throw new OpencliAuthError(failureDetail(result));
   throw new OpencliCommandError(command, failureDetail(result));
 }
 
+/**
+ * The command's result: the `data` of an OpenCLI 2 envelope, or OpenCLI 1.8's
+ * bare JSON. Throws OpencliAuthError or OpencliCommandError for a failure,
+ * including an error envelope that arrives with exit code 0.
+ */
 function parseJsonOutput(command: string, result: OpencliResult): unknown {
   if (result.code !== 0) throwForFailure(command, result);
   const trimmed = result.stdout.trim();
   if (!trimmed) throw new OpencliCommandError(command, "produced no output");
+  let parsed: unknown;
   try {
-    return JSON.parse(trimmed);
+    parsed = JSON.parse(trimmed);
   } catch {
     // Errors sometimes print as YAML even under -f json; classify them too.
     if (AUTH_MARKERS.test(trimmed)) throw new OpencliAuthError(failureDetail(result));
     throw new OpencliCommandError(command, `unparseable output: ${trimmed.slice(0, 200)}`);
   }
+  const envelope = envelopeSchema.safeParse(parsed);
+  if (!envelope.success) return parsed;
+  if (!envelope.data.ok) throwForFailure(command, result);
+  return envelope.data.data;
 }
 
 // ── whoami ────────────────────────────────────────────────────────────────
@@ -312,6 +366,15 @@ export interface LinkedInReplyReceipt extends LinkedInSnapshotMessage {
 /** A reply receipt must carry the same provider id as the history mirror. */
 export function parseLinkedInReply(result: OpencliResult, threadId: string): LinkedInReplyReceipt {
   if (result.code === null) {
+    throw new OpencliCommandError(
+      "linkedin reply",
+      "Send outcome is unknown. Check LinkedIn before retrying.",
+    );
+  }
+  const envelope = parseEnvelope(result.stdout);
+  if (envelope && !envelope.ok && envelope.error.outcome === "unknown") {
+    // OpenCLI marks a command whose browser step may still have run, such as
+    // a daemon timeout after the send was dispatched.
     throw new OpencliCommandError(
       "linkedin reply",
       "Send outcome is unknown. Check LinkedIn before retrying.",

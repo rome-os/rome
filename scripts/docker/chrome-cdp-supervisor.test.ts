@@ -180,6 +180,7 @@ sleep 0.1
     expect(chromeArgs).toContain("--use-gl=angle");
     expect(chromeArgs).toContain("--use-angle=swiftshader-webgl");
     expect(chromeArgs).toContain("--enable-unsafe-swiftshader");
+    expect(chromeArgs).toContain("--disable-backgrounding-occluded-windows");
     expect(chromeArgs).not.toContain("--disable-gpu");
     expect(chromeArgs.filter((arg) => arg.startsWith("--disable-features="))).toEqual([
       "--disable-features=IgnoreDuplicateNavs",

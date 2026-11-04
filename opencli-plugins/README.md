@@ -46,8 +46,8 @@ OpenCLI daemon, and the browser image installs the extension through a managed p
 The extension download requires access to the Chrome Web Store on first startup.
 The dev browser sidecar shares the Rome container's network namespace and reaches the same daemon.
 
-`opencli profile list` lists connected browsers. Pass `--profile <name-or-id>` to choose
-one explicitly. An unavailable explicit profile fails instead of selecting another browser.
+`opencli profile list` lists saved and connected browser profiles, and `connected` marks the ones
+that can run commands. Pass `--profile <name-or-id>` to choose one explicitly. An unavailable explicit profile fails instead of selecting another browser.
 For manual CDP debugging, pass `--cdp-endpoint http://127.0.0.1:9222`.
 Rome does not inject a CDP endpoint into agent processes.
 
@@ -80,7 +80,7 @@ Both startup install loops also register these folders across all profiles.
 
 Plugins load after built-ins and user adapters. With the OpenCLI sequential-discovery fix released and pinned in Rome's Dockerfiles,
 `user-*` plugins load after `rome-*` and win on command conflicts. Only the matching `site/name` command is replaced.
-The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Dockerfile bump must wait for the fork release containing the fix.
+The current `@yunfanye/opencli@2.0.3` pin does not guarantee that order, because it discovers plugins concurrently. That order needs a fork release containing the fix.
 
 ## Rome-owned commands
 

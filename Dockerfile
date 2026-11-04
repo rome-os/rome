@@ -241,7 +241,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # top-level --registry (the mirror), producing a 404.
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.293 @openai/codex@0.160.0 && \
-    npm install -g @yunfanye/opencli@1.8.8
+    npm install -g @yunfanye/opencli@2.0.3
 
 RUN curl -fsSL --retry 5 --retry-delay 2 https://composio.dev/install | COMPOSIO_INSTALL_DIR=/usr/local/lib/composio bash -s -- "$COMPOSIO_CLI_VERSION" && \
     ln -sf /usr/local/lib/composio/composio /usr/local/bin/composio && \

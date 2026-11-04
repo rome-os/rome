@@ -9,7 +9,7 @@ const CONTACT_SETTLE_MS = 3_000;
 const CONTACT_QUIET_MS = 1_000;
 // Time an extraction round trip needs beyond its in-page waits, including the row settle.
 const EXTRACTION_RESERVE_MS = 2_000 + CONTACT_SETTLE_MS;
-// OpenCLI 1.8.8's CDP page waits up to 30s for the load event, then up to 1s for the DOM to settle.
+// OpenCLI 2.0.3's CDP page, like 1.8.8's, waits up to 30s for the load event, then up to 1s for the DOM to settle.
 const NAVIGATION_RESERVE_MS = 31_000;
 
 export function buildProfileProbeScript() {

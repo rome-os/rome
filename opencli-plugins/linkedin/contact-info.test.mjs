@@ -212,7 +212,7 @@ test("navigation failures keep their error type instead of becoming contact stat
 });
 
 test("the opener skips an overlay navigation that the CDP page's 31s navigation would carry past the deadline", async (t) => {
-  // OpenCLI 1.8.8's CDP page waits up to 30s for the load event and 1s for the DOM to settle.
+  // OpenCLI 2.0.3's CDP page waits up to 30s for the load event and 1s for the DOM to settle.
   const page = linkedInPage(t, {
     panelOn: ["overlay"],
     gotoMs: (target) => (target === CONTACT_URL ? 31_000 : 3_000),

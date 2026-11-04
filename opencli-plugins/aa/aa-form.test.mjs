@@ -266,3 +266,28 @@ test("missing homepage controls time out without submitting", async (t) => {
   );
   assert.equal(b.submitted(), null);
 });
+
+test("selects the session's own inactive tab before clicking, and leaves other listings alone", async (t) => {
+  for (const [tabs, expected] of [
+    [[{ page: "TAB-1", active: false }], ["TAB-1"]],
+    [[{ page: "TAB-1", active: true }], []],
+    [
+      [
+        { page: "TAB-1", active: false },
+        { page: "TAB-2", active: true },
+      ],
+      [],
+    ],
+  ]) {
+    const b = browser(t);
+    const selected = [];
+    b.page.tabs = async () => tabs;
+    b.page.selectTab = async (id) => {
+      assert.equal(b.submitted(), null);
+      selected.push(id);
+    };
+    await submitAaSearch(b.page, search(), { now: b.now });
+    assert.deepEqual(selected, expected);
+    assert.ok(b.submitted());
+  }
+});

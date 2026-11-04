@@ -416,9 +416,10 @@ If it helps, I can rewrite this as a compact executive summary.
     expect(result).toEqual({ status: "ok", data: "**OK**" });
     expect(fake.calls[0]).toEqual([
       "browser",
-      expect.stringMatching(/^rome-chatgpt-chat-/),
       "open",
       "https://chatgpt.com/",
+      "--session",
+      expect.stringMatching(/^rome-chatgpt-chat-/),
     ]);
     expect(fake.subcommands().at(-1)).toBe("close");
     expect(buildBrowserScriptExpressionMock).toHaveBeenCalledWith(

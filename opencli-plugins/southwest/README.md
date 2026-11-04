@@ -47,7 +47,7 @@ Unavailable products do not become zero-dollar or zero-point fares.
 - `seats_left` preserves the displayed fare inventory hint when present. Null means Southwest did not display a count.
 - `search_url` opens the same search. Prices can change before booking. Optional baggage, seat, and other extras are not added.
 
-Use `-f json` or `-f yaml` for the complete result. Table output shows the main flight and pricing fields.
+The default JSON output and `-f yaml` carry the complete result. `-f table` shows the main flight and pricing fields.
 
 ## Browser requirements and failure behavior
 

@@ -106,8 +106,22 @@ export function readDeltaForm() {
   };
 }
 
+// OpenCLI 2 refuses clicks and key presses on a hidden page. A persistent
+// session reuses its tab, which turns inactive once another session opens a
+// tab in the shared adapter window, so select it first. This mirrors
+// OpenCLI's own activateSlotTab: a session that lists exactly its own tab
+// is selected, and any other listing is left alone.
+async function activateSessionTab(page) {
+  if (typeof page.tabs !== "function" || typeof page.selectTab !== "function") return;
+  const tabs = await page.tabs();
+  if (Array.isArray(tabs) && tabs.length === 1 && tabs[0]?.page && !tabs[0].active) {
+    await page.selectTab(tabs[0].page);
+  }
+}
+
 /** Submits homepage widgets. Does not build a search URL or select a fare. */
 export async function submitDeltaSearch(page, search, { now = Date.now } = {}) {
+  await activateSessionTab(page);
   const deadline = now() + search.timeout * 1000;
   const waitFor = async (predicate, description) => {
     while (now() <= deadline) {

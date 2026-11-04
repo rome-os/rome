@@ -339,3 +339,87 @@ describe("parseThreadParticipants", () => {
     expect(() => parseThreadParticipants(ok(JSON.stringify([])))).toThrow(OpencliCommandError);
   });
 });
+
+describe("OpenCLI 2 result envelopes", () => {
+  const envelope = (data: unknown) => ok(JSON.stringify({ ok: true, data }));
+  const failure = (code: number, error: Record<string, unknown>): OpencliResult => ({
+    code,
+    stdout: `${JSON.stringify({ ok: false, error: { ...error, exitCode: code } })}\n`,
+    stderr: "",
+  });
+  const receipt = {
+    status: "sent",
+    thread_id: "thread",
+    message_id: "provider-id",
+    sender_is_self: true,
+    sent_at: "2026-09-09T12:00:00Z",
+  };
+
+  it("reads each command's data the same as OpenCLI 1.8's bare output", () => {
+    const identity = { logged_in: true, site: "linkedin", public_id: "jane-doe", name: "Jane Doe" };
+    expect(parseWhoami(envelope(identity))).toEqual(parseWhoami(ok(JSON.stringify(identity))));
+
+    const inbox = [{ thread_url: "https://x/", thread_id: "t1", unread: true }];
+    expect(parseInbox(envelope(inbox))).toEqual(parseInbox(ok(JSON.stringify(inbox))));
+
+    const participants = [
+      { thread_id: "t1", participant_id: "ACoAAAda0001", name: "Ada Lovelace", is_self: false },
+    ];
+    expect(parseThreadParticipants(envelope(participants))).toEqual(
+      parseThreadParticipants(ok(JSON.stringify(participants))),
+    );
+
+    expect(parseLinkedInReply(envelope([receipt]), "thread")).toMatchObject({
+      messageId: "provider-id",
+      threadId: "thread",
+    });
+  });
+
+  it("classifies an AUTH_REQUIRED envelope as OpencliAuthError with its message and hint", () => {
+    const signedOut = failure(77, {
+      code: "AUTH_REQUIRED",
+      message: "LinkedIn li_at cookie missing",
+      hint: "Please open Chrome or Chromium and log in to https://linkedin.com",
+    });
+    expect(() => parseWhoami(signedOut)).toThrow(
+      "LinkedIn li_at cookie missing (AUTH_REQUIRED). Please open Chrome or Chromium and log in to https://linkedin.com",
+    );
+    expect(() => parseInbox(signedOut)).toThrow(OpencliAuthError);
+    expect(() => parseLinkedInReply(signedOut, "thread")).toThrow(OpencliAuthError);
+  });
+
+  it("names the envelope's message and code for any other failure", () => {
+    const disconnected = failure(69, {
+      code: "BROWSER_CONNECT",
+      message: "Browser Bridge extension not connected",
+    });
+    expect(() => parseThreadSnapshot(disconnected)).toThrow(OpencliCommandError);
+    expect(() => parseThreadSnapshot(disconnected)).toThrow(
+      "opencli linkedin thread-snapshot failed: Browser Bridge extension not connected (BROWSER_CONNECT)",
+    );
+  });
+
+  it("keeps the plugin's auth-wall phrasing inside an envelope as an auth failure", () => {
+    const authWall = failure(1, {
+      code: "COMMAND_EXEC",
+      message: "reading this thread requires an active signed-in LinkedIn browser session.",
+    });
+    expect(() => parseThreadParticipants(authWall)).toThrow(OpencliAuthError);
+  });
+
+  it("treats an error envelope that exits 0 as a failure, not as data", () => {
+    const result = { ...failure(0, { code: "COMMAND_EXEC", message: "empty page" }), code: 0 };
+    expect(() => parseInbox(result)).toThrow("empty page (COMMAND_EXEC)");
+  });
+
+  it("reports a reply whose browser step may still have run as an unknown outcome", () => {
+    const timedOut = failure(75, {
+      code: "command_result_unknown",
+      message: "Browser exec command timed out after 120s; it may still complete in the browser.",
+      outcome: "unknown",
+    });
+    expect(() => parseLinkedInReply(timedOut, "thread")).toThrow(
+      "Send outcome is unknown. Check LinkedIn before retrying.",
+    );
+  });
+});

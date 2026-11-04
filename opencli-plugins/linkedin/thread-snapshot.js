@@ -1,4 +1,4 @@
-// Overrides clis/linkedin/thread-snapshot.js from @yunfanye/opencli 1.8.8.
+// Overrides clis/linkedin/thread-snapshot.js from @yunfanye/opencli 2.0.3.
 // Keep the API URL discovery in sync when upstream changes LinkedIn messaging queries.
 import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
