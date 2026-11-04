@@ -12,6 +12,7 @@ import { ChatAdapters } from "./connections/chat-adapter.js";
 import { ChatAddresses } from "./connections/chat-addresses.js";
 import { chatKey, type ChatKey } from "./connections/chat-ids.js";
 import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapter.js";
+import { dashboardChatAdapter } from "./chats/dashboard/dashboard-chat-adapter.js";
 import { recordedSends } from "./connections/recorded-sends.js";
 import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
@@ -39,7 +40,8 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
     platformOfChannel: deps.platformOfChannel,
     channelsOn: deps.channelsOn,
     addresses,
-    platforms: { [EMAIL_PLATFORM]: emailChatAdapter },
+    // PROTOTYPE: the dashboard as a platform with its own adapter.
+    platforms: { [EMAIL_PLATFORM]: emailChatAdapter, webchat: dashboardChatAdapter },
     keyOf(ref: ChatRef): ChatKey {
       const chat = chats.get(ref);
       if (!chat) throw new Error(`No chat ${ref.platform}:${ref.id}`);
