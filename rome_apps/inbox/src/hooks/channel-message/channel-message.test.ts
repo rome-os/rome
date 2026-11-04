@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { SendRefused } from "@rome-os/app-runtime";
 import type {
   ActionEngineLike,
   Channel,
@@ -223,6 +224,23 @@ describe("ChannelMessageHook", () => {
     });
     expect(harness.get).not.toHaveBeenCalled();
     expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it("answers again without the quote where the platform cannot quote", async () => {
+    harness.send.mockRejectedValueOnce(
+      new SendRefused("reply_unaddressable", "whatsapp cannot quote a message"),
+    );
+
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ text: "/stop", addressing: "mention", thread: { kind: "group" } }),
+    );
+
+    expect(harness.send).toHaveBeenNthCalledWith(1, TELEGRAM_ID, "chat-1", {
+      text: "Stopped.",
+      replyToMessageId: "message-1",
+    });
+    expect(harness.send).toHaveBeenNthCalledWith(2, TELEGRAM_ID, "chat-1", { text: "Stopped." });
   });
 
   it("swallows an ambient group /stop instead of sending it to the model", async () => {

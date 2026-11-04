@@ -11,6 +11,7 @@ import {
   type AppRuntimeRepositories,
   type DetachedRunActionOptions,
   type RunActionOptions,
+  isSendRefused,
   type RomeAppDefinition as SdkRomeAppDefinition,
 } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
@@ -253,7 +254,12 @@ export function createRomeAppContext(
       if (err instanceof Error && err.name === "ActionWorkerExitError") {
         throw new ActionInvocationError(name, "worker_failure", message);
       }
-      throw new ActionInvocationError(name, "handler_error", message);
+      throw new ActionInvocationError(
+        name,
+        "handler_error",
+        message,
+        isSendRefused(err) ? err.reason : undefined,
+      );
     }
     return toWireShape(result, name, "result");
   };

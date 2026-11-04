@@ -19,7 +19,7 @@ import {
   type ChatInputCommandInteraction,
   type AutocompleteInteraction,
 } from "discord.js";
-import { chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
+import { SendRefused, chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
 import type {
   APIRequest,
   RateLimitData,
@@ -1413,6 +1413,15 @@ Use \`/channel agent clear\` to undo.`,
     }
 
     const targetChannel = await this.replyChannel(channel as SendableChannel, replyTo);
+    // Rome answers a Discord message only in a thread opened on it. Anywhere
+    // else the answer would land unquoted, so it is refused before anything
+    // goes out.
+    if (replyTo && targetChannel === channel) {
+      throw new SendRefused(
+        "reply_unaddressable",
+        "discord answers a message only in a thread opened on it, which this chat does not allow",
+      );
+    }
 
     try {
       let messageId: string | undefined;

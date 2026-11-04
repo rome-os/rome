@@ -68,6 +68,25 @@ describe("DiscordAdapter.send", () => {
     });
     expect(channel.send).not.toHaveBeenCalled();
   });
+
+  it("refuses a reply where it would land outside a thread, and sends nothing", async () => {
+    const channel = {
+      id: "discord-dm-1",
+      type: ChannelType.DM,
+      isTextBased: () => true,
+      isThread: () => false,
+      send: rs.fn(),
+    };
+    const adapter = new DiscordAdapter({ botToken: "test-token" });
+    Object.assign(adapter, {
+      client: { channels: { fetch: rs.fn().mockResolvedValue(channel) } },
+    });
+
+    await expect(
+      adapter.send(channel.id as ChatId, { text: "Re", replyToMessageId: "123456789012345678" }),
+    ).rejects.toMatchObject({ name: "SendRefused", reason: "reply_unaddressable" });
+    expect(channel.send).not.toHaveBeenCalled();
+  });
 });
 
 describe("DiscordAdapter.replyDelivery", () => {

@@ -1,4 +1,9 @@
-import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
+import {
+  ActionInvocationError,
+  createAppLogger,
+  getCurrentActionContext,
+  isCoreMainAgentId,
+} from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -445,7 +450,7 @@ async function handleTrustedMessage(
       });
       return { status: "ok", data: { action: "streamed", response, streamed } };
     }
-    await deps.appContext.runAction("send_message", {
+    await sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -471,7 +476,7 @@ async function handleTrustedMessage(
   log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
 
   if (envoyResult.action === "approve") {
-    await deps.appContext.runAction("send_message", {
+    await sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -582,7 +587,7 @@ async function handleUntrustedMessage(
   });
 
   if (decision.action === "replied" && decision.response) {
-    await deps.appContext.runAction("send_message", {
+    await sendAnswer(deps, {
       channel,
       threadId,
       text: decision.response,
@@ -854,4 +859,22 @@ export function createMessageHandlerAction(
 
 export function createAction(config: ActionConfig, deps: MessageHandlerRuntimeDeps): Action {
   return createMessageHandlerAction(config, deps);
+}
+
+/** Send an answer that quotes the message it answers. Where the platform
+ *  cannot quote, the send is refused, and the answer goes again without the
+ *  quote: the quote is the inbox's own choice, not the agent's words. */
+export async function sendAnswer(
+  deps: Pick<MessageHandlerRuntimeDeps, "appContext">,
+  input: Record<string, unknown> & { replyToMessageId?: string },
+): Promise<void> {
+  try {
+    await deps.appContext.runAction("send_message", input);
+  } catch (err) {
+    const unquotable =
+      err instanceof ActionInvocationError && err.refusal === "reply_unaddressable";
+    if (!unquotable || input.replyToMessageId === undefined) throw err;
+    const { replyToMessageId: _quote, ...unquoted } = input;
+    await deps.appContext.runAction("send_message", unquoted);
+  }
 }
