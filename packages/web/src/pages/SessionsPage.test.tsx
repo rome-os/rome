@@ -830,18 +830,18 @@ describe("SessionsPage explorer", () => {
     fireEvent.click(screen.getByRole("button", { name: /Filter/ }));
     const typeField = await screen.findByRole("combobox", { name: "Type" });
     fireEvent.keyDown(typeField, { key: "Enter" });
-    fireEvent.click(await screen.findByRole("option", { name: /Automation/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Action run/ }));
     await waitFor(() =>
       expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: "action" })),
     );
 
     // What is set shows as a removable chip under the toolbar.
-    const chip = await screen.findByRole("button", { name: "Clear Type: Automation" });
+    const chip = await screen.findByRole("button", { name: "Clear Type: Action run" });
     fireEvent.click(chip);
     await waitFor(() =>
       expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: undefined })),
     );
-    expect(screen.queryByRole("button", { name: "Clear Type: Automation" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear Type: Action run" })).toBeNull();
 
     // The table header carries the order: first click takes the field at its
     // useful end, a second reverses it.

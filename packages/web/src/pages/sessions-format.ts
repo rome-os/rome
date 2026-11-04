@@ -10,7 +10,7 @@ export const SESSION_TYPE_LABELS: Record<RomeSessionType, string> = {
   webchat: "Chat",
   webchat_handoff: "Handoff",
   channel: "Channel",
-  action: "Automation",
+  action: "Action run",
   fork: "Branch",
   subagent: "Subagent",
 };

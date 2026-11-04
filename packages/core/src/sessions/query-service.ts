@@ -207,7 +207,7 @@ function sessionTypeLabel(type: string): string {
       webchat: "Chat",
       webchat_handoff: "Handoff",
       channel: "Channel",
-      action: "Automation",
+      action: "Action run",
       subagent: "Subagent",
       fork: "Branch",
     }[type] ?? titleCase(type)
@@ -240,7 +240,7 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
       humanize(session.triggerName) ??
       humanize(session.triggerActionName) ??
       humanize(session.agentName) ??
-      `Automation ${shortIdentifier(session.id)}`
+      `Action run ${shortIdentifier(session.id)}`
     );
   }
   if (session.type === "subagent") {
