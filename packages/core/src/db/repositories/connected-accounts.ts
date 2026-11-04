@@ -72,6 +72,22 @@ export class ConnectedAccountsRepository {
     return claimed?.accountId ? { platform: claimed.platform, accountId: claimed.accountId } : null;
   }
 
+  /** Whether a grant, as `exec` sees it, reaches `account`. */
+  grantReaches(exec: Exec, account: AccountKey): boolean {
+    return (
+      exec
+        .select({ custody: connectionGrants.custody })
+        .from(connectionGrants)
+        .where(
+          and(
+            eq(connectionGrants.platform, account.platform),
+            eq(connectionGrants.accountId, account.accountId),
+          ),
+        )
+        .get() !== undefined
+    );
+  }
+
   /** Make the connected account for the account `connectionId` reaches, in
    *  `exec` (the transaction that connects it), with `agent` or none. A
    *  connected account that already exists keeps its agent, and a connection

@@ -531,8 +531,13 @@ async function main() {
           return;
         case "disconnected": {
           // A revoked grant names no account, so its channel record does,
-          // read before the channel is vacated.
-          const account = event.account ?? connectedAccounts.accountOf(tx, connection.id);
+          // read before the channel is vacated. A stale record can name an
+          // account another connection's grant reaches now, and that
+          // connection keeps its agent.
+          const recorded = event.account ? null : connectedAccounts.accountOf(tx, connection.id);
+          const account =
+            event.account ??
+            (recorded && !connectedAccounts.grantReaches(tx, recorded) ? recorded : null);
           channelRecords.vacate(tx, connection.id);
           if (account) connectedAccounts.remove(tx, account);
           connectedAccounts.forgetUnplaced(tx, connection.id);

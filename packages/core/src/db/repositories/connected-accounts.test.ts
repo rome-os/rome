@@ -190,4 +190,12 @@ describe("ConnectedAccountsRepository", () => {
 
     expect(accounts.accountOf(db, "c1")).toEqual({ platform: "telegram", accountId: "bot-9" });
   });
+
+  it("tells whether a grant reaches an account", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1", "bot-1");
+
+    expect(accounts.grantReaches(db, { platform: "telegram", accountId: "bot-1" })).toBe(true);
+    expect(accounts.grantReaches(db, { platform: "telegram", accountId: "bot-2" })).toBe(false);
+  });
 });
