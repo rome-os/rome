@@ -410,11 +410,11 @@ describe("recordedSends", () => {
     });
   });
 
-  it("refuse a chat-style quote of an email in another thread, or on a new email, and send nothing", async () => {
+  it("refuse a chat-style quote of an email Rome does not hold in the thread, on a new email, or at a blank address, and send nothing", async () => {
     idOf = (n) => `<m-${n}@mail.example.com>`;
     await send("email").send("thread-7" as ChatId, { text: "Booked?" });
 
-    for (const address of ["thread-9", "bob@example.com"]) {
+    for (const address of ["thread-9", "bob@example.com", ""]) {
       await expect(
         send("email").send(address as ChatId, {
           text: "Thanks",
@@ -422,6 +422,13 @@ describe("recordedSends", () => {
         }),
       ).rejects.toMatchObject({ reason: "reply_unaddressable" });
     }
+    // An email Rome does not hold sits in a thread only the provider knows.
+    await expect(
+      send("email").send("thread-7" as ChatId, {
+        text: "Thanks",
+        replyToMessageId: "<unheld@mail.example.com>",
+      }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
     expect(sent).toHaveLength(1);
   });
 
