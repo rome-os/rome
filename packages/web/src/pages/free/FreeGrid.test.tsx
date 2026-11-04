@@ -186,9 +186,11 @@ describe("FreeGrid mobile header", () => {
           Response.json(
             url === "/api/settings"
               ? {}
-              : url === "/api/concierge/alerts"
+              : url === "/api/concierge/following"
                 ? {
-                    repos: [{ repo: "acme/widgets", login: "octo-me", kinds: [] }],
+                    items: [
+                      { source: "github", target: "acme/widgets", account: "octo-me", kinds: [] },
+                    ],
                     rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
                   }
                 : url.startsWith("/api/concierge/tasks")
@@ -242,7 +244,7 @@ describe("FreeGrid mobile header", () => {
     expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
     const following = await waitFor(() => {
       const found = header(container).querySelector<HTMLElement>("[data-concierge-following-pill]");
-      expect(found?.getAttribute("aria-label")).toBe("Following, 1 repo");
+      expect(found?.getAttribute("aria-label")).toBe("Following, 1 item");
       return found!;
     });
     // Beside Tasks, at the same level.

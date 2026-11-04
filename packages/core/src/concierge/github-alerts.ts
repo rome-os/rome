@@ -2,7 +2,7 @@
 // The routine trigger narrows each event type by repo and action; the checks
 // here, which need the guardian's login, drop the rest before any model sees it.
 
-import type { ConciergeAlertKind } from "@rome/api-types/concierge";
+import type { ConciergeFollowKind } from "@rome/api-types/concierge";
 import type { EventFilterCondition } from "../routines/types.js";
 import type { AlertEvent } from "./alerts.js";
 
@@ -12,7 +12,7 @@ const EXCERPT_CHARS = 300;
 
 export interface GithubAlertType {
   /** GitHub's event name, such as `pull_request`. */
-  type: ConciergeAlertKind;
+  type: ConciergeFollowKind<"github">;
   /** Conditions the routine trigger checks beyond the repo. */
   filter: EventFilterCondition[];
 }

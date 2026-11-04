@@ -3,11 +3,12 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
-  CONCIERGE_ALERT_DEFAULT_RULES,
-  CONCIERGE_ALERT_MAX_SPACING_MINUTES,
-  CONCIERGE_ALERT_MAX_TURNS_PER_HOUR,
-  type ConciergeAlertRepoDto,
-  type ConciergeAlertRules,
+  CONCIERGE_FOLLOW_DEFAULT_RULES,
+  CONCIERGE_FOLLOW_MAX_SPACING_MINUTES,
+  CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR,
+  CONCIERGE_FOLLOW_SOURCES,
+  type ConciergeFollowedItemDto,
+  type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
 import {
   EmptyState,
@@ -34,30 +35,32 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h3 className="px-3 pb-1 pt-4 text-aux text-muted-foreground">{children}</h3>;
 }
 
-function RepoSection({
-  entry,
+function ItemSection({
+  item,
   onKind,
   onStop,
 }: {
-  entry: ConciergeAlertRepoDto;
-  onKind: (kind: ConciergeAlertRepoDto["kinds"][number]["kind"], enabled: boolean) => void;
+  item: ConciergeFollowedItemDto;
+  onKind: (kind: string, enabled: boolean) => void;
   onStop: () => void;
 }) {
   const { t } = useTranslation("chat");
+  // A mailbox is followed for itself; a repo for the guardian's GitHub login.
+  const account = item.account && item.account !== item.target ? item.account : null;
   return (
-    <section data-following-repo={entry.repo}>
-      <div className="flex items-center gap-2 pl-3 pr-2 pb-1 pt-4">
+    <section data-following-item={`${item.source}:${item.target}`}>
+      <div className="flex items-center gap-2 pl-3 pr-2 pb-1 pt-3">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-ui text-foreground">{entry.repo}</h3>
-          {entry.login ? (
+          <h4 className="truncate text-ui text-foreground">{item.target}</h4>
+          {account ? (
             <p className="truncate text-aux text-subtle-foreground">
-              {t("concierge.following.asLogin", { login: entry.login })}
+              {t("concierge.following.asLogin", { login: account })}
             </p>
           ) : null}
         </div>
         <IconButton
           size="xs"
-          label={t("concierge.following.stopRepo", { repo: entry.repo })}
+          label={t("concierge.following.stopItem", { target: item.target })}
           icon={<X />}
           onClick={onStop}
           className="text-muted-foreground hover:text-foreground"
@@ -65,15 +68,15 @@ function RepoSection({
       </div>
       <List asChild>
         <ul>
-          {entry.kinds.map(({ kind, enabled }) => {
-            const id = `following-${entry.repo}-${kind}`;
+          {item.kinds.map(({ kind, enabled }) => {
+            const id = `following-${item.source}-${item.target}-${kind}`;
             return (
               <ListRow key={kind} asChild size="md">
                 <li>
                   <ListRowContent>
                     <label htmlFor={id} className="block min-w-0">
                       <ListRowTitle className="truncate">
-                        {t(`concierge.following.kinds.${kind}`)}
+                        {t(`concierge.following.kinds.${item.source}.${kind}`)}
                       </ListRowTitle>
                     </label>
                   </ListRowContent>
@@ -140,8 +143,8 @@ function RulesSection({
   rules,
   onChange,
 }: {
-  rules: ConciergeAlertRules;
-  onChange: (change: Partial<ConciergeAlertRules>) => void;
+  rules: ConciergeFollowRules;
+  onChange: (change: Partial<ConciergeFollowRules>) => void;
 }) {
   const { t } = useTranslation("chat");
   const quiet = rules.quietHours;
@@ -166,7 +169,7 @@ function RulesSection({
                 id="following-max-turns"
                 value={rules.maxTurnsPerHour}
                 min={1}
-                max={CONCIERGE_ALERT_MAX_TURNS_PER_HOUR}
+                max={CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR}
                 onSave={(maxTurnsPerHour) => onChange({ maxTurnsPerHour })}
               />
             </li>
@@ -182,7 +185,7 @@ function RulesSection({
                 id="following-min-spacing"
                 value={rules.minSpacingMinutes}
                 min={0}
-                max={CONCIERGE_ALERT_MAX_SPACING_MINUTES}
+                max={CONCIERGE_FOLLOW_MAX_SPACING_MINUTES}
                 onSave={(minSpacingMinutes) => onChange({ minSpacingMinutes })}
               />
             </li>
@@ -240,20 +243,25 @@ function RulesSection({
 }
 
 /**
- * What the Concierge follows for the guardian: the GitHub repos, each event
- * kind on or off, and the rules that bound how often their events wake it.
- * The Concierge starts following a repo from chat; this panel tunes it.
+ * What the Concierge follows for the guardian, grouped by source (GitHub
+ * repos, the Gmail inbox), each kind of event on or off, and the rules that
+ * bound how often their events wake it, shared by every source. The Concierge
+ * starts a follow from chat; this panel tunes it.
  */
 export function ConciergeFollowingPanel() {
   const { t } = useTranslation("chat");
-  const { data, loaded, setKind, stopRepo, setRules } = useConciergeFollowing();
+  const { data, loaded, setKind, unfollow, setRules } = useConciergeFollowing();
   if (!loaded) return null;
-  const repos = data?.repos ?? [];
-  const rules = data?.rules ?? CONCIERGE_ALERT_DEFAULT_RULES;
+  const items = data?.items ?? [];
+  const rules = data?.rules ?? CONCIERGE_FOLLOW_DEFAULT_RULES;
   const failed = () => toast.error(t("concierge.following.saveFailed"));
+  const groups = CONCIERGE_FOLLOW_SOURCES.map((source) => ({
+    source,
+    items: items.filter((item) => item.source === source),
+  })).filter((group) => group.items.length > 0);
   return (
     <div className="flex h-full flex-col overflow-y-auto pb-safe">
-      {repos.length === 0 ? (
+      {groups.length === 0 ? (
         <EmptyState className="py-8">
           <EmptyStateIcon>
             <BellRing />
@@ -262,21 +270,32 @@ export function ConciergeFollowingPanel() {
           <EmptyStateDescription>{t("concierge.following.emptyDescription")}</EmptyStateDescription>
         </EmptyState>
       ) : (
-        repos.map((entry) => (
-          <RepoSection
-            key={entry.repo}
-            entry={entry}
-            onKind={(kind, enabled) =>
-              setKind.mutate({ repo: entry.repo, kind, enabled }, { onError: failed })
-            }
-            onStop={() =>
-              stopRepo.mutate(entry.repo, {
-                onSuccess: () =>
-                  toast.success(t("concierge.following.stopped", { repo: entry.repo })),
-                onError: failed,
-              })
-            }
-          />
+        groups.map((group) => (
+          <section key={group.source} data-following-source={group.source}>
+            <SectionHeading>{t(`concierge.following.sources.${group.source}`)}</SectionHeading>
+            {group.items.map((item) => (
+              <ItemSection
+                key={item.target}
+                item={item}
+                onKind={(kind, enabled) =>
+                  setKind.mutate(
+                    { source: item.source, target: item.target, kind, enabled },
+                    { onError: failed },
+                  )
+                }
+                onStop={() =>
+                  unfollow.mutate(
+                    { source: item.source, target: item.target },
+                    {
+                      onSuccess: () =>
+                        toast.success(t("concierge.following.stopped", { target: item.target })),
+                      onError: failed,
+                    },
+                  )
+                }
+              />
+            ))}
+          </section>
         ))
       )}
       <RulesSection

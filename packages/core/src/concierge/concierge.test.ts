@@ -356,10 +356,11 @@ describe("Concierge tools", () => {
       "chat_list",
       "chat_forward",
       "chat_card",
-      "alerts_watch",
-      "alerts_unwatch",
-      "alerts_list",
-      "alerts_configure",
+      "follow_github_repo",
+      "follow_gmail",
+      "following_list",
+      "unfollow",
+      "following_configure",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
     const off = setup({ enabled: false });

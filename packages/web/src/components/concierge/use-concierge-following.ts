@@ -1,20 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-  ConciergeAlertKind,
-  ConciergeAlertRepoDto,
-  ConciergeAlertRules,
-  ConciergeAlertsResponse,
+  ConciergeFollowedItemDto,
+  ConciergeFollowingResponse,
+  ConciergeFollowRules,
+  ConciergeFollowSource,
 } from "@rome/api-types/concierge";
 import { fetchJson } from "@/lib/fetch-json";
 
 const CONCIERGE_FOLLOWING_QUERY_KEY = ["concierge-following"] as const;
 const REFETCH_MS = 30_000;
 
-const repoPath = (repo: string) =>
-  `/api/concierge/alerts/repos/${repo.split("/").map(encodeURIComponent).join("/")}`;
+/** One followed item as a request names it. */
+export interface FollowedRef {
+  source: ConciergeFollowSource;
+  target: string;
+}
+
+const itemPath = ({ source, target }: FollowedRef, rest = "") =>
+  `/api/concierge/following/${source}${rest}?target=${encodeURIComponent(target)}`;
+
+const sameItem = (a: FollowedRef, b: FollowedRef) => a.source === b.source && a.target === b.target;
 
 /**
- * The repos the Concierge follows and the rules that bound their alerts. The
+ * What the Concierge follows and the rules that bound its events. The
  * Concierge changes them from chat with no live event, so the list is read
  * again on focus and every half minute while something shows it.
  */
@@ -25,48 +33,47 @@ export function useConciergeFollowing() {
     staleTime: 0,
     refetchInterval: REFETCH_MS,
     queryFn: ({ signal }) =>
-      fetchJson<ConciergeAlertsResponse>("/api/concierge/alerts", { signal, fallback: "" }),
+      fetchJson<ConciergeFollowingResponse>("/api/concierge/following", {
+        signal,
+        fallback: "",
+      }),
   });
-  const update = (change: (prev: ConciergeAlertsResponse) => ConciergeAlertsResponse) =>
-    queryClient.setQueryData<ConciergeAlertsResponse>(CONCIERGE_FOLLOWING_QUERY_KEY, (prev) =>
+  const update = (change: (prev: ConciergeFollowingResponse) => ConciergeFollowingResponse) =>
+    queryClient.setQueryData<ConciergeFollowingResponse>(CONCIERGE_FOLLOWING_QUERY_KEY, (prev) =>
       prev ? change(prev) : prev,
     );
   const refresh = () => queryClient.invalidateQueries({ queryKey: CONCIERGE_FOLLOWING_QUERY_KEY });
 
   const setKind = useMutation({
-    mutationFn: async (input: { repo: string; kind: ConciergeAlertKind; enabled: boolean }) =>
+    mutationFn: async (input: FollowedRef & { kind: string; enabled: boolean }) =>
       (
-        await fetchJson<{ repo: ConciergeAlertRepoDto }>(
-          `${repoPath(input.repo)}/kinds/${input.kind}`,
-          {
-            method: "PUT",
-            json: { enabled: input.enabled },
-            fallback: "",
-          },
+        await fetchJson<{ item: ConciergeFollowedItemDto }>(
+          itemPath(input, `/kinds/${encodeURIComponent(input.kind)}`),
+          { method: "PUT", json: { enabled: input.enabled }, fallback: "" },
         )
-      ).repo,
-    onSuccess: (repo) =>
+      ).item,
+    onSuccess: (item) =>
       update((prev) => ({
         ...prev,
-        repos: prev.repos.map((entry) => (entry.repo === repo.repo ? repo : entry)),
+        items: prev.items.map((entry) => (sameItem(entry, item) ? item : entry)),
       })),
     onError: () => void refresh(),
   });
 
-  const stopRepo = useMutation({
-    mutationFn: async (repo: string) => {
-      await fetchJson<unknown>(repoPath(repo), { method: "DELETE", fallback: "" });
-      return repo;
+  const unfollow = useMutation({
+    mutationFn: async (ref: FollowedRef) => {
+      await fetchJson<unknown>(itemPath(ref), { method: "DELETE", fallback: "" });
+      return ref;
     },
-    onSuccess: (repo) =>
-      update((prev) => ({ ...prev, repos: prev.repos.filter((entry) => entry.repo !== repo) })),
+    onSuccess: (ref) =>
+      update((prev) => ({ ...prev, items: prev.items.filter((entry) => !sameItem(entry, ref)) })),
     onError: () => void refresh(),
   });
 
   const setRules = useMutation({
-    mutationFn: async (change: Partial<ConciergeAlertRules>) =>
+    mutationFn: async (change: Partial<ConciergeFollowRules>) =>
       (
-        await fetchJson<{ rules: ConciergeAlertRules }>("/api/concierge/alerts/rules", {
+        await fetchJson<{ rules: ConciergeFollowRules }>("/api/concierge/following/rules", {
           method: "PUT",
           json: change,
           fallback: "",
@@ -76,5 +83,5 @@ export function useConciergeFollowing() {
     onError: () => void refresh(),
   });
 
-  return { data: query.data, loaded: query.isFetched, setKind, stopRepo, setRules };
+  return { data: query.data, loaded: query.isFetched, setKind, unfollow, setRules };
 }

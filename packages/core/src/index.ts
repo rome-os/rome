@@ -160,8 +160,9 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
-import { startConciergeAlerts } from "./concierge/alert-events.js";
+import { startConciergeFollowing } from "./concierge/following.js";
 import { githubLoginReader } from "./concierge/github-alerts.js";
+import { gmailConnector } from "./concierge/gmail-alerts.js";
 import { readGithubAccessTokenFile } from "./lib/provider-token-files.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
@@ -1201,17 +1202,19 @@ async function main() {
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);
-  startConciergeAlerts(concierge, {
+  // The Concierge subscribes at each source as itself, like its own `defer` would.
+  const runAsConcierge = (name: string, args: Record<string, unknown>) =>
+    actionEngine.run(name, args, { initiator: "agent:core:concierge" });
+  const gmail = gmailConnector(runAsConcierge);
+  startConciergeFollowing(concierge, {
     routines: routinesRepo,
     routineEngine,
     actions: actionRegistry,
-    // Subscribes at GitHub as the Concierge, like its own `defer` would.
-    prepareWait: (eventName, filter) =>
-      eventSources.prepareWait(eventName, filter, (name, args) =>
-        actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
-      ),
+    prepareWait: (eventName, filter) => eventSources.prepareWait(eventName, filter, runAsConcierge),
+    subscribeGmail: () => gmail.subscribe(),
     settings: settingsRepo,
     githubLogin: githubLoginReader(readGithubAccessTokenFile),
+    gmailAddress: () => gmail.address(),
   });
 
   const approvalHandler = new ApprovalHandler(

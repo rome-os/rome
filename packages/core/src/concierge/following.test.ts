@@ -2,23 +2,23 @@ import { describe, expect, it } from "@rstest/core";
 import type { Action } from "../actions/types.js";
 import type { Routine } from "../routines/types.js";
 import {
-  type ConciergeAlertDeps,
+  type ConciergeFollowing,
+  type ConciergeFollowingDeps,
   renderAlertBatch,
-  startConciergeAlerts,
+  startConciergeFollowing,
   validateRulesChange,
-} from "./alert-events.js";
-import type { ConciergeAlerts } from "./alert-events.js";
+} from "./following.js";
 import type { ConciergeService } from "./service.js";
 
-function setup(options: { login?: string | null; refuse?: string } = {}) {
+function setup(options: { login?: string | null; refuse?: string; gmail?: string | Error } = {}) {
   const routines = new Map<string, Routine>();
   const active = new Set<string>();
   const settings = new Map<string, unknown>();
   const actions: Action[] = [];
   const waits: string[] = [];
-  let alerts: ConciergeAlerts | null = null;
+  let following: ConciergeFollowing | null = null;
   let nextId = 0;
-  const deps: ConciergeAlertDeps = {
+  const deps: ConciergeFollowingDeps = {
     routines: {
       create: async (data) => {
         const id = `r${nextId++}`;
@@ -31,7 +31,7 @@ function setup(options: { login?: string | null; refuse?: string } = {}) {
         return r
           ? { ...r, key: r.key ?? null, managedBy: null, lastFiredAt: null, nextRunAt: null }
           : null;
-      }) as unknown as ConciergeAlertDeps["routines"]["findById"],
+      }) as unknown as ConciergeFollowingDeps["routines"]["findById"],
       listRoutines: async () => [...routines.values()],
       deleteIfNoActiveRuns: async (id) => {
         routines.delete(id);
@@ -55,31 +55,40 @@ function setup(options: { login?: string | null; refuse?: string } = {}) {
     },
     settings: {
       get: (async (key: string) =>
-        settings.get(key) ?? null) as ConciergeAlertDeps["settings"]["get"],
+        settings.get(key) ?? null) as ConciergeFollowingDeps["settings"]["get"],
       set: async (key, value) => void settings.set(key, value),
     },
+    subscribeGmail: async () => {
+      waits.push("gmail");
+      return { ok: true };
+    },
     githubLogin: async () => (options.login === undefined ? "octo-me" : options.login),
+    gmailAddress: async () => {
+      if (options.gmail instanceof Error) throw options.gmail;
+      return options.gmail ?? "Me@Example.com";
+    },
   };
   const service = {
     isEnabled: async () => true,
     findChatId: async () => "concierge",
     runSystemTurn: async () => undefined,
-    attachAlerts: (attached: ConciergeAlerts | null) => (alerts = attached),
+    attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
-  const stop = startConciergeAlerts(service, deps);
-  return { routines, active, actions, settings, waits, alerts: () => alerts!, stop };
+  const stop = startConciergeFollowing(service, deps);
+  return { routines, active, actions, settings, waits, following: () => following!, stop };
 }
 
-describe("Concierge alert subscriptions", () => {
-  it("watches a repo with one live routine per event type, keyed so a second watch reuses them", async () => {
+describe("What the Concierge follows", () => {
+  it("follows a repo with one live routine per event kind, keyed so a second follow reuses them", async () => {
     const s = setup();
-    const result = await s.alerts().watch({ repo: "acme/widgets" });
-    expect(result.login).toBe("octo-me");
-    expect(result.loginSource).toBe("github");
+    const result = await s.following().followGithubRepo({ repo: "acme/widgets" });
+    expect(result).toMatchObject({ source: "github", target: "acme/widgets", account: "octo-me" });
+    expect(result.accountFrom).toBe("connected");
     expect(s.routines.size).toBe(5);
     expect(s.active.size).toBe(5);
-    const routine = [...s.routines.values()].find((r) => r.args.type === "pull_request")!;
-    expect(routine.actionName).toBe("core:concierge_alert");
+    const routine = [...s.routines.values()].find((r) => r.args.kind === "pull_request")!;
+    expect(routine.key).toBe("concierge-follow:github:acme/widgets:pull_request");
+    expect(routine.actionName).toBe("core:concierge_follow_event");
     expect(routine.trigger).toEqual({
       type: "event-bus",
       eventName: "provider:event:github.pull_request",
@@ -88,12 +97,13 @@ describe("Concierge alert subscriptions", () => {
         { field: "action", equals: "review_requested" },
       ],
     });
-    await s.alerts().watch({ repo: "acme/widgets" });
+    await s.following().followGithubRepo({ repo: "acme/widgets" });
     expect(s.routines.size).toBe(5);
-    expect(await s.alerts().list()).toEqual([
+    expect(await s.following().list()).toEqual([
       {
-        repo: "acme/widgets",
-        login: "octo-me",
+        source: "github",
+        target: "acme/widgets",
+        account: "octo-me",
         kinds: [
           { kind: "pull_request", enabled: true },
           { kind: "pull_request_review", enabled: true },
@@ -103,25 +113,27 @@ describe("Concierge alert subscriptions", () => {
         ],
       },
     ]);
-    expect((await s.alerts().unwatch("acme/widgets")).removed).toBe(5);
+    expect((await s.following().unfollow("github", "acme/widgets")).removed).toBe(5);
     expect(s.routines.size).toBe(0);
     expect(s.active.size).toBe(0);
   });
 
   it("asks for the login only when no GitHub account is connected", async () => {
     const s = setup({ login: null });
-    await expect(s.alerts().watch({ repo: "acme/widgets" })).rejects.toThrow(
+    await expect(s.following().followGithubRepo({ repo: "acme/widgets" })).rejects.toThrow(
       /Ask for their GitHub username/,
     );
-    const result = await s.alerts().watch({ repo: "acme/widgets", login: "@octo-me" });
-    expect(result).toMatchObject({ login: "octo-me", loginSource: "given" });
+    const result = await s
+      .following()
+      .followGithubRepo({ repo: "acme/widgets", login: "@octo-me" });
+    expect(result).toMatchObject({ account: "octo-me", accountFrom: "given" });
   });
 
   it("returns the subscription's refusal and creates no routine", async () => {
     const s = setup({
       refuse: "GitHub refused the webhook on acme/widgets: admin access is required",
     });
-    await expect(s.alerts().watch({ repo: "acme/widgets" })).rejects.toThrow(
+    await expect(s.following().followGithubRepo({ repo: "acme/widgets" })).rejects.toThrow(
       /admin access is required/,
     );
     expect(s.routines.size).toBe(0);
@@ -129,7 +141,7 @@ describe("Concierge alert subscriptions", () => {
 
   it("queues only events that concern the guardian", async () => {
     const s = setup();
-    const action = s.actions.find((a) => a.config.name === "core:concierge_alert")!;
+    const action = s.actions.find((a) => a.config.name === "core:concierge_follow_event")!;
     expect(action.config.visibility).toBe("explicit");
     const payload = {
       action: "review_requested",
@@ -140,20 +152,35 @@ describe("Concierge alert subscriptions", () => {
     };
     const run = (args: Record<string, unknown>) => action.execute(args, {} as never);
     expect(
-      await run({ type: "pull_request", login: "octo-me", __triggerPayload: payload }),
+      await run({
+        source: "github",
+        kind: "pull_request",
+        account: "octo-me",
+        __triggerPayload: payload,
+      }),
     ).toEqual({
       status: "ok",
       data: { queued: "review_requested" },
     });
     expect(
-      await run({ type: "pull_request", login: "octo-me", __triggerPayload: payload }),
+      await run({
+        source: "github",
+        kind: "pull_request",
+        account: "octo-me",
+        __triggerPayload: payload,
+      }),
     ).toEqual({
       status: "ok",
       data: { ignored: "already queued" },
     });
     const notMine = { ...payload, requested_reviewer: { login: "bob" } };
     expect(
-      await run({ type: "pull_request", login: "octo-me", __triggerPayload: notMine }),
+      await run({
+        source: "github",
+        kind: "pull_request",
+        account: "octo-me",
+        __triggerPayload: notMine,
+      }),
     ).toEqual({
       status: "ok",
       data: { ignored: "not for the guardian" },
@@ -161,28 +188,28 @@ describe("Concierge alert subscriptions", () => {
     s.stop();
   });
 
-  it("turns one kind off, keeps it off when the repo is watched again, and drops its trigger", async () => {
+  it("turns one kind off, keeps it off when the repo is followed again, and drops its trigger", async () => {
     const s = setup();
-    await s.alerts().watch({ repo: "acme/widgets" });
-    const updated = await s.alerts().setKind("acme/widgets", "workflow_run", false);
+    await s.following().followGithubRepo({ repo: "acme/widgets" });
+    const updated = await s.following().setKind("github", "acme/widgets", "workflow_run", false);
     expect(updated?.kinds.find((k) => k.kind === "workflow_run")).toEqual({
       kind: "workflow_run",
       enabled: false,
     });
     expect(s.active.size).toBe(4);
-    await s.alerts().watch({ repo: "acme/widgets" });
+    await s.following().followGithubRepo({ repo: "acme/widgets" });
     expect(s.active.size).toBe(4);
-    await s.alerts().setKind("acme/widgets", "workflow_run", true);
+    await s.following().setKind("github", "acme/widgets", "workflow_run", true);
     expect(s.active.size).toBe(5);
-    expect(await s.alerts().setKind("acme/other", "workflow_run", true)).toBeNull();
+    expect(await s.following().setKind("github", "acme/other", "workflow_run", true)).toBeNull();
   });
 
-  it("subscribes the enabled kinds of watched repos again on reconcile", async () => {
+  it("subscribes the enabled kinds of every followed item again on reconcile", async () => {
     const s = setup();
-    await s.alerts().watch({ repo: "acme/widgets" });
-    await s.alerts().setKind("acme/widgets", "issue_comment", false);
+    await s.following().followGithubRepo({ repo: "acme/widgets" });
+    await s.following().setKind("github", "acme/widgets", "issue_comment", false);
     s.waits.length = 0;
-    await s.alerts().reconcile();
+    await s.following().reconcile();
     expect(s.waits).toEqual([
       "provider:event:github.pull_request",
       "provider:event:github.pull_request_review",
@@ -191,16 +218,71 @@ describe("Concierge alert subscriptions", () => {
     ]);
   });
 
+  it("follows the connected Gmail inbox as its address, with one kind and no filter", async () => {
+    const s = setup();
+    const result = await s.following().followGmail();
+    expect(result).toEqual({
+      source: "gmail",
+      target: "me@example.com",
+      account: "me@example.com",
+      accountFrom: "connected",
+      kinds: ["new_mail"],
+    });
+    expect(s.waits).toEqual(["gmail"]);
+    const [routine] = [...s.routines.values()];
+    expect(routine?.key).toBe("concierge-follow:gmail:me@example.com:new_mail");
+    expect(routine?.trigger).toEqual({
+      type: "event-bus",
+      eventName: "provider:event:gmail.gmail_new_gmail_message",
+    });
+    await s.following().followGithubRepo({ repo: "acme/widgets" });
+    // GitHub first, then Gmail.
+    expect((await s.following().list()).map((item) => item.source)).toEqual(["github", "gmail"]);
+    expect((await s.following().unfollow("gmail", "me@example.com")).removed).toBe(1);
+  });
+
+  it("passes on the connector's reason when no Gmail account is connected, and creates no routine", async () => {
+    const s = setup({ gmail: new Error('No active connected account for "gmail"') });
+    await expect(s.following().followGmail()).rejects.toThrow(/No active connected account/);
+    expect(s.routines.size).toBe(0);
+  });
+
+  it("queues new mail from a person, and drops a newsletter", async () => {
+    const s = setup();
+    const action = s.actions.find((a) => a.config.name === "core:concierge_follow_event")!;
+    const run = (payload: Record<string, unknown>) =>
+      action.execute(
+        { source: "gmail", kind: "new_mail", account: "me@example.com", __triggerPayload: payload },
+        {} as never,
+      );
+    const mail = {
+      message_id: "m1",
+      thread_id: "t1",
+      sender: "Ana <ana@x.io>",
+      to: "me@example.com",
+      subject: "Lunch?",
+      label_ids: ["INBOX", "UNREAD"],
+    };
+    expect(await run(mail)).toEqual({ status: "ok", data: { queued: "new_mail" } });
+    expect(
+      await run({ ...mail, message_id: "m2", label_ids: ["INBOX", "CATEGORY_PROMOTIONS"] }),
+    ).toEqual({
+      status: "ok",
+      data: { ignored: "not for the guardian" },
+    });
+    s.stop();
+  });
+
   it("keeps the rules with defaults: 2 turns an hour, 15 minutes apart, no quiet hours", async () => {
     const s = setup();
-    expect(await s.alerts().rules()).toEqual({
+    expect(await s.following().rules()).toEqual({
       maxTurnsPerHour: 2,
       minSpacingMinutes: 15,
       quietHours: null,
     });
-    await s.alerts().setRules({ quietHours: { start: "22:00", end: "08:00" } });
-    await s.alerts().setRules({ maxTurnsPerHour: 4 });
-    expect(await s.alerts().rules()).toEqual({
+    await s.following().setRules({ quietHours: { start: "22:00", end: "08:00" } });
+    await s.following().setRules({ maxTurnsPerHour: 4 });
+    expect(await s.following().rules()).toEqual({
       maxTurnsPerHour: 4,
       minSpacingMinutes: 15,
       quietHours: { start: "22:00", end: "08:00" },

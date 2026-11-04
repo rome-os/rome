@@ -12,8 +12,8 @@
 // Held events live in memory only: a restart drops them.
 
 import {
-  CONCIERGE_ALERT_DEFAULT_RULES,
-  type ConciergeAlertRules,
+  CONCIERGE_FOLLOW_DEFAULT_RULES,
+  type ConciergeFollowRules,
   type ConciergeQuietHours,
 } from "@rome/api-types/concierge";
 import { createLogger } from "../logger.js";
@@ -21,7 +21,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("concierge-alerts");
 
 export const BATCH_DELAY_MS = 60_000;
-export const MIN_SPACING_MS = CONCIERGE_ALERT_DEFAULT_RULES.minSpacingMinutes * 60_000;
+export const MIN_SPACING_MS = CONCIERGE_FOLLOW_DEFAULT_RULES.minSpacingMinutes * 60_000;
 export const HOUR_MS = 60 * 60_000;
 /** Events a batch shows; the rest are given as a count. */
 export const MAX_EVENTS_PER_BATCH = 20;
@@ -60,7 +60,7 @@ export interface AlertDeps {
   /** Runs the batch as a system turn and settles when the turn ends. */
   deliver(batch: AlertBatch): Promise<void>;
   /** The rate limit now. Read on every scheduling, so a change applies at once. */
-  limits?(): Pick<ConciergeAlertRules, "maxTurnsPerHour" | "minSpacingMinutes">;
+  limits?(): Pick<ConciergeFollowRules, "maxTurnsPerHour" | "minSpacingMinutes">;
 }
 
 export class AlertCoalescer {
@@ -105,7 +105,7 @@ export class AlertCoalescer {
     if (this.firstAt === null) return null;
     const now = this.deps.now();
     const { maxTurnsPerHour, minSpacingMinutes } =
-      this.deps.limits?.() ?? CONCIERGE_ALERT_DEFAULT_RULES;
+      this.deps.limits?.() ?? CONCIERGE_FOLLOW_DEFAULT_RULES;
     const recent = this.turns.filter((start) => start > now - HOUR_MS);
     const last = recent.at(-1);
     // The oldest turn whose hour must pass before one more fits.

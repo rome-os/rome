@@ -14,7 +14,7 @@ import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { SessionManager } from "../core/session-manager.js";
 import type { ModelSelectionId } from "../core/model-selector.js";
 import { createLogger } from "../logger.js";
-import type { ConciergeAlerts } from "./alert-events.js";
+import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
 
@@ -86,7 +86,7 @@ export class ConciergeService {
   private creating: Promise<string> | null = null;
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
-  private attachedAlerts: ConciergeAlerts | null = null;
+  private attachedFollowing: ConciergeFollowing | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
 
@@ -194,14 +194,14 @@ export class ConciergeService {
     this.taskEvents = events;
   }
 
-  /** The alert subscriptions, once {@link startConciergeAlerts} has started them. */
-  attachAlerts(alerts: ConciergeAlerts | null): void {
-    this.attachedAlerts = alerts;
+  /** What the Concierge follows, once {@link startConciergeFollowing} has started it. */
+  attachFollowing(following: ConciergeFollowing | null): void {
+    this.attachedFollowing = following;
   }
 
-  get alerts(): ConciergeAlerts {
-    if (!this.attachedAlerts) throw new Error("Alerts are not running");
-    return this.attachedAlerts;
+  get following(): ConciergeFollowing {
+    if (!this.attachedFollowing) throw new Error("Following is not running");
+    return this.attachedFollowing;
   }
 
   /** The id of the todo row that links a chat, or null. Read before the chat is deleted. */

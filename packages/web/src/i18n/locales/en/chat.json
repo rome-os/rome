@@ -79,21 +79,13 @@
     "following": {
       "title": "Following",
       "close": "Close following",
-      "pill_one": "Following, {{count}} repo",
-      "pill_other": "Following, {{count}} repos",
+      "pill_one": "Following, {{count}} item",
+      "pill_other": "Following, {{count}} items",
       "pillIdle": "Following",
-      "emptyTitle": "No repos followed",
-      "emptyDescription": "Ask the Concierge to follow a GitHub repo, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
+      "emptyTitle": "Nothing followed yet",
+      "emptyDescription": "Ask the Concierge to follow a GitHub repo or your Gmail, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
       "asLogin": "For @{{login}}",
-      "stopRepo": "Stop following {{repo}}",
-      "stopped": "Stopped following {{repo}}",
-      "kinds": {
-        "pull_request": "Review requests for you",
-        "pull_request_review": "Reviews of your PRs",
-        "issue_comment": "Comments and mentions",
-        "pull_request_review_comment": "Review comments on your PRs",
-        "workflow_run": "Your failed CI runs"
-      },
+      "stopped": "Stopped following {{target}}",
       "rules": "Rules",
       "maxTurnsPerHour": "Most messages per hour",
       "minSpacingMinutes": "Minutes between messages",
@@ -101,7 +93,24 @@
       "quietHoursHint": "Events wait until quiet hours end, then arrive as one summary.",
       "quietStart": "From",
       "quietEnd": "Until",
-      "saveFailed": "Could not save"
+      "saveFailed": "Could not save",
+      "sources": {
+        "github": "GitHub",
+        "gmail": "Gmail"
+      },
+      "kinds": {
+        "github": {
+          "pull_request": "Review requests for you",
+          "pull_request_review": "Reviews of your PRs",
+          "issue_comment": "Comments and mentions",
+          "pull_request_review_comment": "Review comments on your PRs",
+          "workflow_run": "Your failed CI runs"
+        },
+        "gmail": {
+          "new_mail": "New mail from people"
+        }
+      },
+      "stopItem": "Stop following {{target}}"
     }
   },
   "reply": {

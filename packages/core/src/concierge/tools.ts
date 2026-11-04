@@ -28,7 +28,7 @@ import {
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
-import { buildAlertTools } from "./alert-tools.js";
+import { buildFollowingTools } from "./following-tools.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 
 const log = createLogger("concierge-tools");
@@ -653,6 +653,6 @@ export async function buildConciergeTools(
           return { sent: "Shown; the guardian sees the card.", messageId };
         }),
     },
-    ...buildAlertTools(service),
+    ...buildFollowingTools(service),
   ];
 }

@@ -58,15 +58,24 @@ export interface ConciergeTaskUpsertEvent {
   task: ConciergeTaskDto;
 }
 
-/** The GitHub event kinds an alert watch covers, by GitHub's event name. */
-export const CONCIERGE_ALERT_KINDS = [
-  "pull_request",
-  "pull_request_review",
-  "issue_comment",
-  "pull_request_review_comment",
-  "workflow_run",
-] as const;
-export type ConciergeAlertKind = (typeof CONCIERGE_ALERT_KINDS)[number];
+/** Where a followed item lives. */
+export const CONCIERGE_FOLLOW_SOURCES = ["github", "gmail"] as const;
+export type ConciergeFollowSource = (typeof CONCIERGE_FOLLOW_SOURCES)[number];
+
+/** The kinds of event each source can tell the guardian about. */
+export const CONCIERGE_FOLLOW_KINDS = {
+  /** By GitHub's event name. */
+  github: [
+    "pull_request",
+    "pull_request_review",
+    "issue_comment",
+    "pull_request_review_comment",
+    "workflow_run",
+  ],
+  gmail: ["new_mail"],
+} as const satisfies Record<ConciergeFollowSource, readonly string[]>;
+export type ConciergeFollowKind<S extends ConciergeFollowSource = ConciergeFollowSource> =
+  (typeof CONCIERGE_FOLLOW_KINDS)[S][number];
 
 /** A daily window in the guardian's timezone, `HH:mm` to `HH:mm`; it may wrap midnight. */
 export interface ConciergeQuietHours {
@@ -74,32 +83,34 @@ export interface ConciergeQuietHours {
   end: string;
 }
 
-/** How often outside events may wake the Concierge. */
-export interface ConciergeAlertRules {
+/** How often events from what the Concierge follows may wake it, across every source. */
+export interface ConciergeFollowRules {
   maxTurnsPerHour: number;
   minSpacingMinutes: number;
   /** Off when null. */
   quietHours: ConciergeQuietHours | null;
 }
 
-export const CONCIERGE_ALERT_DEFAULT_RULES: ConciergeAlertRules = {
+export const CONCIERGE_FOLLOW_DEFAULT_RULES: ConciergeFollowRules = {
   maxTurnsPerHour: 2,
   minSpacingMinutes: 15,
   quietHours: null,
 };
-export const CONCIERGE_ALERT_MAX_TURNS_PER_HOUR = 12;
-export const CONCIERGE_ALERT_MAX_SPACING_MINUTES = 120;
+export const CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR = 12;
+export const CONCIERGE_FOLLOW_MAX_SPACING_MINUTES = 120;
 
-/** One watched repo with its event kinds. */
-export interface ConciergeAlertRepoDto {
-  repo: string;
-  /** The GitHub login the alerts are judged against. */
-  login: string;
-  kinds: { kind: ConciergeAlertKind; enabled: boolean }[];
+/** One thing the Concierge follows: a GitHub repo, a mailbox. */
+export interface ConciergeFollowedItemDto {
+  source: ConciergeFollowSource;
+  /** What is followed at the source: `owner/repo`, a mailbox address. */
+  target: string;
+  /** Who the events are judged for: the guardian's GitHub login, their address. */
+  account: string;
+  kinds: { kind: ConciergeFollowKind; enabled: boolean }[];
 }
 
-/** `GET /concierge/alerts`. */
-export interface ConciergeAlertsResponse {
-  repos: ConciergeAlertRepoDto[];
-  rules: ConciergeAlertRules;
+/** `GET /concierge/following`. */
+export interface ConciergeFollowingResponse {
+  items: ConciergeFollowedItemDto[];
+  rules: ConciergeFollowRules;
 }

@@ -9,7 +9,7 @@ import { ConciergeFollowingPanel } from "./ConciergeFollowingPanel";
 import { useConciergeFollowing } from "./use-concierge-following";
 
 /**
- * The Concierge chat's second header pill, beside Tasks: how many repos it
+ * The Concierge chat's second header pill, beside Tasks: how many things it
  * follows for the guardian, else a quiet icon. It opens what it follows in the
  * side pane's Following tab, or in a full-height sheet where the pane would
  * take the whole width.
@@ -18,7 +18,7 @@ export function ConciergeFollowingPill() {
   const { t } = useTranslation("chat");
   const pane = useToolFollowing();
   const { data } = useConciergeFollowing();
-  const count = data?.repos?.length ?? 0;
+  const count = data?.items?.length ?? 0;
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // The tab belongs to this chat: it goes when the chat does.

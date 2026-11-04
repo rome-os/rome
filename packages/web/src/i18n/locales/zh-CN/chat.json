@@ -79,21 +79,13 @@
     "following": {
       "title": "关注",
       "close": "关闭关注",
-      "pill_one": "关注，{{count}} 个仓库",
-      "pill_other": "关注，{{count}} 个仓库",
+      "pill_one": "关注，{{count}} 项",
+      "pill_other": "关注，{{count}} 项",
       "pillIdle": "关注",
-      "emptyTitle": "没有关注的仓库",
-      "emptyDescription": "让 Concierge 关注一个 GitHub 仓库，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
+      "emptyTitle": "还没有关注的内容",
+      "emptyDescription": "让 Concierge 关注一个 GitHub 仓库或你的 Gmail，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
       "asLogin": "按 @{{login}} 判断",
-      "stopRepo": "取消关注 {{repo}}",
-      "stopped": "已取消关注 {{repo}}",
-      "kinds": {
-        "pull_request": "请你审查",
-        "pull_request_review": "你的 PR 收到审查",
-        "issue_comment": "评论和提及",
-        "pull_request_review_comment": "你的 PR 收到行内评论",
-        "workflow_run": "你的 CI 失败"
-      },
+      "stopped": "已取消关注 {{target}}",
       "rules": "规则",
       "maxTurnsPerHour": "每小时最多消息数",
       "minSpacingMinutes": "两条消息间隔（分钟）",
@@ -101,7 +93,24 @@
       "quietHoursHint": "这段时间内的事件会等到结束后汇总成一条。",
       "quietStart": "从",
       "quietEnd": "到",
-      "saveFailed": "保存失败"
+      "saveFailed": "保存失败",
+      "sources": {
+        "github": "GitHub",
+        "gmail": "Gmail"
+      },
+      "kinds": {
+        "github": {
+          "pull_request": "请你审查",
+          "pull_request_review": "你的 PR 收到审查",
+          "issue_comment": "评论和提及",
+          "pull_request_review_comment": "你的 PR 收到行内评论",
+          "workflow_run": "你的 CI 失败"
+        },
+        "gmail": {
+          "new_mail": "来自真人的新邮件"
+        }
+      },
+      "stopItem": "取消关注 {{target}}"
     }
   },
   "reply": {

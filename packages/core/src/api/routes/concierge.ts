@@ -1,15 +1,13 @@
 import {
-  CONCIERGE_ALERT_KINDS,
   CONCIERGE_DONE_DAYS,
-  type ConciergeAlertKind,
-  type ConciergeAlertsResponse,
+  type ConciergeFollowingResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import { validateRulesChange } from "../../concierge/alert-events.js";
+import { isFollowKind, isFollowSource, validateRulesChange } from "../../concierge/following.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -87,10 +85,12 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     });
   });
 
-  // The Alerts tab: the repos the Concierge watches, with each event kind, and
-  // the rules that bound how often alerts wake it. Read from the alert
-  // routines and the `conciergeAlerts` setting. Guardian-only; 404 while off.
-  const alertsOf = async (c: Context) => {
+  // The Following panel: what the Concierge follows, by source, with each kind
+  // of event, and the rules that bound how often their events wake it. Read
+  // from the follow routines and the `conciergeFollowing` setting. A target
+  // is a query parameter, since a mailbox address does not fit a path
+  // segment. Guardian-only; 404 while off.
+  const followingOf = async (c: Context) => {
     if (!(await resolveGuardianSession(c, deps.db))) {
       return { error: c.json({ error: "Not authenticated" }, 401) };
     }
@@ -98,49 +98,61 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     if (!concierge || !(await concierge.isEnabled())) {
       return { error: c.json({ error: "Concierge is off" }, 404) };
     }
-    return { alerts: concierge.alerts };
+    return { following: concierge.following };
   };
-  const repoParam = (c: Context) => `${c.req.param("owner")}/${c.req.param("name")}`;
+  const itemOf = (c: Context) => {
+    const source = c.req.param("source");
+    const target = c.req.query("target")?.trim();
+    if (!isFollowSource(source))
+      return { error: c.json({ error: `Unknown source ${source}` }, 400) };
+    if (!target) return { error: c.json({ error: "target is required" }, 400) };
+    return { source, target };
+  };
 
-  app.get("/concierge/alerts", async (c) => {
-    const { alerts, error } = await alertsOf(c);
+  app.get("/concierge/following", async (c) => {
+    const { following, error } = await followingOf(c);
     if (error) return error;
     return c.json({
-      repos: await alerts.list(),
-      rules: await alerts.rules(),
-    } satisfies ConciergeAlertsResponse);
+      items: await following.list(),
+      rules: await following.rules(),
+    } satisfies ConciergeFollowingResponse);
   });
 
-  app.put("/concierge/alerts/repos/:owner/:name/kinds/:kind", async (c) => {
-    const { alerts, error } = await alertsOf(c);
+  app.put("/concierge/following/:source/kinds/:kind", async (c) => {
+    const { following, error } = await followingOf(c);
     if (error) return error;
+    const item = itemOf(c);
+    if (item.error) return item.error;
     const kind = c.req.param("kind");
-    const body = await c.req.json<{ enabled?: unknown }>().catch(() => null);
-    if (!(CONCIERGE_ALERT_KINDS as readonly string[]).includes(kind)) {
-      return c.json({ error: `Unknown event kind ${kind}` }, 400);
+    if (!isFollowKind(item.source, kind)) {
+      return c.json({ error: `Unknown kind ${kind} for ${item.source}` }, 400);
     }
-    if (typeof body?.enabled !== "boolean")
+    const body = await c.req.json<{ enabled?: unknown }>().catch(() => null);
+    if (typeof body?.enabled !== "boolean") {
       return c.json({ error: "enabled must be a boolean" }, 400);
-    const repo = await alerts.setKind(repoParam(c), kind as ConciergeAlertKind, body.enabled);
-    if (!repo) return c.json({ error: "Not watched" }, 404);
-    return c.json({ repo });
+    }
+    const updated = await following.setKind(item.source, item.target, kind, body.enabled);
+    if (!updated) return c.json({ error: "Not followed" }, 404);
+    return c.json({ item: updated });
   });
 
-  app.delete("/concierge/alerts/repos/:owner/:name", async (c) => {
-    const { alerts, error } = await alertsOf(c);
+  app.delete("/concierge/following/:source", async (c) => {
+    const { following, error } = await followingOf(c);
     if (error) return error;
-    const result = await alerts.unwatch(repoParam(c));
-    if (result.removed === 0) return c.json({ error: "Not watched" }, 404);
+    const item = itemOf(c);
+    if (item.error) return item.error;
+    const result = await following.unfollow(item.source, item.target);
+    if (result.removed === 0) return c.json({ error: "Not followed" }, 404);
     return c.json(result);
   });
 
-  app.put("/concierge/alerts/rules", async (c) => {
-    const { alerts, error } = await alertsOf(c);
+  app.put("/concierge/following/rules", async (c) => {
+    const { following, error } = await followingOf(c);
     if (error) return error;
     const body = await c.req.json<Record<string, unknown>>().catch(() => null);
     if (!body || typeof body !== "object") return c.json({ error: "Invalid request body" }, 400);
     try {
-      return c.json({ rules: await alerts.setRules(validateRulesChange(body)) });
+      return c.json({ rules: await following.setRules(validateRulesChange(body)) });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }

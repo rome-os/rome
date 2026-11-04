@@ -3,14 +3,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ConciergeAlertsResponse } from "@rome/api-types/concierge";
+import type { ConciergeFollowingResponse } from "@rome/api-types/concierge";
 import i18n from "@/i18n";
 import { ConciergeFollowingPanel } from "./ConciergeFollowingPanel";
 
 const toast = rs.hoisted(() => ({ error: rs.fn(), success: rs.fn() }));
 rs.mock("sonner", () => ({ toast }));
 
-let state: ConciergeAlertsResponse;
+let state: ConciergeFollowingResponse;
 const requests: { method: string; url: string; body?: unknown }[] = [];
 
 function mockServer() {
@@ -27,19 +27,23 @@ function mockServer() {
         headers: { "content-type": "application/json" },
       });
     if (method !== "GET") requests.push({ method, url, body });
-    if (url === "/api/concierge/alerts") return json(state);
-    const kind = url.match(/^\/api\/concierge\/alerts\/repos\/([^/]+)\/([^/]+)\/kinds\/(\w+)$/);
+    if (url === "/api/concierge/following") return json(state);
+    const parsed = new URL(url, "http://rome.test");
+    const target = parsed.searchParams.get("target");
+    const kind = parsed.pathname.match(/^\/api\/concierge\/following\/(\w+)\/kinds\/(\w+)$/);
     if (kind && method === "PUT") {
-      const repo = state.repos.find((entry) => entry.repo === `${kind[1]}/${kind[2]}`)!;
-      repo.kinds = repo.kinds.map((k) =>
-        k.kind === kind[3] ? { ...k, enabled: body.enabled } : k,
+      const item = state.items.find(
+        (entry) => entry.source === kind[1] && entry.target === target,
+      )!;
+      item.kinds = item.kinds.map((k) =>
+        k.kind === kind[2] ? { ...k, enabled: body.enabled } : k,
       );
-      return json({ repo });
+      return json({ item });
     }
-    if (url.startsWith("/api/concierge/alerts/repos/") && method === "DELETE") {
-      return json({ removed: 5 });
+    if (/^\/api\/concierge\/following\/\w+$/.test(parsed.pathname) && method === "DELETE") {
+      return json({ removed: 1 });
     }
-    if (url === "/api/concierge/alerts/rules" && method === "PUT") {
+    if (url === "/api/concierge/following/rules" && method === "PUT") {
       state.rules = { ...state.rules, ...body };
       return json({ rules: state.rules });
     }
@@ -63,14 +67,21 @@ describe("ConciergeFollowingPanel", () => {
   beforeEach(() => {
     requests.length = 0;
     state = {
-      repos: [
+      items: [
         {
-          repo: "acme/widgets",
-          login: "octo-me",
+          source: "github",
+          target: "acme/widgets",
+          account: "octo-me",
           kinds: [
             { kind: "pull_request", enabled: true },
             { kind: "workflow_run", enabled: false },
           ],
+        },
+        {
+          source: "gmail",
+          target: "me@example.com",
+          account: "me@example.com",
+          kinds: [{ kind: "new_mail", enabled: true }],
         },
       ],
       rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
@@ -95,22 +106,41 @@ describe("ConciergeFollowingPanel", () => {
     expect(requests).toEqual([
       {
         method: "PUT",
-        url: "/api/concierge/alerts/repos/acme/widgets/kinds/workflow_run",
+        url: "/api/concierge/following/github/kinds/workflow_run?target=acme%2Fwidgets",
         body: { enabled: true },
       },
     ]);
   });
 
-  it("stops watching a repo", async () => {
+  it("groups what is followed by source, GitHub first", async () => {
+    const { container } = renderPanel();
+    await screen.findByText("me@example.com");
+    const groups = [...container.querySelectorAll("[data-following-source]")];
+    expect(groups.map((group) => group.getAttribute("data-following-source"))).toEqual([
+      "github",
+      "gmail",
+    ]);
+    expect(groups.map((group) => group.querySelector("h3")?.textContent)).toEqual([
+      "GitHub",
+      "Gmail",
+    ]);
+    // A repo names the login it is judged for; a mailbox is its own account.
+    expect(screen.getByText("For @octo-me")).toBeTruthy();
+    expect(screen.queryByText("For @me@example.com")).toBeNull();
+    expect(screen.getByRole("switch", { name: "New mail from people" })).toBeTruthy();
+  });
+
+  it("stops following an item, and shows the empty state once nothing is left", async () => {
     renderPanel();
     await userEvent.click(
-      await screen.findByRole("button", { name: "Stop following acme/widgets" }),
+      await screen.findByRole("button", { name: "Stop following me@example.com" }),
     );
-    await waitFor(() => expect(screen.queryByText("acme/widgets")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("me@example.com")).toBeNull());
     expect(requests).toEqual([
-      { method: "DELETE", url: "/api/concierge/alerts/repos/acme/widgets" },
+      { method: "DELETE", url: "/api/concierge/following/gmail?target=me%40example.com" },
     ]);
-    expect(screen.getByText("No repos followed")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Stop following acme/widgets" }));
+    expect(await screen.findByText("Nothing followed yet")).toBeTruthy();
   });
 
   it("edits the rate limit and turns quiet hours on", async () => {
@@ -121,7 +151,7 @@ describe("ConciergeFollowingPanel", () => {
     await waitFor(() =>
       expect(requests).toContainEqual({
         method: "PUT",
-        url: "/api/concierge/alerts/rules",
+        url: "/api/concierge/following/rules",
         body: { maxTurnsPerHour: 4 },
       }),
     );
@@ -129,7 +159,7 @@ describe("ConciergeFollowingPanel", () => {
     await waitFor(() =>
       expect(requests).toContainEqual({
         method: "PUT",
-        url: "/api/concierge/alerts/rules",
+        url: "/api/concierge/following/rules",
         body: { quietHours: { start: "22:00", end: "08:00" } },
       }),
     );
