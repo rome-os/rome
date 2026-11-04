@@ -7,8 +7,9 @@ When an agent takes part in a chat: what wakes it, what it reads, and where it s
 A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is read off the agent's session, not stored.
 
 - A session is in a chat when it has a speaker there. The session keeps its own id. No table holds speakers and nothing names one by an id of its own.
-- A [chat session](agents.md#chat-session) is born with its speaker. When Chats records a message that wakes an agent with no session in the place yet, Participation creates the session standing there as that account, in the same step. Participation is the one writer of that birth, and a session is never placed in a chat later.
+- A [chat session](agents.md#chat-session) is born with its speaker. It is born when its account first hears a message in the place, whether or not the message wakes the agent, or when Rome opens the place by speaking there first. Participation creates it standing there as that account, in the same step that records the message. Participation is the one writer of that birth, and a session is never placed in a chat later.
 - Ending a chat ends its chat sessions with it.
+- Switching the agent on an account ends the account's chat sessions. New ones are born for the new agent as it hears or speaks, and it reads the same chat history.
 - A session in no chat has no speaker and no place to reply into. A reply from one is refused, never placed in a chat for it.
 
 ## Wake

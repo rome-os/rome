@@ -13,7 +13,7 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 
 One agent's run of work, made of [turns](#turn). A session is not a chat: a chat is made of messages that participants said, a session of what one agent did (Ouou, 2026-11-04).
 
-- A session is known by Rome's own id. It has one agent for its whole life.
+- A session is known by Rome's own id. It has one agent for its whole life: switching the agent on an account ends that account's chat sessions rather than changing their agent ([Participation](participation.md#speaker)).
 - A session either stands in a chat, as a [chat session](#chat-session), or stands in none, as a [subagent](#subagent), a [fork](#fork) or an [action run](#action-run). Which one follows from what started it, and it never changes: a session is born in a chat or in none, and is never placed in one later.
 - The dashboard shows a session as its turns, oldest first, each with its prompt, its steps and its answer. A chat is shown as its messages. The two views read one record, and a turn links the two.
 - How a session runs, its model, its trace and its limits, is in [`concepts/sessions.md`](../concepts/sessions.md).
@@ -46,11 +46,11 @@ A session that stands in a chat: it has a [speaker](participation.md#speaker) th
 
 - It is born in its chat, as that account, and never placed later. How it is born is in [Participation](participation.md#speaker).
 - Its prompts are messages that woke the agent, and its answers are its messages in the chat. Messages it only caught up on are linked to the turn too, as seen, and stay the chat's.
-- It ends with its chat.
+- It ends with its chat, or when the guardian switches the agent on its account.
 
 ## Starter
 
-What started a session that stands in no chat, and receives its answers: the parent session's turn for a subagent, the routine or action that ran an action run, whoever made a fork.
+What started a session that stands in no chat, and receives its answers: the parent session's turn for a subagent, the routine or action that ran an action run, the feature that made a fork, such as a recap or turn feedback.
 
 - A starter is not a participant. A session in no chat has no participants, since nothing in it is said in a place.
 - The dashboard names the starter where a chat session names its chat: "subagent of main", "run of the routine Morning inbox".
@@ -64,13 +64,13 @@ A session that a turn of another session starts to hand work to, and whose answe
 
 ## Fork
 
-A session branched from another session's context at one of its turns. It sees what the source had seen, and nothing it does reaches the source. Its starter is whoever made it, such as a recap or turn feedback.
+A session branched from another session's context at one of its turns. It sees what the source had seen, and nothing it does reaches the source. Its starter is the feature that made it, such as a recap or turn feedback.
 
 ## Action run
 
 A session in which an agent runs an [action](../concepts/actions.md), started by a routine or another action. Its starter is what ran it.
 
-- A message the run sends into a chat is a message of that chat, from Rome, and the run's step leads to it there. Sending it does not make the run a chat session.
+- A run can send a message into a chat as any send goes: to a place, from one of Rome's accounts there ([Chats](chats.md#place)), recorded under that account. The message is the chat's, and the run's step leads to it there. Sending does not make the run a chat session, and it is a send, not a reply.
 
 ## Decided against
 
