@@ -57,6 +57,23 @@ export class ChatAddresses {
     );
   }
 
+  /** Where `account` reaches each chat it has heard somewhere but its key,
+   *  by the chat's key: {@link addressOf} for all of them in one read. */
+  addressesOf(account: Account): Map<string, string> {
+    const rows = this.db
+      .select({ chatKey: chatAddresses.chatKey, address: chatAddresses.address })
+      .from(chatAddresses)
+      .where(
+        and(
+          eq(chatAddresses.platform, account.platform),
+          eq(chatAddresses.accountId, account.id),
+          eq(chatAddresses.threadId, CHAT),
+        ),
+      )
+      .all();
+    return new Map(rows.map((row) => [row.chatKey, row.address]));
+  }
+
   /**
    * Key the chat keyed `from` on `account`'s platform `to` instead, with
    * every address kept for it: a direct message Rome reached at its address

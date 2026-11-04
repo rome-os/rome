@@ -32,6 +32,13 @@ describe("ChatRepository", () => {
     expect(again).toEqual(first);
   });
 
+  it("names a chat started with no name by the first name a later start gives", () => {
+    const unnamed = chats.start(DM, "dm", null);
+    expect(chats.start(DM, "dm", "Alice").name).toBe("Alice");
+    expect(chats.start(DM, "dm", "Bob").name).toBe("Alice");
+    expect(chats.start(DM, "dm", null)).toEqual({ ...unnamed, name: "Alice" });
+  });
+
   it("gives the same key on two platforms two chats", () => {
     const feishu = chats.start(GROUP, "group", null);
     const lark = chats.start(key("lark", "oc_group"), "group", null);

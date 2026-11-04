@@ -38,6 +38,7 @@ import {
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
+import { firstPlacementSecond, placedCreatedAt } from "../speaker-placement.js";
 import {
   isSessionTraceArchived,
   sessionTraceCutoff,
@@ -1060,23 +1061,18 @@ export class WebChatRepository {
         .from(romeSessions)
         .where(eq(romeSessions.id, opened.id))
         .get()?.chatId;
-      const firstOwn =
+      const heardSecond =
         placed == null
-          ? this.db.all<{ at: number | null }>(sql`
-              SELECT min(said_at) AS at FROM chat_messages
-              WHERE chat_id = ${speaker.chat.id} AND thread_id IS ${thread}
-                AND sender_account_id = ${speaker.accountId}
-            `)[0]?.at
-          : null;
-      const heardSecond = Math.min(
-        Math.floor(speaker.at.getTime() / 1000),
-        firstOwn ?? Number.POSITIVE_INFINITY,
-      );
+          ? firstPlacementSecond(
+              this.db,
+              { chatId: speaker.chat.id, threadId: thread, accountId: speaker.accountId },
+              speaker.at,
+            )
+          : Math.floor(speaker.at.getTime() / 1000);
       await this.db
         .update(romeSessions)
         .set({
-          createdAt: sql`CASE WHEN ${romeSessions.chatId} IS NULL AND ${romeSessions.createdAt} >= ${heardSecond}
-            THEN ${heardSecond - 1} ELSE ${romeSessions.createdAt} END`,
+          createdAt: placedCreatedAt(heardSecond),
           chatId: speaker.chat.id,
           chatPlatform: speaker.chat.platform,
           threadId: thread,
