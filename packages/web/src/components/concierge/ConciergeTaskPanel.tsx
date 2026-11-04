@@ -19,9 +19,7 @@ import {
   ListRowDescription,
   ListRowTitle,
 } from "@/components/ui/list-row";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { ConciergeAlertsPanel } from "./ConciergeAlertsPanel";
 import { checkPresses } from "./check-presses";
 import { requestConciergeJump } from "./concierge-jump";
 import { doneMessage, pressText, sendTaskAction } from "./send-task-action";
@@ -182,38 +180,11 @@ function TitleText({ task, finished }: { task: ConciergeTaskDto; finished: boole
 }
 
 /**
- * The Concierge's panel: its task list, and the alerts it watches for the
- * guardian, each on a tab of its own.
- */
-export function ConciergeTaskPanel({ onNavigate }: { onNavigate?: () => void }) {
-  const { t } = useTranslation("chat");
-  const [tab, setTab] = useState<"tasks" | "alerts">("tasks");
-  return (
-    <Tabs
-      value={tab}
-      onValueChange={(value) => setTab(value === "alerts" ? "alerts" : "tasks")}
-      className="flex h-full min-h-0 flex-col gap-0"
-    >
-      <TabsList aria-label={t("concierge.alerts.tabsLabel")} className="mx-2 mt-1 shrink-0">
-        <TabsTrigger value="tasks">{t("concierge.tasks.title")}</TabsTrigger>
-        <TabsTrigger value="alerts">{t("concierge.alerts.tab")}</TabsTrigger>
-      </TabsList>
-      <TabsContent value="tasks" className="min-h-0">
-        <ConciergeTaskList onNavigate={onNavigate} />
-      </TabsContent>
-      <TabsContent value="alerts" className="min-h-0">
-        <ConciergeAlertsPanel />
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-/**
  * The Concierge's task list: what needs the guardian, what it is doing, what is
  * next, what it is watching, and what it finished. Read-only: a button sends the
  * Concierge a message, and the row changes when the Concierge writes it.
  */
-function ConciergeTaskList({ onNavigate }: { onNavigate?: () => void }) {
+export function ConciergeTaskPanel({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation("chat");
   // Finished work is history, so that group starts folded.
   const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["done"]));

@@ -186,27 +186,32 @@ describe("FreeGrid mobile header", () => {
           Response.json(
             url === "/api/settings"
               ? {}
-              : url.startsWith("/api/concierge/tasks")
+              : url === "/api/concierge/alerts"
                 ? {
-                    tasks: [
-                      {
-                        id: "t1",
-                        title: "Blocked",
-                        state: "needs_user",
-                        summary: null,
-                        waitingOn: "an answer",
-                        dueAt: null,
-                        rank: null,
-                        chat: null,
-                        createdAt: 1,
-                        updatedAt: 1,
-                        completedAt: null,
-                        archivedAt: null,
-                        notSynced: false,
-                      },
-                    ],
+                    repos: [{ repo: "acme/widgets", login: "octo-me", kinds: [] }],
+                    rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
                   }
-                : [],
+                : url.startsWith("/api/concierge/tasks")
+                  ? {
+                      tasks: [
+                        {
+                          id: "t1",
+                          title: "Blocked",
+                          state: "needs_user",
+                          summary: null,
+                          waitingOn: "an answer",
+                          dueAt: null,
+                          rank: null,
+                          chat: null,
+                          createdAt: 1,
+                          updatedAt: 1,
+                          completedAt: null,
+                          archivedAt: null,
+                          notSynced: false,
+                        },
+                      ],
+                    }
+                  : [],
           ),
         );
       }),
@@ -235,6 +240,14 @@ describe("FreeGrid mobile header", () => {
     const pill = header(container).querySelector<HTMLElement>("[data-concierge-tasks-pill]")!;
     await waitFor(() => expect(pill.getAttribute("data-state")).toBe("needsYou"));
     expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
+    const following = await waitFor(() => {
+      const found = header(container).querySelector<HTMLElement>("[data-concierge-following-pill]");
+      expect(found?.getAttribute("aria-label")).toBe("Following, 1 repo");
+      return found!;
+    });
+    // Beside Tasks, at the same level.
+    expect(following.parentElement).toBe(pill.parentElement);
+    expect(pill.compareDocumentPosition(following) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
@@ -269,6 +282,7 @@ describe("FreeGrid mobile header", () => {
     const { container } = renderAt("/chat/some-other-chat");
     await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
+    expect(header(container).querySelector("[data-concierge-following-pill]")).toBeNull();
   });
 
   it("leaves the header without it while Concierge is off", async () => {

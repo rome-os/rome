@@ -82,6 +82,9 @@ rs.mock("@/components/chat/use-session-identity", () => ({
 rs.mock("@/components/concierge/ConciergeTasksPill", () => ({
   ConciergeTasksPill: () => <span data-testid="tasks-pill" />,
 }));
+rs.mock("@/components/concierge/ConciergeFollowingPill", () => ({
+  ConciergeFollowingPill: () => <span data-testid="following-pill" />,
+}));
 
 rs.mock("@/pages/free/workspace-context", () => ({
   snapshotWorkspaceForSend: () => null,
@@ -1890,6 +1893,8 @@ describe("Chat Concierge empty state", () => {
     const name = screen.getByText("Concierge");
     expect(name.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(name.parentElement).toBe(pill.parentElement);
+    // Following sits right after Tasks, at the same level.
+    expect(pill.nextElementSibling).toBe(screen.getByTestId("following-pill"));
     // The name keeps its width beside the pill; the label after it gives way.
     expect(name.className).toContain("shrink-0");
     view.unmount();
@@ -1897,6 +1902,7 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
     expect(screen.queryByTestId("tasks-pill")).toBeNull();
+    expect(screen.queryByTestId("following-pill")).toBeNull();
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {

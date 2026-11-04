@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ConciergeAlertsResponse } from "@rome/api-types/concierge";
 import i18n from "@/i18n";
-import { ConciergeAlertsPanel } from "./ConciergeAlertsPanel";
+import { ConciergeFollowingPanel } from "./ConciergeFollowingPanel";
 
 const toast = rs.hoisted(() => ({ error: rs.fn(), success: rs.fn() }));
 rs.mock("sonner", () => ({ toast }));
@@ -51,12 +51,12 @@ function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <ConciergeAlertsPanel />
+      <ConciergeFollowingPanel />
     </QueryClientProvider>,
   );
 }
 
-describe("ConciergeAlertsPanel", () => {
+describe("ConciergeFollowingPanel", () => {
   beforeAll(async () => {
     await i18n.changeLanguage("en");
   });
@@ -104,18 +104,18 @@ describe("ConciergeAlertsPanel", () => {
   it("stops watching a repo", async () => {
     renderPanel();
     await userEvent.click(
-      await screen.findByRole("button", { name: "Stop watching acme/widgets" }),
+      await screen.findByRole("button", { name: "Stop following acme/widgets" }),
     );
     await waitFor(() => expect(screen.queryByText("acme/widgets")).toBeNull());
     expect(requests).toEqual([
       { method: "DELETE", url: "/api/concierge/alerts/repos/acme/widgets" },
     ]);
-    expect(screen.getByText("No repos watched")).toBeTruthy();
+    expect(screen.getByText("No repos followed")).toBeTruthy();
   });
 
   it("edits the rate limit and turns quiet hours on", async () => {
     renderPanel();
-    const perHour = await screen.findByLabelText("Most alerts per hour");
+    const perHour = await screen.findByLabelText("Most messages per hour");
     await userEvent.clear(perHour);
     await userEvent.type(perHour, "4{Enter}");
     await waitFor(() =>
@@ -138,7 +138,7 @@ describe("ConciergeAlertsPanel", () => {
 
   it("puts back a rate limit out of bounds without saving it", async () => {
     renderPanel();
-    const perHour = (await screen.findByLabelText("Most alerts per hour")) as HTMLInputElement;
+    const perHour = (await screen.findByLabelText("Most messages per hour")) as HTMLInputElement;
     await userEvent.clear(perHour);
     await userEvent.type(perHour, "99{Enter}");
     expect(perHour.value).toBe("2");

@@ -76,14 +76,17 @@
         "task": "Build me a simple habit tracker app"
       }
     },
-    "alerts": {
-      "tab": "Alerts",
-      "tabsLabel": "Tasks and alerts",
-      "emptyTitle": "No repos watched",
-      "emptyDescription": "Ask the Concierge to tell you about a GitHub repo, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
+    "following": {
+      "title": "Following",
+      "close": "Close following",
+      "pill_one": "Following, {{count}} repo",
+      "pill_other": "Following, {{count}} repos",
+      "pillIdle": "Following",
+      "emptyTitle": "No repos followed",
+      "emptyDescription": "Ask the Concierge to follow a GitHub repo, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
       "asLogin": "For @{{login}}",
-      "stopRepo": "Stop watching {{repo}}",
-      "stopped": "Stopped watching {{repo}}",
+      "stopRepo": "Stop following {{repo}}",
+      "stopped": "Stopped following {{repo}}",
       "kinds": {
         "pull_request": "Review requests for you",
         "pull_request_review": "Reviews of your PRs",
@@ -92,8 +95,8 @@
         "workflow_run": "Your failed CI runs"
       },
       "rules": "Rules",
-      "maxTurnsPerHour": "Most alerts per hour",
-      "minSpacingMinutes": "Minutes between alerts",
+      "maxTurnsPerHour": "Most messages per hour",
+      "minSpacingMinutes": "Minutes between messages",
       "quietHours": "Quiet hours",
       "quietHoursHint": "Events wait until quiet hours end, then arrive as one summary.",
       "quietStart": "From",

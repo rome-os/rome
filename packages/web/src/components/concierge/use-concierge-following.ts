@@ -7,28 +7,31 @@ import type {
 } from "@rome/api-types/concierge";
 import { fetchJson } from "@/lib/fetch-json";
 
-const CONCIERGE_ALERTS_QUERY_KEY = ["concierge-alerts"] as const;
+const CONCIERGE_FOLLOWING_QUERY_KEY = ["concierge-following"] as const;
+const REFETCH_MS = 30_000;
 
 const repoPath = (repo: string) =>
   `/api/concierge/alerts/repos/${repo.split("/").map(encodeURIComponent).join("/")}`;
 
 /**
- * The repos the Concierge watches and the rules that bound its alerts. Read
- * again whenever the tab opens, since the Concierge changes them from chat.
+ * The repos the Concierge follows and the rules that bound their alerts. The
+ * Concierge changes them from chat with no live event, so the list is read
+ * again on focus and every half minute while something shows it.
  */
-export function useConciergeAlerts() {
+export function useConciergeFollowing() {
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: CONCIERGE_ALERTS_QUERY_KEY,
+    queryKey: CONCIERGE_FOLLOWING_QUERY_KEY,
     staleTime: 0,
+    refetchInterval: REFETCH_MS,
     queryFn: ({ signal }) =>
       fetchJson<ConciergeAlertsResponse>("/api/concierge/alerts", { signal, fallback: "" }),
   });
   const update = (change: (prev: ConciergeAlertsResponse) => ConciergeAlertsResponse) =>
-    queryClient.setQueryData<ConciergeAlertsResponse>(CONCIERGE_ALERTS_QUERY_KEY, (prev) =>
+    queryClient.setQueryData<ConciergeAlertsResponse>(CONCIERGE_FOLLOWING_QUERY_KEY, (prev) =>
       prev ? change(prev) : prev,
     );
-  const refresh = () => queryClient.invalidateQueries({ queryKey: CONCIERGE_ALERTS_QUERY_KEY });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: CONCIERGE_FOLLOWING_QUERY_KEY });
 
   const setKind = useMutation({
     mutationFn: async (input: { repo: string; kind: ConciergeAlertKind; enabled: boolean }) =>

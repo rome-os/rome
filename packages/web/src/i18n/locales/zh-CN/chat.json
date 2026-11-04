@@ -76,14 +76,17 @@
         "task": "帮我做一个简单的习惯打卡 app"
       }
     },
-    "alerts": {
-      "tab": "提醒",
-      "tabsLabel": "任务和提醒",
+    "following": {
+      "title": "关注",
+      "close": "关闭关注",
+      "pill_one": "关注，{{count}} 个仓库",
+      "pill_other": "关注，{{count}} 个仓库",
+      "pillIdle": "关注",
       "emptyTitle": "没有关注的仓库",
       "emptyDescription": "让 Concierge 关注一个 GitHub 仓库，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
       "asLogin": "按 @{{login}} 判断",
-      "stopRepo": "停止关注 {{repo}}",
-      "stopped": "已停止关注 {{repo}}",
+      "stopRepo": "取消关注 {{repo}}",
+      "stopped": "已取消关注 {{repo}}",
       "kinds": {
         "pull_request": "请你审查",
         "pull_request_review": "你的 PR 收到审查",
@@ -92,8 +95,8 @@
         "workflow_run": "你的 CI 失败"
       },
       "rules": "规则",
-      "maxTurnsPerHour": "每小时最多提醒次数",
-      "minSpacingMinutes": "两次提醒间隔（分钟）",
+      "maxTurnsPerHour": "每小时最多消息数",
+      "minSpacingMinutes": "两条消息间隔（分钟）",
       "quietHours": "免打扰时段",
       "quietHoursHint": "这段时间内的事件会等到结束后汇总成一条。",
       "quietStart": "从",
