@@ -13,17 +13,13 @@ import type {
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
-import { Pacer } from "../connected-accounts/delivery/pacer.js";
+import { Pacer } from "../participation/reply-delivery/pacer.js";
 import {
   type ReplyStream,
   ReplyStreams,
   type ReplyTarget,
-} from "../connected-accounts/delivery/streams.js";
-import {
-  DeliveryFailure,
-  type DeliveryTransport,
-  plainText,
-} from "../connected-accounts/delivery/types.js";
+} from "../participation/reply-delivery/streams.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "../connections/sending.js";
 import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";

@@ -22,11 +22,11 @@ import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { ChatKind } from "../chats/storage/chat.js";
-import type { ChannelSend } from "../connected-accounts/channel.js";
-import { CONVERSATION_BUFFER_DEFAULTS } from "../connected-accounts/conversation-buffer.js";
+import type { ChannelSend } from "../chats/connected-accounts/connected-account.js";
+import { CONVERSATION_BUFFER_DEFAULTS } from "../participation/conversation-buffer.js";
 import type { ChatAddresses } from "./chat-addresses.js";
-import { ReplyDelivery, type ReplyOutcome } from "../connected-accounts/delivery/reply.js";
-import type { DeliveryPolicy } from "../connected-accounts/delivery/types.js";
+import { ReplyDelivery, type ReplyOutcome } from "../participation/reply-delivery/reply.js";
+import type { DeliveryPolicy } from "./sending.js";
 import type { Clock } from "../lib/clock.js";
 import {
   chatKey,

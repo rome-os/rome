@@ -7,7 +7,7 @@ import type {
   WaHistoryMessage,
   WaMessageInput,
   WhatsAppSyncSink,
-} from "../../connected-accounts/whatsapp-sync.js";
+} from "../../connections/kinds/whatsapp/whatsapp-sync.js";
 
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;

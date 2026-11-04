@@ -8,7 +8,7 @@ import { chatMessages, chats, romeSessions } from "../db/schema/system.js";
 import type { ChatKind } from "../chats/storage/chat.js";
 import type { ChatRef } from "../chats/storage/place.js";
 import type { Account } from "@rome-os/app-runtime";
-import type { PlatformOfChannel } from "../connected-accounts/channel.js";
+import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import { chatAt, directMessageAt } from "../connections/chat-adapter.js";
 import { ChatAddresses } from "../connections/chat-addresses.js";
 import { romeAccountsOn } from "../people/timeline-sources.js";

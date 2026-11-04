@@ -21,7 +21,7 @@ import {
 import { seedBaseline } from "../../test/seeds.js";
 import { sayOnChannel } from "../../test/speakers.js";
 import { channels as channelRows, chatMessages, connectionGrants } from "../../db/schema.js";
-import { channelList } from "../../connected-accounts/channel-list.js";
+import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
 
 // Sending to a person.
 //

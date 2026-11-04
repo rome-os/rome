@@ -6,10 +6,7 @@
 // move under this interface.
 
 import type { Account } from "@rome-os/app-runtime";
-import {
-  isAgentMessageOutbound,
-  messageContentText,
-} from "../connected-accounts/messages-agent.js";
+import { isAgentMessageOutbound, messageContentText } from "./history/messages-agent.js";
 import {
   conversationPlatformMessageId,
   type StoredSaidMessage,

@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { PersonResource, TimelinePage } from "@rome/api-types/people";
 import { createLinkedInDescriptor } from "../../connections/integrations/linkedin.js";
 import type { Credential, RuntimeKit } from "../../connections/types.js";
-import type { OpencliResult } from "../../connected-accounts/linkedin-cli.js";
+import type { OpencliResult } from "../../connections/kinds/linkedin/linkedin-cli.js";
 import {
   buildTestDeps,
   createTestConnections,

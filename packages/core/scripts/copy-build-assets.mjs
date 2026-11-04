@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const ASSETS = ["connected-accounts/wechat-user-send-driver.py"];
+const ASSETS = ["connections/kinds/wechat-user/wechat-user-send-driver.py"];
 
 for (const rel of ASSETS) {
   const from = join(pkgRoot, "src", rel);

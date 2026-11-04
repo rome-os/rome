@@ -25,7 +25,7 @@ import type {
 } from "../../lib/rome-cloud-mail.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { EmailInboundResult } from "../../connected-accounts/email-control.js";
+import type { EmailInboundResult } from "../kinds/email/email-control.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";

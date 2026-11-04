@@ -7,13 +7,9 @@ import type {
   InboundEvent,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { ChatBuffers } from "../connected-accounts/conversation-buffer.js";
-import { Pacer } from "../connected-accounts/delivery/pacer.js";
-import {
-  DeliveryFailure,
-  type DeliveryTransport,
-  plainText,
-} from "../connected-accounts/delivery/types.js";
+import { ChatBuffers } from "../participation/conversation-buffer.js";
+import { Pacer } from "../participation/reply-delivery/pacer.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "./sending.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { chats } from "../db/schema.js";

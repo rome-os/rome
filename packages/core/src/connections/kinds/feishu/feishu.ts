@@ -1,0 +1,921 @@
+import { platformOf } from "../../platform.js";
+import {
+  createLarkChannel,
+  type CardActionEvent,
+  Domain,
+  type LarkChannel,
+  LarkChannelError,
+  LoggerLevel,
+  type NormalizedMessage as LarkMessage,
+} from "@larksuiteoapi/node-sdk";
+import { isStopCommand } from "@rome-os/app-runtime";
+import {
+  answeringAgentOf,
+  describeAnsweringAgent,
+  storedAgentChoice,
+} from "../../../chats/connected-accounts/account-agents.js";
+import type { FeishuStreamingStyle } from "../../../participation/reply-delivery/streaming-switch.js";
+import { feishuTransport } from "./reply-writes.js";
+import type { DeliveryTransport } from "../../sending.js";
+import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
+import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+import type { OutgoingMessage } from "../../../types.js";
+import { createLogger } from "../../../logger.js";
+import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
+import type { PeopleRepository } from "../../../db/repositories/people.js";
+import type {
+  ChannelMessage,
+  ChatDescriptor,
+  ChatId,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
+  MessageAddressing,
+  MessageReceipt,
+} from "@rome-os/app-runtime";
+
+const log = createLogger("feishu");
+const PROCESSING_REACTION_EMOJI = "Typing";
+/** A Feishu or Lark message id, such as `om_dc13264520392913993dd051dba21dcf`. */
+const FEISHU_MESSAGE_ID = /^om_[\w-]+$/;
+/** How long a group message waits on its name lookup. */
+const CHAT_NAME_TIMEOUT_MS = 5_000;
+/** How long a failed name lookup stands before the next message retries it. */
+const CHAT_NAME_RETRY_MS = 10 * 60_000;
+/** Feishu content types whose bot mention can be the whole message. */
+const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]);
+
+export interface FeishuConfig {
+  appId: string;
+  appSecret: string;
+  /** "feishu" = open.feishu.cn (China), "lark" = open.larksuite.com
+   *  (International). Defaults to "feishu". */
+  domain?: "feishu" | "lark";
+  connectionId?: string;
+  chatSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
+  };
+  peopleRepo?: PeopleRepository;
+  listAgents?: () => string[];
+  /** The agent linked to this adapter's channel, as `accountAgentResolver`
+   *  answers it. Absent, the channel reads as one that takes no link. */
+  accountAgent?: () => string | null | undefined;
+  /** Whether an agent is loaded, aliases included. Absent, every agent counts
+   *  as loaded. */
+  hasAgent?: (name: string) => boolean;
+  /** How a streamed reply shows, read for each message it creates. Absent,
+   *  it streams as messages. */
+  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
+  /**
+   * Optional fault seam the Talker wires in. Fires on a terminal
+   * `error` event from the long connection so the Talker maps it (auth →
+   * CredentialRejected via {@link isFeishuAuthError}, else Disconnected). A
+   * bad-credential `connect()` at start rejects out of {@link FeishuAdapter.start}
+   * instead, which the Talker routes the same way. ChannelManager passes no
+   * callback, so its behavior (error logged, swallowed) is unchanged.
+   */
+  onFault?: (err: unknown) => void;
+}
+
+/**
+ * True iff `err` is a Feishu "credential refused" — the app's tenant-access-token
+ * could not be minted / was rejected (bad appId/appSecret or a revoked app). We
+ * recognize it via the SDK's `permission_denied` {@link LarkChannelError} code
+ * and the Feishu auth error codes (10003 app_ticket, 99991663/99991664/99991679
+ * tenant-access-token). This is the ONLY Feishu signal that maps to grant
+ * state; every other websocket/transport failure is a `Disconnected`.
+ */
+export function isFeishuAuthError(err: unknown): boolean {
+  if (err instanceof LarkChannelError && err.code === "permission_denied") return true;
+  const code = extractFeishuErrorCode(err);
+  if (code !== null && FEISHU_AUTH_ERROR_CODES.has(code)) return true;
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return /\b(invalid app_secret|app not exist|access token|permission denied)\b/i.test(message);
+}
+
+const FEISHU_AUTH_ERROR_CODES = new Set<number>([10003, 99991663, 99991664, 99991679]);
+
+function extractFeishuErrorCode(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const record = err as { code?: unknown; response?: { data?: { code?: unknown } } };
+  const direct = typeof record.code === "number" ? record.code : null;
+  if (direct !== null) return direct;
+  const nested = record.response?.data?.code;
+  return typeof nested === "number" ? nested : null;
+}
+
+interface FeishuChannelConfig {
+  chatName?: string;
+  mode?: "allow" | "ignore";
+  requireMention?: boolean;
+  autoThread?: boolean;
+  /** A patch key only. A read reports the agent in `storedAgent` and
+   *  `answeringAgent`, and only when asked for them. */
+  agentName?: string;
+  /** The group's stored agent, "main" for a pin to main. */
+  storedAgent?: string;
+  /** The agent that answers the group, null when none does. */
+  answeringAgent?: string | null;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/**
+ * The transport seam: tests inject a fake LarkChannel instead of module-mocking
+ * the SDK. Mirrors the `createBot` injection in {@link TelegramAdapter}.
+ */
+export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
+
+/**
+ * Feishu / Lark channel adapter.
+ *
+ * Built on the official SDK's high-level {@link LarkChannel} — the same engine
+ * the official OpenClaw Feishu plugin uses. It runs the long connection
+ * (WebSocket), so no public URL/webhook is needed, and owns the parts we'd
+ * otherwise hand-roll:
+ *
+ * - inbound `on("message")` events arrive already normalized (sender name,
+ *   resolved chat type, structured mentions). The adapter maps each onto the
+ *   channel's own record, a `ChannelMessage` whose `raw` is the SDK's wire
+ *   event, so the Connection integration delivers it as it is;
+ * - outbound `send(..., { markdown })` runs the SDK's builtin converter, which
+ *   renders the text as a Feishu rich-text post so bold/lists/code/headings
+ *   display correctly. Agent output is Markdown by design, so every reply takes
+ *   this path — no need to sniff whether a given message "looks like" Markdown.
+ *
+ * Media attachments remain out of scope (text/post only).
+ */
+export class FeishuAdapter {
+  private channel: LarkChannel;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private readonly connectionId?: string;
+  private readonly chatSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
+  };
+  private readonly peopleRepo?: PeopleRepository;
+  private readonly listAgents?: () => string[];
+  private readonly accountAgent?: () => string | null | undefined;
+  private readonly hasAgent?: (name: string) => boolean;
+  private readonly replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
+  private readonly onFault?: (err: unknown) => void;
+  private readonly observedConversations = new Map<
+    string,
+    { id: string; displayName: string; kind: "group" | "channel" }
+  >();
+  /** Group names fetched from Feishu, keyed by chat id. A failed lookup
+   *  stands for {@link CHAT_NAME_RETRY_MS} before a message retries it. */
+  private readonly chatNames = new Map<string, Promise<string | undefined>>();
+  /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
+   *  don't accumulate if the adapter is ever started again. */
+  private unsubscribes: Array<() => void> = [];
+  /** The platform this app's senders are accounts on: Lark for a Lark app,
+   *  Feishu otherwise. */
+  private readonly platform: string;
+
+  constructor(
+    config: FeishuConfig,
+    createChannel: CreateLarkChannel = (c) =>
+      createLarkChannel({
+        appId: c.appId,
+        appSecret: c.appSecret,
+        domain: c.domain === "lark" ? Domain.Lark : Domain.Feishu,
+        transport: "websocket",
+        outbound: { markdownConverter: "builtin" },
+        // Populate `raw` on normalized events so the inbound message's `raw`
+        // carries the real wire-level payload (e.g. for media not surfaced in
+        // the normal shape).
+        includeRawEvent: true,
+        loggerLevel: LoggerLevel.warn,
+      }),
+  ) {
+    this.channel = createChannel(config);
+    this.platform = platformOf("feishu", config.domain);
+    this.connectionId = config.connectionId;
+    this.chatSettings = config.chatSettings;
+    this.peopleRepo = config.peopleRepo;
+    this.listAgents = config.listAgents;
+    this.accountAgent = config.accountAgent;
+    this.hasAgent = config.hasAgent;
+    this.replyStreamingStyle = config.replyStreamingStyle;
+    this.onFault = config.onFault;
+  }
+
+  async start(): Promise<void> {
+    this.unsubscribes.push(
+      this.channel.on("message", async (msg) => {
+        await this.handleMessage(msg);
+      }),
+      this.channel.on("cardAction", async (evt) => {
+        await this.handleCardAction(evt);
+      }),
+      this.channel.on("error", (err) => {
+        log.error("lark channel error", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Surface terminal long-connection errors to the Talker; it maps
+        // auth failures to CredentialRejected and everything else to Disconnected.
+        this.onFault?.(err);
+      }),
+    );
+
+    // connect() resolves once the long connection is established, so awaiting it
+    // surfaces bad credentials at boot rather than silently dropping events.
+    await this.channel.connect();
+    log.info("feishu adapter started");
+  }
+
+  async stop(): Promise<void> {
+    this.unsubscribes.splice(0).forEach((fn) => fn());
+    await this.channel.disconnect();
+    log.info("feishu adapter stopped");
+  }
+
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    refuseAttachments("feishu", message);
+    const text = textToSend("feishu", message);
+    const replyTo = replyToShaped("feishu", message.replyToMessageId, FEISHU_MESSAGE_ID);
+    const threadId: string = chatId;
+
+    // Agent output is Markdown; let the SDK render it as a rich-text post.
+    const opts = replyTo
+      ? {
+          replyTo,
+          replyInThread: await this.repliesInThread(threadId),
+        }
+      : undefined;
+
+    try {
+      const sent = (await this.channel.send(threadId, { markdown: text }, opts)) as unknown as {
+        messageId?: string;
+        message_id?: string;
+      };
+      log.info("message sent", { threadId });
+      const messageId = sent?.messageId ?? sent?.message_id;
+      return { chatId, ...(messageId ? { messageId } : {}) };
+    } catch (err) {
+      log.error("failed to send message", {
+        threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /** Streams replies through this adapter's client, placed as `send` places
+   *  them, in the style the guardian chose. */
+  replyDelivery(): DeliveryTransport {
+    return feishuTransport({
+      client: this.channel.rawClient,
+      replyInThread: (chat) => this.repliesInThread(chat),
+      ...(this.replyStreamingStyle ? { style: this.replyStreamingStyle } : {}),
+    });
+  }
+
+  private async repliesInThread(chatId: string): Promise<boolean> {
+    return (await this.getChannelConfig(chatId)).autoThread ?? true;
+  }
+
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+    this.handler = handler;
+  }
+
+  async addProcessingReaction(messageId: string): Promise<string | null> {
+    return this.channel.addReaction(messageId, PROCESSING_REACTION_EMOJI);
+  }
+
+  async removeProcessingReaction(messageId: string, reactionId: string): Promise<void> {
+    await this.channel.removeReaction(messageId, reactionId);
+  }
+
+  private async handleMessage(m: LarkMessage): Promise<void> {
+    if (!this.handler) return;
+
+    // Skip the bot's own messages to avoid loops (the SDK knows its identity
+    // once connected).
+    if (m.senderId && m.senderId === this.channel.botIdentity?.openId) return;
+
+    // MVP: text-bearing messages only. Media-only messages arrive with empty
+    // content and are dropped until attachment support lands. The SDK strips
+    // the bot mention, so a text or rich-text post that was only the mention
+    // is restored as the visible mention instead of being dropped.
+    const commandText = stripMentionPlaceholders(m.content ?? "", m.mentions);
+    const resolvedText = resolveMentions(m.content ?? "", m.mentions);
+    const text =
+      m.mentionedBot && isStopCommand(commandText)
+        ? "/stop"
+        : preserveMentionOnlyText(
+            resolvedText,
+            m.mentionedBot && TEXT_BEARING_CONTENT_TYPES.has(m.rawContentType),
+            this.channel.botIdentity?.name,
+          );
+    if (!text) return;
+    const threadType = m.chatType === "p2p" ? "private" : "group";
+    const addressing: MessageAddressing =
+      threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
+    const directedStop = addressing !== "ambient" && isStopCommand(text);
+    // Only a delivered message waits on the name; a dropped one starts the lookup.
+    const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
+
+    // A link code said in a group must void the code, so it skips the group
+    // filters. Admission voids it and keeps it from every agent.
+    if (threadType === "group" && !isLinkCodeMessage(text)) {
+      const configRequest = isSettingsRequest(text);
+      if (configRequest && m.mentionedBot) {
+        await this.sendGroupConfigCard(m.chatId, m.messageId, m.senderId);
+        return;
+      }
+
+      const cfg = await this.getChannelConfig(m.chatId);
+      if (cfg.mode === "ignore" && !directedStop) {
+        log.debug("ignoring Feishu group message because group policy is disabled", {
+          from: m.senderId,
+          threadId: m.chatId,
+        });
+        return;
+      }
+      if ((cfg.requireMention ?? true) && !m.mentionedBot) {
+        log.debug("ignoring Feishu group message not mentioning bot", {
+          from: m.senderId,
+          threadId: m.chatId,
+        });
+        return;
+      }
+    }
+
+    const name = await chatName;
+    // The group's agent is not stamped on the message. The inbox reads it
+    // from the conversation settings.
+    const msg: ChannelMessage = {
+      channel: "feishu",
+      direction: "inbound",
+      messageId: m.messageId,
+      chatId: m.chatId as ChatId,
+      senderId: m.senderId,
+      ...(m.senderName ? { senderDisplayName: m.senderName } : {}),
+      text,
+      attachments: [],
+      timestamp: new Date(m.createTime),
+      ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
+      thread: {
+        kind: threadType === "private" ? "dm" : "group",
+        ...(name ? { name } : {}),
+      },
+      addressing,
+      raw: m.raw ?? m,
+    };
+
+    log.info("message received", {
+      from: msg.senderId,
+      chatId: msg.chatId,
+      threadKind: msg.thread?.kind,
+    });
+
+    try {
+      await this.handler(msg);
+    } catch (err) {
+      log.error("message handler error", {
+        messageId: msg.messageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async handleCardAction(evt: CardActionEvent): Promise<void> {
+    const value = evt.action.value;
+    if (isFeishuGroupConfigAction(value)) {
+      await this.handleGroupConfigAction(evt);
+    }
+  }
+
+  /** Record the group for the settings list, under its id until its name arrives. */
+  private observeGroup(chatId: string): Promise<string | undefined> {
+    if (!this.observedConversations.has(chatId)) {
+      this.observedConversations.set(chatId, { id: chatId, displayName: chatId, kind: "group" });
+    }
+    return this.resolveChatName(chatId);
+  }
+
+  /** The group's human-facing name, or undefined when Feishu cannot return one. */
+  private resolveChatName(chatId: string): Promise<string | undefined> {
+    const cached = this.chatNames.get(chatId);
+    if (cached) return cached;
+    const lookup = this.channel.getChatInfo(chatId).then((info) => {
+      const name = info.name?.trim();
+      // The SDK reports some failed calls as a chat with no name.
+      if (!name) throw new Error("Feishu returned no chat name");
+      this.observedConversations.set(chatId, { id: chatId, displayName: name, kind: "group" });
+      return name;
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("chat name lookup timed out")),
+        CHAT_NAME_TIMEOUT_MS,
+      );
+    });
+    const pending: Promise<string | undefined> = Promise.race([lookup, timeout])
+      .catch((err) => {
+        log.warn("failed to fetch Feishu chat name", {
+          chatId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // A missing permission fails every lookup, so wait before asking again.
+        setTimeout(() => {
+          if (this.chatNames.get(chatId) === pending) this.chatNames.delete(chatId);
+        }, CHAT_NAME_RETRY_MS).unref?.();
+        // A lookup that answers after the timeout still names later messages.
+        lookup.then(
+          (name) => {
+            if (this.chatNames.get(chatId) === pending) {
+              this.chatNames.set(chatId, Promise.resolve(name));
+            }
+          },
+          () => {},
+        );
+        return undefined;
+      })
+      .finally(() => clearTimeout(timer));
+    this.chatNames.set(chatId, pending);
+    return pending;
+  }
+
+  listObservedConversations() {
+    return [...this.observedConversations.values()];
+  }
+
+  private async sendGroupConfigCard(
+    chatId: string,
+    replyToMessageId: string,
+    channelUserId: string,
+    error?: string,
+  ): Promise<void> {
+    if (!(await this.isGuardian(channelUserId))) {
+      await this.channel.send(
+        chatId,
+        { markdown: "Only the linked guardian can configure this Feishu group." },
+        { replyTo: replyToMessageId },
+      );
+      return;
+    }
+
+    const cfg = await this.getChannelConfig(chatId, true);
+    await this.channel.send(
+      chatId,
+      {
+        card: buildGroupConfigCard(chatId, cfg, this.getAgentOptions(preselectedAgent(cfg)), error),
+      },
+      {
+        replyTo: replyToMessageId,
+      },
+    );
+  }
+
+  private async handleGroupConfigAction(evt: CardActionEvent): Promise<void> {
+    const value = evt.action.value;
+    if (!isFeishuGroupConfigAction(value)) return;
+    if (!this.chatSettings || !this.connectionId) {
+      await this.sendGroupConfigStatus(
+        evt.chatId,
+        evt.messageId,
+        "Conversation settings are unavailable.",
+      );
+      return;
+    }
+    if (!(await this.isGuardian(evt.operator.openId))) {
+      await this.sendGroupConfigStatus(
+        evt.chatId,
+        evt.messageId,
+        "Only the linked guardian can change this group.",
+      );
+      return;
+    }
+
+    const op = typeof value.op === "string" ? value.op : "save";
+    const patch = this.buildGroupConfigPatch(op, value, evt.raw);
+
+    if (patch === undefined) {
+      await this.sendGroupConfigStatus(
+        evt.chatId,
+        evt.messageId,
+        "This settings card is outdated. Send `@Rome settings` again and use Save.",
+      );
+      return;
+    }
+
+    // Saving the agent the card showed leaves routing alone, so a group with no
+    // choice keeps following the link, an agent switched since the card was sent included.
+    if (patch?.agentName && patch.agentName === value.shown) delete patch.agentName;
+    if (patch?.agentName) {
+      const available = this.listAgents?.();
+      if (available && !available.includes(patch.agentName)) {
+        await this.sendGroupConfigStatus(
+          evt.chatId,
+          evt.messageId,
+          `Agent "${patch.agentName}" is not loaded.`,
+        );
+        return;
+      }
+    }
+
+    const next = await this.updateChannelConfig(evt.chatId, patch, evt.operator.name);
+    log.info("updated Feishu group configuration", {
+      chatId: evt.chatId,
+      op,
+      mode: next.mode ?? "allow",
+      requireMention: next.requireMention ?? true,
+      autoThread: next.autoThread ?? true,
+      answeringAgent: next.answeringAgent ?? null,
+      operator: evt.operator.openId,
+    });
+    await this.sendGroupConfigStatus(
+      evt.chatId,
+      evt.messageId,
+      formatGroupConfigConfirmation(next),
+    );
+  }
+
+  private async sendGroupConfigStatus(
+    chatId: string,
+    replyToMessageId: string,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this.channel.send(chatId, { markdown: text }, { replyTo: replyToMessageId });
+    } catch (err) {
+      log.error("failed to send Feishu group config status", {
+        chatId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async isGuardian(channelUserId: string): Promise<boolean> {
+    if (!this.peopleRepo) return false;
+    const person = await this.peopleRepo.byAccount({ platform: this.platform, id: channelUserId });
+    return person?.bondLevel === "guardian";
+  }
+
+  /** An empty or missing select leaves routing alone. Reset clears it. */
+  private buildAgentPatch(agentName: unknown): Partial<FeishuChannelConfig> {
+    const requestedAgent = typeof agentName === "string" ? agentName.trim() : "";
+    return requestedAgent ? { agentName: requestedAgent } : {};
+  }
+
+  private buildGroupConfigPatch(
+    op: string,
+    value: Record<string, unknown>,
+    raw: unknown,
+  ): Partial<FeishuChannelConfig> | null | undefined {
+    if (op === "reset") return null;
+    if (op !== "save") return undefined;
+
+    const patch: Partial<FeishuChannelConfig> = {
+      ...this.buildAgentPatch(extractCardActionField(value, raw, "agentName")),
+    };
+
+    const groupPolicy = extractCardActionField(value, raw, "groupPolicy");
+    if (groupPolicy === "active") patch.mode = undefined;
+    if (groupPolicy === "disabled") patch.mode = "ignore";
+
+    const replyTrigger = extractCardActionField(value, raw, "replyTrigger");
+    if (replyTrigger === "mention") patch.requireMention = undefined;
+    if (replyTrigger === "all") patch.requireMention = false;
+
+    const replyPlacement = extractCardActionField(value, raw, "replyPlacement");
+    if (replyPlacement === "thread") patch.autoThread = undefined;
+    if (replyPlacement === "inline") patch.autoThread = false;
+
+    return patch;
+  }
+
+  private getAgentOptions(currentAgent?: string): string[] {
+    return Array.from(
+      new Set(["main", currentAgent, ...(this.listAgents?.() ?? [])].filter(Boolean)),
+    )
+      .map(String)
+      .slice(0, 20);
+  }
+
+  private agentsOf(
+    snapshot: Pick<ChatSettingsSnapshot, "effective" | "overrides">,
+  ): Pick<FeishuChannelConfig, "storedAgent" | "answeringAgent"> {
+    const storedAgent = storedAgentChoice(snapshot);
+    return {
+      storedAgent,
+      answeringAgent: answeringAgentOf(this.accountAgent?.(), storedAgent, "group", this.hasAgent),
+    };
+  }
+
+  /** The group's settings. `withAgents` adds `storedAgent` and
+   *  `answeringAgent`, which read the link and the loaded agents. */
+  private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
+    if (!this.chatSettings || !this.connectionId) {
+      return withAgents
+        ? { answeringAgent: answeringAgentOf(this.accountAgent?.(), undefined, "group") }
+        : {};
+    }
+    const observed = this.observedConversations.get(chatId);
+    const descriptor: ChatDescriptor = {
+      ref: { connectionId: this.connectionId, chatId: chatId as ChatId },
+      connectionKind: "feishu",
+      service: "feishu",
+      kind: observed?.kind ?? "group",
+      displayName: observed?.displayName ?? chatId,
+    };
+    this.chatSettings.observe?.(descriptor);
+    const snapshot = await this.chatSettings.get(descriptor.ref);
+    return {
+      chatName: descriptor.displayName,
+      mode: snapshot.effective.enabled ? "allow" : "ignore",
+      requireMention: snapshot.effective.activation.mode === "mention",
+      autoThread: snapshot.effective.replies.placement === "thread",
+      ...(withAgents ? this.agentsOf(snapshot) : {}),
+      updatedAt: snapshot.updatedAt,
+      updatedBy: snapshot.updatedBy?.displayName ?? snapshot.updatedBy?.id,
+    };
+  }
+
+  private async updateChannelConfig(
+    chatId: string,
+    patch: Partial<FeishuChannelConfig> | null,
+    updatedBy?: string,
+  ): Promise<FeishuChannelConfig> {
+    if (!this.chatSettings || !this.connectionId) return {};
+    const current = await this.getChannelConfig(chatId);
+    const ref = { connectionId: this.connectionId, chatId: chatId as ChatId };
+    if (patch === null) {
+      const saved = await this.chatSettings.reset({
+        ref,
+        actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
+      });
+      return {
+        mode: saved.effective.enabled ? "allow" : "ignore",
+        requireMention: saved.effective.activation.mode === "mention",
+        autoThread: saved.effective.replies.placement === "thread",
+        ...this.agentsOf(saved),
+      };
+    }
+    const set: import("@rome-os/app-runtime").PartialChatSettings = {};
+    const clear: import("@rome-os/app-runtime").ChatSettingField[] = [];
+    const owns = (key: keyof FeishuChannelConfig) => Object.hasOwn(patch, key);
+    if (owns("mode")) {
+      if (patch.mode === "ignore") set.enabled = false;
+      else clear.push("enabled");
+    }
+    if (owns("requireMention")) {
+      if (patch.requireMention === false) (set.activation ??= {}).mode = "all";
+      else clear.push("activation.mode");
+    }
+    if (owns("autoThread")) {
+      if (patch.autoThread === false) (set.replies ??= {}).placement = "inline";
+      else clear.push("replies.placement");
+    }
+    // A patch carries an agent only to set one. Reset clears it.
+    if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
+    await this.chatSettings.update({
+      ref,
+      set,
+      clear,
+      actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
+    });
+    return this.getChannelConfig(chatId, true).then((saved) => ({ ...current, ...saved }));
+  }
+}
+
+/**
+ * Replace `@_user_N` / `@_all` mention placeholders the SDK leaves in `content`
+ * with the resolved display name from its structured `mentions`, so the agent
+ * sees clean prose. A no-op when there are no mentions.
+ */
+export function resolveMentions(
+  content: string,
+  mentions: Array<{ key?: string; name?: string }>,
+): string {
+  let text = content;
+  for (const mention of mentions) {
+    if (mention.key && mention.name) text = text.split(mention.key).join(mention.name);
+  }
+  return text.trim();
+}
+
+function stripMentionPlaceholders(
+  content: string,
+  mentions: Array<{ key?: string; name?: string }>,
+): string {
+  let text = content;
+  for (const mention of mentions) {
+    if (mention.key) text = text.split(mention.key).join("");
+  }
+  return text.trim();
+}
+
+function buildGroupConfigCard(
+  chatId: string,
+  cfg: FeishuChannelConfig,
+  agentOptions: string[],
+  error?: string,
+): object {
+  const agent = preselectedAgent(cfg);
+  const groupPolicy = cfg.mode === "ignore" ? "disabled" : "active";
+  const requireMention = cfg.requireMention ?? true;
+  const autoThread = cfg.autoThread ?? true;
+  const elements: object[] = [];
+
+  if (error) {
+    elements.push({
+      tag: "div",
+      text: { tag: "plain_text", content: error },
+    });
+  }
+  if (cfg.answeringAgent === null) {
+    elements.push({
+      tag: "div",
+      text: {
+        tag: "plain_text",
+        content: "No agent answers in this group: this account has no agent, or it is not loaded.",
+      },
+    });
+  } else if (cfg.storedAgent && cfg.storedAgent !== cfg.answeringAgent) {
+    // In a group, only a stored agent that is not loaded yields to the link.
+    elements.push({
+      tag: "div",
+      text: {
+        tag: "plain_text",
+        content: `${cfg.storedAgent} is not loaded, so ${cfg.answeringAgent} answers instead.`,
+      },
+    });
+  }
+
+  elements.push({
+    tag: "form",
+    name: "rome_feishu_group_config",
+    elements: [
+      fieldRow("Agent:", {
+        tag: "select_static",
+        name: "agentName",
+        placeholder: { tag: "plain_text", content: "Route to agent" },
+        ...(agent ? { initial_option: agent } : {}),
+        options: agentOptions.map((name) => ({
+          text: { tag: "plain_text", content: name },
+          value: name,
+        })),
+      }),
+      fieldRow("Group policy:", {
+        tag: "select_static",
+        name: "groupPolicy",
+        placeholder: { tag: "plain_text", content: "Group policy" },
+        initial_option: groupPolicy,
+        options: [
+          {
+            text: { tag: "plain_text", content: "Active" },
+            value: "active",
+          },
+          {
+            text: { tag: "plain_text", content: "Disabled" },
+            value: "disabled",
+          },
+        ],
+      }),
+      fieldRow("Reply trigger:", {
+        tag: "select_static",
+        name: "replyTrigger",
+        placeholder: { tag: "plain_text", content: "Reply trigger" },
+        initial_option: requireMention ? "mention" : "all",
+        options: [
+          {
+            text: { tag: "plain_text", content: "@ only" },
+            value: "mention",
+          },
+          {
+            text: { tag: "plain_text", content: "Every message" },
+            value: "all",
+          },
+        ],
+      }),
+      fieldRow("Reply placement:", {
+        tag: "select_static",
+        name: "replyPlacement",
+        placeholder: { tag: "plain_text", content: "Reply placement" },
+        initial_option: autoThread ? "thread" : "inline",
+        options: [
+          {
+            text: { tag: "plain_text", content: "Thread" },
+            value: "thread",
+          },
+          {
+            text: { tag: "plain_text", content: "Inline" },
+            value: "inline",
+          },
+        ],
+      }),
+      {
+        tag: "button",
+        action_type: "form_submit",
+        name: "save_group_settings",
+        type: "primary",
+        text: { tag: "plain_text", content: "Save" },
+        value: {
+          action: "configure_feishu_group",
+          op: "save",
+          chatId,
+          ...(agent ? { shown: agent } : {}),
+        },
+      },
+      {
+        tag: "button",
+        action_type: "form_submit",
+        name: "reset_group_settings",
+        text: { tag: "plain_text", content: "Reset" },
+        value: { action: "configure_feishu_group", op: "reset", chatId },
+      },
+    ],
+  });
+
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      template: error ? "red" : "blue",
+      title: { tag: "plain_text", content: "Rome group settings" },
+    },
+    elements,
+  };
+}
+
+/** The agent the card's select starts on: the stored choice, or else the
+ *  answering agent. */
+function preselectedAgent(cfg: FeishuChannelConfig): string | undefined {
+  return cfg.storedAgent ?? cfg.answeringAgent ?? undefined;
+}
+
+function fieldRow(label: string, control: object): object {
+  return {
+    tag: "column_set",
+    columns: [
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        vertical_align: "center",
+        elements: [{ tag: "markdown", content: label }],
+      },
+      {
+        tag: "column",
+        width: "weighted",
+        weight: 2,
+        vertical_align: "center",
+        elements: [control],
+      },
+    ],
+  };
+}
+
+function formatGroupConfigConfirmation(cfg: FeishuChannelConfig): string {
+  return [
+    "Feishu group settings updated.",
+    `Agent: ${describeAnsweringAgent(cfg.answeringAgent ?? null)}`,
+    `Group policy: ${cfg.mode === "ignore" ? "Disabled" : "Active"}`,
+    `Reply trigger: ${(cfg.requireMention ?? true) ? "@ only" : "Every message"}`,
+    `Reply placement: ${(cfg.autoThread ?? true) ? "Thread" : "Inline"}`,
+  ].join("\n");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isFeishuGroupConfigAction(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  return value.action === "configure_feishu_group";
+}
+
+function isSettingsRequest(text: string): boolean {
+  return /(^|\s)(settings?|config|configure|设置|配置)(\s|$)/i.test(text.trim());
+}
+
+function extractStringField(value: unknown, field: string): string | null {
+  if (!isRecord(value)) return null;
+  const direct = value[field];
+  if (typeof direct === "string" || typeof direct === "number") return String(direct);
+
+  for (const key of ["form_value", "formValue", "formValues", "form"]) {
+    const form = value[key];
+    if (!isRecord(form)) continue;
+    const nested = form[field];
+    if (typeof nested === "string" || typeof nested === "number") return String(nested);
+  }
+
+  const action = value.action;
+  if (isRecord(action)) {
+    const nested = extractStringField(action, field);
+    if (nested) return nested;
+  }
+
+  return null;
+}
+
+function extractCardActionField(
+  value: Record<string, unknown>,
+  raw: unknown,
+  field: string,
+): string | null {
+  return extractStringField(value, field) ?? extractStringField(raw, field);
+}

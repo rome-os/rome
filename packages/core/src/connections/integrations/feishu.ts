@@ -4,7 +4,7 @@
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
 // the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
-// `FeishuAdapter` (packages/core/src/connected-accounts/feishu.ts), wrapped here so the
+// `FeishuAdapter` (packages/core/src/connections/kinds/feishu/feishu.ts), wrapped here so the
 // runtime's grant-epoch lifecycle and fault→grant-state mapping drive it. The
 // transport already speaks the channel's record, so inbound and send pass
 // through without a projection.
@@ -29,13 +29,13 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
-import type { FeishuStreamingStyle } from "../../connected-accounts/delivery/streaming-switch.js";
+import type { FeishuStreamingStyle } from "../../participation/reply-delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
   type FeishuConfig,
   isFeishuAuthError,
-} from "../../connected-accounts/feishu.js";
+} from "../kinds/feishu/feishu.js";
 import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";

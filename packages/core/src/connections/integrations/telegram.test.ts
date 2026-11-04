@@ -9,7 +9,7 @@
 //      end-to-end over the real ConnectionRegistry.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { sendThrough } from "../../connected-accounts/connection-ports.js";
+import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";

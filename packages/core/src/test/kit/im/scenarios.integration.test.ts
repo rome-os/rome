@@ -1,12 +1,9 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { Pacer } from "../../../connected-accounts/delivery/pacer.js";
-import { ReplyDelivery, type ReplyOutcome } from "../../../connected-accounts/delivery/reply.js";
-import {
-  type DeliveryTransport,
-  effectiveMode,
-} from "../../../connected-accounts/delivery/types.js";
+import { Pacer } from "../../../participation/reply-delivery/pacer.js";
+import { ReplyDelivery, type ReplyOutcome } from "../../../participation/reply-delivery/reply.js";
+import { type DeliveryTransport, effectiveMode } from "../../../connections/sending.js";
 import { systemClock } from "../../../lib/clock.js";
 import { checkDelivery } from "./invariants.js";
 import { runScenario, type ScenarioContext } from "./scenario.js";

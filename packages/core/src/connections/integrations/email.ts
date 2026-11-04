@@ -4,7 +4,7 @@
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
 // gate + body-pull + the inbound `ChannelMessage`, attachment download — is
-// `EmailAdapter` (packages/core/src/connected-accounts/email.ts), wrapped here so the
+// `EmailAdapter` (packages/core/src/connections/kinds/email/email.ts), wrapped here so the
 // runtime's grant-epoch lifecycle and fault→grant-state mapping (registry.ts)
 // drive it. The transport already speaks the channel's record, so inbound and
 // send pass through without a projection.
@@ -37,7 +37,7 @@ import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,
   type EmailInboxCoordinates,
-} from "../../connected-accounts/email.js";
+} from "../kinds/email/email.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";

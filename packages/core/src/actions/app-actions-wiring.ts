@@ -29,7 +29,7 @@ import type { FavorService } from "../favors/types.js";
 import type { HostExecutionService } from "../host-execution/service.js";
 import type { FeedbackService } from "../lib/feedback-client.js";
 import type { CloudProfileService } from "../lib/cloud-profile.js";
-import type { AgentNamesService } from "../connected-accounts/agent-names.js";
+import type { AgentNamesService } from "../chats/accounts/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 

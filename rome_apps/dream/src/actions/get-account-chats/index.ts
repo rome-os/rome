@@ -220,7 +220,7 @@ export function createAction(
       // gone. 'notification' is a line that passed outside a turn: someone the
       // agent did not answer, or Rome sending untied to one. Rome's own lines
       // are told apart by the rule of `agentMessageOutbound` in
-      // packages/core/src/connected-accounts/messages-agent.ts. Lines stored in the same
+      // packages/core/src/chats/history/messages-agent.ts. Lines stored in the same
       // second keep the order they were stored in.
       let rows: MessageRow[];
       const reads = chatReadsOf(appContext);

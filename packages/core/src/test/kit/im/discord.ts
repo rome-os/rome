@@ -1,6 +1,6 @@
 import type { RESTOptions } from "discord.js";
 import type { WebSocket } from "ws";
-import { DiscordAdapter } from "../../../connected-accounts/discord.js";
+import { DiscordAdapter } from "../../../connections/kinds/discord/discord.js";
 import { exemplar, loadCapture } from "./capture.js";
 import textCapture from "./captures/discord-text.capture.json" with { type: "json" };
 import {

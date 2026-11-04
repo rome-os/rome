@@ -13,8 +13,8 @@ import type {
   RomeSessionRef,
   StreamAgentEvent,
 } from "@rome-os/app-runtime";
-import type { ReplyOutcome } from "../connected-accounts/delivery/reply.js";
-import type { ReplyStream, ReplyStreams } from "../connected-accounts/delivery/streams.js";
+import type { ReplyOutcome } from "../participation/reply-delivery/reply.js";
+import type { ReplyStream, ReplyStreams } from "../participation/reply-delivery/streams.js";
 import type {
   AgentSessionInit,
   AgentSessionKey,

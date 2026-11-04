@@ -1,4 +1,4 @@
-import type { GuardianLinkCodes } from "../connected-accounts/guardian-link-code.js";
+import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -7,13 +7,17 @@ import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
-import type { Channels, PlatformOfChannel, RecordedOn } from "../connected-accounts/channel.js";
+import type {
+  Channels,
+  PlatformOfChannel,
+  RecordedOn,
+} from "../chats/connected-accounts/connected-account.js";
 import type { SendRecording } from "../connections/send.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import type { AccountNames } from "../connected-accounts/account-names.js";
-import type { ExternalAgents } from "../connected-accounts/agents-accounts.js";
+import type { AccountNames } from "../chats/accounts/account-names.js";
+import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -56,7 +60,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
-import type { AccountListening } from "../connected-accounts/account-agents.js";
+import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
@@ -93,7 +97,7 @@ export interface ApiDeps {
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (connected-accounts/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route

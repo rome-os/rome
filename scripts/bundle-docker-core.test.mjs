@@ -105,7 +105,7 @@ test("compiled People contracts run in plain Node without TypeScript source reso
 test("bundles the WeChat scripts the compiled runtime reads from dist", async () => {
   const expected = [
     [
-      "packages/core/src/connected-accounts/wechat-user-send-driver.py",
+      "packages/core/src/connections/kinds/wechat-user/wechat-user-send-driver.py",
       "dist/wechat-user-send-driver.py",
     ],
   ];

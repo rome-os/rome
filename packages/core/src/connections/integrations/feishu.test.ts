@@ -8,7 +8,7 @@
 //   4. inbound/outbound messages map through the Connection's talker.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { sendThrough } from "../../connected-accounts/connection-ports.js";
+import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import {
   type CardActionEvent,
@@ -18,7 +18,7 @@ import {
   type SendOptions,
 } from "@larksuiteoapi/node-sdk";
 import type { PeopleRepository } from "../../db/repositories/people.js";
-import { isFeishuAuthError } from "../../connected-accounts/feishu.js";
+import { isFeishuAuthError } from "../kinds/feishu/feishu.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";

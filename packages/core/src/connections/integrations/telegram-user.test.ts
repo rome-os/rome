@@ -23,7 +23,7 @@ import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
-import * as telegramUserModule from "../../connected-accounts/telegram-user.js" with {
+import * as telegramUserModule from "../kinds/telegram-user/telegram-user.js" with {
   rstest: "importActual",
 };
 
@@ -55,7 +55,7 @@ const fakeState: {
   probeGate: null,
 };
 
-rs.mock("../../connected-accounts/telegram-user.js", () => {
+rs.mock("../kinds/telegram-user/telegram-user.js", () => {
   // Keep the real classifier + error class; only replace the adapter transport.
   return {
     ...telegramUserModule,
@@ -91,7 +91,7 @@ rs.mock("../../connected-accounts/telegram-user.js", () => {
 });
 
 const { TelegramUserSessionNotAuthorizedError } = await import(
-  "../../connected-accounts/telegram-user.js"
+  "../kinds/telegram-user/telegram-user.js"
 );
 const {
   makeTelegramUserDescriptor,

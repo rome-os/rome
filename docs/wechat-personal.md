@@ -106,7 +106,7 @@ From a source checkout inside the signed-in container, run the live contract tes
 ```sh
 HOME=/home/rome scripts/test-env.sh env WECHAT_USER_TEST=1 pnpm exec rstest \
   -c packages/core/rstest.config.ts \
-  packages/core/src/connected-accounts/wechat-user.integration.test.ts
+  packages/core/src/connections/kinds/wechat-user/wechat-user.integration.test.ts
 ```
 
 The test checks readiness, reader output, and the message store used by People. It requires development dependencies. The environment flag must be set inside the test launcher because the launcher removes runtime configuration.

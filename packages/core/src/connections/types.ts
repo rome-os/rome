@@ -14,12 +14,12 @@ import type {
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type { DeliveryTransport } from "../connected-accounts/delivery/types.js";
+import type { DeliveryTransport } from "./sending.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
 // A Connection's conversational surface, as its builder implements it
-// (`Talker`). Only the channel ports (connected-accounts/connection-ports.ts) reach it,
+// (`Talker`). Only the channel ports (chats/connected-accounts/connection-ports.ts) reach it,
 // through `Connection.withTalker`: apps reach channels through the channels
 // service (actions) or a hook's `channels`. A talker delivers each message as
 // the channel's own record: a `ChannelMessage` naming the channel it backs,

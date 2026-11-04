@@ -3,7 +3,7 @@ import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { WechatAdapter } from "../../../connected-accounts/wechat.js";
+import type { WechatAdapter } from "../../../connections/kinds/wechat/wechat.js";
 import { comparable, loadCapture } from "./capture.js";
 import textCapture from "./captures/wechat-text.capture.json" with { type: "json" };
 import { deferred } from "./peer.js";

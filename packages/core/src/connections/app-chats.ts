@@ -29,8 +29,11 @@ import {
   type SendOptions,
   type Sent as SdkSent,
 } from "@rome-os/app-runtime/chats";
-import { ChannelNotConnected, type ChannelSend } from "../connected-accounts/channel.js";
-import { DeliveryFailure } from "../connected-accounts/delivery/types.js";
+import {
+  ChannelNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
+import { DeliveryFailure } from "./sending.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";

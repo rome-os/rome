@@ -127,7 +127,7 @@ import type {
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import type { PlatformOfChannel } from "../connected-accounts/channel.js";
+import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import { ChatEvents, type Via } from "../chats/events.js";
 import type { SaidMessage } from "../chats/message.js";
 import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";

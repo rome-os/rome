@@ -1,10 +1,7 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
-import type { Admission } from "./connected-accounts/admission.js";
-import {
-  createGuardianLinkAdmission,
-  GuardianLinkCodes,
-} from "./connected-accounts/guardian-link-code.js";
-import { createAgentsGuardianLink } from "./connected-accounts/agents-guardian.js";
+import type { Admission } from "./chats/connected-accounts/admission.js";
+import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
+import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -87,41 +84,47 @@ import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
-import { LinkedInAccounts } from "./connected-accounts/linkedin-accounts.js";
-import { WhatsAppAccounts } from "./connected-accounts/whatsapp-accounts.js";
-import { createAccountNames } from "./connected-accounts/account-names.js";
-import { AccountProfiles, refreshingAfter } from "./connected-accounts/account-profiles.js";
+import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
+import { WhatsAppAccounts } from "./chats/accounts/whatsapp.js";
+import { createAccountNames } from "./chats/accounts/account-names.js";
+import { AccountProfiles, refreshingAfter } from "./chats/accounts/account-profiles.js";
 import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
-import { agentsAccounts, externalAgents } from "./connected-accounts/agents-accounts.js";
-import { channelList, joinLaterChannel } from "./connected-accounts/channel-list.js";
-import { storedOn } from "./connected-accounts/channel.js";
+import { agentsAccounts, externalAgents } from "./chats/accounts/agents-accounts.js";
+import {
+  channelList,
+  joinLaterChannel,
+} from "./chats/connected-accounts/connected-account-list.js";
+import { storedOn } from "./chats/connected-accounts/connected-account.js";
 import {
   WEBCHAT_CHANNEL,
   WEBCHAT_SURFACE,
   webchatChannel,
-} from "./connected-accounts/webchat-channel.js";
-import { claimChannels, recordChannelAccounts } from "./connected-accounts/claim-channels.js";
+} from "./chats/dashboard/dashboard-account.js";
+import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
-import { domainOf, domainOfGrant } from "./connected-accounts/platform.js";
+import { domainOf, domainOfGrant } from "./connections/platform.js";
 import {
   AccountListening,
   accountAgentResolver,
   byAccount,
   byChannel,
-} from "./connected-accounts/account-agents.js";
-import { romeAccounts } from "./connected-accounts/rome-accounts.js";
-import { recordedChannelOf } from "./connected-accounts/connection-ports.js";
+} from "./chats/connected-accounts/account-agents.js";
+import { romeAccounts } from "./apps/rome-accounts.js";
+import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { accountLinkOf, connectionKindOf } from "./connected-accounts/account-links.js";
-import { ConnectionPacing } from "./connected-accounts/delivery/connection-pacing.js";
-import { ReplyStreams } from "./connected-accounts/delivery/streams.js";
-import { replyStreamingSwitch } from "./connected-accounts/delivery/streaming-switch.js";
+import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
+import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
+import { ReplyStreams } from "./participation/reply-delivery/streams.js";
+import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
-import { createChannelsService, emailConnection } from "./connected-accounts/channels-service.js";
-import { createAgentNames } from "./connected-accounts/agent-names.js";
-import { WechatUserReader, WechatUserRuntime } from "./connected-accounts/wechat-user.js";
+import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
+import { createAgentNames } from "./chats/accounts/agent-names.js";
+import {
+  WechatUserReader,
+  WechatUserRuntime,
+} from "./connections/kinds/wechat-user/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
@@ -188,8 +191,8 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { mapGuardianToChannel } from "./connected-accounts/guardian-mapping.js";
-import type { EmailInboundResult } from "./connected-accounts/email-control.js";
+import { mapGuardianToChannel } from "./people/guardian-mapping.js";
+import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
 import { HostExecutionService } from "./host-execution/service.js";
@@ -204,7 +207,7 @@ import { emitAgentMessage } from "./actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
-import type { EmailAdapter, EmailSettings } from "./connected-accounts/email.js";
+import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
 import {
   resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,

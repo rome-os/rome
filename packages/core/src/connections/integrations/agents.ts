@@ -8,7 +8,7 @@
 // grant; the grant only records the agent Cloud assigned. A sender is
 // never mapped to a person here. A sender Cloud marks as in this Rome's own
 // account is linked to the guardian when its message is admitted
-// (connected-accounts/agents-guardian.ts); any other sender stays unlinked, and the
+// (people/agents-guardian.ts); any other sender stays unlinked, and the
 // guardian decides whether Rome may answer it. Every agent is addressed by its
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
@@ -19,7 +19,7 @@ import {
   ChannelSendRefused,
   type OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { refuseUnshownParts } from "../../connected-accounts/send-refusals.js";
+import { refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,

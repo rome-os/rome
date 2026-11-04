@@ -11,7 +11,7 @@ import type {
 } from "../../../lib/rome-cloud-mail.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import { EmailAdapter } from "../../../connected-accounts/email.js";
+import { EmailAdapter } from "../../../connections/kinds/email/email.js";
 import { MessageStore, type VisibleMessage } from "./peer.js";
 
 export const EMAIL_MAILBOX = "rome@example.com";

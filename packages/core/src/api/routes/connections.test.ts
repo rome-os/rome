@@ -20,7 +20,7 @@ import {
   updateGrant,
 } from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import { domainOf } from "../../connected-accounts/platform.js";
+import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { PeopleRepository } from "../../db/repositories/people.js";

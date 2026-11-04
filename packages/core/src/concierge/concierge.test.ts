@@ -20,7 +20,7 @@ import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { readWebchatMessages } from "../connected-accounts/webchat.js";
+import { readWebchatMessages } from "../chats/dashboard/webchat.js";
 import { startConciergeEvents } from "./events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import {
