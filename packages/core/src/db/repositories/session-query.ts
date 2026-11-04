@@ -475,8 +475,7 @@ export class SessionQueryRepository {
       .as("session_query_run_stats");
   }
 
-  async querySessionPage(input: SessionPageStorageQuery) {
-    const query = input;
+  async querySessionPage(query: SessionPageStorageQuery) {
     const runStats = this.runStats(query.scope);
     const messageCounts = this.db
       .select({ sessionId: romeAgentMessages.sessionId, count: count().as("message_count") })
@@ -569,8 +568,7 @@ export class SessionQueryRepository {
     };
   }
 
-  async queryRunAggregates(input: SessionQueryStorageScope): Promise<RawSessionRunAggregate[]> {
-    const scope = input;
+  async queryRunAggregates(scope: SessionQueryStorageScope): Promise<RawSessionRunAggregate[]> {
     const interval = sql<number>`cast(${romeAgentMessages.createdAt} / 900 as integer)`;
     const agentName = answeringAgentName(scope);
     const rows = await this.db
