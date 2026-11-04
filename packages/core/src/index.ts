@@ -99,7 +99,6 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import { storedOn } from "./chats/connected-accounts/connected-account.js";
 import {
   WEBCHAT_CHANNEL,
   WEBCHAT_SURFACE,
@@ -294,13 +293,11 @@ import {
 } from "./relay/settings.js";
 import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
-import { ChatEvents } from "./chats/events.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import { StoredMessages } from "./chats/message-repository.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -437,15 +434,6 @@ async function main() {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
   const chatRepo = new ChatRepository(db, channelRecords);
-  // What was said in each place (docs/domains/chats.md#message). Reads find a
-  // platform's chats under every channel it is kept under, built or released.
-  // `channels` is built further down, before anything reads.
-  const chatEvents = new ChatEvents();
-  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
-    channelsOn: (platform) =>
-      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
-    accountOf: (channel) => channelRecords.accountOf(channel),
-  });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
   const appSpeakers = {
@@ -457,7 +445,6 @@ async function main() {
     settingsRepo,
     webchatRepo,
     chatRepo,
-    chatMessages,
     speakers: appSpeakers,
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.
@@ -590,7 +577,7 @@ async function main() {
   // Experimental features in Advanced settings. Off, sends go out unpaced and
   // replies go out whole. On, a channel that can stream paces every write of its
   // Connection, and the session bridge streams a guardian's direct replies
-  // through its replies port.
+  // through the session's speaker.
   const replyStreamingOn = replyStreamingSwitch(settingsRepo);
   const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
   const replyStreams = new ReplyStreams({
@@ -1138,10 +1125,8 @@ async function main() {
       skillCatalog,
       lifecycleDispatcher,
       webchatRepo,
-      chatMessages,
       // Catch-up reads what was said where the session stands from Chats.
       turnLinks: chatsWired.links,
-      platformOfChannel,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
