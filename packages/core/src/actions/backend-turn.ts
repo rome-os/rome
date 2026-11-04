@@ -224,15 +224,9 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         { ...(turnId ? { turnId } : {}), agent: params.agentName },
       );
       if (said) return;
-      // The session stands in no chat, so nothing can record the reply
-      // where it is read back. It still goes out: the user asked for it.
-      log.warn("backend reply has no speaker to say it, sent unrecorded", {
-        channel: params.channel,
-        threadId: params.threadId,
-        sessionId: session.id,
-      });
-      await send.send(params.threadId as ChatId, { text: reply, ...(turnId ? { turnId } : {}) });
-      return;
+      // The session stands in no chat, so nothing could record the reply
+      // where it is read back: nothing is sent.
+      throw new Error(`Session ${session.id} stands in no chat, so its reply was not sent`);
     }
     const delivery = await send.send(params.threadId as ChatId, {
       text: reply,

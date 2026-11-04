@@ -375,14 +375,14 @@ describe("backend turn delivery", () => {
         replies: { send: async () => null },
       });
 
-      await runner.runAndDeliver(params);
+      await runner.runAndDeliver(params).catch(() => {});
 
       expect(agentRunner.calls[0]).toMatchObject({ persistAnswer: false });
       expect(agentRunner.calls[0]).not.toHaveProperty("persistTrace", false);
       expect(agentRunner.calls[0]).not.toHaveProperty("persistTranscript", false);
     });
 
-    it("still sends the reply when the session stands in no chat", async () => {
+    it("sends nothing, and says which session, when the session stands in no chat", async () => {
       const send = rs.fn<Send>(async (chatId) => ({ chatId }));
       const runner = createBackendTurnRunner({
         agentRunner: answered(),
@@ -391,9 +391,10 @@ describe("backend turn delivery", () => {
         replies: { send: async () => null },
       });
 
-      await runner.runAndDeliver(params);
-
-      expect(send).toHaveBeenCalledWith("wechat-thread-1", { text: "Done.", turnId: "turn-1" });
+      await expect(runner.runAndDeliver(params)).rejects.toThrow(
+        "Session session-1 stands in no chat",
+      );
+      expect(send).not.toHaveBeenCalled();
     });
 
     it("tells a caller delivering its own turn's reply that the speaker records it", () => {
