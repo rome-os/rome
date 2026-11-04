@@ -137,7 +137,9 @@ One of Rome's accounts as Chats sees it: an [account](#account) Rome holds, or h
 What a platform says about an [account](#account): its display name, handle and avatar. Chats keeps it as a cache, not a record of its own.
 
 - It is keyed by the account, the platform and the platform's own id, and has no identity of its own. Nothing points at it: a reader that holds an account looks its profile up by the same value.
-- The channels fill it as they learn: from an address book's sync, and from what a sender put on a message. On a platform Rome mirrors an address book for, only the address book fills it, keyed by the book's own id for the account, since a message may name the sender by another of the account's addresses. Elsewhere, what a platform's address book holds would outrank what a sender called themselves, so a message never overwrites a profile an address book wrote.
+- It is the one place Rome keeps an account's name. The platform fills it through whichever route its word reaches Rome: an address book's sync, what a sender put on a message, or what the platform reported for Rome's own account when the guardian connected or fixed it. A later word replaces an earlier one, except that an address book outranks the rest: nothing else overwrites a profile an address book wrote (Ouou, 2026-11-04).
+- On a platform Rome mirrors an address book for, a message does not fill it, since a message may name the sender by another of the account's addresses than the book's own id for the account.
+- A connection's grant goes when the connection is disconnected, and the name it reported stays here, so a [connected account](#connected-account) keeps its name after a disconnect.
 - It can be dropped and rebuilt from the platforms at any time, and nothing else is lost when it is. An account no profile has been learned for yet is still an account.
 - A profile may be missing for an account a link, a dismissal or a message names. A reader then shows the account by its id.
 - A channel's own mirror of an address book stays the source for what it mirrors. A name is read from the mirror first, then from the profile.

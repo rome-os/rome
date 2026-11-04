@@ -1,6 +1,6 @@
 import type { Account } from "@rome-os/app-runtime";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import type { DrizzleDb } from "../index.js";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 import { accountProfiles } from "../schema.js";
 
 /** What a platform says about an account. Every field is null where the
@@ -15,10 +15,13 @@ export interface AccountProfile {
  * The account profile cache (docs/domains/chats.md#account-profile), keyed by
  * the `Account` value.
  *
- * Two writers, ranked. An address book states what the platform holds for the
- * account, and its row replaces whatever was there. A message states what its
- * sender called themselves when they sent it, and it writes only where no
- * address book has: a saved contact name outranks the name a sender gives.
+ * The platform fills it through whichever route reaches Rome, and an address
+ * book outranks the rest. An address book states what the platform holds for
+ * the account, and its row replaces whatever was there. A message states what
+ * its sender called themselves when they sent it, and a connection states what
+ * the platform said about Rome's own account when the guardian connected or
+ * fixed it. Those two write only where no address book has: a saved contact
+ * name outranks the name a sender or a grant gives.
  */
 export class AccountProfilesRepository {
   constructor(private readonly db: DrizzleDb) {}
@@ -67,8 +70,34 @@ export class AccountProfilesRepository {
           avatarUrl: sql`coalesce(excluded.avatar_url, ${accountProfiles.avatarUrl})`,
           updatedAt: sql`excluded.updated_at`,
         },
-        setWhere: eq(accountProfiles.source, "message"),
+        setWhere: ne(accountProfiles.source, "address_book"),
       });
+  }
+
+  /** Record what the platform said about Rome's own account when a grant
+   *  reached it, unless an address book has already spoken for the account.
+   *  Synchronous, so it runs inside the grant's transaction. */
+  fromConnection(
+    exec: DrizzleDb | DrizzleTx,
+    account: Account,
+    profile: AccountProfile,
+    now = new Date(),
+  ): void {
+    exec
+      .insert(accountProfiles)
+      .values({ ...rowOf(account, profile), source: "connection", updatedAt: now })
+      .onConflictDoUpdate({
+        target: [accountProfiles.platform, accountProfiles.accountId],
+        set: {
+          displayName: sql`coalesce(excluded.display_name, ${accountProfiles.displayName})`,
+          handle: sql`coalesce(excluded.handle, ${accountProfiles.handle})`,
+          avatarUrl: sql`coalesce(excluded.avatar_url, ${accountProfiles.avatarUrl})`,
+          source: sql`excluded.source`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+        setWhere: ne(accountProfiles.source, "address_book"),
+      })
+      .run();
   }
 
   /** The profile of each account, positionally, or null for an account the

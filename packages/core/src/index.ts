@@ -89,6 +89,10 @@ import { WhatsAppAccounts } from "./chats/accounts/whatsapp.js";
 import { createAccountNames } from "./chats/accounts/account-names.js";
 import { AccountProfiles, refreshingAfter } from "./chats/accounts/account-profiles.js";
 import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
+import {
+  backfillOwnAccountProfiles,
+  rememberOwnAccountProfile,
+} from "./chats/accounts/own-account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./chats/accounts/agents-accounts.js";
 import {
@@ -369,7 +373,8 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db, platformOfChannel);
   // What each platform says about the accounts Rome meets. The two address
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
-  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db));
+  const accountProfilesRepo = new AccountProfilesRepository(db);
+  const accountProfiles = new AccountProfiles(accountProfilesRepo);
   const refreshWhatsAppProfiles = () =>
     accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
   const refreshLinkedInProfiles = () =>
@@ -515,6 +520,13 @@ async function main() {
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
           connectedAccounts.add(tx, record.id);
+          rememberOwnAccountProfile(
+            accountProfilesRepo,
+            tx,
+            connectionRegistry.getDescriptor(record.connectionKind),
+            event.account,
+            event.profile,
+          );
           // A channel that now knows its account moves its legacy chats
           // before it hears anything.
           backfillLegacyChatsIn(tx);
@@ -524,6 +536,13 @@ async function main() {
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
           connectedAccounts.add(tx, connection.id);
+          rememberOwnAccountProfile(
+            accountProfilesRepo,
+            tx,
+            connectionRegistry.getDescriptor(connection.connectionKind),
+            event.account,
+            event.profile,
+          );
           backfillLegacyChatsIn(tx);
           return;
         case "revoked":
@@ -1756,6 +1775,12 @@ async function main() {
   // A grant from before grants named their account learns it now, so the next
   // connect of that account is refused.
   await recordGrantAccounts(connectionRegistry);
+  // The account profile cache learns each held grant's account name, so an
+  // account connected before it learned from grants keeps its name after a
+  // disconnect.
+  backfillOwnAccountProfiles(accountProfilesRepo, db, await connectionsRepository.all(), (kind) =>
+    connectionRegistry.getDescriptor(kind),
+  );
   // Agent links the move to account keys could not place go to the accounts
   // their connections now reach.
   connectedAccounts.placeUnplaced();

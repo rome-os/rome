@@ -498,7 +498,7 @@ export class ConnectionRegistry {
         tx,
         minting
           ? { kind: "connected", connection: record, profile, account }
-          : { kind: "fixed", connection: { id, connectionKind }, account },
+          : { kind: "fixed", connection: { id, connectionKind }, profile, account },
       );
       opts.inTx?.(tx, { reachesAnotherAccount: anotherAccount });
     };
