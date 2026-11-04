@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { takeLoginReturn } from "@/lib/login-return";
-import { submitSetupReturn } from "@/lib/setup-api";
+import { getSetupState, isTerminalSetup, submitSetupReturn } from "@/lib/setup-api";
+import { endedNoticeId } from "@/components/setup/use-setup";
 
 interface OAuthRedeemPayload {
   nextPath?: string;
@@ -41,7 +42,7 @@ function connectionPath(connectionKind: string | undefined): string {
 type ReturnOutcome =
   /** `ended` when the setup's fix reached another account, so it ended the
    *  connection it fixed and started one to that account. */
-  | { redirect: string; ended?: boolean }
+  | { redirect: string; ended?: boolean; follow?: string }
   | { error: string }
   | { delivered: true }
   | { cancelled: true }
@@ -142,7 +143,17 @@ function handleOAuthReturnOnce(
       // The setup consumed the leg and is finishing the redeem; the connection's
       // detail page re-attaches and settles it.
       const ended = returned.state?.status === "done" && Boolean(returned.state.grant?.ended);
-      return { redirect: connectionPath(returned.connectionKind), ...(ended ? { ended } : {}) };
+      // A setup still redeeming can end the connection after this page has
+      // gone, and the detail page may never see it, so it is followed here.
+      const follow =
+        returned.cid && returned.state && !isTerminalSetup(returned.state)
+          ? returned.cid
+          : undefined;
+      return {
+        redirect: connectionPath(returned.connectionKind),
+        ...(ended ? { ended } : {}),
+        ...(follow ? { follow } : {}),
+      };
     }
 
     // A broker error (denied consent) means no connection could have succeeded —
@@ -173,6 +184,26 @@ function handleOAuthReturnOnce(
 
   returnHandlers.set(key, run);
   return run;
+}
+
+// How often, and for how long, the callback follows a setup it handed off.
+const FOLLOW_POLL_MS = 1000;
+const FOLLOW_LIMIT = 120;
+
+/** Poll a setup until it finishes, and toast when it ended a connection. The
+ *  toast shares its id with the one `useSetup` shows, so a detail page that
+ *  re-attached to the same setup does not show it twice. */
+async function followSetupForEnded(cid: string, notice: string): Promise<void> {
+  for (let i = 0; i < FOLLOW_LIMIT; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
+    const state = await getSetupState(cid).catch(() => null);
+    if (!state) return;
+    if (!isTerminalSetup(state)) continue;
+    if (state.status === "done" && state.grant?.ended) {
+      toast(notice, { id: endedNoticeId(state.grant.ended) });
+    }
+    return;
+  }
 }
 
 async function redeemOAuthHandoff(
@@ -259,8 +290,10 @@ export default function CallbackPage() {
         }
         // The detail page cannot re-attach to a finished setup, so the
         // callback tells the guardian a fix ended the connection it fixed.
-        if (outcome.ended) toast(t("connections.accounts.endedAnother", { ns: "settings" }));
+        const endedNotice = t("connections.accounts.endedAnother", { ns: "settings" });
+        if (outcome.ended) toast(endedNotice);
         navigate(outcome.redirect, { replace: true });
+        if (outcome.follow) void followSetupForEnded(outcome.follow, endedNotice);
       } catch (returnError) {
         if (cancelled) return;
         setError(returnError instanceof Error ? returnError.message : fallbackError);

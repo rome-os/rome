@@ -34,6 +34,12 @@ export interface UseSetupOptions {
   onDone?: (connectionId: string | null) => void;
 }
 
+/** The id of the toast that says a setup ended the connection `ended`, so the
+ *  setup's card and the OAuth callback that followed it show it once. */
+export function endedNoticeId(ended: string): string {
+  return `setup-ended:${ended}`;
+}
+
 // Poll interval while the setup awaits an external event.
 const POLL_MS = 2000;
 
@@ -76,7 +82,9 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         // A fix that reached another account ended the connection it fixed.
         // The card drops its done view once the new account reads working, and
         // can move to the new account's page, so this goes out as a toast.
-        if (next.grant?.ended) toast(t("connections.accounts.endedAnother"));
+        if (next.grant?.ended) {
+          toast(t("connections.accounts.endedAnother"), { id: endedNoticeId(next.grant.ended) });
+        }
         onDone?.(next.grant?.connectionId ?? null);
       }
     },

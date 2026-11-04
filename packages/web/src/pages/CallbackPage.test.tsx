@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import * as sonner from "sonner";
 import i18n from "@/i18n";
@@ -194,6 +194,44 @@ describe("CallbackPage return-leg routing", () => {
     expect(landed.textContent).toBe("/settings/connections/github");
     expect(toast).toHaveBeenCalledTimes(1);
     expect(String(toast.mock.calls[0]![0])).toContain("Rome ended the connection");
+  });
+
+  it("follows a setup still redeeming and tells the guardian once it ended the connection", async () => {
+    const toast = rs.spyOn(sonner, "toast").mockImplementation(() => "t");
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/api/setups/return")) {
+        return new Response(
+          JSON.stringify({
+            matched: true,
+            cid: "setup-follow",
+            connectionKind: "github",
+            accepted: true,
+            state: { status: "presenting", view: { progress: true } },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/setups/setup-follow")) {
+        return new Response(
+          JSON.stringify({
+            state: { status: "done", grant: { connectionId: "conn-2", ended: "conn-1" } },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/auth/me")) {
+        return new Response(JSON.stringify({ kind: "guardian" }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    renderCallbackAndTrackLanding("?handoff=h-gh&state=s-gh-follow");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/settings/connections/github");
+    expect(toast).not.toHaveBeenCalled();
+    await waitFor(() => expect(toast).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(toast.mock.calls[0]![1]).toEqual({ id: "setup-ended:conn-1" });
   });
 
   it("tells the guardian when a connect through the redeem ended the connection", async () => {
