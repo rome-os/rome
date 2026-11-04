@@ -242,14 +242,21 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       if (liveCidRef.current) void cancelSetup(liveCidRef.current);
     };
   }, [cancelOnLeave]);
-  // A setup left running when the card goes away is followed to its end, so
-  // the guardian still hears that it ended a connection.
+  // A setup that can still finish without the guardian, when the card goes
+  // away, is followed to its end, so the guardian still hears that it ended a
+  // connection. One waiting on the guardian's input cannot finish without
+  // its card.
   const endedNoticeRef = useRef("");
   endedNoticeRef.current = t("connections.accounts.endedAnother");
+  const followCidRef = useRef<string | null>(null);
+  followCidRef.current =
+    cid && (state?.status === "presenting" || state?.status === "awaiting-redirect") ? cid : null;
   useEffect(() => {
     if (cancelOnLeave) return;
     return () => {
-      if (liveCidRef.current) void followSetupForEnded(liveCidRef.current, endedNoticeRef.current);
+      if (followCidRef.current) {
+        void followSetupForEnded(followCidRef.current, endedNoticeRef.current);
+      }
     };
   }, [cancelOnLeave]);
   useEffect(() => {
