@@ -117,6 +117,13 @@ export function setToolsCollapsed(collapsed: boolean) {
   notify();
 }
 
+/** Collapse a narrow workspace on mount without changing its saved view. */
+export function collapseToolsOnMount() {
+  if (window.innerWidth >= COMPACT_WIDTH || toolView.collapsed) return;
+  toolView = { ...toolView, collapsed: true };
+  notify();
+}
+
 function reconcileToolView(next: WidgetPlacement[]) {
   const sorted = [...next].sort((a, b) => a.order - b.order);
   const old = [...snapshot].sort((a, b) => a.order - b.order);

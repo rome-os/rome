@@ -357,6 +357,38 @@ describe("opening chats", () => {
     expect(result.current.toolView).toEqual({ ...view, collapsed: true });
   });
 
+  it("collapses a narrow workspace on mount without saving or changing its selected tab and unread markers", async () => {
+    const { store, result } = await open({ saved: true });
+    act(() => result.current.selectTool("notes"));
+    const view = result.current.toolView;
+    const activations = result.current.toolActivations;
+    const write = rs.spyOn(Storage.prototype, "setItem");
+    try {
+      act(() => store.collapseToolsOnMount());
+      expect(result.current.toolView).toEqual({ ...view, collapsed: true });
+      expect(result.current.toolActivations).toBe(activations);
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it.each([
+    721, 1280,
+  ])("does nothing to the mounted tool view or storage at %s px", async (width) => {
+    const { store, result } = await open({ width, saved: true });
+    const view = result.current.toolView;
+    const write = rs.spyOn(Storage.prototype, "setItem");
+    try {
+      act(() => store.collapseToolsOnMount());
+      expect(result.current.toolView).toBe(view);
+      expect(result.current.toolView.collapsed).toBe(false);
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it("does not let passive agent placements open a narrow chat's pane", async () => {
     const { store, result } = await open();
     act(() => {
