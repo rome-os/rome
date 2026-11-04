@@ -156,9 +156,20 @@ export function buildEnvoys(
     }
     envoyOf(account.agent).accounts.push(account);
   }
+  // A listing read before a reconnect can still call an account
+  // disconnected that a connection now reaches, so the connection wins.
+  const reached = new Set(
+    connections.flatMap((connection) =>
+      connection.id !== null && connection.account
+        ? [`${connection.account.platform}:${connection.account.id}`]
+        : [],
+    ),
+  );
   for (const entry of connectedAccounts) {
     const account = toDisconnected(entry);
-    if (account) envoyOf(account.agent).disconnected.push(account);
+    if (account && !reached.has(`${account.platform}:${account.accountId}`)) {
+      envoyOf(account.agent).disconnected.push(account);
+    }
   }
   const envoys = [...byAgent.values()].sort((a, b) => compareAgents(a.agent, b.agent));
   // Core links only loaded agents, and main always. Without the list, the
