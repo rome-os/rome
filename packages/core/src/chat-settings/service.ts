@@ -630,7 +630,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       ref,
       connectionKind: connections[0]!.connectionKind,
       service: connections[0]!.connectionKind,
-      kind: row.kind,
+      // Chats knows a group, which its platform may call a channel.
+      kind: row.kind === "group" && remembered?.kind === "channel" ? "channel" : row.kind,
       displayName: row.placeName ?? remembered?.displayName ?? row.name,
     };
     if (row.parentSessionId) {

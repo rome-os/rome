@@ -847,14 +847,17 @@ describe("ChatSettingsService", () => {
     });
 
     expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    await expect(
-      service.update({
-        ref: throughSupport,
-        set: { session: { reset: { mode: "none" } } },
-        clear: [],
-        actor: { kind: "guardian" },
-      }),
-    ).rejects.toThrow("cannot tell whether it is a group or a direct message");
+    // The group Rome holds there through Sales has its kind, so Support's
+    // rule is set in it, as Support's own.
+    await service.update({
+      ref: throughSupport,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect((await service.get(throughSupport)).overrides).toEqual({
+      session: { reset: { mode: "none" } },
+    });
     expect((await service.get(throughSales)).effective.enabled).toBe(false);
   });
 

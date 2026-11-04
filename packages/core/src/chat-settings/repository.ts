@@ -339,13 +339,17 @@ export class ChatSettingsRepository {
    * The chat at the address `descriptor` names, started as an incoming
    * message there would start it ({@link startChannelChat}): of the kind the
    * address names where it names one, else of the kind `descriptor` states.
-   * Refuses when that kind is only a guess (`kindKnown` false) and the
-   * address names none, since a chat's kind never changes and a wrong one
+   * Refuses when that kind is only a guess (`kindKnown` false), the address
+   * names none and Rome holds no group there, since a chat's kind never changes and a wrong one
    * would hold the session the first message opens.
    */
   private startChat(descriptor: ChatDescriptor, channel: string, kindKnown: boolean): ChatRef {
     const address = descriptor.ref.chatId;
     if (!kindKnown && kindNamedBy(this.accountOn(channel).platform, address) === null) {
+      // A group Rome already holds there, through another of its accounts,
+      // has its kind already.
+      const held = this.chatOf(channel, address, "group");
+      if (held) return held;
       throw new Error(
         `Rome has not heard the chat at ${address} on ${channel} and cannot tell whether it is a group or a direct message; its rule can be set once a message there arrives or its platform lists it`,
       );
