@@ -1841,9 +1841,9 @@ export interface ChannelDirectMessaging {
  *   A text platform shows `text` parts and nothing else.
  * - `attachment_unsupported`: an attachment the channel cannot carry.
  * - `reply_unaddressable`: `replyToMessageId` names no message the channel
- *   can answer, so the reply would land somewhere else. A platform with no
- *   way to quote at all, such as WhatsApp or WeChat, answers in place, as
- *   does a reply the channel's placement keeps out of a thread.
+ *   can answer, so the reply would land somewhere else. That includes any
+ *   reply on a platform Rome cannot quote on, such as WhatsApp or WeChat.
+ *   The sender drops the quote and sends again.
  */
 export type SendRefusedReason =
   | "empty"
@@ -2568,6 +2568,10 @@ export class ActionInvocationError extends Error {
     readonly actionName: string,
     readonly code: ActionInvocationErrorCode,
     message: string,
+    /** Why a send was refused, when the handler failed on a
+     *  {@link SendRefused}, so the caller can rewrite the message and send
+     *  it again. */
+    readonly refusal?: SendRefusedReason,
   ) {
     super(message);
     this.name = "ActionInvocationError";
