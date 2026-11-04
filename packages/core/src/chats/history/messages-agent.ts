@@ -36,7 +36,7 @@ const ROME_SENDER_ID = "rome";
  * person's side of the conversation.
  *
  * So the sender settles what the role leaves open, and this is stated once for
- * both stores that read these rows: two spellings would put one message on two
+ * every reader of these rows: two spellings would put one message on two
  * sides.
  */
 export function agentMessageOutbound(role: SQL, senderId: SQL): SQL {
@@ -60,8 +60,8 @@ export function isAgentMessageOutbound(role: string, senderId: string | null): b
 /**
  * Rome's own transcript of a channel conversation, read for accounts from
  * Chats: each direct message Rome's account on a channel has with the
- * account's address, every line said there. `accountsOn` names the accounts
- * of Rome's to read under a channel.
+ * account's address, every line said there. `accountOf` names Rome's account
+ * on a channel, or null where its record knows none and nothing is read.
  *
  * A group answers to no address, and a guardian chat is the guardian talking
  * to Rome, so neither is read. A line is Rome's when
@@ -70,29 +70,28 @@ export function isAgentMessageOutbound(role: string, senderId: string | null): b
  */
 export function chatsAgentMessages(
   db: DrizzleDb,
-  accountsOn: (channel: string) => readonly Account[],
+  accountOf: (channel: string) => Account | null,
 ): AccountMessages {
   return sqlMessages({
     db,
     view(scope) {
       if (scope.keys.length === 0) return null;
-      // Rome's accounts once per channel, and the scope as one JSON value, so
+      // Rome's account once per channel, and the scope as one JSON value, so
       // a batch binds one variable however many keys it holds.
-      const accounts = new Map<string, readonly Account[]>();
+      const accounts = new Map<string, Account | null>();
       const on = (channel: string) => {
-        let held = accounts.get(channel);
-        if (!held) accounts.set(channel, (held = accountsOn(channel)));
-        return held;
+        if (!accounts.has(channel)) accounts.set(channel, accountOf(channel));
+        return accounts.get(channel) ?? null;
       };
       const pairs = JSON.stringify(
-        scope.keys.flatMap(({ channel, key }) =>
-          on(channel).map((account) => {
-            // The direct message the address names before Rome's account has
-            // heard it anywhere else; the address store below has the last word.
-            const named = chatAt(account.platform, key, { romeEnd: account.id }).externalId;
-            return [channel, account.platform, account.id, key, named];
-          }),
-        ),
+        scope.keys.flatMap(({ channel, key }) => {
+          const account = on(channel);
+          if (!account) return [];
+          // The direct message the address names before Rome's account has
+          // heard it anywhere else; the address store below has the last word.
+          const named = chatAt(account.platform, key, { romeEnd: account.id }).externalId;
+          return [[channel, account.platform, account.id, key, named]];
+        }),
       );
       return sql`
         WITH v(channel, platform, account, key, named) AS (

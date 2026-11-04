@@ -98,7 +98,9 @@ export interface MainBackendTurnRunner extends BackendTurnRunner {
 
 export interface BackendTurnRunnerDeps {
   agentRunner: AgentRunnerInterface;
-  /** The channel a reply is delivered on, by name, or null when there is none. */
+  /** The channel a reply is delivered on, by name, or null when there is none.
+   *  Its send port must be the platform's own, not one that records its
+   *  sends: the speaker records the reply. */
   channel: (name: string) => Channel | null;
   /** Resolve the working dir for the continued session from its (channel,
    * thread), so the resumed turn runs in the SAME project the conversation

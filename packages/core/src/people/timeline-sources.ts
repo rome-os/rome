@@ -60,7 +60,7 @@ export function personMessageStores(deps: {
   /** Rome's own account on a channel, or null while its record knows none. */
   accountOf?: (channel: string) => Account | null;
 }): AccountMessages[] {
-  const transcript = chatsAgentMessages(deps.db, (channel) => romeAccountsOn(deps, channel));
+  const transcript = chatsAgentMessages(deps.db, (channel) => deps.accountOf?.(channel) ?? null);
   return [...messageStores(deps.channels), transcript];
 }
 
@@ -82,19 +82,6 @@ export async function guardianChannels(deps: {
     const account = deps.accountOf?.(channel);
     return account != null && own.has(`${account.platform}\u0000${account.id}`);
   };
-}
-
-/**
- * Rome's account on channel `channel`, as the chats it spoke in name it: the
- * channel record's while it holds one, else none, since a channel's name
- * names no account.
- */
-export function romeAccountsOn(
-  deps: { accountOf?: (channel: string) => Account | null },
-  channel: string,
-): Account[] {
-  const recorded = deps.accountOf?.(channel);
-  return recorded ? [recorded] : [];
 }
 
 /**
