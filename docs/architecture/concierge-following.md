@@ -73,7 +73,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 
 ### Triage decides importance, and the Concierge decides what to say
 
-- **Triage reads the normalized event, the follow's options rendered as words from the catalog, its preference in the guardian's words, and what was told recently.** It has no tools and answers important, digest or ignore for each event. Its prompt states goals and names no service; labels are descriptions it weighs, not rules. When it is unsure, it answers digest.
+- **Triage reads the normalized event, the follow's options rendered as words from the catalog, its preference in the guardian's words, and what was told recently.** It has no tools and answers important, digest or ignore for each event. Its prompt states goals and names no service. Labels are descriptions it weighs, not rules. When it is unsure, it answers digest.
 - **Triage never decides delivery.** An important item reaches the Concierge promptly, and the Concierge decides whether to tell the guardian now or stay silent.
 - **Every message to the guardian is a Concierge turn.** No part of following posts into the chat by itself.
 - **Every important and digest item goes into the next digest, whether or not the Concierge told it.** Important items lead the digest. The Concierge gives an item already told one short line.
