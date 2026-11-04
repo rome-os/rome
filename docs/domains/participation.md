@@ -7,6 +7,9 @@ When an agent takes part in a chat: what wakes it, what it reads, and where it s
 A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is read off the agent's session, not stored.
 
 - A session is in a chat when it has a speaker there. The session keeps its own id. No table holds speakers and nothing names one by an id of its own.
+- A [chat session](agents.md#chat-session) is born with its speaker. When Chats records a message that wakes an agent with no session in the place yet, Participation creates the session standing there as that account, in the same step. Participation is the one writer of that birth, and a session is never placed in a chat later.
+- Ending a chat ends its chat sessions with it.
+- A session in no chat has no speaker and no place to reply into. A reply from one is refused, never placed in a chat for it.
 
 ## Wake
 
@@ -40,4 +43,5 @@ What the agent says back after a wake, through the account it was woken on.
 
 - **A projection setting per agent or per chat.** One default serves every chat: the place the waking message was said in. A setting would move a reading decision that belongs to the agent into chat configuration.
 - **A thread as the boundary of the agent's memory.** What the agent remembers is its own decision, in Agents. Participation says only what it is offered at a wake.
+- **A session created first and given its speaker later.** Each path that reached the session in between had to handle a session standing nowhere, and a path that skipped the second step left it there.
 - **Refusing every message outside the woken chat.** The guardian sometimes wants the agent to carry something across chats. An approval card keeps that possible and keeps the guardian in the loop.

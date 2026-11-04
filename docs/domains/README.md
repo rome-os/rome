@@ -11,7 +11,7 @@ This folder is the source of truth for what these words mean. Other docs link he
 | **Chats** | Who said what, where, and as whom | [chats.md](chats.md) |
 | **Connections** | What access Rome has to which external account | [connections.md](connections.md) |
 | **Participation** | When an agent takes part in a chat, what wakes it, what it reads, and where it speaks | [participation.md](participation.md) |
-| **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
+| **Agents** | What an agent is, how it runs, and what it did, session by session | [agents.md](agents.md) |
 | **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
 
 ```mermaid
@@ -58,6 +58,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
 - Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
+- A subagent, a fork and an action run keep their own prompts and answers, outside Chats, and the dashboard shows them as the session's turns.
 - The People and Assistants pages send to a place, the direct message that reaches the account. Rome does not store a message's delivery yet: a message is recorded once the platform took it, and a refused one is not recorded.
 - An assistant's chat is on one Assistants page that switches between assistants, each marked with its kind, from the moment Rome knows the assistant, and the guardian can add the page to the sidebar. Other Romes are left out.
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
@@ -103,3 +104,6 @@ Diffs still owed to the model, each a change of its own:
 - The channel record goes.
 - Email and WhatsApp accounts lose Rome's reach at disconnect like every other, and connecting again reaches the same connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
+- A chat session is born in its chat with its speaker, by Participation in the step that records the waking message. Today a session row is made first and its chat written onto it later.
+- A dashboard chat gets its own id when it opens. Today it takes the id of its session, which cannot hold once the chat exists before its session.
+- Promoting a side chat makes a fork into a dashboard chat and moves its prompts and answers into Chats, placing a session in a chat after it was born. How a side chat is modelled is still open.

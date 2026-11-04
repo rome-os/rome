@@ -1,6 +1,6 @@
 # Sessions
 
-A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, a [chat](../domains/chats.md#chat) on one of Rome's accounts, an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
+A Rome session is the durable product boundary around one continuous body of agent work. What a session is in the domain language, and how it differs from a chat, is in [Agents](../domains/agents.md#session). It can represent a guardian-authored chat, a [chat](../domains/chats.md#chat) on one of Rome's accounts, an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
 
 **Contracts:**
 
