@@ -1216,6 +1216,15 @@ async function main() {
     connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
     items: new ConciergeFollowItemsRepository(db),
     agentRunner,
+    // The Concierge's say lands in its chat as assistant rows; the newest few
+    // turns hold any said after `since`.
+    saidSince: async (chatId, since) => {
+      const { rows } = await webchatRepo.getMessagesPage(chatId, { limit: 4 });
+      return rows
+        .filter((row) => row.role === "assistant" && new Date(row.createdAt).getTime() >= since)
+        .map((row) => String(row.content))
+        .join("\n");
+    },
   });
 
   const approvalHandler = new ApprovalHandler(

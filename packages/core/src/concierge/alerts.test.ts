@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow-items.js";
+import { toldIn } from "./following.js";
 import {
   BATCH_WINDOW_MS,
   FollowBatcher,
@@ -39,6 +40,7 @@ const item = (over: Partial<ConciergeFollowItemRow> = {}): ConciergeFollowItemRo
   line: "alice asked you to review #7",
   url: "https://github.com/acme/widgets/pull/7",
   createdAt: new Date(START),
+  deferredAt: null,
   deliveredAt: null,
   ...over,
 });
@@ -242,14 +244,29 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     expect(prompt.match(/<\/external_events>/g)).toHaveLength(1);
   });
 
+  it("puts important items first in a digest, marked, and never counts them away", () => {
+    const many = [
+      ...Array.from({ length: 60 }, () =>
+        item({ source: "gmail", kind: "new_mail", decision: "digest" }),
+      ),
+      item({ decision: "important", line: "bob asked you about the release" }),
+    ];
+    const turn = renderDigestTurn(many);
+    expect(turn.indexOf("bob asked you")).toBeLessThan(turn.indexOf('kind="new_mail"'));
+    expect(turn).toMatch(/important="true"[^>]*>bob asked you about the release</);
+    expect(turn.match(/important="true"/g)).toHaveLength(1);
+  });
+
   it("shows a small digest whole, and a large one as a few lines per kind plus counts", () => {
     const small = renderDigestTurn([item({ decision: "digest" }), item({ decision: "digest" })]);
     expect(small.match(/<item /g)).toHaveLength(2);
     expect(small).not.toContain("<more");
 
     const many = [
-      ...Array.from({ length: 60 }, () => item({ source: "gmail", kind: "new_mail" })),
-      ...Array.from({ length: 3 }, () => item({ kind: "your_ci_failed" })),
+      ...Array.from({ length: 60 }, () =>
+        item({ source: "gmail", kind: "new_mail", decision: "digest" }),
+      ),
+      ...Array.from({ length: 3 }, () => item({ kind: "your_ci_failed", decision: "digest" })),
     ];
     const large = renderDigestTurn(many);
     expect(large).toContain('count="63"');
@@ -292,5 +309,15 @@ describe("quiet hours", () => {
     expect(parseQuietHours({ start: "22:00", end: "22:00" })).toBeNull();
     expect(parseQuietHours({ start: "9:00", end: "18:00" })).toBeNull();
     expect(parseQuietHours(null)).toBeNull();
+  });
+});
+
+describe("toldIn", () => {
+  it("finds an item told by its link, with or without a trailing slash or escaping", () => {
+    const item = { url: "https://github.com/acme/widgets/pull/7?a=1&b=2" };
+    expect(toldIn("see [#7](https://github.com/acme/widgets/pull/7?a=1&b=2)", item)).toBe(true);
+    expect(toldIn("see https://github.com/acme/widgets/pull/7?a=1&amp;b=2", item)).toBe(true);
+    expect(toldIn("see https://github.com/acme/widgets/pull/8", item)).toBe(false);
+    expect(toldIn("anything", { url: null })).toBe(false);
   });
 });

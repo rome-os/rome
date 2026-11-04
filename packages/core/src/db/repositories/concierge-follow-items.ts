@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
 import { conciergeFollowItems } from "../schema.js";
 
@@ -18,8 +18,9 @@ export interface FollowItemInput {
 }
 
 /**
- * The events the Concierge's triage kept, each owed to the Concierge until
- * delivered: `important` ones in the next batch, `digest` ones at the next digest.
+ * The events the Concierge's triage kept, each owed until the guardian was
+ * told: `important` ones go to the Concierge after their batch, and `digest`
+ * ones, with the important ones it did not tell, at the next digest.
  */
 export class ConciergeFollowItemsRepository {
   constructor(private db: DrizzleDb) {}
@@ -57,15 +58,25 @@ export class ConciergeFollowItemsRepository {
     return new Set(rows.map((row) => row.eventId));
   }
 
-  /** The items of a decision not yet delivered, oldest first. */
-  async owed(decision: FollowItemDecision): Promise<ConciergeFollowItemRow[]> {
+  /**
+   * What is owed, oldest first. `important`: important items the Concierge has
+   * not had yet. `digest`: digest items, and important items left for the
+   * digest, which keep their decision so the digest can rank them first.
+   */
+  async owed(to: FollowItemDecision): Promise<ConciergeFollowItemRow[]> {
+    const items = conciergeFollowItems;
     return this.db
       .select()
-      .from(conciergeFollowItems)
+      .from(items)
       .where(
-        and(eq(conciergeFollowItems.decision, decision), isNull(conciergeFollowItems.deliveredAt)),
+        and(
+          isNull(items.deliveredAt),
+          to === "important"
+            ? and(eq(items.decision, "important"), isNull(items.deferredAt))
+            : or(eq(items.decision, "digest"), isNotNull(items.deferredAt)),
+        ),
       )
-      .orderBy(asc(conciergeFollowItems.createdAt));
+      .orderBy(asc(items.createdAt));
   }
 
   async markDelivered(ids: string[], at: Date): Promise<void> {
@@ -76,16 +87,20 @@ export class ConciergeFollowItemsRepository {
       .where(inArray(conciergeFollowItems.id, ids));
   }
 
-  /** Moves owed important items to the digest. */
-  async moveToDigest(ids: string[]): Promise<void> {
+  /** Leaves owed important items for the digest. They stay important. */
+  async deferToDigest(ids: string[], at: Date): Promise<void> {
     if (ids.length === 0) return;
     await this.db
       .update(conciergeFollowItems)
-      .set({ decision: "digest" })
+      .set({ deferredAt: at })
       .where(and(inArray(conciergeFollowItems.id, ids), isNull(conciergeFollowItems.deliveredAt)));
   }
 
-  /** Important items since `since`, newest first, so triage knows what was already told. */
+  /**
+   * Important items the Concierge told the guardian since `since`, newest
+   * first, so triage knows what was already told. One left for the digest is
+   * not among them.
+   */
   async recentImportant(since: Date, limit: number): Promise<ConciergeFollowItemRow[]> {
     return this.db
       .select()
@@ -93,6 +108,8 @@ export class ConciergeFollowItemsRepository {
       .where(
         and(
           eq(conciergeFollowItems.decision, "important"),
+          isNotNull(conciergeFollowItems.deliveredAt),
+          isNull(conciergeFollowItems.deferredAt),
           gte(conciergeFollowItems.createdAt, since),
         ),
       )

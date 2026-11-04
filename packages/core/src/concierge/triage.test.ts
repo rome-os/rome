@@ -102,9 +102,8 @@ describe("the triage agent", () => {
     expect(agent.systemPromptPrefix).not.toMatch(/\bnotify\b/);
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain("Whether to tell them now is your call");
-    expect(prompt).toContain(
-      "An item you leave untold is handled: it does not come back in the digest.",
-    );
+    expect(prompt).toContain("goes to the next digest, still marked important");
+    expect(prompt).toContain('Items with `important="true"` come first');
     expect(prompt).not.toMatch(/\bnotify\b/);
   });
 });

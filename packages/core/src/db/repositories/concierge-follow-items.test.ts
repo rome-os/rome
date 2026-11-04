@@ -40,15 +40,18 @@ describe("ConciergeFollowItemsRepository", () => {
     expect((await repo.owed("digest")).map((row) => row.eventId)).toEqual(["e2"]);
   });
 
-  it("moves owed important items to the digest, and lists recent important items", async () => {
+  it("leaves untold important items for the digest, still important, and lists recent ones", async () => {
     const [a, b] = await repo.add(
       [item("a", "important"), item("b", "important")],
       new Date(10_000),
     );
     await repo.markDelivered([a!.id], new Date(11_000));
-    await repo.moveToDigest([a!.id, b!.id]);
-    // A delivered one stays as it was.
-    expect((await repo.owed("digest")).map((row) => row.eventId)).toEqual(["b"]);
+    await repo.deferToDigest([a!.id, b!.id], new Date(11_000));
+    // A delivered one stays as it was; the other is owed to the digest, not to the Concierge.
+    expect(await repo.owed("important")).toEqual([]);
+    expect((await repo.owed("digest")).map((row) => [row.eventId, row.decision])).toEqual([
+      ["b", "important"],
+    ]);
     expect((await repo.recentImportant(new Date(9_000), 10)).map((row) => row.eventId)).toEqual([
       "a",
     ]);

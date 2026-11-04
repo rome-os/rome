@@ -5,11 +5,11 @@
 //   batch       a fixed window: a batch closes BATCH_WINDOW_MS after its
 //               first event, and is triaged in runs of at most 50 events
 //   important   goes to the Concierge after each batch, as one quiet turn; it
-//               tells the guardian now or stays silent, and either way the
-//               item is handled and not sent again in the digest
+//               tells the guardian now or stays silent, and an item it did not
+//               tell goes to the next digest, still marked important
 //   breaker     a fixed cap, not a rule: past IMPORTANT_TURNS_PER_HOUR
 //               important turns in the last hour, a batch's important items go
-//               to the digest
+//               to the digest, still marked important
 //   quiet hours important items wait until the guardian's quiet window ends,
 //               then arrive as one turn marked as held
 //   digest      goes to the Concierge at the guardian's digest times
@@ -242,11 +242,12 @@ function attr(value: string): string {
 const text = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-function itemTag(item: ConciergeFollowItemRow): string {
+function itemTag(item: ConciergeFollowItemRow, markImportant = false): string {
   const attrs = [
     `source="${attr(item.source)}"`,
     `target="${attr(item.target)}"`,
     `kind="${attr(item.kind)}"`,
+    ...(markImportant && item.decision === "important" ? ['important="true"'] : []),
     ...(item.url ? [`url="${attr(item.url)}"`] : []),
   ].join(" ");
   return `<item ${attrs}>${text(item.line)}</item>`;
@@ -260,29 +261,33 @@ export function renderImportantTurn(items: ConciergeFollowItemRow[], held: boole
   return [
     `<external_events untrusted="true" delivery="important"${held ? ' held="quiet_hours"' : ""}>`,
     FENCE_NOTE,
-    ...items.map(itemTag),
+    ...items.map((item) => itemTag(item)),
     "</external_events>",
   ].join("\n");
 }
 
 /**
- * The quiet turn of a digest. A large digest shows a few lines per source and
- * kind and counts the rest, so the conversation is not flooded.
+ * The quiet turn of a digest. Important items the Concierge did not tell come
+ * first and are always listed, marked as such. A large digest shows a few lines
+ * of the rest per source and kind and counts the others, so the conversation
+ * is not flooded.
  */
 export function renderDigestTurn(items: ConciergeFollowItemRow[]): string {
+  const important = items.filter((item) => item.decision === "important");
+  const rest = items.filter((item) => item.decision !== "important");
+  const lines = important.map((item) => itemTag(item, true));
   const groups = new Map<string, ConciergeFollowItemRow[]>();
-  for (const item of items) {
+  for (const item of rest) {
     const key = `${item.source}\u0000${item.kind}`;
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
-  const lines: string[] = [];
-  let shown = 0;
+  let shown = important.length;
   for (const group of groups.values()) {
     const first = group[0];
     if (!first) continue;
     const room = items.length <= MAX_DIGEST_LINES ? group.length : DIGEST_LINES_PER_GROUP;
     const take = Math.min(room, Math.max(0, MAX_DIGEST_LINES - shown), group.length);
-    lines.push(...group.slice(0, take).map(itemTag));
+    lines.push(...group.slice(0, take).map((item) => itemTag(item)));
     shown += take;
     if (group.length > take) {
       lines.push(

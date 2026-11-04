@@ -164,6 +164,8 @@ function setup(
     gmailStatus?: WatchSource["status"];
     /** The connectors a second provider app lists. */
     second?: ProviderSources;
+    /** What the Concierge says in an important turn; by default every link it was given. */
+    says?: (prompt: string) => string;
     /** Triage's decision per event id; important when not named. */
     triage?: Record<string, "important" | "digest" | "ignore">;
   } = {},
@@ -175,6 +177,7 @@ function setup(
   const calls: [string, Record<string, unknown>][] = [];
   const changes: number[] = [];
   const turns: string[] = [];
+  const said: string[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
   const testDb = createTestDb();
@@ -280,7 +283,7 @@ function setup(
                   kind: "review_requested",
                   actor: "alice",
                   subject: "Fix it",
-                  url: "https://github.com/acme/widgets/pull/7",
+                  url: `https://github.com/acme/widgets/pull/${payload.id ?? "7"}`,
                   facts: { aboutYou: true, repo: "acme/widgets", "bad key": "x" },
                 },
               },
@@ -295,13 +298,18 @@ function setup(
       set: async (key, value) => void settings.set(key, value),
     },
     connections: async () => connectionViews(),
+    saidSince: async () => said.join("\n"),
     items,
     agentRunner,
   };
   const service = {
     isEnabled: async () => true,
     findChatId: async () => "concierge",
-    runSystemTurn: async (_chatId: string, prompt: string) => void turns.push(prompt),
+    runSystemTurn: async (_chatId: string, prompt: string) => {
+      turns.push(prompt);
+      said.length = 0;
+      said.push(options.says ? options.says(prompt) : prompt);
+    },
     followingChanged: () => void changes.push(1),
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
@@ -703,6 +711,40 @@ describe("the follow pipeline", () => {
     await fire(s, "e1");
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     expect(s.triaged).toHaveLength(1);
+    s.stop();
+  });
+
+  it("marks only what the Concierge told as done, and gives the digest the rest, ranked first", async () => {
+    rs.useFakeTimers();
+    // The Concierge tells e1, with its link, and stays silent on e2.
+    const s = setup({
+      triage: { e3: "digest" },
+      says: () => "alice wants your review: https://github.com/acme/widgets/pull/e1",
+    });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    for (const id of ["e1", "e2", "e3"]) await fire(s, id);
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turns).toHaveLength(1);
+    expect(await s.items.owed("important")).toEqual([]);
+    expect((await s.items.owed("digest")).map((i) => [i.eventId, i.decision])).toEqual([
+      ["e2", "important"],
+      ["e3", "digest"],
+    ]);
+    // The untold important item is not offered again with the next batch.
+    await fire(s, "e4");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turns[1]).toContain("line for e4");
+    expect(s.turns[1]).not.toContain("line for e2");
+
+    const digest = await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(digest).toMatchObject({ status: "ok", data: { items: 3 } });
+    const turn = s.turns.at(-1)!;
+    expect(turn).toContain('delivery="digest"');
+    // Important ones first, marked; e1, which was told, is not in it.
+    expect(turn.indexOf("line for e2")).toBeLessThan(turn.indexOf("line for e3"));
+    expect(turn).toMatch(/important="true"[^>]*>line for e2</);
+    expect(turn).not.toContain("line for e1");
+    expect(await s.items.owed("digest")).toEqual([]);
     s.stop();
   });
 
