@@ -28,7 +28,12 @@ describe("sendApprovalCard", () => {
 
     await sendApprovalCard(target, {
       ...approval,
-      channelContext: { channel: "telegram_user", threadId: "t1" },
+      channelContext: {
+        channel: "telegram_user",
+        threadId: "t1",
+        threadType: "private",
+        senderBondLevel: "guardian",
+      },
     } as never);
 
     expect(target.send).toHaveBeenCalledWith("telegram_user", "t1", {
@@ -46,6 +51,41 @@ describe("sendApprovalCard", () => {
         },
       ],
     });
+  });
+
+  it("keeps the preview off a card someone other than the guardian may read", async () => {
+    const preview = {
+      kind: "sensitive_message",
+      channel: "telegram",
+      threadId: "elsewhere",
+      text: "My private notes",
+    };
+    for (const channelContext of [
+      {
+        channel: "telegram_user",
+        threadId: "t1",
+        threadType: "group",
+        senderBondLevel: "guardian",
+      },
+      {
+        channel: "telegram_user",
+        threadId: "t1",
+        threadType: "private",
+        senderBondLevel: "acquaintance",
+      },
+      { channel: "telegram_user", threadId: "t1" },
+    ]) {
+      const target = channels(true);
+
+      await sendApprovalCard(target, { ...approval, preview, channelContext } as never);
+
+      const [, , message] = target.send.mock.calls[0] ?? [];
+      expect(JSON.stringify(message)).not.toContain("My private notes");
+      expect(message?.parts?.[0]).toMatchObject({
+        type: "approval_card",
+        preview: { kind: "generic", title: "an action" },
+      });
+    }
   });
 
   it("rejects with the refusal of a channel that cannot show a card", async () => {

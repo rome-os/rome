@@ -25,7 +25,7 @@ describe("widgetText", () => {
         "Approval needed: Send an email",
         "To Dana, about Friday",
         "Subject: Lunch",
-        "Approve or deny it on Rome's dashboard.",
+        "The guardian approves or denies it on Rome's dashboard.",
       ].join("\n"),
     );
   });
@@ -54,7 +54,7 @@ describe("widgetText", () => {
         "Approval needed: send this message",
         "See you at 6",
         "Why: It goes to another chat",
-        "Approve or deny it on Rome's dashboard.",
+        "The guardian approves or denies it on Rome's dashboard.",
       ].join("\n"),
     );
   });

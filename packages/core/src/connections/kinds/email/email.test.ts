@@ -345,6 +345,28 @@ describe("EmailAdapter.send", () => {
     expect(provider.listMessages).not.toHaveBeenCalled();
   });
 
+  it("refuses an email with its own HTML and a card, and calls no provider", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("zoolsher@gmail.com" as ChatId, {
+        kind: "email",
+        html: "<p>Report</p>",
+        parts: [
+          {
+            type: "approval_card",
+            approvalId: "approval-1",
+            actionName: "send_message",
+            preview: { kind: "generic", title: "Send email", summary: "Send it." },
+            status: "pending",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
   it("sends an approval card as the card's plain-text version", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);

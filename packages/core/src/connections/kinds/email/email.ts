@@ -9,7 +9,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
 import { ChannelSendRefused } from "@rome-os/app-runtime";
-import { partsAsText, refuseUnshownParts } from "../../outbound/send-refusals.js";
+import { messageAsText, refuseUnshownParts } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import { mapGuardianToChannel } from "../../../people/guardian-mapping.js";
@@ -267,10 +267,7 @@ export class EmailAdapter {
    * throw before anything is sent. A provider answer without both IDs throws as
    * unconfirmed, since the mail may have gone out.
    *
-   * An empty body is the one exception that neither sends nor throws, unless the
-   * caller asked for an email explicitly (`kind: "email"`). Parts-only messages
-   * such as approval cards have no email rendering, so the adapter skips them and
-   * receipts the conversation it was asked for, without a `messageId`.
+   * An approval card is sent as its plain-text version.
    *
    * A thread reply targets the newest received message in the thread, falling
    * back to the newest message Rome sent for a thread nobody else wrote in.
@@ -353,8 +350,16 @@ export class EmailAdapter {
         "Email inReplyToMessageId must not be blank. No email was sent.",
       );
     }
+    // An app's own HTML is the whole body, so a widget beside it would not
+    // show.
+    if (email?.html?.trim() && message.parts?.some((part) => part.type !== "text")) {
+      throw new ChannelSendRefused(
+        "part_unsupported",
+        "An email with its own HTML cannot also carry a widget. No email was sent.",
+      );
+    }
     // Blank text says nothing, so the text parts speak, as on every channel.
-    const bodyText = (message.text?.trim() ? message.text : partsAsText(message.parts)).trim();
+    const bodyText = messageAsText(message).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.

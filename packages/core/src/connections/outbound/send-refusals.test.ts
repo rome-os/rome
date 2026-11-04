@@ -14,7 +14,12 @@ describe("textToSend", () => {
     } as const;
     const said = textToSend("telegram", { parts: [{ type: "text", content: "One thing:" }, card] });
     expect(said).toBe(
-      "One thing:\n\nApproval needed: Deploy\nShip it to production\nApprove or deny it on Rome's dashboard.",
+      "One thing:\n\nApproval needed: Deploy\nShip it to production\nThe guardian approves or denies it on Rome's dashboard.",
+    );
+    expect(
+      textToSend("telegram", { text: "Look", parts: [{ type: "text", content: "x" }, card] }),
+    ).toBe(
+      "Look\n\nApproval needed: Deploy\nShip it to production\nThe guardian approves or denies it on Rome's dashboard.",
     );
     expect(() =>
       textToSend("telegram", { parts: [{ type: "turn_recap", turnId: "t", content: "Recap" }] }),

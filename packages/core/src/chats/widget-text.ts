@@ -25,13 +25,14 @@ function previewLines(preview: PreviewPayload): string[] {
   ];
 }
 
-/** The plain-text version of an approval card: what the agent wants to do,
- *  and, while it waits, where the guardian answers it. */
+/** The plain-text version of an approval card: what its preview says the
+ *  agent wants to do, and, while it waits, where the guardian answers it. */
 export function approvalCardText(card: ApprovalCard): string {
   const title = card.preview.kind === "generic" ? card.preview.title : "send this message";
   const lines = [`${APPROVAL_HEADING[card.status] ?? APPROVAL_HEADING.pending}: ${title}`];
   lines.push(...previewLines(card.preview).filter((line) => line.trim()));
-  if (card.status === "pending") lines.push("Approve or deny it on Rome's dashboard.");
+  if (card.status === "pending")
+    lines.push("The guardian approves or denies it on Rome's dashboard.");
   return lines.join("\n");
 }
 

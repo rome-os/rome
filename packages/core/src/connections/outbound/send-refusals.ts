@@ -12,28 +12,30 @@ import {
 import { widgetText } from "../../chats/widget-text.js";
 
 /**
- * What `parts` say on a channel that shows text only: each text part, and
- * each widget's own plain-text line in its place.
+ * What `message` says on a channel that shows text only. `text` that says
+ * anything takes the place of the text parts, and otherwise the text parts
+ * speak. Each widget adds its own plain-text line in either case, in its
+ * place among the parts.
  */
-export function partsAsText(parts: OutgoingMessage["parts"]): string {
-  return (parts ?? [])
-    .flatMap((part) => {
-      const said = part.type === "text" ? part.content : widgetText(part);
-      return said === undefined ? [] : [said];
-    })
-    .join("\n\n");
+export function messageAsText(message: OutgoingMessage): string {
+  const said = message.text?.trim() ? message.text : undefined;
+  const lines = (message.parts ?? []).flatMap((part) => {
+    if (part.type === "text") return said === undefined ? [part.content] : [];
+    const line = widgetText(part);
+    return line === undefined ? [] : [line];
+  });
+  return [...(said === undefined ? [] : [said]), ...lines].join("\n\n");
 }
 
 /**
  * The text a channel named `channel`, which shows text and no other part,
- * sends for `message`: its `text` when it has any, else what its parts say,
- * a widget by its plain-text line. Refuses a part that is neither text nor a
- * widget with a line of its own, and a message with no text and no
- * attachment.
+ * sends for `message`, as {@link messageAsText} reads it. Refuses a part that
+ * is neither text nor a widget with a line of its own, and a message with no
+ * text and no attachment.
  */
 export function textToSend(channel: string, message: OutgoingMessage): string {
   refuseUnshownParts(channel, message);
-  const text = message.text?.trim() ? message.text : partsAsText(message.parts);
+  const text = messageAsText(message);
   if (text.trim()) return text;
   if (!message.attachments?.length) {
     throw new ChannelSendRefused("empty", `A message to ${channel} needs text or an attachment`);

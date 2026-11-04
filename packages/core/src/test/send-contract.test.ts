@@ -386,7 +386,19 @@ describe.each(SUBJECTS)("$channel send", (subject) => {
       const [said] = harness.texts();
       expect(said).toContain("Approval needed: Send an email");
       expect(said).toContain("To Dana, about Friday");
-      expect(said).toContain("Approve or deny it on Rome");
+      expect(said).toContain("The guardian approves or denies it on Rome");
+    });
+
+    it("sends `text` and then the card's plain-text version, never the text alone", async () => {
+      const harness = subject.make();
+      await harness.send({
+        text: "Before I send it:",
+        parts: [{ type: "text", content: "x" }, CARD],
+      });
+      const [said] = harness.texts();
+      expect(said).toContain("Before I send it:");
+      expect(said).toContain("Approval needed: Send an email");
+      expect(said).not.toContain("x\n");
     });
   }
 
