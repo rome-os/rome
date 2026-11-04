@@ -49,7 +49,7 @@ Each word has a heading, its meaning in one or two sentences, and the rules that
 
 The language is the model. The code holds most of it and owes the rest. A reader of `main` can rely on:
 
-- An account that takes an agent exists only while connected and is never reclaimed by the next connection.
+- An account that takes an agent keeps its agent across a disconnect, and connecting the same account again finds it. A different account is a different connected account and inherits nothing.
 - Rome listens to an account that takes an agent only while one is linked. An account that takes no agent is always listened to.
 - A newly connected account starts with no agent. Rome never links one on its own, and the guardian links it afterwards.
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
@@ -93,12 +93,12 @@ Diffs still owed to the model, each a change of its own:
 - Adapters deliver every message, and the reply rule is applied after delivery.
 - A thread's messages are the parent chat's, marked by thread.
 - Messages are stored as text, attachments and widgets from one catalog, each readable as plain text, and a press on a widget is a message of its own. Each platform draws the widget kinds it can.
-- A disconnected account's record is deleted, with the chats it alone was in. A chat another of Rome's accounts is in keeps its whole history.
+- A disconnected account's record stays, as disconnected with its agent, and every chat keeps its whole history.
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
-- Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.
+- Email and WhatsApp accounts lose Rome's reach at disconnect like every other, and connecting again reaches the same connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.

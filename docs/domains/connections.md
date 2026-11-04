@@ -42,7 +42,7 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 ## Decided against
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.
-- **Keeping a disconnected account's record behind, retired.** The guardian has no use for a record nothing reaches, and the chat rule already says which history survives.
+- **Deleting a disconnected account's record, with the chats it alone was in.** The rule until 2026-11-04. The agent link is the guardian's decision about the account and outlives Rome's access to it, and a chat's history belongs to the chat whatever reaches it, so a disconnect removes Rome's reach and nothing else.
 - **Keeping a disconnected connection, and reusing it when the same account is connected again.** A connection with no grant gives Rome no access, so it is not a connection. What carries over a reconnect is the account, by platform and the platform's own id, and the chats that kept its history.
 - **Two connections to one account, each of its own kind.** A signed-in Telegram user and a Telegram bot for the same account would be two ways in to one participant, and the account could not say which one its agent speaks through.
 - **Several grants on one connection.** Every kind relies on one credential, and a connection that holds several cannot say whether it is working.
