@@ -401,6 +401,44 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
+  it("ends the connection a fix started when a disconnect waited on that fix", async () => {
+    let releaseClear: () => void = () => {};
+    const clearing = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    let clears = 0;
+    const db = createTestDb();
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(db.db),
+    });
+    registry.register({
+      ...botIdDescriptor(),
+      // The ended connection's custody clears slowly, so the fix is still
+      // running when the disconnect arrives.
+      custody: {
+        sync: async () => {},
+        clear: () => (clears++ === 0 ? clearing : Promise.resolve()),
+      },
+    });
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+
+      const fix = registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
+        botId: "900",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const disconnect = registry.disconnect(first.id);
+      releaseClear();
+      await fix;
+      await disconnect;
+
+      expect(registry.all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("records the account a grant reaches, and clears it on disconnect", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {

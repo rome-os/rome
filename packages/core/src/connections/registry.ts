@@ -167,6 +167,10 @@ export class ConnectionRegistry {
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
+  /** The connection a fix that reached another account started in place of
+   *  each connection it ended, so a disconnect asked for before that fix
+   *  finished ends the connection it started. */
+  private readonly startedInPlaceOf = new WeakMap<ConnectionImpl, ConnectionId>();
   private readonly unlockHandlers: Record<Capability, Array<(conn: Connection) => void>> = {
     chat: [],
     act: [],
@@ -377,10 +381,18 @@ export class ConnectionRegistry {
     const grant = conn.descriptor.grant;
     await this.withGrantSection(connectionKind, grant, () =>
       this.connectionMutex.runExclusive(connectionKind, async () => {
-        // A disconnect that ran while this one waited may have removed it.
-        if (this.connections.get(id) !== conn) return;
-        await conn.disconnect(grant);
-        this.connections.delete(id);
+        // A disconnect that ran while this one waited may have removed it. A
+        // fix that reached another account while this one waited ended it and
+        // started a connection to that account, and the guardian asked to take
+        // away the access they were fixing, so this ends that connection.
+        let current: ConnectionImpl | undefined = conn;
+        while (current && this.connections.get(current.id) !== current) {
+          const next = this.startedInPlaceOf.get(current);
+          current = next ? this.connections.get(next) : undefined;
+        }
+        if (!current) return;
+        await current.disconnect(grant);
+        this.connections.delete(current.id);
       }),
     );
   }
@@ -526,6 +538,7 @@ export class ConnectionRegistry {
         // transaction.
         await ending.disconnect(ending.descriptor.grant, { inTx: write });
         this.connections.delete(ending.id);
+        this.startedInPlaceOf.set(ending, id);
         opts.onEnded?.(ending.id);
       } else {
         commit();
