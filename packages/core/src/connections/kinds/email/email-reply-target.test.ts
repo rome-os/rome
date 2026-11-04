@@ -211,6 +211,16 @@ describe("resolveEmailReplyTarget", () => {
     expect(listMessages).toHaveBeenCalledTimes(3);
   });
 
+  it("names the reply field of both the SDK and send_message when the lookup gives up", async () => {
+    const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
+      messages: [item("other")],
+    }));
+    const result = resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel);
+
+    await expect(result).rejects.toThrow("`inReplyToMessageId`");
+    await expect(result).rejects.toThrow("`replyToMessageId` in send_message");
+  });
+
   it("bounds an endless stream of empty pages", async () => {
     let pages = 0;
     const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
