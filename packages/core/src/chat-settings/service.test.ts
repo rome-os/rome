@@ -963,6 +963,19 @@ describe("ChatSettingsService", () => {
     ).rejects.toThrow('Unsupported conversation setting "enabled"');
   });
 
+  it("reads a direct message a send opened after its address was read as one", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "oc_ray" as ChatId };
+    // Read before Rome held anything there, so its kind is only a guess.
+    await service.get(ref);
+    startChannelChat(wired, { channel: "feishu", threadId: "oc_ray", threadType: "private" });
+
+    expect((await service.get(ref)).supportedFields).toEqual(["session.reset"]);
+    await expect(
+      service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } }),
+    ).rejects.toThrow('Unsupported conversation setting "enabled"');
+  });
+
   it("places a speaker a rule starts before what its account already said there", async () => {
     const { service, repository, wired, throughSales } = await twoAccountsInOneGroup();
     // A send said something in the group before any rule, and opened no

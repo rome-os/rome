@@ -688,7 +688,18 @@ export class ChatSettingsService implements ChatSettingsControl {
         return { descriptor: remembered, row };
       }
       const row = this.find(this.channelName(ref), ref);
-      return { descriptor: row ? this.descriptorFromRow(row) : remembered, row };
+      if (row) return { descriptor: this.descriptorFromRow(row), row };
+      // A kind guessed before Rome held the chat gives way to the one it
+      // holds now, as a send may have started it since.
+      if (!this.describedKinds.has(this.key(ref))) {
+        const kind = this.knownKind(ref, remembered, null);
+        if (kind !== null && kind !== remembered.kind) {
+          const descriptor = { ...remembered, kind };
+          this.remember(descriptor);
+          return { descriptor, row: null };
+        }
+      }
+      return { descriptor: remembered, row: null };
     }
     const connection = this.deps.connections.get(ref.connectionId);
     const channel = this.deps.channelOf(connection);
