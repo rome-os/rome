@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { takeLoginReturn } from "@/lib/login-return";
 import { submitSetupReturn } from "@/lib/setup-api";
 
@@ -36,7 +37,9 @@ function connectionPath(connectionKind: string | undefined): string {
  *  `done` either: `/api/setups/:cid` stays private, so an anonymous browser has
  *  no way to poll for the real outcome. */
 type ReturnOutcome =
-  | { redirect: string }
+  /** `ended` when the setup's fix reached another account, so it ended the
+   *  connection it fixed and started one to that account. */
+  | { redirect: string; ended?: boolean }
   | { error: string }
   | { delivered: true }
   | { cancelled: true }
@@ -136,7 +139,8 @@ function handleOAuthReturnOnce(
       if (!(await hasDashboardSession())) return { delivered: true };
       // The setup consumed the leg and is finishing the redeem; the connection's
       // detail page re-attaches and settles it.
-      return { redirect: connectionPath(returned.connectionKind) };
+      const ended = returned.state?.status === "done" && Boolean(returned.state.grant?.ended);
+      return { redirect: connectionPath(returned.connectionKind), ...(ended ? { ended } : {}) };
     }
 
     // A broker error (denied consent) means no connection could have succeeded —
@@ -248,6 +252,9 @@ export default function CallbackPage() {
           setConnectionFailed(outcome.connectionFailed);
           return;
         }
+        // The detail page cannot re-attach to a finished setup, so the
+        // callback tells the guardian a fix ended the connection it fixed.
+        if (outcome.ended) toast(t("connections.accounts.endedAnother", { ns: "settings" }));
         navigate(outcome.redirect, { replace: true });
       } catch (returnError) {
         if (cancelled) return;

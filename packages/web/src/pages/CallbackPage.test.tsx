@@ -2,6 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import * as sonner from "sonner";
 import i18n from "@/i18n";
 import { rememberLoginReturn } from "@/lib/login-return";
 import CallbackPage from "./CallbackPage";
@@ -170,6 +171,29 @@ describe("CallbackPage return-leg routing", () => {
     // still-redeeming setup and settles it to connected.
     const landed = await screen.findByTestId("landed-on");
     expect(landed.textContent).toBe("/settings/connections/github");
+  });
+
+  it("tells the guardian a fix ended the connection when it reached another account", async () => {
+    const toast = rs.spyOn(sonner, "toast").mockImplementation(() => "t");
+    stubFetch({
+      setupReturn: () =>
+        new Response(
+          JSON.stringify({
+            matched: true,
+            cid: "setup-gh",
+            connectionKind: "github",
+            accepted: true,
+            state: { status: "done", grant: { connectionId: "conn-2", ended: "conn-1" } },
+          }),
+          { status: 200 },
+        ),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-gh&state=s-gh-ended");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/settings/connections/github");
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(String(toast.mock.calls[0]![0])).toContain("Rome ended the connection");
   });
 
   it("lands on the connections list when the matched setup names no connection kind", async () => {

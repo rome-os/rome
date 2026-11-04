@@ -144,8 +144,8 @@ export function grantProfileFromBundle(
  * redeem for an account other than the one the connection reaches ends that
  * connection and starts one to the other account, and it refuses an account
  * another connection holds (`AccountAlreadyConnectedError`). A redeem that
- * signs in to Rome is not a fix: one for another account fails
- * (`SignInOtherAccountError`) and leaves the connection as it is. It runs in
+ * signs in to Rome never disturbs a connection: one for another account grants
+ * nothing and leaves the connection as it is. It runs in
  * the grant's section, so it never interleaves with a disconnect or a setup's
  * terminal write.
  *

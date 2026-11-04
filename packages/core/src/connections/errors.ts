@@ -91,25 +91,6 @@ export class RenewalUnavailable extends Error {
  * Signals a terminal transport failure the builder could not recover. Never
  * touches grant state — the runtime answers with backoff + rebuild.
  */
-/**
- * A sign-in to Rome reached another account than the one the provider's
- * connection reaches. Signing in is not a fix, so it leaves the connection as
- * it is and fails rather than end it. The message reads to the guardian.
- */
-export class SignInOtherAccountError extends Error {
-  readonly connectionKind: string;
-  readonly connectionId: ConnectionId;
-
-  constructor(connectionKind: string, connectionId: ConnectionId) {
-    super(
-      "This is a different account from the one Rome is connected to. Sign in with that account, or connect this one from Connections after signing in.",
-    );
-    this.name = "SignInOtherAccountError";
-    this.connectionKind = connectionKind;
-    this.connectionId = connectionId;
-  }
-}
-
 export class Disconnected extends Error {
   constructor(cause?: unknown) {
     super("disconnected", cause !== undefined ? { cause } : undefined);

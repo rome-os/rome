@@ -30,7 +30,6 @@ import {
   Disconnected,
   DuplicateKindConnectionsError,
   RenewalUnavailable,
-  SignInOtherAccountError,
 } from "./errors.js";
 import type {
   Act,
@@ -76,8 +75,9 @@ export interface GiveGrantOptions {
   /** Told the id of the connection the grant ended, when the grant reached
    *  another account than the one that connection reaches. */
   onEnded?: (id: ConnectionId) => void;
-  /** The grant comes from signing in to Rome, which is not a fix: one that
-   *  reaches another account fails with SignInOtherAccountError and leaves the
+  /** The grant comes from signing in to Rome. A sign-in never disturbs a
+   *  connection (docs/adrs/sign-in-links-separate-from-provider-connections.md),
+   *  so one that reaches another account grants nothing and leaves the
    *  connection as it is. */
   signIn?: boolean;
 }
@@ -461,7 +461,7 @@ export class ConnectionRegistry {
     if (registered && account && conn) {
       const held = (await this.store.grantOf(conn.id)) ?? NO_GRANT;
       if (reachesAnotherAccount(registered.descriptor, held, account)) {
-        if (opts.signIn) throw new SignInOtherAccountError(connectionKind, conn.id);
+        if (opts.signIn) return conn;
         ending = conn;
         conn = undefined;
       }

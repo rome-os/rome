@@ -152,8 +152,8 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       // grant still records a grant outcome — scopes and Slack's teamId come
       // from the token bundle even when the identity fields are sparse.
       // An already-signed-in guardian redeeming here is connecting a provider
-      // (a sign-in redeem has no session yet). Signing in is not a fix, so it
-      // never ends the connection to another account.
+      // (a sign-in redeem has no session yet). Signing in never disturbs a
+      // connection, so one that reaches another account grants nothing.
       const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
       const imported = await importProviderBundle(
         deps.connectionRegistry,
