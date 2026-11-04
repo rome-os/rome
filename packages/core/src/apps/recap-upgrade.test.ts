@@ -6,13 +6,13 @@ import type { RomeAppContext } from "@rome-os/app-runtime";
 import { createApiHandler } from "../../../../rome_apps/system/src/api/index.js";
 import { getRecapSettings } from "../../../../rome_apps/system/src/settings.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
 import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
 import { packArtifact } from "./packaging/index.js";
 import { preserveRecapOptOutAtBoot } from "./recap-upgrade.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("recap to system upgrade", () => {
   let harness: TestAppsHarness;
@@ -59,7 +59,7 @@ describe("recap to system upgrade", () => {
   function repositories() {
     return createAppRuntimeRepositories({
       settingsRepo,
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       chatRepo: testChatRepository(testDb.db),
     });
   }

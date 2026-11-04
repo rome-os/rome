@@ -73,7 +73,7 @@ describe("AgentTraceRecorder", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
   });
 
   afterEach(() => {

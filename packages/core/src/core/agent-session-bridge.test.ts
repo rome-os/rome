@@ -26,6 +26,7 @@ import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb } from "../test/helpers.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -120,7 +121,7 @@ describe("AgentSessionBridge conversation", () => {
   it("records a turn with no caller conversation in the one the session recorded", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.ensureRomeSession({
         id: "child-chat",
         type: "subagent",
@@ -907,7 +908,7 @@ describe("AgentSessionBridge reply streaming", () => {
   /** A repository holding the conversation the run is recorded in. */
   async function recorded() {
     const testDb = createTestDb();
-    const repo = new WebChatRepository(testDb.db);
+    const repo = new ChatsWebChatRepository(testDb.db);
     await repo.ensureRomeSession({
       id: "conversation-1",
       type: "channel",

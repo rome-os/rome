@@ -17,7 +17,6 @@ import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import type { RecordedConversation } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
@@ -79,6 +78,7 @@ import type {
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -286,7 +286,7 @@ describe("AgentRunner", () => {
   });
 
   it("fills a re-entry's conversation id from its channel address", async () => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-1", "Webchat chat");
     const stop = new Error("stop after acquire");
     const acquireBySessionId = rs.fn(async () => {
@@ -319,7 +319,7 @@ describe("AgentRunner", () => {
     ["saves", true, ["trace"]],
     ["leaves", undefined, []],
   ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
@@ -354,7 +354,7 @@ describe("AgentRunner", () => {
     ["writes", undefined, true],
     ["leaves out", false, false],
   ])("%s a turn's answer in its transcript as the caller asks, and keeps its trace", async (_label, persistAnswer, answered) => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-answer", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
@@ -430,7 +430,7 @@ describe("AgentRunner", () => {
   it("records a forked run as a fork rome session with parent lineage", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("parent-chat", "Fixing the build");
 
       const source = {
@@ -563,7 +563,7 @@ describe("AgentRunner", () => {
     it("leaves a recorded channel conversation to the inbox", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "channel:telegram:t1",
           type: "channel",
@@ -592,7 +592,7 @@ describe("AgentRunner", () => {
     it("writes the prompt into a recorded subagent conversation it alone records", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -621,7 +621,7 @@ describe("AgentRunner", () => {
     it("leaves a turn under a webchat thread to that chat", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -660,7 +660,7 @@ describe("AgentRunner", () => {
     it("leaves a turn under a messaging thread to that thread", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -697,7 +697,7 @@ describe("AgentRunner", () => {
     it("writes a recorded subagent transcript when the caller keeps its own", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -734,7 +734,7 @@ describe("AgentRunner", () => {
     it("leaves a saved side chat to the webchat route on a backend turn", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "side-chat",
           type: "fork",
@@ -777,7 +777,7 @@ describe("AgentRunner", () => {
     it("leaves a recorded webchat conversation to the webchat route", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
         const { manager, turns } = resumedSession({
           id: "user-chat",
@@ -800,7 +800,7 @@ describe("AgentRunner", () => {
     it("does not recreate a recorded conversation that was deleted", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         // The lookup at open found no conversation, so none is recorded.
         const { manager, turns } = resumedSession();
         const runner = new AgentRunner(manager, agentLoader, repo);
@@ -821,7 +821,7 @@ describe("AgentRunner", () => {
   it("links a fork to the conversation its source serves when no thread names one", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("stored-chat", "Stored chat");
 
       const source = {
@@ -2003,14 +2003,14 @@ describe("AgentRunner", () => {
       actionRegistry,
       modelResolver,
       actionEngine,
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
-        webchatRepo: new WebChatRepository(testDb.db),
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
         activeRegistry: activeSubagentRegistry,
         turnStreams,
       }),
@@ -4124,7 +4124,7 @@ describe("AgentRunner", () => {
     });
 
     it("skips stored-message context for a channel whose surface needs none", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "quiet-context",
@@ -4172,7 +4172,7 @@ describe("AgentRunner", () => {
     });
 
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "linked-context",
@@ -4253,7 +4253,7 @@ describe("AgentRunner", () => {
       unseen: UnseenLine[],
       threadContext: { threadId: string; parentThreadId?: string },
     ): Promise<string> {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       if (threadContext.parentThreadId) {
         await webchatRepo.ensureChannelChat({
           channel: "discord",
@@ -4361,7 +4361,7 @@ describe("AgentRunner", () => {
     });
 
     it("quotes the platform's copy of the message replied to when Rome holds none", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "wechat",
         threadId: "wechat-runtime-reply",
@@ -5310,7 +5310,7 @@ describe("AgentRunner", () => {
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-mismatch",
         "Legacy chat",
         undefined,
@@ -5371,7 +5371,7 @@ describe("AgentRunner", () => {
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-no-context",
         "Legacy chat",
         undefined,
@@ -5426,7 +5426,7 @@ describe("AgentRunner", () => {
       // The parent chat stores a Claude selection. Its subagent's legacy row
       // (model NULL) ran on Codex, and the subagent opens with the parent's
       // thread context, so the chat's selection must not reach it.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-parent",
         "Legacy chat",
         undefined,
@@ -6117,7 +6117,9 @@ describe("AgentRunner", () => {
           message.type === "subagent_start" && message.toolUseId === "tu-explore-1",
       );
       expect(firstChild).toBeDefined();
-      const storedChild = await new WebChatRepository(testDb.db).getSession(firstChild!.sessionId);
+      const storedChild = await new ChatsWebChatRepository(testDb.db).getSession(
+        firstChild!.sessionId,
+      );
       expect(storedChild).toMatchObject({
         type: "subagent",
         parentSessionId: "action:exec-1:core:test-main",
