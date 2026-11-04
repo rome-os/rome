@@ -7,7 +7,7 @@
 // `rome_sessions`. Ending a chat removes its messages with it; the sessions
 // that stood in it are Agents' to remove.
 
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import { chats } from "../../db/schema/system.js";
 import type { Chat, ChatKind } from "./chat.js";
@@ -42,7 +42,9 @@ export class ChatRepository {
       .values({ platform: key.platform, key: key.externalId, kind, name, startedAt: new Date() })
       .onConflictDoUpdate({
         target: [chats.platform, chats.key],
-        set: { name: sql`coalesce(${chats.name}, excluded.name)` },
+        set: { name: sql`excluded.name` },
+        // Only a chat still unnamed is written to.
+        setWhere: isNull(chats.name),
       })
       .run();
     const chat = this.byKey(key);

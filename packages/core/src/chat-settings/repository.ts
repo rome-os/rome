@@ -38,9 +38,9 @@ export interface ChatSettingsRepositoryDeps {
     ChatAdapters,
     "chatAt" | "accountOn" | "knownAccountOn" | "channelOf" | "addressAt" | "openedDirectMessageAt"
   >;
-  /** Where each of Rome's accounts reaches its chats, read once per account
-   *  in a listing. */
-  addresses: Pick<ChatAddresses, "addressesOf">;
+  /** Where each of Rome's accounts reaches its chats: one chat's for one
+   *  row, and all of an account's once in a listing. */
+  addresses: Pick<ChatAddresses, "addressOf" | "addressesOf">;
 }
 
 /**
@@ -141,7 +141,10 @@ export class ChatSettingsRepository {
   /** Speaker `row` with the kind and name of the place it stands in, the
    *  channel it speaks through, and its address. `seen` holds the chats and
    *  channels already read, across the rows of one listing. */
-  private stored(row: SpeakerRow, seen: StoredLookups = newLookups()): StoredChatRow {
+  private stored(row: SpeakerRow, listed?: StoredLookups): StoredChatRow {
+    // A listing reads each account's addresses once; one row reads its own.
+    const listing = listed !== undefined;
+    const seen = listed ?? newLookups();
     let chat: Chat | null = null;
     if (row.chatId) {
       if (!seen.chats.has(row.chatId)) seen.chats.set(row.chatId, this.deps.chats.find(row.chatId));
@@ -159,14 +162,18 @@ export class ChatSettingsRepository {
       if (row.threadId !== null) {
         address = row.threadId as ChatId;
       } else {
-        if (!seen.addresses.has(speaking)) {
-          seen.addresses.set(
-            speaking,
-            this.deps.addresses.addressesOf({ platform: chat.ref.platform, id: row.accountId }),
-          );
+        const account = { platform: chat.ref.platform, id: row.accountId };
+        let heard: string | null;
+        if (listing) {
+          if (!seen.addresses.has(speaking)) {
+            seen.addresses.set(speaking, this.deps.addresses.addressesOf(account));
+          }
+          heard = seen.addresses.get(speaking)?.get(chat.key) ?? null;
+        } else {
+          heard = this.deps.addresses.addressOf(account, chat.key);
         }
         const key = { platform: chat.ref.platform, externalId: chat.key as ChatId };
-        address = (seen.addresses.get(speaking)?.get(chat.key) ?? addressOf(key)) as ChatId;
+        address = (heard ?? addressOf(key)) as ChatId;
       }
     }
     const placeName = row.threadId !== null ? row.name : (chat?.name ?? null);
