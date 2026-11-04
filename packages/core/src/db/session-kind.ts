@@ -18,7 +18,7 @@ export function channelChatId(channel: string, threadId: string): string {
 /**
  * Whether a row is a guardian chat: its session is a speaker in a dashboard
  * chat. The Dream, Briefing and Showcases raw SQL spells the same rule over
- * `type` and `chat_platform`, so a change here changes there too.
+ * `type` and `chat_platform` by hand, so a change here must be made there too.
  */
 export const isWebchatChat: SQL = webchatChatWhere(romeSessions);
 
