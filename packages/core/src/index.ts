@@ -1775,11 +1775,14 @@ async function main() {
   // A grant from before grants named their account learns it now, so the next
   // connect of that account is refused.
   await recordGrantAccounts(connectionRegistry);
-  // The account profile cache learns each held grant's account name, so an
-  // account connected before it learned from grants keeps its name after a
-  // disconnect.
-  backfillOwnAccountProfiles(accountProfilesRepo, db, await connectionsRepository.all(), (kind) =>
-    connectionRegistry.getDescriptor(kind),
+  // The account profile cache learns each held chat grant's account name, as
+  // a connect does, so an account connected before it learned from grants
+  // keeps its name after a disconnect.
+  backfillOwnAccountProfiles(
+    accountProfilesRepo,
+    db,
+    (await connectionsRepository.all()).filter((c) => talks(c.connectionKind)),
+    (kind) => connectionRegistry.getDescriptor(kind),
   );
   // Agent links the move to account keys could not place go to the accounts
   // their connections now reach.
