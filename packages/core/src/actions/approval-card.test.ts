@@ -59,7 +59,7 @@ describe("sendApprovalCard", () => {
         ...approval,
         channelContext: { channel: "telegram_user", threadId: "t1" },
       } as never),
-    ).rejects.toMatchObject({ name: "SendRefused", reason: "part_unsupported" });
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
   });
 
   it("sends nothing without a conversation or on a channel that cannot send", async () => {

@@ -338,7 +338,7 @@ const SUBJECTS: readonly Subject[] = [
   },
 ];
 
-const refused = (reason: string) => ({ name: "SendRefused", reason });
+const refused = (reason: string) => ({ name: "ChannelSendRefused", reason });
 
 const CARD = {
   type: "approval_card",

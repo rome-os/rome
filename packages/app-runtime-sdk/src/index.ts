@@ -1859,13 +1859,15 @@ export class SendRefused extends Error {
     message: string,
   ) {
     super(message);
-    this.name = "SendRefused";
+    // The name an app's copy of an older SDK matches a refusal by, kept until
+    // the breaking release that drops the deprecated aliases.
+    this.name = "ChannelSendRefused";
   }
 }
 
 /** Whether `error` is a {@link SendRefused}, matched by name and reason so it
- *  holds across module copies. A refusal from a copy older than the rename
- *  carries the name `ChannelSendRefused`, and matches too. */
+ *  holds across module copies. A refusal is named `ChannelSendRefused` today,
+ *  and `SendRefused` once the deprecated aliases go, so both match. */
 export function isSendRefused(error: unknown): error is SendRefused {
   return (
     error instanceof Error &&

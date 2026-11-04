@@ -63,7 +63,7 @@ describe("DiscordAdapter.send", () => {
     });
 
     await expect(adapter.send(channel.id as ChatId, {})).rejects.toMatchObject({
-      name: "SendRefused",
+      name: "ChannelSendRefused",
       reason: "empty",
     });
     expect(channel.send).not.toHaveBeenCalled();
