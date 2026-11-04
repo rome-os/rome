@@ -4,8 +4,7 @@
 // Every answerable message a channel delivers is recorded in its chat before
 // anything acts on it, whether or not an agent answers it, and raises
 // MessageSaid. Agents hears it there and decides the wake
-// (sessions/messages-said.ts). Nothing records through it until the Chats
-// switch; `chats/inbound.ts` records into the legacy rows until then.
+// (sessions/messages-said.ts).
 
 import type { Channel, InboundEvent } from "@rome-os/app-runtime";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
