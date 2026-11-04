@@ -20,6 +20,7 @@ import {
   type ChatInputCommandInteraction,
   type AutocompleteInteraction,
 } from "discord.js";
+import { randomBytes } from "node:crypto";
 import { SendRefused, chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
 import type {
   APIRequest,
@@ -1422,9 +1423,18 @@ Use \`/channel agent clear\` to undo.`,
         ? { messageReference: replyTo, failIfNotExists: true }
         : undefined;
     // A quote does not mention its author, as an unquoted answer did not.
+    // discord.js resends a create whose answer it lost, and a quote refused
+    // on that resend would say nothing went out when the first one did. The
+    // nonce has Discord return the first message to a resend instead.
     const quoting = <T extends object>(options: T): T => {
       const quoted = quote
-        ? { ...options, reply: quote, allowedMentions: { ...ALL_MENTIONS, repliedUser: false } }
+        ? {
+            ...options,
+            reply: quote,
+            allowedMentions: { ...ALL_MENTIONS, repliedUser: false },
+            nonce: randomBytes(12).toString("base64url"),
+            enforceNonce: true,
+          }
         : options;
       quote = undefined;
       return quoted;

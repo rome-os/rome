@@ -11,11 +11,11 @@ import {
   type AppRuntimeRepositories,
   type DetachedRunActionOptions,
   type RunActionOptions,
-  isSendRefused,
   type RomeAppDefinition as SdkRomeAppDefinition,
 } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
 import { callAction } from "../actions/call-action.js";
+import { sendRefusalOf } from "../actions/worker-protocol.js";
 import type { ActionInvocationObserver } from "../actions/runtime-events.js";
 import type { ActionResult } from "../actions/types.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -243,10 +243,11 @@ export function createRomeAppContext(
         throw err;
       }
       const message = err instanceof Error ? err.message : String(err);
-      if (isSendRefused(err)) {
+      const refusal = sendRefusalOf(err);
+      if (refusal) {
         // A refused send is an answer the caller acts on, such as sending
         // again without the quote, not a fault.
-        log.info("action refused a send", { action: name, reason: err.reason, error: message });
+        log.info("action refused a send", { action: name, reason: refusal, error: message });
       } else {
         log.warn("action invocation failed", {
           action: name,
@@ -260,12 +261,7 @@ export function createRomeAppContext(
       if (err instanceof Error && err.name === "ActionWorkerExitError") {
         throw new ActionInvocationError(name, "worker_failure", message);
       }
-      throw new ActionInvocationError(
-        name,
-        "handler_error",
-        message,
-        isSendRefused(err) ? err.reason : undefined,
-      );
+      throw new ActionInvocationError(name, "handler_error", message, refusal);
     }
     return toWireShape(result, name, "result");
   };

@@ -1,9 +1,4 @@
-import {
-  ActionInvocationError,
-  createAppLogger,
-  getCurrentActionContext,
-  isCoreMainAgentId,
-} from "@rome-os/app-runtime";
+import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -871,8 +866,12 @@ export async function sendAnswer(
   try {
     await deps.appContext.runAction("send_message", input);
   } catch (err) {
+    // Matched by its fields, not its class, as `isSendRefused` matches, so a
+    // copy of the SDK other than the host's still recognizes it.
     const unquotable =
-      err instanceof ActionInvocationError && err.refusal === "reply_unaddressable";
+      err instanceof Error &&
+      err.name === "ActionInvocationError" &&
+      (err as { refusal?: unknown }).refusal === "reply_unaddressable";
     if (!unquotable || input.replyToMessageId === undefined) throw err;
     const { replyToMessageId: _quote, ...unquoted } = input;
     await deps.appContext.runAction("send_message", unquoted);

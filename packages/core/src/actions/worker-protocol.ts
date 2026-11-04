@@ -59,11 +59,22 @@ export interface WireError {
 /** `err` as it crosses the worker boundary. */
 export function toWireError(err: unknown): WireError {
   if (!(err instanceof Error)) return { name: "Error", message: String(err) };
+  const refusal = sendRefusalOf(err);
   return {
     name: err.name,
     message: err.message,
-    ...(isSendRefused(err) ? { refusal: err.reason } : {}),
+    ...(refusal ? { refusal } : {}),
   };
+}
+
+/** Why a send `err` fails on was refused: a {@link SendRefused}'s reason, or
+ *  the refusal an action called from this one failed on, which it let pass
+ *  up. Undefined for any other failure. */
+export function sendRefusalOf(err: unknown): SendRefusedReason | undefined {
+  if (isSendRefused(err)) return err.reason;
+  if (!(err instanceof Error) || err.name !== "ActionInvocationError") return undefined;
+  const { refusal } = err as { refusal?: unknown };
+  return typeof refusal === "string" ? (refusal as SendRefusedReason) : undefined;
 }
 
 /** The error `wire` describes, with the name and message an in-process

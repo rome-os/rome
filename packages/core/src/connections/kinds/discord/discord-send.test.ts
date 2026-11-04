@@ -189,6 +189,20 @@ describe("DiscordAdapter.send", () => {
     });
   });
 
+  it("sends a quote under a nonce Discord enforces, so a resend returns the first message", async () => {
+    const { channel, adapter, send } = chatOf(ChannelType.DM);
+
+    await adapter.send(channel.id as ChatId, {
+      text: "Re",
+      replyToMessageId: "123456789012345678",
+    });
+
+    const options = send.mock.calls[0]?.[0] as { nonce?: unknown; enforceNonce?: unknown };
+    expect(options.enforceNonce).toBe(true);
+    expect(typeof options.nonce).toBe("string");
+    expect((options.nonce as string).length).toBeLessThanOrEqual(25);
+  });
+
   it("passes on a failure of a send that quotes nothing", async () => {
     const unknown = new DiscordAPIError(
       { code: 50035, message: "Invalid Form Body" },
