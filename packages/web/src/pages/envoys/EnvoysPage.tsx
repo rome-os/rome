@@ -415,7 +415,14 @@ function DisconnectedAgentRow({
         { platform: account.platform, id: account.accountId },
         t("change.failed"),
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: CONNECTED_ACCOUNTS_KEY }),
+    // The account may have been connected again meanwhile, so the connections
+    // are stale too.
+    onSuccess: () =>
+      Promise.all(
+        [CONNECTED_ACCOUNTS_KEY, CONNECTIONS_KEY, ["connection-detail", "connections"]].map(
+          (queryKey) => queryClient.invalidateQueries({ queryKey }),
+        ),
+      ),
   });
   return (
     <div className="flex flex-col gap-3 py-3">
