@@ -93,7 +93,7 @@ describe("SessionQueryRepository", () => {
       own("chat-1", "a", "assistant", 202);
     }
 
-    /** A subagent in no chat, with a prompt, a trace and an answer of its own. */
+    /** A subagent in no chat, which keeps its prompt, trace and answer (#1671). */
     function seededSubagent() {
       testDb.db
         .insert(romeSessions)
@@ -119,14 +119,14 @@ describe("SessionQueryRepository", () => {
       seededSubagent();
       const repository = new SessionQueryRepository(testDb.db, "chats");
 
-      expect(await pageCounts(repository)).toEqual({ "chat-1": 3, sub: 1 });
+      expect(await pageCounts(repository)).toEqual({ "chat-1": 3, sub: 3 });
       expect((await repository.getSessionDetailRows("chat-1"))?.messageCount).toBe(3);
-      expect((await repository.getSessionDetailRows("sub"))?.messageCount).toBe(1);
+      expect((await repository.getSessionDetailRows("sub"))?.messageCount).toBe(3);
     });
 
-    // Of what a session keeps in `rome_agent_messages`, only its traces count:
-    // the rest is not a message in Chats.
-    it("counts none of a session's own rows but its traces", async () => {
+    // A session in a chat counts only its traces of what it keeps in
+    // `rome_agent_messages`: a dashboard notice is not a message in Chats (#1672).
+    it("counts none of a chat session's own rows but its traces", async () => {
       seededChat();
       own("chat-1", "notice", "notification", 203);
       const repository = new SessionQueryRepository(testDb.db, "chats");

@@ -278,16 +278,16 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
-  // A session in no chat has no messages in Chats, so its transcript holds
-  // only its traces (#1671).
-  it("reads no prompt or answer for a session in no chat", async () => {
+  // Until #1671 settles where they live, a session in no chat keeps its
+  // prompts and answers as its own.
+  it("keeps the lines of a session in no chat as its own", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
 
     expect(session("fork-1")?.chatId).toBeNull();
     expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
-    expect(await repo.getMessages("fork-1")).toEqual([]);
-    expect(await repo.getMessageCount("fork-1")).toBe(0);
+    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+    expect(await repo.getMessageCount("fork-1")).toBe(1);
   });
 
   it("moves a promoted fork's lines into its new chat, linked to their turns", async () => {
@@ -619,6 +619,19 @@ describe("ChatsWebChatRepository", () => {
     await repo.addMessage("in-1", "chat-1", "user", text("Back again"), "turn-2");
     expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual([]);
   });
+  it("reads a session in no chat in the order its rows were written", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.addMessage("in-1", "fork-1", "user", text("Plan a trip"), "turn-1");
+    await repo.addMessage("card-1", "fork-1", "assistant", text("Which city?"), "turn-1");
+    await repo.addMessage("in-2", "fork-1", "user", text("Lisbon"), "turn-1");
+
+    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual([
+      "in-1",
+      "card-1",
+      "in-2",
+    ]);
+  });
+
   it("keeps a promoted fork's inputs where they stand, queued or run", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.recordUserInput("in-1", "fork-1", text("Run"));

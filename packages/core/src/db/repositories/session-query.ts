@@ -271,20 +271,22 @@ function rawStats(row: RawSessionStats): RawSessionStats {
 /**
  * Where a session's messages are counted from: `legacy` counts the session's
  * own rows in `rome_agent_messages`; `chats` counts the messages said where
- * its speaker stands, from Chats, beside the session's own traces.
- * Vocabulary: docs/domains/chats.md.
+ * its speaker stands, from Chats, beside the session's own traces, or all
+ * its own rows when it stands in no chat (#1671). Vocabulary:
+ * docs/domains/chats.md.
  */
 export type SessionLines = "legacy" | "chats";
 
 /**
  * How many messages each of sessions `ids` has in its transcript, read from
- * Chats: its traces in `rome_agent_messages`, and the messages said where its
- * speaker stands since it joined.
+ * Chats: its traces in `rome_agent_messages` (all its rows there when it
+ * stands in no chat), and the messages said where its speaker stands since
+ * it joined.
  */
 function chatsMessageCounts(ids: readonly string[]): SQL {
   return sql`SELECT s.id AS id,
     (SELECT count(*) FROM rome_agent_messages t
-      WHERE t.session_id = s.id AND t.role = 'trace')
+      WHERE t.session_id = s.id AND (s.chat_id IS NULL OR t.role = 'trace'))
     + (SELECT count(*) FROM ${CHAT_MESSAGES} m
       WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at) AS count
