@@ -101,10 +101,19 @@ export interface RomeSessionExplorerRecord {
   projectPath: string | null;
   agentName: string | null;
   type: RomeSessionType;
-  sourceChannel: string | null;
-  sourceThreadId: string | null;
-  sourceThreadName: string | null;
-  sourceThreadType: string | null;
+  /** The channel the session's speaker speaks through, `webchat` for a
+   *  dashboard chat, or null for a session that stands in no chat.
+   *  Vocabulary: docs/domains/participation.md#speaker. */
+  channel: string | null;
+  /** The chat the speaker stands in, and the thread in it, or null. */
+  chatId: string | null;
+  threadId: string | null;
+  /** The name of the place the speaker stands in: its chat's, or a
+   *  thread's own. */
+  placeName: string | null;
+  /** The kind of place the speaker stands in: a topic when it is in a
+   *  thread. */
+  speakerKind: "dm" | "group" | "topic" | null;
   triggerKind: string | null;
   triggerName: string | null;
   triggerActionName: string | null;
@@ -128,7 +137,7 @@ export interface RomeSessionsPageResult {
   nextOffset: number | null;
   facets: {
     types: { value: string | null; count: number }[];
-    sourceChannels: { value: string | null; count: number }[];
+    channels: { value: string | null; count: number }[];
   };
 }
 

@@ -61,6 +61,102 @@ describe("SessionQueryRepository", () => {
     ).resolves.toEqual([]);
   });
 
+  describe("reading where a speaker stands", () => {
+    const at = new Date(0);
+    const channels = () => [
+      { channel: "telegram", account: { platform: "telegram", id: "bot-sales" } },
+    ];
+
+    function seeded() {
+      const fixture = speakerFixture(testDb.db);
+      const dashboard = fixture.chat("webchat", "chat-1", "dm", "Weekly planning");
+      fixture.speaker({ id: "dashboard", chat: dashboard, accountId: "guardian" });
+      const dm = fixture.chat("telegram", "dana", "dm", "Dana");
+      fixture.speaker({ id: "dm", chat: dm, accountId: "bot-sales" });
+      const group = fixture.chat("telegram", "-42", "group", "Release crew");
+      fixture.speaker({ id: "group", chat: group, accountId: "bot-sales" });
+      fixture.speaker({
+        id: "topic",
+        chat: group,
+        accountId: "bot-sales",
+        threadId: "7",
+        name: "Launch topic",
+      });
+      // A speaker of an account no recorded channel holds.
+      fixture.speaker({ id: "stray", chat: group, accountId: "bot-gone" });
+      testDb.db
+        .insert(romeSessions)
+        .values({ id: "sub", name: "Sub", type: "subagent", createdAt: at, activityAt: at })
+        .run();
+      // One run each, as the explorer lists only sessions that ran.
+      for (const sessionId of ["dashboard", "dm", "group", "topic", "stray", "sub"]) {
+        testDb.db
+          .insert(romeAgentMessages)
+          .values({
+            id: `trace-${sessionId}`,
+            sessionId,
+            role: "trace",
+            content: "[]",
+            turnId: `turn-${sessionId}`,
+            createdAt: new Date(1000),
+          })
+          .run();
+      }
+    }
+
+    async function page(repository: SessionQueryRepository, scope = {}) {
+      return repository.querySessionPage({
+        scope: { from: null, to: new Date(10_000_000), ...scope },
+        sort: { field: "activity", direction: "desc" },
+        offset: 0,
+        limit: 10,
+      });
+    }
+
+    it("reads each speaker's channel, place and kind from its chat and account", async () => {
+      seeded();
+      const repository = new SessionQueryRepository(testDb.db, "legacy", channels);
+
+      const rows = Object.fromEntries(
+        (await page(repository)).rows.map((row) => [
+          row.id,
+          [row.channel, row.placeName, row.speakerKind],
+        ]),
+      );
+
+      expect(rows).toEqual({
+        dashboard: ["webchat", "Weekly planning", "dm"],
+        dm: ["telegram", "Dana", "dm"],
+        group: ["telegram", "Release crew", "group"],
+        topic: ["telegram", "Launch topic", "topic"],
+        stray: [null, "Release crew", "group"],
+        sub: [null, null, null],
+      });
+      const detail = await repository.getSessionDetailRows("topic");
+      expect([
+        detail?.session.channel,
+        detail?.session.placeName,
+        detail?.session.speakerKind,
+      ]).toEqual(["telegram", "Launch topic", "topic"]);
+    });
+
+    it("filters and counts sessions by the channel their speaker speaks through", async () => {
+      seeded();
+      const repository = new SessionQueryRepository(testDb.db, "legacy", channels);
+
+      const onTelegram = await page(repository, { channels: ["telegram"] });
+      const internal = await page(repository, { includeInternalSource: true, channels: [] });
+
+      expect(onTelegram.rows.map((row) => row.id).sort()).toEqual(["dm", "group", "topic"]);
+      expect(internal.rows.map((row) => row.id).sort()).toEqual(["stray", "sub"]);
+      expect(
+        Object.fromEntries(
+          (await page(repository)).facets.channels.map((facet) => [facet.value, facet.count]),
+        ),
+      ).toEqual({ webchat: 1, telegram: 3, null: 2 });
+    });
+  });
+
   describe("reading lines from Chats", () => {
     const at = (seconds: number) => new Date(seconds * 1000);
 

@@ -229,9 +229,9 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
   };
   if (session.type === "channel") {
     return (
-      clean(session.sourceThreadName) ??
+      clean(session.placeName) ??
       clean(session.name) ??
-      humanize(session.sourceChannel) ??
+      humanize(session.channel) ??
       `Channel ${shortIdentifier(session.id)}`
     );
   }
@@ -337,10 +337,10 @@ export class SessionQueryService {
    * has no shape for no agent.
    */
   private answeringAgent(session: SessionRow, accountAgentOf: AccountAgentOf): string | null {
-    if (session.type !== "channel" || !session.sourceChannel) return session.agentName;
-    const linked = accountAgentOf(session.sourceChannel);
+    if (session.type !== "channel" || !session.channel) return session.agentName;
+    const linked = accountAgentOf(session.channel);
     if (!linked) return session.agentName;
-    if (session.sourceThreadType !== "private") {
+    if (session.speakerKind !== "dm") {
       // A null routing override is an explicit pin to main.
       if (session.channelSettings?.overrides.routing?.agentName === null) return null;
       if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
@@ -414,7 +414,7 @@ export class SessionQueryService {
       ownerAgentNames: scope.sessions?.owners ? Array.from(ownerAgentNames) : undefined,
       includeUninstalledOwners,
       knownAgentNames,
-      sourceChannels: sources
+      channels: sources
         ?.filter(
           (source): source is Extract<(typeof sources)[number], { kind: "channel" }> =>
             source.kind === "channel",
@@ -460,10 +460,11 @@ export class SessionQueryService {
       projectPath: session.projectPath,
       agentName,
       type: session.type as RomeSessionType,
-      sourceChannel: session.sourceChannel,
-      sourceThreadId: session.sourceThreadId,
-      sourceThreadName: session.sourceThreadName,
-      sourceThreadType: session.sourceThreadType,
+      channel: session.channel,
+      chatId: session.chatId === null ? null : String(session.chatId),
+      threadId: session.threadId,
+      placeName: session.placeName,
+      speakerKind: session.speakerKind,
       triggerKind: session.triggerKind,
       triggerName: session.triggerName,
       triggerActionName: session.triggerActionName,
@@ -584,7 +585,7 @@ export class SessionQueryService {
       };
     }
     if (by === "source") {
-      if (!run.sourceChannel) {
+      if (!run.channel) {
         return {
           key: "source:internal",
           label: "Internal",
@@ -600,16 +601,16 @@ export class SessionQueryService {
         };
       }
       return {
-        key: `source:${run.sourceChannel}`,
-        label: titleCase(run.sourceChannel),
+        key: `source:${run.channel}`,
+        label: titleCase(run.channel),
         description: "External source",
         iconUrl: null,
         kind: "named",
         dimension: {
           dimension: "source",
           state: "channel",
-          channel: run.sourceChannel,
-          label: titleCase(run.sourceChannel),
+          channel: run.channel,
+          label: titleCase(run.channel),
         },
       };
     }
