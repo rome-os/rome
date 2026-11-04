@@ -221,6 +221,8 @@ for (let index = 0; index < 32; index += 1) {
       }
     }
   }
+  // Writing a message moves the session's activity to now; put it back.
+  await db.update(romeSessions).set({ activityAt }).where(eq(romeSessions.id, id));
 }
 
 console.log(
