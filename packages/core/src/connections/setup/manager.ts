@@ -335,13 +335,21 @@ export class SetupManager {
       const opts = {
         ...(plan && channelUserId
           ? {
-              inTx: (tx: DrizzleTx) =>
+              // A grant that reaches another account leaves the guardian's
+              // first account theirs, so its People link stays and the new
+              // account is added beside it.
+              inTx: (
+                tx: DrizzleTx,
+                { reachesAnotherAccount }: { reachesAnotherAccount: boolean },
+              ) =>
                 applyGuardianMappingWithinTx(
                   tx,
                   this.#deps.peopleRepo,
                   platform,
                   channelUserId,
-                  plan,
+                  reachesAnotherAccount && plan.op === "update"
+                    ? { op: "add", guardianId: plan.guardianId }
+                    : plan,
                 ),
             }
           : {}),

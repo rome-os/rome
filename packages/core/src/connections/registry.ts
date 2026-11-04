@@ -67,8 +67,10 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
 
 /** How {@link ConnectionRegistry.giveGrant} writes. */
 export interface GiveGrantOptions {
-  /** A participant run in the grant's transaction (the guardian mapping). */
-  inTx?: (tx: DrizzleTx) => void;
+  /** A participant run in the grant's transaction (the guardian mapping).
+   *  `reachesAnotherAccount` is true when the grant reaches another account
+   *  than the connection it found, which is still the guardian's. */
+  inTx?: (tx: DrizzleTx, grant: { reachesAnotherAccount: boolean }) => void;
   /** Mint another account of the connection kind rather than fill its first one. Only
    *  read when no connection id is addressed. */
   another?: boolean;
@@ -458,10 +460,12 @@ export class ConnectionRegistry {
     // connection to that account, in the same transaction
     // (docs/domains/connections.md).
     let ending: ConnectionImpl | undefined;
+    let anotherAccount = false;
     if (registered && account && conn) {
       const held = (await this.store.grantOf(conn.id)) ?? NO_GRANT;
       if (reachesAnotherAccount(registered.descriptor, held, account)) {
         if (opts.signIn) return conn;
+        anotherAccount = true;
         // A grant that addresses no connection, on a kind that holds several
         // accounts, is adding an account: it mints beside the one it found.
         if (connectionId || !registered.descriptor.severalAccounts) ending = conn;
@@ -496,7 +500,7 @@ export class ConnectionRegistry {
           ? { kind: "connected", connection: record, profile, account }
           : { kind: "fixed", connection: { id, connectionKind }, account },
       );
-      opts.inTx?.(tx);
+      opts.inTx?.(tx, { reachesAnotherAccount: anotherAccount });
     };
     const commit = () => this.store.transaction(write);
     const logActivationFailure = (err: unknown) => {

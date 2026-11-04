@@ -73,7 +73,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
       // The atomic write: record the credential, then run the guardian-mapping
       // participant exactly as the real `grant` does inside its transaction.
       imports.push({ id: conn.id, grant, credential, profile });
-      opts?.inTx?.(FAKE_TX);
+      opts?.inTx?.(FAKE_TX, { reachesAnotherAccount: false });
       return conn;
     },
   };
