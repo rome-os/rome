@@ -1,6 +1,7 @@
 // What the Concierge follows for the guardian. What can be followed belongs to
-// the connections: the connector app answers which sources exist, their status,
-// kinds and options (`connector_watch_sources`), subscribes at the source
+// the connections: the connector app answers which services it connects and,
+// for each one it can watch, its status, kinds and options
+// (`connector_watch_sources`), subscribes at the source
 // (`connector_watch_ensure`), and judges each raw event (`connector_watch_judge`).
 // Core never names a source. It keeps the follows, one event-bus routine per
 // raw event a follow listens on, and one queue and rate limit for every source
@@ -14,13 +15,12 @@ import {
   CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH,
   type ConciergeFollowChange,
   type ConciergeFollowDto,
-  type ConciergeConnectorDto,
   type ConciergeConnectorsResponse,
   type ConciergeFollowKindDto,
   type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
-  type ConciergeWatchDto,
 } from "@rome/api-types/concierge";
+import type { ConnectionView } from "../api/routes/connections.js";
 import type { Action } from "../actions/types.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -34,6 +34,7 @@ import {
   parseQuietHours,
   quietWindowEnd,
 } from "./alerts.js";
+import { mergeConnectors, type ProviderService, type ProviderWatchSection } from "./connectors.js";
 import type { ConciergeService } from "./service.js";
 
 const log = createLogger("concierge-following");
@@ -97,19 +98,24 @@ export function watchProvidersOf(
   });
 }
 
-/** A connector as its provider describes it, with the raw events behind each watch kind. */
-export interface ProviderConnector extends Omit<ConciergeConnectorDto, "watch"> {
-  watch:
-    | (Omit<ConciergeWatchDto, "follows" | "kinds"> & {
-        kinds: (ConciergeFollowKindDto & { triggers: WatchTrigger[] })[];
-      })
-    | null;
+/**
+ * What a provider's `sources` action answers: the services it connects itself,
+ * and the watch section of each service it watches, with the raw events behind
+ * each kind.
+ */
+export interface ProviderSources {
+  services: ProviderService[];
+  watch: ProviderWatchSectionWithTriggers[];
 }
 
-/** A watchable connector, flattened for following: its id is the follow's source. */
-export interface WatchSource extends NonNullable<ProviderConnector["watch"]> {
+/** A provider's watch section, with the raw events behind each kind. */
+export interface ProviderWatchSectionWithTriggers extends Omit<ProviderWatchSection, "kinds"> {
+  kinds: (ConciergeFollowKindDto & { triggers: WatchTrigger[] })[];
+}
+
+/** A watch section, for following: its service is the follow's source. */
+export interface WatchSource extends ProviderWatchSectionWithTriggers {
   source: string;
-  label: string;
   provider: WatchProvider;
 }
 
@@ -140,12 +146,14 @@ export interface ConciergeFollowingDeps {
   /** Runs an action as the Concierge. */
   runAction(name: string, args: Record<string, unknown>): Promise<ActionOutcome>;
   settings: Pick<SettingsRepository, "get" | "set">;
+  /** Rome's connections and placeholders, as `GET /connections` lists them. */
+  connections(): Promise<ConnectionView[]>;
   now?: () => number;
 }
 
 /** What the Concierge's actions and the dashboard's Following panel reach. */
 export interface ConciergeFollowing {
-  /** Every connector with its connection, act and watch (with follows), and the rules. */
+  /** Every service with its state, connect entry and capabilities (watch with its follows), and the rules. */
   list(): Promise<ConciergeConnectorsResponse>;
   /** Follows a target, or changes a follow that exists. Throws with what the source needs. */
   follow(change: ConciergeFollowChange): Promise<ConciergeFollowDto>;
@@ -401,16 +409,16 @@ export function startConciergeFollowing(
     })
     .catch(() => undefined);
 
-  let connectorsCache: {
+  let sourcesCache: {
     at: number;
-    connectors: (ProviderConnector & { provider: WatchProvider })[];
+    services: ProviderService[];
+    watch: WatchSource[];
   } | null = null;
-  /** Every provider's connectors, the first provider winning a shared id. */
-  const readConnectors = async (fresh = false) => {
-    if (!fresh && connectorsCache && now() - connectorsCache.at < SOURCES_TTL_MS) {
-      return connectorsCache.connectors;
-    }
-    const connectors: (ProviderConnector & { provider: WatchProvider })[] = [];
+  /** Every provider's services and watch sections, the first provider winning a shared service. */
+  const readProviders = async (fresh = false) => {
+    if (!fresh && sourcesCache && now() - sourcesCache.at < SOURCES_TTL_MS) return sourcesCache;
+    const services: ProviderService[] = [];
+    const watch: WatchSource[] = [];
     for (const provider of deps.providers()) {
       const outcome = await run(provider, "sources", {}).catch((error: unknown) => ({
         status: "error",
@@ -423,20 +431,20 @@ export function startConciergeFollowing(
         });
         continue;
       }
-      const listed = ((outcome as ActionOutcome).data as { connectors?: unknown } | undefined)
-        ?.connectors;
-      for (const connector of (Array.isArray(listed) ? listed : []) as ProviderConnector[]) {
-        if (connectors.some((c) => c.id === connector.id)) continue;
-        connectors.push({ ...connector, provider });
+      const data = ((outcome as ActionOutcome).data ?? {}) as Partial<ProviderSources>;
+      for (const service of Array.isArray(data.services) ? data.services : []) {
+        if (!services.some((s) => s.service === service.service)) services.push(service);
+      }
+      for (const section of Array.isArray(data.watch) ? data.watch : []) {
+        if (watch.some((s) => s.source === section.service)) continue;
+        watch.push({ ...section, source: section.service, provider });
       }
     }
-    connectorsCache = { at: now(), connectors };
-    return connectors;
+    sourcesCache = { at: now(), services, watch };
+    return sourcesCache;
   };
   const readSources = async (fresh = false): Promise<WatchSource[]> =>
-    (await readConnectors(fresh)).flatMap((c) =>
-      c.watch ? [{ ...c.watch, source: c.id, label: c.label, provider: c.provider }] : [],
-    );
+    (await readProviders(fresh)).watch;
   const sourceOf = async (name: string, fresh = false) => {
     const sources = await readSources(fresh);
     const found = sources.find((s) => s.source === name);
@@ -613,30 +621,26 @@ export function startConciergeFollowing(
 
   const following: ConciergeFollowing = {
     async list() {
-      const [connectors, stored] = await Promise.all([readConnectors(true), readStored()]);
+      const [{ services, watch }, stored, connections] = await Promise.all([
+        readProviders(true),
+        readStored(),
+        deps.connections(),
+      ]);
       return {
-        connectors: connectors.map(({ provider: _provider, watch, ...connector }) => ({
-          ...connector,
-          watch: watch
-            ? {
-                ...watch,
-                kinds: watch.kinds.map(({ triggers: _triggers, ...kind }) => kind),
-                follows: stored.follows
-                  .filter((f) => f.source === connector.id)
-                  .map((f) =>
-                    toDto(
-                      {
-                        ...watch,
-                        source: connector.id,
-                        label: connector.label,
-                        provider: _provider,
-                      },
-                      f,
-                    ),
-                  ),
-              }
-            : null,
-        })),
+        connectors: mergeConnectors({
+          connections,
+          services,
+          watch: watch.map(({ provider: _provider, source: _source, ...section }) => ({
+            ...section,
+            kinds: section.kinds.map(({ triggers: _triggers, ...kind }) => kind),
+          })),
+          followsOf: (service) => {
+            const source = watch.find((s) => s.source === service);
+            return source
+              ? stored.follows.filter((f) => f.source === service).map((f) => toDto(source, f))
+              : [];
+          },
+        }),
         rules: parseFollowRules(stored),
       };
     },
@@ -912,7 +916,7 @@ export function changeOf(args: Record<string, unknown>): ConciergeFollowChange {
 const CHANGE_SCHEMA_PROPERTIES = {
   source: {
     type: "string",
-    description: `A source as ${CONCIERGE_FOLLOWING_ACTIONS.list} names it.`,
+    description: `A service as ${CONCIERGE_FOLLOWING_ACTIONS.list} names it.`,
   },
   target: {
     type: "string",

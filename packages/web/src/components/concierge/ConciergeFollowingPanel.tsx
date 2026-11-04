@@ -47,13 +47,12 @@ function FollowRow({
   follow: ConciergeFollowDto;
 }) {
   const { t } = useTranslation("chat");
-  const watch = connector.watch;
-  if (!watch) return null;
-  const kinds = watch.kinds
+  const watch = connector.capabilities.watch;
+  const kinds = (watch.kinds ?? [])
     .filter((kind) => follow.kinds.some((k) => k.kind === kind.kind && k.on))
     .map((kind) => kind.label);
   // Only what the guardian changed from the defaults: the rest goes without saying.
-  const options = watch.options.flatMap((option) => {
+  const options = (watch.options ?? []).flatMap((option) => {
     const value = follow.options[option.key];
     if (value === undefined || sameValue(value, option.default)) return [];
     return [
@@ -62,7 +61,7 @@ function FollowRow({
   });
   return (
     <ListRow asChild size="md">
-      <li data-following-item={`${connector.id}:${follow.target}`} className="items-start">
+      <li data-following-item={`${connector.service}:${follow.target}`} className="items-start">
         <ListRowContent>
           <ListRowTitle className="truncate">{follow.target}</ListRowTitle>
           {follow.state !== "active" ? (
@@ -108,30 +107,36 @@ export function ConciergeFollowingPanel() {
   }
   return (
     <div className="flex h-full flex-col overflow-y-auto pb-safe">
-      {followed.map((connector) => (
-        <section key={connector.id} data-following-source={connector.id}>
-          <SectionHeading>
-            {connector.watch?.account
-              ? t("concierge.following.sourceWithAccount", {
-                  source: connector.label,
-                  account: connector.watch.account,
-                })
-              : connector.label}
-          </SectionHeading>
-          {connector.watch && connector.watch.status !== "ready" && connector.watch.statusReason ? (
-            <p className="px-3 pb-1 text-aux text-muted-foreground">
-              {connector.watch.statusReason}
-            </p>
-          ) : null}
-          <List asChild>
-            <ul>
-              {connector.watch?.follows.map((follow) => (
-                <FollowRow key={follow.target} connector={connector} follow={follow} />
-              ))}
-            </ul>
-          </List>
-        </section>
-      ))}
+      {followed.map((connector) => {
+        const watch = connector.capabilities.watch;
+        // Why its follows are not active now: no access, or connected but degraded.
+        const reason =
+          watch.state === "unlocked"
+            ? watch.degradation?.reason
+            : watch.state === "needs-auth"
+              ? t("concierge.following.notConnected", { source: connector.label })
+              : undefined;
+        return (
+          <section key={connector.service} data-following-source={connector.service}>
+            <SectionHeading>
+              {watch.account
+                ? t("concierge.following.sourceWithAccount", {
+                    source: connector.label,
+                    account: watch.account,
+                  })
+                : connector.label}
+            </SectionHeading>
+            {reason ? <p className="px-3 pb-1 text-aux text-muted-foreground">{reason}</p> : null}
+            <List asChild>
+              <ul>
+                {watch.follows?.map((follow) => (
+                  <FollowRow key={follow.target} connector={connector} follow={follow} />
+                ))}
+              </ul>
+            </List>
+          </section>
+        );
+      })}
       <p className="px-3 pt-4 text-aux text-subtle-foreground">
         {t("concierge.following.changeInChat")}
       </p>

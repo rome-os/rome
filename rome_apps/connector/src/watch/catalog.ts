@@ -1,11 +1,18 @@
+import { buildTopic } from "../api/topic.js";
+
 // What this app's connections let Rome watch: per source, the kinds of event a
 // follower may turn on, in words the guardian reads, the options that tune them,
 // and the raw bus events behind each kind. Core reads it through the
 // `connector_watch_sources` action and never names a source itself.
 
-/** One raw bus event a kind listens on. `{target}` in an `equals` is the followed target. */
+/**
+ * One raw event a kind listens on, by the provider and event type this app
+ * declares under `eventSources` in app.yaml; its bus name follows from them.
+ * `{target}` in an `equals` is the followed target.
+ */
 export interface WatchTrigger {
-  eventName: string;
+  provider: string;
+  type: string;
   filter?: { field: string; equals: string }[];
 }
 
@@ -39,9 +46,9 @@ export interface Watchable {
   options: WatchOption[];
 }
 
-const GITHUB_PREFIX = "provider:event:github.";
 const repo = (type: string): WatchTrigger => ({
-  eventName: `${GITHUB_PREFIX}${type}`,
+  provider: "github",
+  type,
   filter: [{ field: "repository.full_name", equals: "{target}" }],
 });
 
@@ -131,7 +138,8 @@ export const GITHUB_WATCHABLE: Watchable = {
 };
 
 export const GMAIL_TRIGGER_SLUG = "GMAIL_NEW_GMAIL_MESSAGE";
-export const GMAIL_EVENT_NAME = "provider:event:gmail.gmail_new_gmail_message";
+/** The event type the trigger publishes, as `eventSources` declares it. */
+export const GMAIL_NEW_MAIL_TYPE = GMAIL_TRIGGER_SLUG.toLowerCase();
 /** The trigger watches the inbox only; Composio wants the label as a string. */
 export const GMAIL_TRIGGER_CONFIG = { labelIds: "INBOX" };
 
@@ -145,7 +153,7 @@ export const GMAIL_WATCHABLE: Watchable = {
       label: "New mail from people",
       default: true,
       // One Gmail account is connected at a time, so the event needs no filter.
-      triggers: [{ eventName: GMAIL_EVENT_NAME }],
+      triggers: [{ provider: "gmail", type: GMAIL_NEW_MAIL_TYPE }],
     },
   ],
   options: [
@@ -198,3 +206,7 @@ export function optionValue(
     ? stored
     : option.default;
 }
+
+/** The bus name of a trigger's raw event. */
+export const eventNameOf = (trigger: Pick<WatchTrigger, "provider" | "type">) =>
+  buildTopic(trigger.provider, trigger.type);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { listConnectors, NO_RELAY_REASON, type WatchSourceDeps } from "./sources.js";
+import {
+  composioServices,
+  listWatchSources,
+  NO_RELAY_REASON,
+  type WatchSourceDeps,
+} from "./sources.js";
 
 const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
   githubToken: async () => "gho_test",
@@ -8,81 +13,75 @@ const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
   composioSignedIn: async () => true,
   composioAccounts: async () => [
     { toolkit: "gmail", status: "ACTIVE" },
-    { toolkit: "notion", status: "ACTIVE" },
-    { toolkit: "discord", status: "EXPIRED" },
+    { toolkit: "notion", status: "EXPIRED" },
   ],
   gmailAddress: async () => "me@example.com",
-  romeManagedConnected: async (toolkit) => toolkit === "github",
   ...extra,
 });
 
-const byId = async (extra: Partial<WatchSourceDeps> = {}) =>
-  new Map((await listConnectors(deps(extra))).map((c) => [c.id, c]));
-
-describe("listConnectors", () => {
-  it("lists the watchable connectors first, each with connection, act and watch", async () => {
-    const connectors = await listConnectors(deps());
-    expect(connectors.slice(0, 2).map((c) => c.id)).toEqual(["gmail", "github"]);
-    const map = new Map(connectors.map((c) => [c.id, c]));
-    expect(map.get("github")).toMatchObject({
-      label: "GitHub",
-      connection: { status: "connected" },
-      act: true,
-      watch: { status: "ready", account: "octo-me", target: { example: "rome-os/rome" } },
-    });
-    expect(map.get("gmail")?.watch).toMatchObject({ status: "ready", account: "me@example.com" });
-    // Rome can act through a connected tool it cannot watch.
-    expect(map.get("notion")).toMatchObject({
-      act: true,
-      watch: null,
-      connection: { status: "connected" },
-    });
-  });
-
-  it("gives a not-connected connector the call that starts connecting it", async () => {
-    const map = await byId();
-    expect(map.get("slack")?.connection).toEqual({
-      status: "not_connected",
-      reason: "Slack is not connected.",
-      connect: { kind: "rome_oauth", method: "POST", path: "/api/oauth/slack/start" },
-    });
-    expect(map.get("discord")?.connection).toMatchObject({
-      status: "expired",
+describe("composioServices", () => {
+  it("lists the Composio services from the catalog, without the ones Rome manages", () => {
+    const services = composioServices(
+      [
+        { toolkit: "gmail", status: "ACTIVE" },
+        { toolkit: "notion", status: "EXPIRED" },
+      ],
+      true,
+    );
+    const ids = services.map((s) => s.service);
+    expect(ids).toContain("gmail");
+    expect(ids).not.toContain("github");
+    expect(ids).not.toContain("slack");
+    const byId = new Map(services.map((s) => [s.service, s]));
+    expect(byId.get("gmail")).toMatchObject({ state: "working", connect: null });
+    expect(byId.get("notion")?.state).toBe("broken");
+    expect(byId.get("linear")).toMatchObject({
+      state: null,
       connect: {
         kind: "composio",
         path: "/api/apps/connector/connectors",
-        body: { provider: "discord" },
+        body: { provider: "linear" },
         needsLogin: false,
       },
     });
-    expect(map.get("slack")?.act).toBe(false);
   });
 
-  it("asks for the Composio sign-in first when Rome is not signed in", async () => {
-    const map = await byId({ composioSignedIn: async () => false });
-    expect(map.get("gmail")?.connection.connect).toMatchObject({
-      kind: "composio",
+  it("asks for the Composio sign-in first when Rome is not signed in", () => {
+    const [first] = composioServices([], false);
+    expect(first?.connect).toMatchObject({
       needsLogin: true,
       login: { method: "POST", path: "/api/apps/connector/login/start" },
     });
-    expect(map.get("gmail")?.watch).toMatchObject({
-      status: "not_connected",
-      statusReason: expect.stringMatching(/Settings → Connections/),
-    });
+  });
+});
+
+describe("listWatchSources", () => {
+  it("gives each watchable service its status, account, kinds with their bus events, and options", async () => {
+    const { watch } = await listWatchSources(deps());
+    expect(watch.map((w) => [w.service, w.status, w.account])).toEqual([
+      ["github", "ready", "octo-me"],
+      ["gmail", "ready", "me@example.com"],
+    ]);
+    expect(watch[1]?.kinds[0]?.triggers[0]?.eventName).toBe(
+      "provider:event:gmail.gmail_new_gmail_message",
+    );
   });
 
-  it("says what is missing for watch: the relay, or the account's identity", async () => {
-    const noRelay = await byId({ relayDepositUrl: async () => null });
-    expect(noRelay.get("github")?.watch).toMatchObject({
-      status: "no_relay",
-      statusReason: NO_RELAY_REASON,
-    });
-    const broken = await byId({
-      gmailAddress: async () => {
-        throw new Error("Gmail's profile answered 401");
-      },
-    });
-    expect(broken.get("gmail")?.watch).toMatchObject({
+  it("says what is missing: a connection, the relay, or the account's identity", async () => {
+    const off = await listWatchSources(
+      deps({ githubToken: async () => null, composioSignedIn: async () => false }),
+    );
+    expect(off.watch.map((w) => w.status)).toEqual(["not_connected", "not_connected"]);
+    const noRelay = await listWatchSources(deps({ relayDepositUrl: async () => null }));
+    expect(noRelay.watch[0]).toMatchObject({ status: "no_relay", statusReason: NO_RELAY_REASON });
+    const broken = await listWatchSources(
+      deps({
+        gmailAddress: async () => {
+          throw new Error("Gmail's profile answered 401");
+        },
+      }),
+    );
+    expect(broken.watch[1]).toMatchObject({
       status: "error",
       statusReason: expect.stringContaining("401"),
     });

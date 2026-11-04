@@ -5,10 +5,11 @@ import {
   type ActionConfig,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
+import { PROVIDER_EVENT_PREFIX } from "../../api/topic.js";
 import { judgeGithub, judgeGmail } from "../../watch/judge.js";
 import { isTeamMember } from "../../watch/runtime.js";
 
-const GITHUB_PREFIX = "provider:event:github.";
+const GITHUB_PREFIX = `${PROVIDER_EVENT_PREFIX}github.`;
 
 const inputSchema = z.object({
   source: z.string(),

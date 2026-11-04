@@ -85,6 +85,7 @@
       "emptyTitle": "Nothing followed yet",
       "emptyDescription": "Ask the Concierge in chat to follow something, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
       "sourceWithAccount": "{{source}} · {{account}}",
+      "notConnected": "{{source}} is not connected. Connect it in Settings → Connections.",
       "state": {
         "off": "Every kind is off",
         "unavailable": "Paused until the source is ready again"

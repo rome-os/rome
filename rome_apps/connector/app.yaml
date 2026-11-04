@@ -93,6 +93,12 @@ eventSources:
       - delete
       - deployment_status
     ensureAction: connector_event_ensure
+  # New mail in the connected Gmail inbox, through Composio's polling trigger.
+  # It follows the connected account, so a wait names no key.
+  - events: "provider:event:gmail.*"
+    types:
+      - gmail_new_gmail_message
+    ensureAction: connector_event_ensure
 
 skills:
   - skills/composio-cli

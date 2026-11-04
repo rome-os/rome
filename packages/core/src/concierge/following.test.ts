@@ -1,16 +1,18 @@
 import { describe, expect, it } from "@rstest/core";
+import type { ConciergeWatchCapability } from "@rome/api-types/concierge";
 import type { Action } from "../actions/types.js";
 import type { Routine } from "../routines/types.js";
 import {
   type ConciergeFollowing,
   type ConciergeFollowingDeps,
-  type ProviderConnector,
+  type ProviderSources,
   renderAlertBatch,
   startConciergeFollowing,
   validateRulesChange,
   watchProvidersOf,
   type WatchSource,
 } from "./following.js";
+import type { ConnectionView } from "../api/routes/connections.js";
 import type { ConciergeService } from "./service.js";
 
 const repoTrigger = (type: string) => ({
@@ -18,105 +20,148 @@ const repoTrigger = (type: string) => ({
   filter: [{ field: "repository.full_name", equals: "{target}" }],
 });
 
-/** The connectors a provider would answer, trimmed to what the tests need. */
-const watchOf = (
-  source: Omit<WatchSource, "provider" | "source" | "label"> & { source: string; label: string },
-): ProviderConnector => {
-  const { source: id, label, ...watch } = source;
-  return {
-    id,
-    label,
-    connection: { status: watch.status === "not_connected" ? "not_connected" : "connected" },
-    act: watch.status !== "not_connected",
-    watch,
-  };
-};
-const sources = (gmailStatus: WatchSource["status"] = "ready"): ProviderConnector[] => [
-  watchOf({
-    source: "github",
-    label: "GitHub",
-    status: "ready",
-    account: "octo-me",
-    target: { format: "A repository as owner/name", example: "rome-os/rome" },
-    kinds: [
-      {
-        kind: "review_requested",
-        label: "Review requested of you",
-        default: true,
-        triggers: [repoTrigger("pull_request")],
+/** A Composio service as the connector lists it. */
+const composio = (service: string, label: string, working: boolean) => ({
+  service,
+  label,
+  state: working ? ("working" as const) : null,
+  connect: working
+    ? null
+    : {
+        kind: "composio" as const,
+        method: "POST" as const,
+        path: "/api/apps/connector/connectors",
+        body: { provider: service },
+        needsLogin: false,
+        login: { method: "POST" as const, path: "/api/apps/connector/login/start" },
       },
-      {
-        kind: "your_pr_closed",
-        label: "Your PRs merged or closed",
-        default: true,
-        triggers: [repoTrigger("pull_request")],
+});
+
+/** Rome's connections as `GET /connections` lists them, trimmed to what the merge reads. */
+const connectionViews = (): ConnectionView[] =>
+  [
+    {
+      id: "c1",
+      connectionKind: "github",
+      label: "GitHub",
+      state: "working",
+      display: { github: { displayName: null, handle: "octo-me", email: null, avatarUrl: null } },
+      account: null,
+      connect: { url: "https://cloud/oauth/github", available: true, unavailableReason: null },
+      capabilities: {
+        chat: { state: "unsupported" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
       },
-      {
-        kind: "your_ci_failed",
-        label: "Your CI runs that failed",
-        default: true,
-        triggers: [repoTrigger("workflow_run")],
+    },
+    {
+      id: null,
+      connectionKind: "telegram_user",
+      label: "Telegram",
+      state: null,
+      display: {},
+      account: null,
+      connect: null,
+      capabilities: {
+        chat: { state: "needs-auth", missingGrants: ["telegram"] },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
       },
-      {
-        kind: "new_pr_or_issue",
-        label: "New PRs and issues",
-        default: false,
-        requires: { option: "scope", value: "whole_repo" },
-        triggers: [repoTrigger("issues"), repoTrigger("pull_request")],
-      },
-    ],
-    options: [
-      {
-        key: "scope",
-        label: "What to hear about",
-        type: "enum",
-        values: [
-          { value: "about_me", label: "Only what concerns me" },
-          { value: "whole_repo", label: "Also the whole repository" },
-        ],
-        default: "about_me",
-      },
-      { key: "ignorePeople", label: "Ignore these people", type: "list", default: [] },
-    ],
-  }),
-  watchOf({
-    source: "gmail",
-    label: "Gmail",
-    status: gmailStatus,
-    ...(gmailStatus === "ready"
-      ? { account: "me@example.com" }
-      : { statusReason: "Gmail is not connected." }),
-    target: null,
-    kinds: [
-      {
-        kind: "new_mail",
-        label: "New mail from people",
-        default: true,
-        triggers: [{ eventName: "provider:event:gmail.gmail_new_gmail_message" }],
-      },
-    ],
-    options: [
-      {
-        key: "recipients",
-        label: "Mail sent to",
-        type: "enum",
-        values: [
-          { value: "to_and_cc", label: "Me, or with me in cc" },
-          { value: "to", label: "Me directly" },
-        ],
-        default: "to_and_cc",
-      },
-    ],
-  }),
-  { id: "notion", label: "Notion", connection: { status: "connected" }, act: true, watch: null },
-];
+    },
+  ] as unknown as ConnectionView[];
+
+/** What the connector's `sources` answers, trimmed to what the tests need. */
+const sources = (gmailStatus: WatchSource["status"] = "ready"): ProviderSources => ({
+  services: [
+    composio("gmail", "Gmail", gmailStatus !== "not_connected"),
+    composio("notion", "Notion", true),
+  ],
+  watch: [
+    {
+      service: "github",
+      label: "GitHub",
+      status: "ready",
+      account: "octo-me",
+      target: { format: "A repository as owner/name", example: "rome-os/rome" },
+      kinds: [
+        {
+          kind: "review_requested",
+          label: "Review requested of you",
+          default: true,
+          triggers: [repoTrigger("pull_request")],
+        },
+        {
+          kind: "your_pr_closed",
+          label: "Your PRs merged or closed",
+          default: true,
+          triggers: [repoTrigger("pull_request")],
+        },
+        {
+          kind: "your_ci_failed",
+          label: "Your CI runs that failed",
+          default: true,
+          triggers: [repoTrigger("workflow_run")],
+        },
+        {
+          kind: "new_pr_or_issue",
+          label: "New PRs and issues",
+          default: false,
+          requires: { option: "scope", value: "whole_repo" },
+          triggers: [repoTrigger("issues"), repoTrigger("pull_request")],
+        },
+      ],
+      options: [
+        {
+          key: "scope",
+          label: "What to hear about",
+          type: "enum",
+          values: [
+            { value: "about_me", label: "Only what concerns me" },
+            { value: "whole_repo", label: "Also the whole repository" },
+          ],
+          default: "about_me",
+        },
+        { key: "ignorePeople", label: "Ignore these people", type: "list", default: [] },
+      ],
+    },
+    {
+      service: "gmail",
+      label: "Gmail",
+      status: gmailStatus,
+      ...(gmailStatus === "ready"
+        ? { account: "me@example.com" }
+        : { statusReason: "Gmail is not connected." }),
+      target: null,
+      kinds: [
+        {
+          kind: "new_mail",
+          label: "New mail from people",
+          default: true,
+          triggers: [{ eventName: "provider:event:gmail.gmail_new_gmail_message" }],
+        },
+      ],
+      options: [
+        {
+          key: "recipients",
+          label: "Mail sent to",
+          type: "enum",
+          values: [
+            { value: "to_and_cc", label: "Me, or with me in cc" },
+            { value: "to", label: "Me directly" },
+          ],
+          default: "to_and_cc",
+        },
+      ],
+    },
+  ],
+});
 
 function setup(
   options: {
     refuse?: string;
     gmailStatus?: WatchSource["status"];
     /** The connectors a second provider app lists. */
-    second?: ProviderConnector[];
+    second?: ProviderSources;
   } = {},
 ) {
   const routines = new Map<string, Routine>();
@@ -182,12 +227,12 @@ function setup(
     ],
     runAction: async (qualified, args) => {
       if (qualified === "second:list") {
-        return { status: "ok", data: { connectors: options.second ?? [] } };
+        return { status: "ok", data: options.second ?? { services: [], watch: [] } };
       }
       const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
-        return { status: "ok", data: { connectors: sources(options.gmailStatus) } };
+        return { status: "ok", data: sources(options.gmailStatus) };
       }
       if (name === "connector_watch_ensure") {
         return options.refuse && args.source === "github"
@@ -222,6 +267,7 @@ function setup(
         settings.get(key) ?? null) as ConciergeFollowingDeps["settings"]["get"],
       set: async (key, value) => void settings.set(key, value),
     },
+    connections: async () => connectionViews(),
   };
   const service = {
     isEnabled: async () => true,
@@ -235,6 +281,15 @@ function setup(
   return { routines, active, calls, changes, settings, action, following: () => following!, stop };
 }
 
+/** The watch capability of one service in the list. */
+const watchIn = (
+  list: { connectors: { service: string; capabilities: { watch: unknown } }[] },
+  service: string,
+) =>
+  list.connectors.find((c) => c.service === service)?.capabilities.watch as
+    | ConciergeWatchCapability
+    | undefined;
+
 const keys = (s: ReturnType<typeof setup>) => [...s.routines.values()].map((r) => r.key).sort();
 
 describe("following_list", () => {
@@ -243,25 +298,34 @@ describe("following_list", () => {
     await s.following().follow({ source: "github", target: "acme/widgets" });
     const list = await s.following().list();
     expect(list.rules).toEqual({ maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null });
+    // Every service, unfiltered, watchable first, in the connection model's words.
     expect(
-      list.connectors.map((x) => [
-        x.id,
-        x.act,
-        x.watch?.status ?? null,
-        x.watch?.statusReason ?? null,
-      ]),
+      list.connectors.map((x) => [x.service, x.origin, x.state, x.capabilities.watch.state]),
     ).toEqual([
-      ["github", true, "ready", null],
-      ["gmail", false, "not_connected", "Gmail is not connected."],
-      ["notion", true, null, null],
+      ["github", "connection", "working", "unlocked"],
+      ["gmail", "composio", null, "needs-auth"],
+      ["telegram_user", "connection", null, "unsupported"],
+      ["notion", "composio", "working", "unsupported"],
     ]);
+    const [github, gmail, telegram, notion] = list.connectors;
+    expect(github?.account).toBe("octo-me");
+    expect(github?.connect).toBeNull();
+    expect(gmail?.connect).toMatchObject({ kind: "composio", body: { provider: "gmail" } });
+    expect(telegram?.connect).toEqual({ kind: "dashboard" });
+    // Chat and act come from the connection as `GET /connections` reads it.
+    expect(telegram?.capabilities.chat).toEqual({
+      state: "needs-auth",
+      missingGrants: ["telegram"],
+    });
+    expect(notion?.capabilities.act).toEqual({ state: "unlocked" });
+    expect(gmail?.capabilities.act).toEqual({ state: "needs-auth", missingGrants: [] });
     // The raw events behind each kind stay between core and the connector.
-    expect(list.connectors[0]?.watch?.kinds[0]).toEqual({
+    expect(watchIn(list, "github")?.kinds?.[0]).toEqual({
       kind: "review_requested",
       label: "Review requested of you",
       default: true,
     });
-    expect(list.connectors[0]?.watch?.follows).toEqual([
+    expect(watchIn(list, "github")?.follows).toEqual([
       {
         target: "acme/widgets",
         state: "active",
@@ -303,7 +367,7 @@ describe("follow", () => {
       filter: [{ field: "repository.full_name", equals: "acme/widgets" }],
     });
     expect(s.active.size).toBe(2);
-    const [follow] = (await s.following().list()).connectors[0]!.watch!.follows;
+    const [follow] = watchIn(await s.following().list(), "github")!.follows!;
     expect(follow?.options.ignorePeople).toEqual(["dependabot"]);
     expect(follow?.preference).toBe("Only PRs that touch the billing code matter.");
   });
@@ -407,7 +471,7 @@ describe("configure and unfollow", () => {
     await s.following().follow({ source: "gmail" });
     expect(await s.following().unfollow("gmail", "")).toEqual({ removed: true });
     expect(s.routines.size).toBe(0);
-    expect((await s.following().list()).connectors[1]?.watch?.follows).toEqual([]);
+    expect(watchIn(await s.following().list(), "gmail")?.follows).toEqual([]);
     expect(s.calls.some(([name]) => name === "connector_watch_release")).toBe(true);
     expect(await s.following().unfollow("gmail", "")).toEqual({ removed: false });
   });
@@ -539,29 +603,18 @@ describe("watchProvidersOf", () => {
     ]);
   });
 
-  it("merges the connectors of two providers, the first winning a shared id", async () => {
+  it("merges two providers, the first winning a shared service", async () => {
     const s = setup({
-      second: [
-        {
-          id: "gmail",
-          label: "Other Gmail",
-          connection: { status: "connected" },
-          act: true,
-          watch: null,
-        },
-        {
-          id: "linear",
-          label: "Linear",
-          connection: { status: "connected" },
-          act: true,
-          watch: null,
-        },
-      ],
+      second: {
+        services: [composio("gmail", "Other Gmail", true), composio("linear", "Linear", true)],
+        watch: [],
+      },
     });
     const { connectors } = await s.following().list();
-    expect(connectors.map((c) => [c.id, c.label])).toEqual([
+    expect(connectors.map((c) => [c.service, c.label])).toEqual([
       ["github", "GitHub"],
       ["gmail", "Gmail"],
+      ["telegram_user", "Telegram"],
       ["notion", "Notion"],
       ["linear", "Linear"],
     ]);

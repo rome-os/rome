@@ -8,8 +8,6 @@ import { ensureComposioWebhookRegistered } from "../api/composio-webhook.js";
 import { readGithubOAuthToken } from "../api/github-proxy.js";
 import { resolveRelayDepositUrl } from "../api/relay-webhook.js";
 import { SettingsStore } from "../api/settings-store.js";
-import { readShopifyOAuthToken } from "../api/shopify-proxy.js";
-import { readSlackOAuthTokens } from "../api/slack-proxy.js";
 import { loadConnectorClient, ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
 import { GMAIL_TRIGGER_CONFIG, GMAIL_TRIGGER_SLUG } from "./catalog.js";
 import type { WatchSourceDeps } from "./sources.js";
@@ -94,12 +92,6 @@ export function watchSourceDeps(deps: AppActionRuntimeDeps): WatchSourceDeps {
       }));
     },
     gmailAddress,
-    romeManagedConnected: async (toolkit) => {
-      if (toolkit === "github") return (await readGithubOAuthToken()) !== null;
-      if (toolkit === "slack") return (await readSlackOAuthTokens()) !== null;
-      if (toolkit === "shopify") return (await readShopifyOAuthToken()) !== null;
-      return false;
-    },
   };
 }
 

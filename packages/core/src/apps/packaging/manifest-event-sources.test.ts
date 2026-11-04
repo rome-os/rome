@@ -56,6 +56,11 @@ describe("AppManifestSchema eventSources", () => {
         keys: [["repository.full_name"], ["organization.login"]],
         ensureAction: "connector_event_ensure",
       }),
+      {
+        events: "provider:event:gmail.*",
+        types: ["gmail_new_gmail_message"],
+        ensureAction: "connector_event_ensure",
+      },
     ]);
     expect(manifest.eventSources?.[0]?.types).toEqual(
       expect.arrayContaining(["workflow_run", "pull_request", "check_suite"]),

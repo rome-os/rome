@@ -170,16 +170,25 @@ describe("connector_event_ensure action", () => {
   } as unknown as AppActionRuntimeDeps;
   const repoFilter = [{ field: "repository.full_name", equals: "acme/widgets" }];
 
-  it("refuses an event that is not a GitHub event", async () => {
+  it("refuses an event it does not deliver", async () => {
     const result = await createAction(config, deps).execute({
-      eventName: "provider:event:gmail.gmail_new_gmail_message",
+      eventName: "provider:event:slack.message",
       filter: [],
     });
     expect(result).toEqual({
       status: "error",
       error:
-        'connector_event_ensure handles provider:event:github.* events only, not "provider:event:gmail.gmail_new_gmail_message"',
+        'connector_event_ensure handles provider:event:github.* and provider:event:gmail.gmail_new_gmail_message events only, not "provider:event:slack.message"',
     });
+  });
+
+  it("subscribes Gmail's new mail through the connected account, with no filter", async () => {
+    const result = await createAction(config, deps).execute({
+      eventName: "provider:event:gmail.gmail_new_gmail_message",
+      filter: [],
+    });
+    // No Composio sign-in in tests: the Gmail path answers why it cannot subscribe.
+    expect(result).toEqual({ status: "error", error: "Rome is not signed in to Composio." });
   });
 
   it("refuses a filter without a repo or org before calling GitHub", async () => {

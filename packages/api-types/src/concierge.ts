@@ -83,31 +83,33 @@ export const CONCIERGE_FOLLOW_MAX_SPACING_MINUTES = 120;
 export const CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH = 500;
 
 /**
- * Whether a connector can be watched now. The connection that owns it decides;
- * `statusReason` says what is missing and how to fix it.
+ * What a service lets Rome do, by capability, in the words of Rome's
+ * connection model (`GET /api/connections`): unlocked (possibly degraded,
+ * with the reason), needing access, needing a subscription, or unsupported.
  */
-export type ConciergeWatchStatus = "ready" | "not_connected" | "no_relay" | "error";
-
-/** Whether Rome holds working access to a connector. */
-export type ConciergeConnectionStatus = "connected" | "not_connected" | "expired";
+export type ConciergeCapabilityStatus =
+  | { state: "unlocked"; degradation?: { reason: string; retryAt?: string } }
+  | { state: "needs-auth"; missingGrants: string[] }
+  | { state: "needs-subscription" }
+  | { state: "unsupported" };
 
 /**
- * How a client starts connecting a connector: one HTTP call on this Rome that
- * answers `{ redirectUrl }` to open. `settings` means the dashboard's Settings
- * page is the only way in.
+ * How a client starts connecting a service. `rome_oauth`: open `url`, Rome
+ * Cloud's sign-in for the service. `composio`: one call on this Rome that
+ * answers `{ redirectUrl }`, after signing in to Composio when `needsLogin`.
+ * `dashboard`: the dashboard's Connections page is the only way in.
  */
 export type ConciergeConnectEntry =
-  | { kind: "rome_oauth"; method: "POST"; path: string }
+  | { kind: "rome_oauth"; url: string | null; available: boolean; unavailableReason: string | null }
   | {
       kind: "composio";
       method: "POST";
       path: string;
       body: { provider: string };
-      /** Sign in to Composio first, with `login`, when Rome is not signed in. */
       needsLogin: boolean;
       login: { method: "POST"; path: string };
     }
-  | { kind: "settings"; path: string };
+  | { kind: "dashboard" };
 
 /** One kind of event a source can tell of, in the guardian's words. */
 export interface ConciergeFollowKindDto {
@@ -141,34 +143,40 @@ export interface ConciergeFollowDto {
   preference: string | null;
 }
 
-/** What can be watched through a connector, and what the Concierge follows there. */
-export interface ConciergeWatchDto {
-  status: ConciergeWatchStatus;
-  statusReason?: string;
+/**
+ * The watch capability of a service, filled by the app that provides watch for
+ * it: its status, and when it can be watched, the target format, the kinds
+ * and options, and what the Concierge follows there.
+ */
+export type ConciergeWatchCapability = ConciergeCapabilityStatus & {
   /** Who events are judged for: the GitHub login, the mailbox address. */
   account?: string;
   /** What a follow names, or null: the connected account itself. */
-  target: { format: string; example: string } | null;
-  kinds: ConciergeFollowKindDto[];
-  options: ConciergeFollowOptionDto[];
-  follows: ConciergeFollowDto[];
-}
+  target?: { format: string; example: string } | null;
+  kinds?: ConciergeFollowKindDto[];
+  options?: ConciergeFollowOptionDto[];
+  follows?: ConciergeFollowDto[];
+};
 
-/** One of the Concierge's connectors: a tool it can act through, watch, or both. */
+/** One service: one of Rome's connections, or a service the connector app connects through Composio. */
 export interface ConciergeConnectorDto {
-  id: string;
+  /** The connection kind (such as `github`, `telegram_user`) or the Composio toolkit (such as `gmail`). */
+  service: string;
   label: string;
-  glyph?: string;
-  connection: {
-    status: ConciergeConnectionStatus;
-    reason?: string;
-    /** Present when not connected: how a client starts connecting it. */
-    connect?: ConciergeConnectEntry;
+  origin: "connection" | "composio";
+  /** The connection's id, or null for a Composio service or a kind never connected. */
+  connectionId: string | null;
+  /** `working`, `broken`, or null when not connected. */
+  state: "working" | "broken" | null;
+  /** The account it reaches, as a person reads it, when connected. */
+  account: string | null;
+  /** How a client starts connecting it, when it is not working. */
+  connect: ConciergeConnectEntry | null;
+  capabilities: {
+    chat: ConciergeCapabilityStatus;
+    act: ConciergeCapabilityStatus;
+    watch: ConciergeWatchCapability;
   };
-  /** The Concierge can use it by delegating work to a task chat: it is connected. */
-  act: boolean;
-  /** Null when the connector cannot be watched. */
-  watch: ConciergeWatchDto | null;
 }
 
 /**
@@ -183,7 +191,7 @@ export interface ConciergeConnectorsResponse {
 
 /** A change to one follow: kinds on or off by name, options by key, the preference. */
 export interface ConciergeFollowChange {
-  /** The connector id. */
+  /** The service, as the list names it. */
   source: string;
   target?: string;
   kinds?: Record<string, boolean>;

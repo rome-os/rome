@@ -190,24 +190,31 @@ describe("FreeGrid mobile header", () => {
                 ? {
                     connectors: [
                       {
-                        id: "github",
+                        service: "github",
                         label: "GitHub",
-                        connection: { status: "connected" },
-                        act: true,
-                        watch: {
-                          status: "ready",
-                          target: null,
-                          kinds: [],
-                          options: [],
-                          follows: [
-                            {
-                              target: "acme/widgets",
-                              state: "active",
-                              kinds: [],
-                              options: {},
-                              preference: null,
-                            },
-                          ],
+                        origin: "connection",
+                        connectionId: "c1",
+                        state: "working",
+                        account: null,
+                        connect: null,
+                        capabilities: {
+                          chat: { state: "unsupported" },
+                          act: { state: "unsupported" },
+                          watch: {
+                            state: "unlocked",
+                            target: null,
+                            kinds: [],
+                            options: [],
+                            follows: [
+                              {
+                                target: "acme/widgets",
+                                state: "active",
+                                kinds: [],
+                                options: {},
+                                preference: null,
+                              },
+                            ],
+                          },
                         },
                       },
                     ],

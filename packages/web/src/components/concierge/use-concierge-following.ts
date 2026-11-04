@@ -35,10 +35,10 @@ export function useConciergeFollowing() {
     { onReconnect: () => void refetch() },
   );
   const followed = (query.data?.connectors ?? []).filter(
-    (connector) => (connector.watch?.follows?.length ?? 0) > 0,
+    (connector) => (connector.capabilities.watch.follows?.length ?? 0) > 0,
   );
   const followCount = followed.reduce(
-    (count, connector) => count + (connector.watch?.follows.length ?? 0),
+    (count, connector) => count + (connector.capabilities.watch.follows?.length ?? 0),
     0,
   );
   return { data: query.data, loaded: query.isFetched, followed, followCount };

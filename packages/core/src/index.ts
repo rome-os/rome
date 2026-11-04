@@ -161,6 +161,7 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
+import { listConnectionViews } from "./api/routes/connections.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -1209,6 +1210,8 @@ async function main() {
     providers: () => watchProvidersOf(appCatalog.listResolved()),
     runAction: (name, args) => actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
     settings: settingsRepo,
+    // The same projection `GET /connections` serves, so both read one model.
+    connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
   });
 
   const approvalHandler = new ApprovalHandler(

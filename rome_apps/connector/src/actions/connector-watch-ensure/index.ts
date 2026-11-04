@@ -21,7 +21,6 @@ import { createGithubHookClient } from "../github-hook-client.js";
 
 const log = createAppLogger("connector_watch_ensure");
 
-const GITHUB_PREFIX = "provider:event:github.";
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 const inputSchema = z.object({
@@ -55,9 +54,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         ...new Set(
           watchable.kinds
             .filter((kind) => kinds.includes(kind.kind))
-            .flatMap((kind) => kind.triggers.map((trigger) => trigger.eventName))
-            .filter((name) => name.startsWith(GITHUB_PREFIX))
-            .map((name) => name.slice(GITHUB_PREFIX.length)),
+            .flatMap((kind) => kind.triggers)
+            .filter((trigger) => trigger.provider === "github")
+            .map((trigger) => trigger.type),
         ),
       ];
       const resolved = await resolveGithubHookSetup(deps);

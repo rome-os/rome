@@ -8,74 +8,93 @@ import { ConciergeFollowingPanel } from "./ConciergeFollowingPanel";
 
 let state: ConciergeConnectorsResponse;
 
+const UNSUPPORTED = { state: "unsupported" } as const;
+
 function listing(): ConciergeConnectorsResponse {
   return {
     connectors: [
       {
-        id: "github",
+        service: "github",
         label: "GitHub",
-        connection: { status: "connected" },
-        act: true,
-        watch: {
-          status: "ready",
-          account: "octo-me",
-          target: { format: "A repository as owner/name", example: "rome-os/rome" },
-          kinds: [
-            {
-              kind: "review_requested",
-              label: "Review requested of you or your team",
-              default: true,
-            },
-            { kind: "your_ci_failed", label: "Your CI runs that failed", default: true },
-          ],
-          options: [
-            {
-              key: "scope",
-              label: "What to hear about",
-              type: "enum",
-              values: [
-                { value: "about_me", label: "Only what concerns me" },
-                { value: "whole_repo", label: "Also the whole repository" },
-              ],
-              default: "about_me",
-            },
-            { key: "ignorePeople", label: "Ignore these people", type: "list", default: [] },
-            { key: "includeBots", label: "Include bots", type: "boolean", default: false },
-          ],
-          follows: [
-            {
-              target: "acme/widgets",
-              state: "active",
-              kinds: [
-                { kind: "review_requested", on: true },
-                { kind: "your_ci_failed", on: false },
-              ],
-              options: { scope: "about_me", ignorePeople: ["dependabot"], includeBots: false },
-              preference: "Only billing changes",
-            },
-          ],
+        origin: "connection",
+        connectionId: "c1",
+        state: "working",
+        account: "octo-me",
+        connect: null,
+        capabilities: {
+          chat: UNSUPPORTED,
+          act: UNSUPPORTED,
+          watch: {
+            state: "unlocked",
+            account: "octo-me",
+            target: { format: "A repository as owner/name", example: "rome-os/rome" },
+            kinds: [
+              {
+                kind: "review_requested",
+                label: "Review requested of you or your team",
+                default: true,
+              },
+              { kind: "your_ci_failed", label: "Your CI runs that failed", default: true },
+            ],
+            options: [
+              {
+                key: "scope",
+                label: "What to hear about",
+                type: "enum",
+                values: [
+                  { value: "about_me", label: "Only what concerns me" },
+                  { value: "whole_repo", label: "Also the whole repository" },
+                ],
+                default: "about_me",
+              },
+              { key: "ignorePeople", label: "Ignore these people", type: "list", default: [] },
+              { key: "includeBots", label: "Include bots", type: "boolean", default: false },
+            ],
+            follows: [
+              {
+                target: "acme/widgets",
+                state: "active",
+                kinds: [
+                  { kind: "review_requested", on: true },
+                  { kind: "your_ci_failed", on: false },
+                ],
+                options: { scope: "about_me", ignorePeople: ["dependabot"], includeBots: false },
+                preference: "Only billing changes",
+              },
+            ],
+          },
         },
       },
       {
-        id: "gmail",
+        service: "gmail",
         label: "Gmail",
-        connection: { status: "connected" },
-        act: true,
-        watch: {
-          status: "ready",
-          account: "me@example.com",
-          target: null,
-          kinds: [{ kind: "new_mail", label: "New mail from people", default: true }],
-          options: [],
-          follows: [],
+        origin: "composio",
+        connectionId: null,
+        state: "working",
+        account: "me@example.com",
+        connect: null,
+        capabilities: {
+          chat: UNSUPPORTED,
+          act: { state: "unlocked" },
+          watch: {
+            state: "unlocked",
+            account: "me@example.com",
+            target: null,
+            kinds: [{ kind: "new_mail", label: "New mail from people", default: true }],
+            options: [],
+            follows: [],
+          },
         },
       },
       {
-        id: "notion",
+        service: "notion",
         label: "Notion",
-        connection: { status: "connected" },
-        act: true,
-        watch: null,
+        origin: "composio",
+        connectionId: null,
+        state: "working",
+        account: null,
+        connect: null,
+        capabilities: { chat: UNSUPPORTED, act: { state: "unlocked" }, watch: UNSUPPORTED },
       },
     ],
     rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
@@ -138,7 +157,7 @@ describe("ConciergeFollowingPanel", () => {
   });
 
   it("shows the empty state when nothing is followed", async () => {
-    state.connectors[0]!.watch!.follows = [];
+    state.connectors[0]!.capabilities.watch.follows = [];
     renderPanel();
     expect(await screen.findByText("Nothing followed yet")).toBeTruthy();
   });
