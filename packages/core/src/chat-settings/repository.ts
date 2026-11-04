@@ -12,6 +12,7 @@ import { addressOf, type ChatAdapters, kindNamedBy } from "../connections/chat-a
 import type { ChatAddresses } from "../connections/chat-addresses.js";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
+import { firstPlacementSecond, placedCreatedAt } from "../db/speaker-placement.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 type SpeakerRow = typeof romeSessions.$inferSelect;
@@ -384,18 +385,11 @@ export class ChatSettingsRepository {
         const id = channelChatId(channel, at);
         const name = placeholder ? at : descriptor.displayName;
         const now = new Date();
-        // A speaker first placed here starts a second before now, so the first
-        // message, heard within the second, is one it has not seen. Where the
-        // account already spoke here, as a send that opened no session, it
-        // starts before that message instead, so it reads what it said, as
-        // `ensureChannelChat` places one.
-        const firstOwn = tx.all<{ at: number | null }>(sql`
-          SELECT min(said_at) AS at FROM chat_messages
-          WHERE chat_id = ${chat.id} AND thread_id IS NULL AND sender_account_id = ${via.id}
-        `)[0]?.at;
-        const startSecond = Math.min(
-          Math.floor(now.getTime() / 1000),
-          firstOwn ?? Number.POSITIVE_INFINITY,
+        // Placed as a message placing the speaker would place it.
+        const startSecond = firstPlacementSecond(
+          tx,
+          { chatId: chat.id, threadId: null, accountId: via.id },
+          now,
         );
         const placedAt = new Date((startSecond - 1) * 1000);
         // The legacy source columns are still written for readers that have
@@ -437,8 +431,7 @@ export class ChatSettingsRepository {
             // before it stood in a chat stands here now, and one left by the
             // account the channel was paired as before moves here, as the
             // first message after a re-pairing moves it.
-            createdAt: sql`CASE WHEN ${romeSessions.chatId} IS NULL AND ${romeSessions.createdAt} >= ${startSecond}
-              THEN ${startSecond - 1} ELSE ${romeSessions.createdAt} END`,
+            createdAt: placedCreatedAt(startSecond),
             chatId: chat.id,
             chatPlatform: chat.platform,
             accountId: via.id,
