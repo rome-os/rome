@@ -14,7 +14,6 @@ import {
 } from "@rome-os/app-runtime";
 import type { ChannelSend } from "../chats/connected-accounts/connected-account.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
-import { spokenText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
@@ -104,8 +103,9 @@ export function recordedSends<C extends Channel>(
         const emails = deps.adapters.platformOn(channel.name) === EMAIL_PLATFORM;
         const email = emails && message.kind === "email" ? message : undefined;
         const out: Out = {
-          // The port reads a message without text by its parts.
-          text: message.text ?? (message.parts ? spokenText(message.parts) : ""),
+          // The port reads a message without text by its parts, in their
+          // order.
+          text: message.text ?? "",
           ...(message.parts?.length ? { parts: message.parts } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
           ...(email?.html ? { html: email.html } : {}),

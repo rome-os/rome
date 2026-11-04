@@ -379,7 +379,7 @@ describe("appChats", () => {
       expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([card]);
     });
 
-    it("hands a text-only connection a card's plain-text line once", async () => {
+    it("hands a text-only connection a card's plain-text line once, in its place", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       const card = {
         type: "approval_card",
@@ -389,14 +389,18 @@ describe("appChats", () => {
         status: "pending",
       } as const;
 
-      await chats.send(group, { parts: [{ type: "text", content: "Before I go on:" }, card] });
+      await chats.send(group, {
+        parts: [
+          { type: "text", content: "Before I go on:" },
+          card,
+          { type: "text", content: "Back soon." },
+        ],
+      });
 
-      const message = sent[0]?.message;
-      expect(message?.text).toBe("Before I go on:");
-      const shown = messageAsText(message ?? {});
       const line = widgetText(card) ?? "";
-      expect(line).not.toBe("");
-      expect(shown.split(line)).toHaveLength(2);
+      expect(messageAsText(sent[0]?.message ?? {})).toBe(
+        ["Before I go on:", line, "Back soon."].join("\n\n"),
+      );
     });
 
     it("answers what the channel refuses as unsupported, and records nothing", async () => {

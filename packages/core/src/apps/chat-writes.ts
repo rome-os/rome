@@ -21,7 +21,6 @@ import { v7 as uuidv7 } from "uuid";
 import { messageContentText } from "../chats/history/messages-agent.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
-import { spokenText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";
 import { type ChatAdapters, platformIdOfMessage } from "../connections/chat-adapter.js";
@@ -289,9 +288,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         input.sessionId,
         channel,
         {
-          // A channel that shows text alone shows this, so parts-only sends
-          // say their text parts.
-          text: input.text ?? (parts ? spokenText(parts) : ""),
+          // A channel that shows text alone reads parts-only sends by their
+          // parts, in their order.
+          text: input.text ?? "",
           ...(parts ? { parts } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           ...replyToIn(deps, speaker, input.replyToPlatformMessageId),
@@ -320,9 +319,10 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       const composed = input.content ? recordedOf(input.content) : undefined;
       const recorded = composed?.length ? composed : undefined;
       const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
-      // An email's body is its text, else the text of its parts. An
-      // HTML-only email goes on record as the text its HTML reads as.
-      const text = input.text ?? (parts ? spokenText(parts) : "");
+      // An email's body is its text, else its parts, which the email port
+      // reads in their order. An HTML-only email goes on record as the text
+      // its HTML reads as.
+      const text = input.text ?? "";
       const shown = text.trim() || (html ? htmlToMarkdown(html, true).trim() : "");
       const onRecord: readonly MessagePart[] = recorded ??
         parts ?? [{ type: "text", content: shown }];

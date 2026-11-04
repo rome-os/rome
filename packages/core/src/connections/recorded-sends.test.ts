@@ -2,6 +2,7 @@
 // address, else in the chat Rome holds there, recorded once either way.
 // Contract: docs/architecture/channels.md#chat-adapters.
 
+import { messageAsText } from "./outbound/send-refusals.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   type Channel,
@@ -471,7 +472,7 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([]);
   });
 
-  it("send an email's reply recipients, and its text from its parts when it has none", async () => {
+  it("send an email's reply recipients, and and its parts as they are when it has no text", async () => {
     await send("email").send(
       "thread-7" as ChatId,
       {
@@ -483,10 +484,12 @@ describe("recordedSends", () => {
     );
 
     expect(sent[0]?.message).toMatchObject({
-      text: "From parts",
+      text: "",
+      parts: [{ type: "text", content: "From parts" }],
       cc: ["ann@example.com"],
       bcc: ["log@example.com"],
     });
+    expect(messageAsText(sent[0]?.message ?? {})).toBe("From parts");
   });
 
   it("keep a thread a plain message reaches on an email channel as a group", async () => {
