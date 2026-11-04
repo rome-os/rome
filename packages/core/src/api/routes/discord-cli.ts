@@ -98,7 +98,7 @@ export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: str
 
     const outcome = await execute(
       deps,
-      toChannelApiRequest(brokerRequest),
+      toConnectionApiRequest(brokerRequest),
       c.req.header(DISCORD_BROKER_CHANNEL_HEADER),
     );
     return c.json(outcome.body, outcome.status as ContentfulStatusCode);
@@ -212,7 +212,7 @@ function projectFailure(result: Extract<ConnectionApiResult, { error: unknown }>
   };
 }
 
-function toChannelApiRequest(request: DiscordBrokerRequest): ConnectionApiRequest {
+function toConnectionApiRequest(request: DiscordBrokerRequest): ConnectionApiRequest {
   return {
     method: request.method,
     path: request.endpoint,
