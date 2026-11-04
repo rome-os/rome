@@ -194,6 +194,13 @@ export interface ActionRunContext {
    * caller that queues can wait on its own slot. Read on the root only and
    * never inherited by nested calls, which always fail fast. */
   whenWorkersBusy?: "fail" | "queue";
+  /**
+   * Argument names whose values the execution record leaves out, keeping
+   * only their size: a routine's trigger payload, an event passed on. Read
+   * on the root only and never inherited by nested calls. The action itself
+   * still gets every argument.
+   */
+  omitFromRecord?: readonly string[];
   executionId?: string;
   rootExecutionId?: string;
   parentExecutionId?: string;
@@ -277,6 +284,22 @@ interface ActionEngineOptions {
    * worker. Trust never comes from the action's own manifest. Absent, every
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
+}
+
+/** The arguments as an execution record keeps them, without the values a root run omits. */
+export function recordedArgs(
+  args: Record<string, unknown>,
+  context: ActionRunContext | undefined,
+  isRoot: boolean,
+): Record<string, unknown> {
+  const omit = isRoot ? context?.omitFromRecord : undefined;
+  if (!omit?.length) return args;
+  const out = { ...args };
+  for (const key of omit) {
+    if (!(key in out)) continue;
+    out[key] = { omitted: true, bytes: JSON.stringify(out[key] ?? null)?.length ?? 0 };
+  }
+  return out;
 }
 
 interface ExecutionInvocation {
@@ -712,7 +735,7 @@ export class ActionEngine {
         actionName: action.config.name,
         actionType: action.config.type,
         status: "pending_approval",
-        args,
+        args: recordedArgs(args, context, true),
         initiator,
         actor,
         parentId,
@@ -955,7 +978,7 @@ export class ActionEngine {
       rootExecutionId,
       actionName: name,
       actionType: action.config.type,
-      args,
+      args: recordedArgs(args, invocation.context, isRoot),
       initiator,
       actor,
       parentId,
@@ -990,7 +1013,7 @@ export class ActionEngine {
           actionName: name,
           actionType: action.config.type,
           status,
-          args,
+          args: recordedArgs(args, invocation.context, isRoot),
           initiator,
           actor,
           parentId,
@@ -1003,7 +1026,7 @@ export class ActionEngine {
           actionName: name,
           actionType: action.config.type,
           status,
-          args,
+          args: recordedArgs(args, invocation.context, isRoot),
           error: result.status === "error" ? result.error : undefined,
           initiator,
           actor,
@@ -1046,7 +1069,7 @@ export class ActionEngine {
             actionName: name,
             actionType: action.config.type,
             status: "error",
-            args,
+            args: recordedArgs(args, invocation.context, isRoot),
             error: failureMessage,
             initiator,
             actor,

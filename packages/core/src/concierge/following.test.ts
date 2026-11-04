@@ -173,6 +173,7 @@ function setup(
   const settings = new Map<string, unknown>();
   const actions: Action[] = [];
   const calls: [string, Record<string, unknown>][] = [];
+  const omitted: [string, string[]][] = [];
   const turns: string[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
@@ -252,7 +253,8 @@ function setup(
           ]
         : []),
     ],
-    runAction: async (qualified, args) => {
+    runAction: async (qualified, args, runOptions) => {
+      if (runOptions?.omitFromRecord) omitted.push([qualified, [...runOptions.omitFromRecord]]);
       if (qualified === "second:list") {
         return { status: "ok", data: options.second ?? { services: [], watch: [] } };
       }
@@ -316,6 +318,7 @@ function setup(
     turns,
     triaged,
     prompts,
+    omitted,
     items,
     following: () => following!,
     stop: () => {
@@ -656,6 +659,48 @@ describe("the follow actions", () => {
         {} as never,
       ),
     ).toEqual({ status: "ok", data: { ignored: "not followed" } });
+    s.stop();
+  });
+});
+
+describe("payloads in records", () => {
+  it("keeps no trigger payload in follow runs, and leaves the event out of normalize's record", async () => {
+    const s = setup();
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const follows = [...s.routines.values()].filter((r) => r.key?.startsWith("concierge-follow:"));
+    expect(follows.length).toBeGreaterThan(0);
+    expect(follows.every((r) => r.keepTriggerPayload === false)).toBe(true);
+    await s.action("core:concierge_follow_event").execute(
+      {
+        source: "github",
+        target: "acme/widgets",
+        eventName: "provider:event:github.pull_request",
+        __triggerPayload: { keep: true },
+      },
+      {} as never,
+    );
+    expect(s.omitted).toEqual([["connector:connector_watch_normalize", ["payload"]]]);
+    s.stop();
+  });
+
+  it("turns it off at reconcile for follow routines made before, and leaves other routines alone", async () => {
+    const s = setup();
+    await s.following().follow({ source: "gmail" });
+    const follow = [...s.routines.values()].find((r) => r.key?.startsWith("concierge-follow:"))!;
+    s.routines.set(follow.id, { ...follow, keepTriggerPayload: undefined });
+    s.routines.set("other", {
+      id: "other",
+      name: "someone else's",
+      key: "briefing-1",
+      enabled: true,
+      trigger: { type: "event-bus", eventName: "x" },
+      actionName: "noop",
+      args: {},
+      createdAt: new Date(),
+    });
+    await s.following().reconcile();
+    expect(s.routines.get(follow.id)?.keepTriggerPayload).toBe(false);
+    expect(s.routines.get("other")?.keepTriggerPayload).toBeUndefined();
     s.stop();
   });
 });

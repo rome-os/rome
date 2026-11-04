@@ -1232,7 +1232,8 @@ async function main() {
     // or disable takes effect without a restart. Core names no provider.
     providers: () =>
       watchProvidersOf(appCatalog.listResolved(), (name) => actionRegistry.getMetadata(name)),
-    runAction: (name, args) => actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
+    runAction: (name, args, options) =>
+      actionEngine.run(name, args, { initiator: "agent:core:concierge", ...options }),
     settings: settingsRepo,
     // The same projection `GET /connections` serves, so both read one model.
     connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),

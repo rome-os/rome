@@ -1030,6 +1030,10 @@ export const routines = sqliteTable("routines", {
 
   actionName: text("action_name").notNull(),
   args: text("args", { mode: "json" }).notNull(), // JSON array
+  // Whether a run's record keeps the payload that fired it. Off for a routine
+  // whose payloads are private and large, such as a whole mail: its runs then
+  // keep only the payload's size.
+  keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
 
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),

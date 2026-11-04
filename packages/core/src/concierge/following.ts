@@ -172,8 +172,15 @@ export interface ConciergeFollowingDeps {
   actions: { register(action: Action): void };
   /** The apps that declare `watchProvider` in their manifest, read live. */
   providers(): WatchProvider[];
-  /** Runs an action as the Concierge. */
-  runAction(name: string, args: Record<string, unknown>): Promise<ActionOutcome>;
+  /**
+   * Runs an action as the Concierge. `omitFromRecord` names arguments whose
+   * values the execution record leaves out, such as an event's payload.
+   */
+  runAction(
+    name: string,
+    args: Record<string, unknown>,
+    options?: { omitFromRecord?: readonly string[] },
+  ): Promise<ActionOutcome>;
   settings: Pick<SettingsRepository, "get" | "set">;
   /** Rome's connections and placeholders, as `GET /connections` lists them. */
   connections(): Promise<ConnectionView[]>;
@@ -381,7 +388,8 @@ export function startConciergeFollowing(
     provider: WatchProvider,
     action: keyof WatchProvider["actions"],
     args: Record<string, unknown>,
-  ) => outsideAction(() => deps.runAction(provider.actions[action], args));
+    options?: { omitFromRecord?: readonly string[] },
+  ) => outsideAction(() => deps.runAction(provider.actions[action], args, options));
 
   // Read at boot and kept current by every write, since scheduling reads it synchronously.
   let rules = CONCIERGE_FOLLOW_DEFAULT_RULES;
@@ -584,6 +592,17 @@ export function startConciergeFollowing(
     return { items: owed.length };
   };
 
+  /** Follow routines made before they kept no payload stop keeping it. */
+  const keepNoPayloads = async () => {
+    for (const routine of await deps.routines.listRoutines()) {
+      if (!routine.key?.startsWith(ROUTINE_KEY_PREFIX) || routine.keepTriggerPayload === false) {
+        continue;
+      }
+      await deps.routines.update(routine.id, { keepTriggerPayload: false });
+      if (routine.enabled) await reactivate(routine.id);
+    }
+  };
+
   /** One digest routine per digest time while anything is followed; none otherwise. */
   const syncDigestRoutines = async () => {
     const stored = await readStored();
@@ -669,14 +688,21 @@ export function startConciergeFollowing(
       let id: string;
       if (existing) {
         id = existing.id;
-        await deps.routines.update(id, { args, trigger: routineTrigger, enabled: true });
+        await deps.routines.update(id, {
+          args,
+          trigger: routineTrigger,
+          enabled: true,
+          keepTriggerPayload: false,
+        });
       } else {
+        // An event's payload (a whole mail, say) stays out of the run history.
         id = await deps.routines.create({
           name: `Concierge follows ${follow.target} (${source.label})`,
           key,
           trigger: routineTrigger,
           actionName: CONCIERGE_FOLLOW_ACTION,
           args,
+          keepTriggerPayload: false,
         });
       }
       await reactivate(id);
@@ -915,6 +941,7 @@ export function startConciergeFollowing(
 
     async reconcile() {
       await syncDigest();
+      await keepNoPayloads();
       if (!(await service.isEnabled())) return;
       const { follows } = await readStored();
       if (follows.length === 0) return;
@@ -971,13 +998,13 @@ export function startConciergeFollowing(
       if (!follow) return { status: "ok", data: { ignored: "not followed" } };
       const provider = (await readSources()).find((s) => s.source === source)?.provider;
       if (!provider) return { status: "ok", data: { ignored: "no provider watches it now" } };
-      const outcome = await run(provider, "normalize", {
-        source,
-        eventName,
-        payload,
-        account: follow.account,
-        kinds: follow.kinds,
-      });
+      // The event itself (a whole mail, say) stays out of the execution record.
+      const outcome = await run(
+        provider,
+        "normalize",
+        { source, eventName, payload, account: follow.account, kinds: follow.kinds },
+        { omitFromRecord: ["payload"] },
+      );
       if (outcome.status !== "ok") {
         return { status: "error", error: failure(provider.actions.normalize, outcome) };
       }

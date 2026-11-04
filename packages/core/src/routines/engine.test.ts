@@ -134,6 +134,70 @@ describe("RoutineEngine run records", () => {
     const firedBy = await Promise.all(recorded.map((run) => runs.findFiredBy(run.executionId)));
     expect(firedBy.sort()).toEqual(["run_now", "schedule"]);
   });
+  it("keeps no trigger payload in the run or the action's record when the routine says so", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const calls: { args: Record<string, unknown>; context: Record<string, unknown> }[] = [];
+    const actionEngine = {
+      run: async (
+        _name: string,
+        args: Record<string, unknown>,
+        context: Record<string, unknown>,
+      ) => {
+        calls.push({ args, context });
+        return { status: "success", result: null };
+      },
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    let fire: ((payload: Record<string, unknown>) => Promise<void>) | undefined;
+    engine.registerProvider("event-bus", {
+      activate: async (_routine: unknown, onFire: typeof fire) => {
+        fire = onFire;
+      },
+      deactivate: () => {},
+    } as unknown as TriggerProvider);
+    const mail = { subject: "Contract", body: "x".repeat(1000) };
+    const trigger: Trigger = { type: "event-bus", eventName: "provider:event:gmail.new" };
+    const privateId = await routines.create({
+      name: "private",
+      trigger,
+      actionName: "noop",
+      args: {},
+      keepTriggerPayload: false,
+    });
+    await engine.start();
+    await fire?.(mail);
+
+    const [run] = await runs.findByRoutineId(privateId);
+    expect(run?.payload).toEqual({ omitted: true, bytes: JSON.stringify(mail).length });
+    // The action still gets the whole payload; only its record leaves it out.
+    expect(calls[0]?.args.__triggerPayload).toEqual(mail);
+    expect(calls[0]?.context.omitFromRecord).toEqual(["__triggerPayload"]);
+  });
+
+  it("keeps the trigger payload by default, as before", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const contexts: Record<string, unknown>[] = [];
+    const actionEngine = {
+      run: async (_name: string, _args: unknown, context: Record<string, unknown>) => {
+        contexts.push(context);
+        return { status: "success", result: null };
+      },
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const id = await routines.create({
+      name: "plain",
+      trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "09:00" },
+      actionName: "noop",
+      args: {},
+    });
+    await engine.runNow(id, { repo: "acme/widgets" });
+    const [run] = await runs.findByRoutineId(id);
+    expect(run?.payload).toEqual({ repo: "acme/widgets" });
+    expect(contexts[0]).not.toHaveProperty("omitFromRecord");
+    expect((await routines.findById(id))?.keepTriggerPayload).toBe(true);
+  });
 });
 
 describe("RoutineEngine worker admission", () => {
