@@ -976,6 +976,37 @@ describe("ChatSettingsService", () => {
     ).rejects.toThrow('Unsupported conversation setting "enabled"');
   });
 
+  it("sets a rule in a direct message Rome holds with no speaker in it", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    // A send opened the direct message with the party oc_ray names, and kept
+    // no address for it.
+    wired.chats.start(wired.adapters.chatAt("feishu", "oc_ray", "dm"), "dm", null);
+    const ref = { ...throughSales, chatId: "oc_ray" as ChatId };
+
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(repository.find("feishu", "oc_ray" as ChatId)).toMatchObject({ kind: "dm" });
+    expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("finds a chat its platform has not named by the name its speaker shows", async () => {
+    const { service, repository, throughSales } = await twoAccountsInOneGroup([], false);
+    await service.update({
+      ref: { ...throughSales, chatId: "ou_ray" as ChatId },
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId)!;
+
+    expect(repository.listKnown({ query: "ou_ray" }).map((row) => row.id)).toEqual([ruled.id]);
+  });
+
   it("places a speaker a rule starts before what its account already said there", async () => {
     const { service, repository, wired, throughSales } = await twoAccountsInOneGroup();
     // A send said something in the group before any rule, and opened no

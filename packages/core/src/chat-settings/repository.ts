@@ -214,6 +214,12 @@ export class ChatSettingsRepository {
         or(
           sql`${romeSessions.chatId} in (SELECT ${chats.id} FROM ${chats} WHERE ${chats.name} LIKE ${pattern})`,
           and(isNotNull(romeSessions.threadId), like(romeSessions.name, pattern)),
+          // A chat its platform has not named shows its speaker's own name.
+          and(
+            isNull(romeSessions.threadId),
+            sql`${romeSessions.chatId} in (SELECT ${chats.id} FROM ${chats} WHERE ${chats.name} IS NULL)`,
+            like(romeSessions.name, pattern),
+          ),
         )!,
       );
     }
@@ -300,12 +306,17 @@ export class ChatSettingsRepository {
   }
 
   /** The kind of the chat Rome holds at address `chatId` on `channel`'s
-   *  platform, through any of its accounts, whose kind is then fixed; else
-   *  null. An address bound to a direct message holds that one, though asked
-   *  for a group. */
+   *  platform, whose kind is then fixed: the group there, through any of its
+   *  accounts, else the channel's account's direct message with the party
+   *  the address names; else null. An address bound to a direct message
+   *  holds that one, though asked for a group. */
   heldKind(channel: string, chatId: ChatId): ChatKind | null {
     if (!this.deps.adapters.knownAccountOn(channel)) return null;
-    return this.deps.chats.byKey(this.keyOf(channel, chatId, "group"))?.kind ?? null;
+    for (const kind of ["group", "dm"] as const) {
+      const held = this.deps.chats.byKey(this.keyOf(channel, chatId, kind));
+      if (held) return held.kind;
+    }
+    return null;
   }
 
   /** The platform channel `channel`'s account lives on. */
