@@ -51,8 +51,8 @@ afterEach(() => testDb.close());
 
 function chat(id: string, name: string, extra: { owner?: string; archived?: boolean } = {}) {
   testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, owner_key, archived_at, created_at, activity_at)
-    VALUES (${id}, ${name}, 'channel', 'webchat', ${id}, ${extra.owner ?? null},
+    INSERT INTO rome_sessions (id, name, type, chat_platform, owner_key, archived_at, created_at, activity_at)
+    VALUES (${id}, ${name}, 'channel', 'webchat', ${extra.owner ?? null},
       ${extra.archived ? sec(1) : null}, ${sec(100)}, ${sec(1)})
   `);
 }

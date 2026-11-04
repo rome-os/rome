@@ -84,7 +84,7 @@ async function readRecentChats(
       FROM rome_agent_messages m
       JOIN rome_sessions s ON s.id = m.session_id
       WHERE (s.type IN ('webchat', 'webchat_handoff')
-          OR (s.type = 'channel' AND s.source_channel = 'webchat' AND s.source_thread_id = s.id))
+          OR (s.type = 'channel' AND s.chat_platform = 'webchat'))
         AND coalesce(s.owner_key, 'guardian') = 'guardian'
         AND s.id NOT IN (
           SELECT session_id FROM rome_agent_messages

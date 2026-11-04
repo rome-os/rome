@@ -17,7 +17,7 @@ export const GUARDIAN_OWN_KINDS = ["telegram_user"];
 export function inDashboardChat(session: string): SQL {
   const s = sql.raw(session);
   return sql`(${s}.type IN ('webchat', 'webchat_handoff')
-    OR (${s}.type = 'channel' AND ${s}.source_channel = 'webchat' AND ${s}.source_thread_id = ${s}.id))`;
+    OR (${s}.type = 'channel' AND ${s}.chat_platform = 'webchat'))`;
 }
 
 /**

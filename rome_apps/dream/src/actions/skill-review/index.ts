@@ -150,7 +150,7 @@ export function createAction(
         const row = appContext.db.connection.get(
           sql`
             SELECT id, name FROM rome_sessions
-            WHERE (type IN ('webchat', 'webchat_handoff') OR (type = 'channel' AND source_channel = 'webchat' AND source_thread_id = id))
+            WHERE (type IN ('webchat', 'webchat_handoff') OR (type = 'channel' AND chat_platform = 'webchat'))
             ORDER BY created_at DESC
             LIMIT 1
           `,
