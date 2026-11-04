@@ -1,7 +1,8 @@
 // What each platform says about the accounts Rome meets: the account profile
 // cache (docs/domains/chats.md#account-profile). The channels fill it as they
 // learn, from an address book's sync and from the messages senders send, and
-// every read is keyed by the `Account` value, the platform and its own id.
+// a connect or fix fills it for Rome's own account (own-account-profiles.ts).
+// Every read is keyed by the `Account` value, the platform and its own id.
 //
 // It is a read model. A channel's own mirror stays the source for what it
 // mirrors, so `AccountNames` (account-names.ts) asks the mirror first and this

@@ -27,6 +27,44 @@ function connection(overrides: Partial<ApiConnection> & { connectionKind: string
 }
 
 describe("buildEnvoys", () => {
+  it("lists a disconnected account under its agent, and leaves out connected and agentless ones", () => {
+    const { envoys, unlinked } = buildEnvoys(
+      [connection({ connectionKind: "telegram", agent: "sales:agent" })],
+      [],
+      [
+        {
+          account: { platform: "telegram", id: "bot-1" },
+          name: null,
+          agent: "sales:agent",
+          connection: "telegram-id",
+        },
+        {
+          account: { platform: "feishu", id: "app-2" },
+          name: "Sales app",
+          agent: "sales:agent",
+          connection: null,
+        },
+        {
+          account: { platform: "discord", id: "bot-3" },
+          name: null,
+          agent: "main",
+          connection: null,
+        },
+        { account: { platform: "slack", id: "bot-4" }, name: null, agent: null, connection: null },
+      ],
+    );
+    expect(envoys.map((envoy) => envoy.agent)).toEqual([MAIN_AGENT_ID, "sales:agent"]);
+    expect(envoys[0]!.accounts).toEqual([]);
+    expect(envoys[0]!.disconnected).toEqual([
+      { platform: "discord", accountId: "bot-3", name: "bot-3", agent: MAIN_AGENT_ID },
+    ]);
+    expect(envoys[1]!.accounts).toHaveLength(1);
+    expect(envoys[1]!.disconnected).toEqual([
+      { platform: "feishu", accountId: "app-2", name: "Sales app", agent: "sales:agent" },
+    ]);
+    expect(unlinked).toEqual([]);
+  });
+
   it("groups connected accounts by agent, main first", () => {
     const { envoys, unlinked } = buildEnvoys(
       [
@@ -46,6 +84,29 @@ describe("buildEnvoys", () => {
     expect(envoys[0]!.description).toBe("The guardian's agent");
     expect(envoys[0]!.accounts.map((account) => account.name)).toEqual(["Sales", "Telegram"]);
     expect(unlinked).toEqual([]);
+  });
+
+  it("leaves out a disconnected entry for an account a connection reaches again", () => {
+    const { envoys } = buildEnvoys(
+      [
+        connection({
+          connectionKind: "telegram",
+          agent: "sales:agent",
+          account: { platform: "telegram", id: "bot-1" },
+        }),
+      ],
+      [],
+      [
+        {
+          account: { platform: "telegram", id: "bot-1" },
+          name: null,
+          agent: "sales:agent",
+          connection: null,
+        },
+      ],
+    );
+    expect(envoys[0]!.accounts).toHaveLength(1);
+    expect(envoys[0]!.disconnected).toEqual([]);
   });
 
   it("names an account with no name after its platform, Lark apart from Feishu", () => {

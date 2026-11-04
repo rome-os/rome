@@ -154,9 +154,9 @@ export const accountProfiles = sqliteTable(
     handle: text("handle"),
     avatarUrl: text("avatar_url"),
     // Where the row was learned. A platform's address book outranks the name a
-    // sender put on a message, so a message never overwrites a row the address
-    // book wrote.
-    source: text("source", { enum: ["address_book", "message"] }).notNull(),
+    // sender put on a message and the name a grant reported for Rome's own
+    // account, so neither overwrites a row the address book wrote.
+    source: text("source", { enum: ["address_book", "message", "connection"] }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
@@ -1168,10 +1168,12 @@ export const channels = sqliteTable(
   ],
 );
 
-// Chats' record of a connected account: one row per account Rome holds a
-// connection to that lets it chat, keyed by the account (the platform and the
+// Chats' record of a connected account: one row per account a connection that
+// lets Rome chat has reached, keyed by the account (the platform and the
 // platform's own id) and holding the agent that speaks through it, null for
-// none. A connection whose grant has not reported its account yet has no row.
+// none. The row outlives the connection, so disconnecting keeps the agent and
+// connecting the same account again finds it. A connection whose grant has
+// not reported its account yet has no row.
 // Vocabulary: docs/domains/chats.md#connected-account.
 export const connectedAccounts = sqliteTable(
   "connected_accounts",

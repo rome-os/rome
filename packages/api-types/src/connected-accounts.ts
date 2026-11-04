@@ -1,6 +1,7 @@
 /**
  * The wire shapes of connected accounts and the agents linked to them. A
- * connected account is named by its connection's id.
+ * connected account is named by its account, or, on the older routes, by the
+ * id of the connection that reaches it.
  * Vocabulary: docs/domains/chats.md#connected-account.
  */
 
@@ -65,4 +66,34 @@ export interface LinkAccountAgentResult {
      *  connection takes no agent. */
     link: AccountLink | null;
   };
+}
+
+/** One entry of `GET /api/connected-accounts`: a connected account, whether or not a
+ *  connection reaches it now. Disconnecting leaves the account and its agent,
+ *  and connecting the same account again finds them. */
+export interface ConnectedAccountEntry {
+  account: AccountValue;
+  /** The name the platform last gave the account, when Rome has learned one. */
+  name: string | null;
+  /** Canonical id of the account's agent, or null when it has none. */
+  agent: string | null;
+  /** The id of the connection that reaches the account, or null while it is
+   *  disconnected. */
+  connection: string | null;
+}
+
+/** Body of `GET /api/connected-accounts`. */
+export interface ListConnectedAccountsResult {
+  accounts: ConnectedAccountEntry[];
+}
+
+/** Body of `PUT /api/connected-accounts/:platform/:accountId/agent`, which names the
+ *  account itself. Null unlinks it. A disconnected account can be unlinked,
+ *  but takes a new agent only once it is connected again, since its kind of
+ *  connection decides whether it takes one. */
+export type LinkConnectedAccountRequest = LinkAccountAgentRequest;
+
+/** The connected account as it stands after a link by account. */
+export interface LinkConnectedAccountResult {
+  account: ConnectedAccountEntry;
 }

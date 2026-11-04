@@ -8,10 +8,16 @@
  */
 
 import type {
+  AccountValue,
+  ConnectedAccountEntry,
   ConnectionAccountFields,
   LinkAccountAgentRequest,
   LinkAccountAgentResult,
+  LinkConnectedAccountRequest,
+  LinkConnectedAccountResult,
+  ListConnectedAccountsResult,
 } from "@rome/api-types/connected-accounts";
+import { getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -117,6 +123,35 @@ export async function linkAccountAgent(
   const body: LinkAccountAgentRequest = { agent };
   return fetchJson<LinkAccountAgentResult>(
     `/api/accounts/${encodeURIComponent(connectionId)}/agent`,
+    { method: "PUT", json: body, fallback },
+  );
+}
+
+/** Every connected account with its agent, disconnected ones included, from
+ *  `GET /api/connected-accounts`. A core that predates the listing answers
+ *  404, and then no account reads as disconnected. */
+export async function fetchConnectedAccounts(): Promise<ConnectedAccountEntry[]> {
+  const response = await fetch("/api/connected-accounts", {
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new Error(await getApiErrorMessage(response, "Failed to load connected accounts."));
+  }
+  return ((await response.json()) as ListConnectedAccountsResult).accounts;
+}
+
+/** Unlink the agent of a connected account named by its account, which works
+ *  for a disconnected one too. `fallback` is the error message when the
+ *  server gives none. */
+export async function unlinkConnectedAccount(
+  account: AccountValue,
+  fallback: string,
+): Promise<LinkConnectedAccountResult> {
+  const body: LinkConnectedAccountRequest = { agent: null };
+  return fetchJson<LinkConnectedAccountResult>(
+    `/api/connected-accounts/${encodeURIComponent(account.platform)}/${encodeURIComponent(account.id)}/agent`,
     { method: "PUT", json: body, fallback },
   );
 }
