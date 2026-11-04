@@ -31,7 +31,7 @@ import {
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
-import type { SetupGrant, SetupState } from "./types.js";
+import type { SetupCommitted, SetupGrant, SetupState } from "./types.js";
 
 /** The narrow registry surface the manager drives — every real
  *  `ConnectionRegistry` satisfies it structurally, and tests fake it directly. */
@@ -318,7 +318,7 @@ export class SetupManager {
     grant: string,
     given: SetupGrant,
     signal: AbortSignal,
-  ): Promise<string> {
+  ): Promise<SetupCommitted> {
     return this.#deps.registry.withGrantSection(target.connectionKind, grant, async () => {
       // A cancel that landed while the write waited for the section wins, so
       // an abandoned setup leaves nothing behind.
@@ -355,7 +355,12 @@ export class SetupManager {
         given.profile,
         Object.keys(opts).length > 0 ? opts : undefined,
       );
-      return connection.id;
+      // A fix that reached another account ended the connection it addressed.
+      const ended =
+        target.connectionId !== undefined && target.connectionId !== connection.id
+          ? target.connectionId
+          : undefined;
+      return { connectionId: connection.id, ...(ended ? { ended } : {}) };
     });
   }
 }

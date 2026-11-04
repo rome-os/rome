@@ -133,6 +133,11 @@ export interface SetupDoneView {
   /** The connection the grant wrote, so a setup for a new account can
    *  name the account it made. */
   connectionId?: string;
+  /** The connection the setup ended, when it fixed a connection and the
+   *  sign-in reached another account. A connection's account never changes,
+   *  so Rome ended that connection and `connectionId` is a new one to the
+   *  account that answered. */
+  ended?: string;
 }
 
 /** The guardian-facing verbs handed to a setup coroutine. Deliberately
@@ -179,3 +184,10 @@ export interface SetupContext {
  * next to the grant it grants.
  */
 export type SetupFn = (interact: SetupInteraction, ctx: SetupContext) => Promise<SetupGrant>;
+
+/** What a setup's terminal write made: the connection it wrote, and the one it
+ *  ended when a fix reached another account. */
+export interface SetupCommitted {
+  connectionId: string;
+  ended?: string;
+}

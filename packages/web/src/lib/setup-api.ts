@@ -53,6 +53,10 @@ export interface SetupDoneView {
   /** The connection the setup connected, so a setup for a new account can
    *  open the account it made. Absent from a core that predates it. */
   connectionId?: string;
+  /** The connection the setup ended: it fixed that connection and the
+   *  sign-in reached another account, so Rome ended it and `connectionId` is
+   *  a new one to the account that answered. */
+  ended?: string;
 }
 
 export type SetupState =

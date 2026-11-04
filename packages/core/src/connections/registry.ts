@@ -17,7 +17,7 @@ import {
   brokenGrant,
   givenGrant,
   reachedAccount,
-  refuseDifferentAccount,
+  reachesAnotherAccount,
   renewedGrant,
   sameAccount,
   toPersisted,
@@ -443,19 +443,27 @@ export class ConnectionRegistry {
     if (connectionId && !conn) {
       throw new Error(`Connection "${connectionId}" no longer exists; setup cannot grant.`);
     }
+    const account =
+      registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
+    // A connection's account never changes. A grant that reaches another
+    // account than the one `conn` reaches ends `conn` and starts a new
+    // connection to that account, in the same transaction
+    // (docs/domains/connections.md).
+    let ending: ConnectionImpl | undefined;
+    if (registered && account && conn) {
+      const held = (await this.store.grantOf(conn.id)) ?? NO_GRANT;
+      if (reachesAnotherAccount(registered.descriptor, held, account)) {
+        ending = conn;
+        conn = undefined;
+      }
+    }
     const minting = !conn;
     if (minting && !registered) {
       throw new Error(`no registered descriptor for connection kind "${connectionKind}"`);
     }
 
     const id = conn?.id ?? crypto.randomUUID();
-    const account =
-      registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
     if (registered && account) {
-      if (conn) {
-        const held = (await this.store.grantOf(id)) ?? NO_GRANT;
-        refuseDifferentAccount(registered.descriptor, id, held, account);
-      }
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
     }
     const createdAt = this.clock();
@@ -471,6 +479,13 @@ export class ConnectionRegistry {
     // placeholder), the credential/profile, and the caller's participant.
     const commit = () =>
       this.store.transaction((tx) => {
+        if (ending) {
+          this.store.remove(tx, ending.id);
+          this.raise(tx, {
+            kind: "disconnected",
+            connection: { id: ending.id, connectionKind: ending.connectionKind },
+          });
+        }
         this.store.save(tx, { ...record, grant: grantValue });
         this.raise(
           tx,
@@ -497,6 +512,10 @@ export class ConnectionRegistry {
     // grant writes and can never land over it.
     if (minting) {
       commit();
+      if (ending) {
+        ending.teardownAll();
+        this.connections.delete(ending.id);
+      }
       try {
         conn = new ConnectionImpl(record, registered!.descriptor, this);
         this.connections.set(id, conn);

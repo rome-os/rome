@@ -140,10 +140,10 @@ export function grantProfileFromBundle(
 
 /**
  * Grant the bundle on the provider's connection, making the connection on the
- * first redeem; later redeems fix the one that exists. Like every grant, it
- * refuses an account other than the one the connection reaches
- * (`DifferentAccountError`) and an account another connection holds
- * (`AccountAlreadyConnectedError`). It runs in the grant's section, so it never
+ * first redeem; later redeems fix the one that exists. Like every grant, a
+ * redeem for an account other than the one the connection reaches ends that
+ * connection and starts one to the other account, and it refuses an account
+ * another connection holds (`AccountAlreadyConnectedError`). It runs in the grant's section, so it never
  * interleaves with a disconnect or a setup's terminal write.
  *
  * A no-op (returns `false`) when the bundle has no usable token, or when the

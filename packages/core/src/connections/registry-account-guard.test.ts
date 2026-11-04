@@ -6,7 +6,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/helpers.js";
-import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
+import { AccountAlreadyConnectedError } from "./errors.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { SetupManager } from "./setup/manager.js";
@@ -65,22 +65,35 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
-  it("refuses a different bot on a Connection that still names its own", async () => {
-    const { ledger, registry, close } = setupRegistry();
+  it("ends a Connection whose fix reaches another bot, and starts one to that bot", async () => {
+    const db = createTestDb();
+    const ledger = new DrizzleConnectionsRepository(db.db);
+    const events: string[] = [];
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      onEvent: (_tx, event) => events.push(`${event.kind}:${event.connection.id}`),
+    });
+    registry.register(botIdDescriptor());
     try {
       const first = await registry.connect(SERVICE);
       await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      events.length = 0;
 
-      const refused = registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
+      const next = await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",
       });
 
-      await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
-      await expect(ledger.grantOf(first.id)).resolves.toMatchObject({
-        profile: { botId: "100" },
+      expect(next.id).not.toBe(first.id);
+      expect(events).toEqual([`disconnected:${first.id}`, `connected:${next.id}`]);
+      expect(registry.all().map((connection) => connection.id)).toEqual([next.id]);
+      await expect(ledger.grantOf(first.id)).resolves.toBeNull();
+      await expect(ledger.grantOf(next.id)).resolves.toMatchObject({
+        account: { accountId: "900" },
       });
+      expect(first.isUnlocked("chat")).toBe(false);
+      expect(next.isUnlocked("chat")).toBe(true);
     } finally {
-      close();
+      db.close();
     }
   });
 
@@ -203,6 +216,40 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
+  it("reports the Connection a fix's setup ended when it reached another bot", async () => {
+    const pasteBot: SetupFn = async (interact) => {
+      const { token, botId } = await interact.prompt({
+        fields: [
+          { name: "token", label: "Token", secret: true },
+          { name: "botId", label: "Bot id", secret: false },
+        ],
+      });
+      return { credential: credentialFor(token!), profile: { botId } };
+    };
+    const { registry, close } = setupRegistry(pasteBot);
+    try {
+      const manager = new SetupManager({ registry, peopleRepo: {} as PeopleRepository });
+      const first = await registry.connect(SERVICE);
+      const connect = await manager.start(
+        { connectionKind: SERVICE, connectionId: first.id },
+        "bot",
+      );
+      await manager.provideInput(connect.cid, { token: "t-1", botId: "100" });
+
+      const fix = await manager.start({ connectionKind: SERVICE, connectionId: first.id }, "bot");
+      const outcome = await manager.provideInput(fix.cid, { token: "t-9", botId: "900" });
+
+      const [next] = registry.all();
+      expect(next!.id).not.toBe(first.id);
+      expect(outcome?.state).toEqual({
+        status: "done",
+        grant: { connectionId: next!.id, ended: first.id },
+      });
+    } finally {
+      close();
+    }
+  });
+
   it("records the account a grant reaches, and clears it on disconnect", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {
@@ -270,7 +317,7 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
-  it("refuses a different bot on a Connection the boot pass left without an account", async () => {
+  it("ends a Connection the boot pass left without an account when its fix reaches another bot", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
@@ -278,11 +325,11 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
       // As for the later of two connections that reached one account.
       await updateGrant(ledger, first.id, (current) => ({ ...current, account: undefined }));
 
-      const refused = registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
+      const next = await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",
       });
 
-      await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
+      expect(next.id).not.toBe(first.id);
     } finally {
       close();
     }
