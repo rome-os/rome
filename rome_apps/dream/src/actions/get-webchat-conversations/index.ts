@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import {
   createAppLogger,
   type Action,
@@ -6,7 +5,6 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
 import { chatReadsOf, guardianChats } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
@@ -84,51 +82,22 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       log.info("fetching webchat conversations", { windowHours, cutoffSeconds, sessionId });
 
-      // A guardian chat is stored either as a webchat row or as a webchat
-      // channel row addressed by its own id; both filters below match either.
-      // Same rule as `isWebchatChat` in packages/core/src/db/session-kind.ts.
-      let rows: MessageRow[] = [];
-      const reads = chatReadsOf(appContext);
+      // The guardian's dashboard chats, through Chats.
+      const rows: MessageRow[] = [];
       try {
-        if (reads) {
-          const since = new Date(cutoffSeconds * 1000);
-          for (const chat of await guardianChats(reads, since, sessionId)) {
-            for (const line of chat.lines) {
-              if (line.createdAt < since || line.role === "notification") continue;
-              rows.push({
-                session_id: chat.sessionId,
-                session_name: chat.name,
-                role: line.role,
-                content: line.content,
-                created_at: Math.floor(line.createdAt.getTime() / 1000),
-              });
-            }
+        const reads = chatReadsOf(appContext);
+        const since = new Date(cutoffSeconds * 1000);
+        for (const chat of await guardianChats(reads, since, sessionId)) {
+          for (const line of chat.lines) {
+            if (line.createdAt < since || line.role === "notification") continue;
+            rows.push({
+              session_id: chat.sessionId,
+              session_name: chat.name,
+              role: line.role,
+              content: line.content,
+              created_at: Math.floor(line.createdAt.getTime() / 1000),
+            });
           }
-        } else if (sessionId) {
-          rows = appContext.db.connection.all(
-            sql`
-              SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM rome_agent_messages wm
-              JOIN rome_sessions ws ON ws.id = wm.session_id
-              WHERE wm.session_id = ${sessionId}
-                AND wm.created_at >= ${cutoffSeconds}
-                AND ${inDashboardChat("ws")}
-                AND ${guardianOnlyChat("ws")}
-              ORDER BY wm.created_at ASC
-            `,
-          ) as MessageRow[];
-        } else {
-          rows = appContext.db.connection.all(
-            sql`
-              SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM rome_agent_messages wm
-              JOIN rome_sessions ws ON ws.id = wm.session_id
-              WHERE wm.created_at >= ${cutoffSeconds}
-                AND ${inDashboardChat("ws")}
-                AND ${guardianOnlyChat("ws")}
-              ORDER BY wm.session_id, wm.created_at ASC
-            `,
-          ) as MessageRow[];
         }
       } catch (err) {
         log.error("failed to query webchat messages", {

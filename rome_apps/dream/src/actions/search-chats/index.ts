@@ -1,6 +1,5 @@
 // Searches the guardian's requests across the dashboard's past chats, so a
 // dream can tell a one-off task from one the guardian keeps asking for.
-import { sql } from "drizzle-orm";
 import {
   createAppLogger,
   type Action,
@@ -8,7 +7,6 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
 import { chatReadsOf, guardianChats, type ChatHistory } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
@@ -64,16 +62,12 @@ function isoDate(seconds: number): string {
   return new Date(seconds * 1000).toISOString().slice(0, 10);
 }
 
-function likePattern(word: string): string {
-  return `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-}
-
 /** Groups matching requests by chat, best match first. */
 function rankChats(rows: RequestRow[], words: string[]): ChatHit[] {
   const chats = new Map<string, ChatHit>();
   for (const row of rows) {
     const text = extractText(row.content);
-    // The SQL filter also matches inside stored JSON; count only the words in
+    // The match above also reads inside stored JSON; count only the words in
     // what the guardian wrote.
     const lower = text.toLowerCase();
     const score = words.filter((word) => lower.includes(word)).length;
@@ -134,25 +128,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
   const { appContext } = deps;
 
   /** The opening request of every chat active since `cutoff`, most
-   *  recently active first, read through Chats when the host offers it. */
+   *  recently active first, read through Chats. */
   async function openingRows(cutoff: number): Promise<RequestRow[]> {
     const reads = chatReadsOf(appContext);
-    if (!reads) {
-      return appContext.db.connection.all(sql`
-        SELECT session_id, session_name, content, created_at FROM (
-          SELECT m.session_id, s.name AS session_name, m.content, m.created_at,
-            ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at, m.id) AS n,
-            MAX(m.created_at) OVER (PARTITION BY m.session_id) AS last_at
-          FROM rome_agent_messages m
-          JOIN rome_sessions s ON s.id = m.session_id
-          WHERE m.role = 'user'
-            AND ${inDashboardChat("s")}
-            AND ${guardianOnlyChat("s")}
-        )
-        WHERE n = 1 AND last_at >= ${cutoff}
-        ORDER BY last_at DESC
-      `) as RequestRow[];
-    }
     const rows: RequestRow[] = [];
     for (const chat of await guardianChats(reads, new Date(cutoff * 1000))) {
       const opening = chat.lines.find((line) => line.role === "user");
@@ -162,42 +140,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
   }
 
   /** The newest guardian requests since `cutoff` holding any of `words`,
-   *  with when each chat started, read through Chats when the host offers
-   *  it. */
+   *  with when each chat started, read through Chats. */
   async function matchingRows(
     words: string[],
     cutoff: number,
   ): Promise<{ rows: RequestRow[]; startsOf: ChatStarts }> {
     const reads = chatReadsOf(appContext);
-    if (!reads) {
-      const rows = appContext.db.connection.all(sql`
-        SELECT m.session_id, s.name AS session_name, m.content, m.created_at
-        FROM rome_agent_messages m
-        JOIN rome_sessions s ON s.id = m.session_id
-        WHERE m.role = 'user'
-          AND m.created_at >= ${cutoff}
-          AND ${inDashboardChat("s")}
-          AND ${guardianOnlyChat("s")}
-          AND (${sql.join(
-            words.map((word) => sql`lower(m.content) LIKE ${likePattern(word)} ESCAPE '\\'`),
-            sql` OR `,
-          )})
-        ORDER BY m.created_at DESC
-        LIMIT ${MAX_ROWS}
-      `) as RequestRow[];
-      const startsOf: ChatStarts = (sessionIds) => {
-        const starts = appContext.db.connection.all(sql`
-          SELECT session_id, MIN(created_at) AS started_at FROM rome_agent_messages
-          WHERE session_id IN (${sql.join(
-            sessionIds.map((id) => sql`${id}`),
-            sql`, `,
-          )})
-          GROUP BY session_id
-        `) as Array<{ session_id: string; started_at: number }>;
-        return new Map(starts.map((row) => [row.session_id, row.started_at]));
-      };
-      return { rows, startsOf };
-    }
     const histories = await guardianChats(reads, new Date(cutoff * 1000));
     const rows: RequestRow[] = [];
     for (const chat of histories) {

@@ -10,7 +10,6 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
-import { hasChatSince } from "../../lib/chat-activity.js";
 import { chatReadsOf, heardSince } from "../../lib/chat-lines.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
 import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
@@ -111,11 +110,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
   const carrierDir = deps.carrierDir ?? userSkillsCarrierDir();
   const memoryDir = deps.memoryDir ?? profileMemoryDir();
   /** Whether anyone sent Rome a message in the last `windowHours`, read
-   *  through Chats when the host offers it. */
+   *  through Chats. */
   const chatInWindow = async (windowHours: number) => {
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
-    const reads = chatReadsOf(appContext);
-    return reads ? heardSince(reads, since) : hasChatSince(appContext.db, since);
+    return heardSince(chatReadsOf(appContext), since);
   };
 
   return {

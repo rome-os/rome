@@ -1,5 +1,4 @@
 import { rm } from "node:fs/promises";
-import { sql } from "drizzle-orm";
 import {
   createAppLogger,
   type Action,
@@ -123,43 +122,18 @@ export function createAction(
       let sessionName: string | null = null;
       const reads = chatReadsOf(appContext);
 
-      if (reads) {
-        // The guardian's dashboard chats, most recently active first: the one
-        // named, or the latest.
-        const chats = await reads.recentChats({ since: new Date(0), where: "dashboard" });
-        if (sessionId) {
-          sessionName = chats.find((chat) => chat.sessionId === sessionId)?.name ?? null;
-        } else {
-          const latest = chats[0];
-          if (!latest) {
-            return { status: "ok", data: { result: "No webchat sessions found." } };
-          }
-          sessionId = latest.sessionId;
-          sessionName = latest.name;
-        }
-      } else if (sessionId) {
-        const row = appContext.db.connection.get(
-          sql`SELECT name FROM rome_sessions WHERE id = ${sessionId}`,
-        ) as { name: string } | undefined;
-        sessionName = row?.name ?? null;
+      // The guardian's dashboard chats, most recently active first: the one
+      // named, or the latest.
+      const chats = await reads.recentChats({ since: new Date(0), where: "dashboard" });
+      if (sessionId) {
+        sessionName = chats.find((chat) => chat.sessionId === sessionId)?.name ?? null;
       } else {
-        // rome_sessions also holds channel and background runs, including this
-        // review's own agent session; keep to guardian chats. A chat is stored
-        // either as a webchat row or as a webchat channel row addressed by its
-        // own id, the rule `isWebchatChat` in core's db/session-kind.ts holds.
-        const row = appContext.db.connection.get(
-          sql`
-            SELECT id, name FROM rome_sessions
-            WHERE (type IN ('webchat', 'webchat_handoff') OR (type = 'channel' AND chat_platform = 'webchat'))
-            ORDER BY created_at DESC
-            LIMIT 1
-          `,
-        ) as { id: string; name: string } | undefined;
-        if (!row) {
+        const latest = chats[0];
+        if (!latest) {
           return { status: "ok", data: { result: "No webchat sessions found." } };
         }
-        sessionId = row.id;
-        sessionName = row.name;
+        sessionId = latest.sessionId;
+        sessionName = latest.name;
       }
 
       const runs = createRunsRepository(appContext.db);
