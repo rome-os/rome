@@ -1,8 +1,10 @@
 // The Concierge's triage of events from what it follows: one fresh run of the
-// `concierge-triage` agent per batch decides, per event, notify (tell the
-// guardian now), digest (in the next summary) or ignore. Code judges nothing
-// about relevance; it only makes sure every event gets a decision, so an
-// event the run missed lands in the digest rather than nowhere.
+// `concierge-triage` agent per batch marks each event important (it matters
+// to the guardian), digest (worth a line in the next summary) or ignore.
+// Whether to tell the guardian an important event now is the Concierge's own
+// decision. Code judges nothing about relevance; it only makes sure every
+// event gets a decision, so an event the run missed lands in the digest
+// rather than nowhere.
 
 import type { AgentRunnerInterface } from "../core/types.js";
 
@@ -29,7 +31,7 @@ export interface FollowEvent {
   at: number;
 }
 
-export type TriageDecisionKind = "notify" | "digest" | "ignore";
+export type TriageDecisionKind = "important" | "digest" | "ignore";
 
 export interface TriageDecision {
   id: string;
@@ -95,7 +97,7 @@ export function parseTriage(output: unknown, events: FollowEvent[]): TriageDecis
   for (const raw of Array.isArray(items) ? items : []) {
     const item = (raw ?? {}) as Record<string, unknown>;
     if (typeof item.id !== "string" || byId.has(item.id)) continue;
-    if (item.decision !== "notify" && item.decision !== "digest" && item.decision !== "ignore") {
+    if (item.decision !== "important" && item.decision !== "digest" && item.decision !== "ignore") {
       continue;
     }
     byId.set(item.id, {

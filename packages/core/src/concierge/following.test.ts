@@ -164,8 +164,8 @@ function setup(
     gmailStatus?: WatchSource["status"];
     /** The connectors a second provider app lists. */
     second?: ProviderSources;
-    /** Triage's decision per event id; notify when not named. */
-    triage?: Record<string, "notify" | "digest" | "ignore">;
+    /** Triage's decision per event id; important when not named. */
+    triage?: Record<string, "important" | "digest" | "ignore">;
   } = {},
 ) {
   const routines = new Map<string, Routine>();
@@ -190,7 +190,7 @@ function setup(
           content: JSON.stringify({
             items: ids.map((id) => ({
               id,
-              decision: options.triage?.[id] ?? "notify",
+              decision: options.triage?.[id] ?? "important",
               reason: "because",
               line: `line for ${id}`,
             })),
@@ -679,7 +679,7 @@ describe("the follow pipeline", () => {
       {} as never,
     );
 
-  it("batches for five minutes, triages, tells notify items and stores digest ones", async () => {
+  it("batches for five minutes, triages, tells important items and stores digest ones", async () => {
     rs.useFakeTimers();
     const s = setup({ triage: { e2: "digest", e3: "ignore" } });
     await s
@@ -692,12 +692,12 @@ describe("the follow pipeline", () => {
     expect(s.triaged).toEqual([]);
     await rs.advanceTimersByTimeAsync(4 * 60_000);
     expect(s.triaged).toEqual([["e1", "e2", "e3"]]);
-    // The Concierge gets only the triaged line of the notify item.
+    // The Concierge gets only the triaged line of the important item.
     expect(s.turns).toHaveLength(1);
-    expect(s.turns[0]).toContain('delivery="notify"');
+    expect(s.turns[0]).toContain('delivery="important"');
     expect(s.turns[0]).toContain("line for e1");
     expect(s.turns[0]).not.toContain("e2");
-    expect(await s.items.owed("notify")).toEqual([]);
+    expect(await s.items.owed("important")).toEqual([]);
     expect((await s.items.owed("digest")).map((i) => i.eventId)).toEqual(["e2"]);
     // A repeat of a stored event is not triaged again.
     await fire(s, "e1");

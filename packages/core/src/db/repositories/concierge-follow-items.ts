@@ -19,7 +19,7 @@ export interface FollowItemInput {
 
 /**
  * The events the Concierge's triage kept, each owed to the Concierge until
- * delivered: `notify` ones in the next batch, `digest` ones at the next digest.
+ * delivered: `important` ones in the next batch, `digest` ones at the next digest.
  */
 export class ConciergeFollowItemsRepository {
   constructor(private db: DrizzleDb) {}
@@ -76,7 +76,7 @@ export class ConciergeFollowItemsRepository {
       .where(inArray(conciergeFollowItems.id, ids));
   }
 
-  /** Moves owed notify items to the digest. */
+  /** Moves owed important items to the digest. */
   async moveToDigest(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     await this.db
@@ -85,14 +85,14 @@ export class ConciergeFollowItemsRepository {
       .where(and(inArray(conciergeFollowItems.id, ids), isNull(conciergeFollowItems.deliveredAt)));
   }
 
-  /** Notify items since `since`, newest first, so triage knows what was already told. */
-  async recentNotify(since: Date, limit: number): Promise<ConciergeFollowItemRow[]> {
+  /** Important items since `since`, newest first, so triage knows what was already told. */
+  async recentImportant(since: Date, limit: number): Promise<ConciergeFollowItemRow[]> {
     return this.db
       .select()
       .from(conciergeFollowItems)
       .where(
         and(
-          eq(conciergeFollowItems.decision, "notify"),
+          eq(conciergeFollowItems.decision, "important"),
           gte(conciergeFollowItems.createdAt, since),
         ),
       )

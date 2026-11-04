@@ -6,7 +6,7 @@
 // (`connector_watch_normalize`). Core never names a source. It keeps the
 // follows and one event-bus routine per raw event a follow listens on. Events
 // are batched, triaged by the `concierge-triage` agent (triage.ts), and what
-// triage kept reaches the Concierge as quiet system turns: notify ones after
+// triage kept reaches the Concierge as quiet system turns: important ones after
 // each batch, digest ones at the guardian's digest times (alerts.ts).
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -32,11 +32,11 @@ import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
 import { createLogger } from "../logger.js";
 import {
   FollowBatcher,
-  NotifyDelivery,
+  ImportantDelivery,
   parseQuietHours,
   quietWindowEnd,
   renderDigestTurn,
-  renderNotifyTurn,
+  renderImportantTurn,
 } from "./alerts.js";
 import { mergeConnectors, type ProviderService, type ProviderWatchSection } from "./connectors.js";
 import type { ConciergeService } from "./service.js";
@@ -61,7 +61,7 @@ const KEEP_DELIVERED_MS = 30 * 24 * 60 * 60_000;
 /** What triage reads of what was told: this far back, and at most this many lines. */
 const RECENTLY_TOLD_MS = 24 * 60 * 60_000;
 const RECENTLY_TOLD_MAX = 20;
-/** How long after boot owed notify items are delivered. */
+/** How long after boot owed important items are delivered. */
 const BOOT_DELIVERY_DELAY_MS = 60_000;
 /**
  * The Concierge's own actions for what it follows. Explicit, so only an agent
@@ -180,7 +180,7 @@ export interface ConciergeFollowingDeps {
   /** What triage kept, owed to the Concierge until delivered. */
   items: Pick<
     ConciergeFollowItemsRepository,
-    "add" | "known" | "owed" | "markDelivered" | "moveToDigest" | "recentNotify" | "prune"
+    "add" | "known" | "owed" | "markDelivered" | "moveToDigest" | "recentImportant" | "prune"
   >;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
@@ -447,17 +447,17 @@ export function startConciergeFollowing(
     return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(deps.settings));
   };
 
-  const delivery = new NotifyDelivery({
+  const delivery = new ImportantDelivery({
     now,
     isEnabled: () => service.isEnabled(),
     quietUntil,
-    owed: () => deps.items.owed("notify"),
+    owed: () => deps.items.owed("important"),
     toDigest: (items) => deps.items.moveToDigest(items.map((item) => item.id)),
     send: async (items, held) => {
       const chatId = await service.findChatId();
-      log.info("following notify", { items: items.length, held, delivered: chatId !== null });
+      log.info("following important", { items: items.length, held, delivered: chatId !== null });
       if (!chatId) return;
-      await service.runSystemTurn(chatId, renderNotifyTurn(items, held), { quiet: true });
+      await service.runSystemTurn(chatId, renderImportantTurn(items, held), { quiet: true });
       await deps.items.markDelivered(
         items.map((item) => item.id),
         new Date(now()),
@@ -465,14 +465,14 @@ export function startConciergeFollowing(
     },
   });
 
-  /** Triage of one batch: every event gets notify, digest or ignore; the kept ones are stored. */
+  /** Triage of one batch: every event gets important, digest or ignore; the kept ones are stored. */
   const triageBatch = async (events: FollowEvent[]) => {
     if (!(await service.isEnabled())) return;
     const known = await deps.items.known(events.map((e) => e.id));
     const fresh = events.filter((e) => !known.has(e.id));
     if (fresh.length === 0) return;
     const { follows } = await readStored();
-    const told = await deps.items.recentNotify(
+    const told = await deps.items.recentImportant(
       new Date(now() - RECENTLY_TOLD_MS),
       RECENTLY_TOLD_MAX,
     );
@@ -537,7 +537,7 @@ export function startConciergeFollowing(
     const stored = await deps.items.add(kept, new Date(now()));
     log.info("follow batch triaged", {
       events: fresh.length,
-      notify: stored.filter((i) => i.decision === "notify").length,
+      important: stored.filter((i) => i.decision === "important").length,
       digest: stored.filter((i) => i.decision === "digest").length,
       ignored: fresh.length - kept.length,
     });
@@ -1020,7 +1020,7 @@ export function startConciergeFollowing(
   const reconcileTimer = setInterval(runReconcile, RECONCILE_INTERVAL_MS);
   firstReconcile.unref?.();
   reconcileTimer.unref?.();
-  // Notify items owed from before a restart.
+  // Important items owed from before a restart.
   delivery.deliverIn(BOOT_DELIVERY_DELAY_MS);
 
   return () => {

@@ -719,7 +719,7 @@ export const conciergeTasks = sqliteTable(
 );
 
 /**
- * Events from what the Concierge follows that its triage kept: `notify` ones
+ * Events from what the Concierge follows that its triage kept: `important` ones
  * go to the Concierge in the next batch, `digest` ones at the next digest time.
  * Only the triage's one-line description is kept, never the event's text. A
  * row is owed until `deliveredAt` is set, so a restart loses none.
@@ -733,7 +733,7 @@ export const conciergeFollowItems = sqliteTable(
     source: text("source").notNull(),
     kind: text("kind").notNull(),
     target: text("target").notNull(),
-    decision: text("decision", { enum: ["notify", "digest"] }).notNull(),
+    decision: text("decision", { enum: ["important", "digest"] }).notNull(),
     /** Why triage decided so, in one line. */
     reason: text("reason").notNull(),
     /** What happened, in one line, as triage wrote it. */
