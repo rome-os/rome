@@ -67,6 +67,7 @@ import { DrizzleConnectionsRepository } from "../../connections/repository-db.js
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
+import { verifySession } from "../../lib/auth.js";
 import { oauthRoutes } from "./oauth.js";
 
 // A fresh drizzle-backed connections repository per test;
@@ -237,6 +238,33 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       profile: { subject: "99" },
       tokens: { accessToken: "gho-2" },
       metadata: null,
+    });
+    const res = await postRedeem(makeDeps(registry));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).not.toHaveProperty("ended");
+    expect(registry.find("github").map((connection) => connection.id)).toEqual([first!.id]);
+  });
+
+  it("keeps a sign-in a sign-in when a session appeared during the round trip", async () => {
+    const registry = makeRegistry();
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { subject: "42" },
+      tokens: { accessToken: "gho-1" },
+      metadata: null,
+    });
+    await postRedeem(makeDeps(registry));
+    const [first] = registry.find("github");
+
+    // Another tab signed in while this attempt, started signed out, was away.
+    rs.mocked(verifySession).mockReturnValueOnce({ userId: "guardian-1" } as never);
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { subject: "99" },
+      tokens: { accessToken: "gho-2" },
+      metadata: null,
+      intent: "sign-in",
     });
     const res = await postRedeem(makeDeps(registry));
 

@@ -430,6 +430,10 @@ export const visitorProfiles = sqliteTable("visitor_profiles", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/** What an OAuth attempt was started for: connecting a provider, or signing
+ *  in to Rome. */
+export type OAuthAttemptIntent = "connect" | "sign-in";
+
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -441,6 +445,10 @@ export const oauthPendingAttempts = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     consumedAt: integer("consumed_at", { mode: "timestamp" }),
+    // What the attempt was started for, `connect` or `sign-in`, decided when it
+    // started so a session that changes during the round trip cannot change
+    // it. Null for an attempt started before Rome recorded it.
+    intent: text("intent").$type<OAuthAttemptIntent>(),
   },
   (table) => [index("idx_oauth_pending_attempts_expires_at").on(table.expiresAt)],
 );
