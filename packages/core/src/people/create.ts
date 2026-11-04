@@ -45,8 +45,6 @@ export async function createPerson(
     id = await deps.peopleRepo.create({
       displayName: request.displayName,
       bondLevel: request.bondLevel,
-      // The guardian typed this person in, so there is nobody left to approve
-      // them — the same standing every person the dashboard creates has.
       links: request.accounts.map(accountOfWire),
     });
   } catch (err) {
