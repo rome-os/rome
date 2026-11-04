@@ -351,9 +351,10 @@ export class ChatSettingsRepository {
     input: {
       settings: StoredChatSettings | null;
       agentName: string | null | undefined;
-      /** False when `descriptor.kind` is only a guess, made for an address
-       *  its platform has never described. The rule then stays the
-       *  account's own, and reaches no other speaker in a group. */
+      /** False when `descriptor.kind` is only a guess: nothing Rome holds
+       *  and nothing its platform listed states it. The rule is then refused,
+       *  since such an address has no speaker yet and its chat cannot be
+       *  started on a guess. */
       kindKnown?: boolean;
     },
   ): void {
@@ -405,11 +406,7 @@ export class ChatSettingsRepository {
         const placedAt = new Date((startSecond - 1) * 1000);
         // The legacy source columns are still written for readers that have
         // not moved to the speaker's chat and account.
-        const sourceThreadType = !kindKnown
-          ? null
-          : descriptor.kind === "dm"
-            ? "private"
-            : descriptor.kind;
+        const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
         tx.insert(romeSessions)
           .values({
             id,
@@ -437,7 +434,7 @@ export class ChatSettingsRepository {
           .set({
             // A placeholder leaves the name the session has.
             ...(placeholder ? {} : { name }),
-            ...(sourceThreadType === null ? {} : { sourceThreadType }),
+            sourceThreadType,
             // The row is this account's speaker in this chat. One stored
             // before it stood in a chat stands here now, and one left by the
             // account the channel was paired as before moves here, as the
@@ -469,7 +466,7 @@ export class ChatSettingsRepository {
         }
         // A group's rule is the group's: every other speaker there takes it,
         // keeping its own routing marker.
-        if (isShared(descriptor.kind) && kindKnown) {
+        if (isShared(descriptor.kind)) {
           const rule = input.settings && withoutRouting(input.settings);
           const others = tx
             .select({ id: romeSessions.id, channelSettings: romeSessions.channelSettings })
@@ -491,15 +488,14 @@ export class ChatSettingsRepository {
 
   /**
    * The chat at the address `descriptor` names, started as an incoming
-   * message there would start it ({@link startChannelChat}): of the kind the
-   * address names where it names one, else of the kind `descriptor` states.
-   * Refuses when that kind is only a guess (`kindKnown` false) and the
-   * address names none, since a chat's kind never changes and a wrong one
-   * would hold the session the first message opens.
+   * message there would start it ({@link startChannelChat}), of the kind
+   * `descriptor` states. Refuses when that kind is only a guess (`kindKnown`
+   * false), since a chat's kind never changes and a wrong one would hold the
+   * session the first message opens.
    */
   private startChat(descriptor: ChatDescriptor, channel: string, kindKnown: boolean): ChatRef {
     const address = descriptor.ref.chatId;
-    if (!kindKnown && kindNamedBy(this.accountOn(channel).platform, address) === null) {
+    if (!kindKnown) {
       throw new Error(
         `Rome cannot tell whether the chat at ${address} on ${channel} is a group or a direct message: no message there has reached Rome and its platform has not listed it. Its rule can be set once either happens`,
       );
@@ -508,7 +504,7 @@ export class ChatSettingsRepository {
       channel,
       threadId: address,
       ...(isPlaceholderName(channel, descriptor) ? {} : { threadName: descriptor.displayName }),
-      ...(kindKnown ? { threadType: descriptor.kind === "dm" ? "private" : "group" } : {}),
+      threadType: descriptor.kind === "dm" ? "private" : "group",
     }).chat;
   }
 
