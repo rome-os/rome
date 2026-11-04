@@ -221,6 +221,10 @@ export class ChatSettingsService implements ChatSettingsControl {
   /** The channel each remembered conversation was last seen on, so it still
    *  reads its row once its Connection is removed. */
   private readonly rememberedChannels = new Map<string, string>();
+  /** The speaker last read for each conversation, which a removed
+   *  Connection's conversation still reads once its channel lets go of its
+   *  account. */
+  private readonly rememberedSpeakers = new Map<string, string>();
 
   constructor(private readonly deps: ChatSettingsServiceDeps) {}
 
@@ -539,9 +543,10 @@ export class ChatSettingsService implements ChatSettingsControl {
     if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
       channel = this.channelName(ref);
     }
-    return channel === null
-      ? null
-      : this.deps.repository.ruleOf(channel, ref.chatId, this.knownKind(ref, descriptor, row));
+    // A removed Connection's speaker, which no channel is the account of
+    // now, reads its own rule.
+    if (channel === null) return row?.channelSettings ?? null;
+    return this.deps.repository.ruleOf(channel, ref.chatId, this.knownKind(ref, descriptor, row));
   }
 
   /** What `mutate` writes for `ref`: the conversation as its kind is known,
@@ -619,6 +624,12 @@ export class ChatSettingsService implements ChatSettingsControl {
   }
 
   private descriptorFromRow(row: StoredChatRow): ChatDescriptor {
+    const descriptor = this.describeRow(row);
+    this.rememberedSpeakers.set(this.key(descriptor.ref), row.id);
+    return descriptor;
+  }
+
+  private describeRow(row: StoredChatRow): ChatDescriptor {
     // The speaker's connection is the one behind its account on its chat's
     // platform.
     const channel = row.channel;
@@ -670,7 +681,11 @@ export class ChatSettingsService implements ChatSettingsControl {
       // its row under the channel it was last seen on.
       if (!this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
         const channel = this.rememberedChannels.get(this.key(ref));
-        return { descriptor: remembered, row: this.find(channel, ref) };
+        const speaker = this.rememberedSpeakers.get(this.key(ref));
+        const row =
+          this.find(channel, ref) ??
+          (speaker === undefined ? null : this.deps.repository.byId(speaker));
+        return { descriptor: remembered, row };
       }
       const row = this.find(this.channelName(ref), ref);
       return { descriptor: row ? this.descriptorFromRow(row) : remembered, row };

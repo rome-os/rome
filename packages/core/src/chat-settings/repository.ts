@@ -8,7 +8,8 @@ import { chatIdsOn, type ChatRepository } from "../chats/storage/chat-repository
 import type { Chat, ChatKind } from "../chats/storage/chat.js";
 import { placeIn, type ChatKey, type ChatRef } from "../chats/storage/place.js";
 import { startChannelChat } from "../connections/channel-chat.js";
-import { type ChatAdapters, kindNamedBy } from "../connections/chat-adapter.js";
+import { addressOf, type ChatAdapters, kindNamedBy } from "../connections/chat-adapter.js";
+import type { ChatAddresses } from "../connections/chat-addresses.js";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -37,6 +38,9 @@ export interface ChatSettingsRepositoryDeps {
     ChatAdapters,
     "chatAt" | "accountOn" | "knownAccountOn" | "channelOf" | "addressAt" | "openedDirectMessageAt"
   >;
+  /** Where each of Rome's accounts reaches its chats, read once per account
+   *  in a listing. */
+  addresses: Pick<ChatAddresses, "addressesOf">;
 }
 
 /**
@@ -147,15 +151,36 @@ export class ChatSettingsRepository {
     const speaking = `${row.chatPlatform}\0${row.accountId}`;
     if (!seen.channels.has(speaking)) seen.channels.set(speaking, this.channelOf(row));
     const channel = seen.channels.get(speaking) ?? null;
-    const address =
-      chat && channel
-        ? this.deps.adapters.addressAt(
-            channel,
-            placeIn(chat.ref, row.threadId === null ? undefined : (row.threadId as ChatId)),
-          )
-        : null;
+    // Where the channel reaches the place, as `ChatAdapters.addressAt` reads
+    // it: a thread at its own address, a chat where the account last heard
+    // it, else at its key. Read from the account's addresses, once a listing.
+    let address: ChatId | null = null;
+    if (chat && channel && row.accountId) {
+      if (row.threadId !== null) {
+        address = row.threadId as ChatId;
+      } else {
+        if (!seen.addresses.has(speaking)) {
+          seen.addresses.set(
+            speaking,
+            this.deps.addresses.addressesOf({ platform: chat.ref.platform, id: row.accountId }),
+          );
+        }
+        const key = { platform: chat.ref.platform, externalId: chat.key as ChatId };
+        address = (seen.addresses.get(speaking)?.get(chat.key) ?? addressOf(key)) as ChatId;
+      }
+    }
     const placeName = row.threadId !== null ? row.name : (chat?.name ?? null);
     return { ...row, kind, channel, placeName, address };
+  }
+
+  /** Speaker `sessionId`, whether or not a channel is its account now. */
+  byId(sessionId: string): StoredChatRow | null {
+    const row = this.db
+      .select()
+      .from(romeSessions)
+      .where(and(isChannelConversation, eq(romeSessions.id, sessionId)))
+      .get();
+    return row ? this.stored(row) : null;
   }
 
   find(channel: string, chatId: ChatId): StoredChatRow | null {
@@ -543,10 +568,12 @@ export class ChatSettingsRepository {
 interface StoredLookups {
   chats: Map<number, Chat | null>;
   channels: Map<string, string | null>;
+  /** Each account's addresses, by chat key. */
+  addresses: Map<string, Map<string, string>>;
 }
 
 function newLookups(): StoredLookups {
-  return { chats: new Map(), channels: new Map() };
+  return { chats: new Map(), channels: new Map(), addresses: new Map() };
 }
 
 function isShared(kind: ChatDescriptor["kind"] | null): boolean {

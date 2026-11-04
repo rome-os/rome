@@ -701,14 +701,19 @@ describe("ChatSettingsService", () => {
     const support = await connectLive(registry, "wechat");
     // The account the sales channel is paired as, which a re-pairing
     // changes, and the channel it is, which a reconnect changes.
-    const paired = { sales: "ou_sales", salesChannel: "feishu" };
+    const paired: { sales: string | null; salesChannel: string } = {
+      sales: "ou_sales",
+      salesChannel: "feishu",
+    };
     const channelOf = (connection: { id: string }) =>
       connection.id === sales.id ? paired.salesChannel : "feishu-2";
     const wired = chatsWiring(testDb.db, {
       channelsOn: (platform) => (platform === "feishu" ? [paired.salesChannel, "feishu-2"] : []),
       accountOf: (name) =>
         name === paired.salesChannel
-          ? { platform: "feishu", id: paired.sales }
+          ? paired.sales === null
+            ? null
+            : { platform: "feishu", id: paired.sales }
           : name === "feishu-2"
             ? { platform: "feishu", id: "ou_support" }
             : null,
@@ -740,7 +745,7 @@ describe("ChatSettingsService", () => {
     const standIn = (channel: "feishu" | "feishu-2") =>
       openSpeaker(testDb!.db, { channel, threadId: "oc_group", agentName: "main" }, wired);
 
-    return { service, repository, wired, paired, standIn, throughSales, throughSupport };
+    return { registry, service, repository, wired, paired, standIn, throughSales, throughSupport };
   }
 
   it("serializes writers through two of Rome's accounts in one group", async () => {
@@ -1077,6 +1082,24 @@ describe("ChatSettingsService", () => {
 
     expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
     expect(repository.listKnown({ query: "Ray" }).map((row) => row.id)).toEqual([ruled.id]);
+  });
+
+  it("still reads a removed connection's rule once its channel lets go of its account", async () => {
+    const { registry, service, paired, standIn, throughSales } = await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    await registry.remove(throughSales.connectionId);
+    // Removing the connection vacates its channel, which knows no account
+    // from then on.
+    paired.sales = null;
+
+    expect((await service.get(throughSales)).effective.enabled).toBe(false);
   });
 
   it("names no chat after the placeholder a session opened without a name took", async () => {
