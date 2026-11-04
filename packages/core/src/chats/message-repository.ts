@@ -1,7 +1,6 @@
 // Reading the messages on record in a place, a page at a time. Vocabulary:
 // docs/domains/chats.md#message.
 
-import type { Via } from "./events.js";
 import type { SaidMessage } from "./message.js";
 import type { Place } from "./place.js";
 
@@ -35,7 +34,7 @@ export interface MessageRepository {
    * one account holds it, since its address alone may name a direct message
    * with each of Rome's accounts.
    */
-  recent(place: Place, limit: number, via?: Pick<Via, "channel">): Promise<MessagePage>;
+  recent(place: Place, limit: number, via?: { readonly channel: string }): Promise<MessagePage>;
 
   /** The `limit` messages said in `place` just before `cursor`, oldest
    *  first, by the same rule as {@link recent}. */
@@ -43,6 +42,6 @@ export interface MessageRepository {
     place: Place,
     cursor: MessageCursor,
     limit: number,
-    via?: Pick<Via, "channel">,
+    via?: { readonly channel: string },
   ): Promise<MessagePage>;
 }
