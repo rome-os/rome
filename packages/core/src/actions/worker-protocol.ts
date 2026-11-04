@@ -1,3 +1,4 @@
+import { isSendRefused, SendRefused, type SendRefusedReason } from "@rome-os/app-runtime";
 import type { ActionRunContext } from "./engine.js";
 import type { ActionRuntimeEvent } from "./runtime-events.js";
 import type { ActionResult } from "./types.js";
@@ -44,7 +45,51 @@ export interface ActionWorkerFailure {
    * identity matches what an in-process caller would have seen — IPC cannot
    * ship the instance itself.
    */
-  error: { name: string; message: string };
+  error: WireError;
+}
+
+/** An error as it crosses the worker boundary. `refusal` is the reason of a
+ *  refused send, so the caller can tell it from any other failure. */
+export interface WireError {
+  name: string;
+  message: string;
+  refusal?: SendRefusedReason;
+}
+
+/** `err` as it crosses the worker boundary. */
+export function toWireError(err: unknown): WireError {
+  if (!(err instanceof Error)) return { name: "Error", message: String(err) };
+  const refusal = sendRefusalOf(err);
+  return {
+    name: err.name,
+    message: err.message,
+    ...(refusal ? { refusal } : {}),
+  };
+}
+
+/** Why a send `err` fails on was refused: a {@link SendRefused}'s reason, or
+ *  the refusal an action called from this one failed on, which it let pass
+ *  up. Undefined for any other failure. */
+export function sendRefusalOf(err: unknown): SendRefusedReason | undefined {
+  if (isSendRefused(err)) return err.reason;
+  if (!(err instanceof Error) || err.name !== "ActionInvocationError") return undefined;
+  const { refusal } = err as { refusal?: unknown };
+  return typeof refusal === "string" ? (refusal as SendRefusedReason) : undefined;
+}
+
+/** The error `wire` describes, with the name and message an in-process
+ *  caller would have seen, and a refused send rebuilt as one. */
+export function fromWireError(wire: WireError): Error {
+  if (wire.refusal && wire.name === "ActionInvocationError") {
+    // A called action's refusal, which the action let pass up, keeps the
+    // field `ActionInvocationError` carries it in.
+    const err = Object.assign(new Error(wire.message), { refusal: wire.refusal });
+    err.name = wire.name;
+    return err;
+  }
+  const err = wire.refusal ? new SendRefused(wire.refusal, wire.message) : new Error(wire.message);
+  err.name = wire.name;
+  return err;
 }
 
 export interface ActionWorkerRuntimeEvent {

@@ -17,7 +17,6 @@ import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import type { RecordedConversation } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
@@ -79,6 +78,7 @@ import type {
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -286,7 +286,7 @@ describe("AgentRunner", () => {
   });
 
   it("fills a re-entry's conversation id from its channel address", async () => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-1", "Webchat chat");
     const stop = new Error("stop after acquire");
     const acquireBySessionId = rs.fn(async () => {
@@ -319,7 +319,7 @@ describe("AgentRunner", () => {
     ["saves", true, ["trace"]],
     ["leaves", undefined, []],
   ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
@@ -354,7 +354,7 @@ describe("AgentRunner", () => {
     ["writes", undefined, true],
     ["leaves out", false, false],
   ])("%s a turn's answer in its transcript as the caller asks, and keeps its trace", async (_label, persistAnswer, answered) => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-answer", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
@@ -430,7 +430,7 @@ describe("AgentRunner", () => {
   it("records a forked run as a fork rome session with parent lineage", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("parent-chat", "Fixing the build");
 
       const source = {
@@ -563,7 +563,7 @@ describe("AgentRunner", () => {
     it("leaves a recorded channel conversation to the inbox", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "channel:telegram:t1",
           type: "channel",
@@ -592,7 +592,7 @@ describe("AgentRunner", () => {
     it("writes the prompt into a recorded subagent conversation it alone records", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -621,7 +621,7 @@ describe("AgentRunner", () => {
     it("leaves a turn under a webchat thread to that chat", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -660,7 +660,7 @@ describe("AgentRunner", () => {
     it("leaves a turn under a messaging thread to that thread", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -697,7 +697,7 @@ describe("AgentRunner", () => {
     it("writes a recorded subagent transcript when the caller keeps its own", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -734,7 +734,7 @@ describe("AgentRunner", () => {
     it("leaves a saved side chat to the webchat route on a backend turn", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "side-chat",
           type: "fork",
@@ -777,7 +777,7 @@ describe("AgentRunner", () => {
     it("leaves a recorded webchat conversation to the webchat route", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
         const { manager, turns } = resumedSession({
           id: "user-chat",
@@ -800,7 +800,7 @@ describe("AgentRunner", () => {
     it("does not recreate a recorded conversation that was deleted", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         // The lookup at open found no conversation, so none is recorded.
         const { manager, turns } = resumedSession();
         const runner = new AgentRunner(manager, agentLoader, repo);
@@ -821,7 +821,7 @@ describe("AgentRunner", () => {
   it("links a fork to the conversation its source serves when no thread names one", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("stored-chat", "Stored chat");
 
       const source = {
@@ -2003,14 +2003,14 @@ describe("AgentRunner", () => {
       actionRegistry,
       modelResolver,
       actionEngine,
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
-        webchatRepo: new WebChatRepository(testDb.db),
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
         activeRegistry: activeSubagentRegistry,
         turnStreams,
       }),
@@ -4124,7 +4124,7 @@ describe("AgentRunner", () => {
     });
 
     it("skips stored-message context for a channel whose surface needs none", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "quiet-context",
@@ -4171,84 +4171,8 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("injects pending channel notifications and exact reply context once before the current message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "channel-context",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "user",
-        content: textContent("original message"),
-        platformMessageId: "original-message",
-        senderName: "Alice",
-        createdAt: new Date("2026-08-03T08:00:00.000Z"),
-      });
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "notification",
-        content: textContent("ambient update"),
-        platformMessageId: "ambient-message",
-        senderName: "Bob",
-        createdAt: new Date("2026-08-03T08:01:00.000Z"),
-      });
-
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-conversation-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "current message",
-          channelThreadKey: "discord:channel-context",
-          romeSessionId: conversation.id,
-          platformMessageId: "current-message",
-          replyTo: {
-            messageId: "original-message",
-            content: "stale provider snapshot",
-            senderName: "Wrong sender",
-          },
-          threadContext: {
-            channel: "discord",
-            threadId: "channel-context",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
-
-      expect(providerPrompts).toHaveLength(1);
-      const prompt = providerPrompts[0] ?? "";
-      expect(prompt).toContain("<conversation_context>");
-      expect(prompt).toContain("Bob: ambient update");
-      expect(prompt).toContain("<reply_context>");
-      expect(prompt).toContain("Alice: original message");
-      expect(prompt).not.toContain("stale provider snapshot");
-      expect(prompt).toContain("<current_message>\ncurrent message\n</current_message>");
-      expect(prompt.indexOf("<conversation_context>")).toBeLessThan(
-        prompt.indexOf("<reply_context>"),
-      );
-      expect(prompt.indexOf("<reply_context>")).toBeLessThan(prompt.indexOf("<current_message>"));
-
-      await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
-    });
-
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "linked-context",
@@ -4329,7 +4253,7 @@ describe("AgentRunner", () => {
       unseen: UnseenLine[],
       threadContext: { threadId: string; parentThreadId?: string },
     ): Promise<string> {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       if (threadContext.parentThreadId) {
         await webchatRepo.ensureChannelChat({
           channel: "discord",
@@ -4416,148 +4340,37 @@ describe("AgentRunner", () => {
       expect(prompt.indexOf("Bob: start here")).toBeLessThan(prompt.indexOf("Rome: on it"));
     });
 
-    it("injects a child thread's parent starter before Rome's first reply and the current message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const parent = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "parent-channel-thread-starter",
-        agentName: "main",
-      });
-      const child = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "child-thread-starter-context",
-        parentThreadId: "parent-channel-thread-starter",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      await webchatRepo.addConversationMessage({
-        sessionId: parent.id,
-        role: "user",
-        content: textContent("Should we ship on Friday?"),
-        platformMessageId: "thread-starter-message",
-        senderName: "Alice",
-      });
-      await webchatRepo.recordOutboundConversationMessage({
-        sessionId: child.id,
-        content: textContent("We should check the release checklist first."),
-        platformMessageId: "rome-first-thread-reply",
-        senderId: "rome",
-        senderName: "Rome",
-        replyToPlatformMessageId: "thread-starter-message",
-        knownToProvider: false,
-      });
+    it("carries only the newest 20 unseen lines, and counts the rest", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const unseen: UnseenLine[] = Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        senderName: "Participant",
+        text: `ambient ${index + 1}`,
+        at,
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      }));
 
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-child-thread-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "What deadline did you mean?",
-          channelThreadKey: "discord:child-thread-starter-context",
-          romeSessionId: child.id,
-          platformMessageId: "child-current-message",
-          threadContext: {
-            channel: "discord",
-            threadId: "child-thread-starter-context",
-            parentThreadId: "parent-channel-thread-starter",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
+      const prompt = await linkedPrompt(unseen, { threadId: "bounded-chat" });
 
-      expect(providerPrompts).toHaveLength(1);
-      const prompt = providerPrompts[0] ?? "";
-      expect(prompt).toContain("Alice: Should we ship on Friday?");
-      expect(prompt).toContain("Rome: We should check the release checklist first.");
-      expect(prompt).toContain(
-        "<current_message>\nWhat deadline did you mean?\n</current_message>",
-      );
-      expect(prompt.indexOf("Alice: Should we ship on Friday?")).toBeLessThan(
-        prompt.indexOf("Rome: We should check the release checklist first."),
-      );
-      expect(prompt.indexOf("Rome: We should check the release checklist first.")).toBeLessThan(
-        prompt.indexOf("<current_message>"),
-      );
-      await expect(webchatRepo.loadConversationContext(child.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
-    });
-
-    it("injects only the latest 20 pending notifications and marks the omitted snapshot consumed", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "bounded-channel-context",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      for (let index = 0; index < 21; index += 1) {
-        await webchatRepo.addConversationMessage({
-          sessionId: conversation.id,
-          role: "notification",
-          content: textContent(`ambient ${index + 1}`),
-          platformMessageId: `ambient-${index + 1}`,
-          senderName: "Participant",
-          createdAt: new Date(Date.UTC(2026, 7, 3, 8, index)),
-        });
-      }
-
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-bounded-conversation-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "current message",
-          channelThreadKey: "discord:bounded-channel-context",
-          romeSessionId: conversation.id,
-          platformMessageId: "current-message",
-          threadContext: {
-            channel: "discord",
-            threadId: "bounded-channel-context",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
-
-      const prompt = providerPrompts[0] ?? "";
       expect(prompt).toContain("[1 earlier messages omitted]");
       expect(prompt).not.toContain("Participant: ambient 1\n");
       expect(prompt).toContain("Participant: ambient 2");
       expect(prompt).toContain("Participant: ambient 21");
-      await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
     });
 
-    it("uses provider-supplied reply content for the current turn without persisting a synthetic message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+    it("quotes the platform's copy of the message replied to when Rome holds none", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "wechat",
         threadId: "wechat-runtime-reply",
         agentName: "main",
       });
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: () => [],
+        seen: () => undefined,
+      };
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
@@ -4570,7 +4383,7 @@ describe("AgentRunner", () => {
       };
 
       await collectMessages(
-        createRunner(provider).run({
+        createRunner(provider, undefined, { turnLinks }).run({
           agentName: "test-main",
           prompt: "What does the first word mean?",
           channelThreadKey: "wechat:wechat-runtime-reply",
@@ -4593,13 +4406,6 @@ describe("AgentRunner", () => {
       expect(providerPrompts[0]).toContain(
         "<reply_context>\nRome: Jack Ma profile\n</reply_context>",
       );
-      await expect(
-        webchatRepo.loadConversationContext(conversation.id, "wechat-server-42"),
-      ).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
     });
   });
 
@@ -5504,7 +5310,7 @@ describe("AgentRunner", () => {
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-mismatch",
         "Legacy chat",
         undefined,
@@ -5565,7 +5371,7 @@ describe("AgentRunner", () => {
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-no-context",
         "Legacy chat",
         undefined,
@@ -5620,7 +5426,7 @@ describe("AgentRunner", () => {
       // The parent chat stores a Claude selection. Its subagent's legacy row
       // (model NULL) ran on Codex, and the subagent opens with the parent's
       // thread context, so the chat's selection must not reach it.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-parent",
         "Legacy chat",
         undefined,
@@ -6311,7 +6117,9 @@ describe("AgentRunner", () => {
           message.type === "subagent_start" && message.toolUseId === "tu-explore-1",
       );
       expect(firstChild).toBeDefined();
-      const storedChild = await new WebChatRepository(testDb.db).getSession(firstChild!.sessionId);
+      const storedChild = await new ChatsWebChatRepository(testDb.db).getSession(
+        firstChild!.sessionId,
+      );
       expect(storedChild).toMatchObject({
         type: "subagent",
         parentSessionId: "action:exec-1:core:test-main",

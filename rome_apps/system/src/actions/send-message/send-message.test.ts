@@ -25,6 +25,35 @@ function makeAdapter(service = "discord"): ChannelsService {
   };
 }
 
+/** A host's chats, which send and record through Chats. A session main opens
+ *  at an address is named after it, so a send's session says where it went. */
+function host() {
+  return {
+    ensureChannelChat: rs.fn(async (input: { channel: string; threadId: string }) => ({
+      id: `${input.channel}:${input.threadId}`,
+      agentName: null,
+    })),
+    ensureChannelConversation: rs.fn(),
+    addMessage: rs.fn(),
+    promoteMessageToUser: rs.fn(),
+    send: rs.fn(async (_input: Parameters<NonNullable<ChatRepository["send"]>>[0]) => ({
+      messageId: "out-1",
+    })),
+    sendEmail: rs.fn(async (_input: Parameters<NonNullable<ChatRepository["sendEmail"]>>[0]) => ({
+      messageId: "msg_1",
+      threadId: "t1",
+    })),
+  };
+}
+
+/** That `chats` said one message on `channel` at `threadId`, as main's
+ *  session there. */
+function expectSent(chats: ReturnType<typeof host>, channel: string, threadId: string) {
+  expect(chats.send).toHaveBeenCalledWith(
+    expect.objectContaining({ sessionId: `${channel}:${threadId}`, channel }),
+  );
+}
+
 describe("send_message attachments", () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "rome-send-message-"));
@@ -47,20 +76,25 @@ describe("send_message attachments", () => {
     await mkdir(join(projectsRoot, "default"), { recursive: true });
     await writeFile(source, "pdf");
     const safeSource = await realpath(source);
-    const adapter = makeAdapter();
+    const chats = host();
 
-    await executeSendMessage(adapter, {
-      channel: "discord",
-      threadId: "thread-1",
-      attachments: [{ type: "document", source, caption: "Report" }],
-    });
+    await executeSendMessage(
+      makeAdapter(),
+      {
+        channel: "discord",
+        threadId: "thread-1",
+        attachments: [{ type: "document", source, caption: "Report" }],
+      },
+      { chats },
+    );
 
-    expect(adapter.send).toHaveBeenCalledWith("discord", "thread-1", {
-      text: undefined,
-      attachments: [{ type: "document", source: safeSource, caption: "Report" }],
-      replyToMessageId: undefined,
-      turnId: undefined,
-    });
+    expect(chats.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "discord:thread-1",
+        channel: "discord",
+        attachments: [{ type: "document", source: safeSource, caption: "Report" }],
+      }),
+    );
   });
 
   it("rejects absolute paths outside allowed attachment roots", async () => {
@@ -109,37 +143,31 @@ describe("send_message email union", () => {
     return adapter;
   }
 
-  it("maps email-specific fields into OutgoingMessage.email for a new email", async () => {
-    const adapter = makeEmailAdapter();
-    await executeSendMessage(adapter, {
-      channel: "email",
-      to: "guardian",
-      subject: "Hi",
-      cc: ["c@x.com"],
-      text: "body",
-    });
+  it("maps email-specific fields into the email for a new email", async () => {
+    const chats = host();
+    await executeSendMessage(
+      makeEmailAdapter(),
+      { channel: "email", to: "guardian", subject: "Hi", cc: ["c@x.com"], text: "body" },
+      { chats },
+    );
 
-    expect(adapter.send).toHaveBeenCalledTimes(1);
-    const [channel, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
-    expect(channel).toBe("email");
-    expect(threadId).toBe("");
-    expect(message.kind).toBe("email");
-    expect(message.text).toBe("body");
-    expect(message).toMatchObject({ to: "guardian", subject: "Hi", cc: ["c@x.com"] });
+    expect(chats.sendEmail).toHaveBeenCalledTimes(1);
+    const [sent] = chats.sendEmail.mock.calls[0]!;
+    expect(sent).toMatchObject({ channel: "email", text: "body" });
+    expect(sent.threadId).toBeUndefined();
+    expect(sent.email).toMatchObject({ to: "guardian", subject: "Hi", cc: ["c@x.com"] });
   });
 
   it("maps replyToMessageId to email.inReplyToMessageId for an on-thread reply", async () => {
-    const adapter = makeEmailAdapter();
-    await executeSendMessage(adapter, {
-      channel: "email",
-      threadId: "t1",
-      replyToMessageId: "msg_1",
-      text: "reply",
-    });
+    const chats = host();
+    await executeSendMessage(
+      makeEmailAdapter(),
+      { channel: "email", threadId: "t1", replyToMessageId: "msg_1", text: "reply" },
+      { chats },
+    );
 
-    const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
-    expect(message.kind).toBe("email");
-    expect(message.inReplyToMessageId).toBe("msg_1");
+    const [sent] = chats.sendEmail.mock.calls[0]!;
+    expect(sent).toMatchObject({ threadId: "t1", email: { inReplyToMessageId: "msg_1" } });
   });
 
   it("rejects an email with neither a thread nor a recipient", async () => {
@@ -151,14 +179,14 @@ describe("send_message email union", () => {
   });
 
   it("allows an html-only email body", async () => {
-    const adapter = makeEmailAdapter();
-    await executeSendMessage(adapter, {
-      channel: "email",
-      to: "x@y.com",
-      html: "<p>hi</p>",
-    });
-    const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
-    expect(message.html).toBe("<p>hi</p>");
+    const chats = host();
+    await executeSendMessage(
+      makeEmailAdapter(),
+      { channel: "email", to: "x@y.com", html: "<p>hi</p>" },
+      { chats },
+    );
+    const [sent] = chats.sendEmail.mock.calls[0]!;
+    expect(sent.email.html).toBe("<p>hi</p>");
   });
 
   it("rejects email attachments before checking their sources or the body", async () => {
@@ -213,6 +241,7 @@ describe("send_message chat recipient aliases", () => {
 
   it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
     const adapter = makeAdapter("whatsapp");
+    const chats = host();
     const personMappingRepo = {
       findByBondLevel: rs.fn(async () => [
         {
@@ -231,17 +260,17 @@ describe("send_message chat recipient aliases", () => {
         to: "guardian",
         text: "hello guardian",
       },
-      { personMappingRepo },
+      { personMappingRepo, chats },
     );
 
     expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
-    expect(adapter.send).toHaveBeenCalledWith("whatsapp", "15551234567@s.whatsapp.net", {
-      text: "hello guardian",
-      parts: undefined,
-      attachments: undefined,
-      replyToMessageId: undefined,
-      turnId: undefined,
-    });
+    expect(chats.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "whatsapp:15551234567@s.whatsapp.net",
+        channel: "whatsapp",
+        text: "hello guardian",
+      }),
+    );
   });
 
   it("fails loudly when a chat guardian alias has no mapping for the channel", async () => {
@@ -323,22 +352,24 @@ describe("send_message to an account with an opaque id", () => {
 
   it("sends as the account its id names", async () => {
     const adapter = accounts(FIRST, SECOND);
+    const chats = host();
 
-    await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" });
+    await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" }, { chats });
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      SECOND,
-      "42",
-      expect.objectContaining({ text: "hi" }),
-    );
+    expectSent(chats, SECOND, "42");
   });
 
   it("sends as Rome's one account on a platform it names", async () => {
     const adapter = accounts(FIRST);
+    const chats = host();
 
-    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
+    await executeSendMessage(
+      adapter,
+      { platform: "telegram", threadId: "42", text: "hi" },
+      { chats },
+    );
 
-    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
+    expectSent(chats, FIRST, "42");
   });
 
   it("refuses a platform where Rome has several accounts, naming them", async () => {
@@ -352,6 +383,7 @@ describe("send_message to an account with an opaque id", () => {
 
   // A bot connected before opaque ids has a channel named after its platform.
   // Its name addresses that bot, and the platform still counts both accounts.
+
   it("keeps a channel named after its platform apart from the platform", async () => {
     const adapter: ChannelsService = {
       list: rs.fn(async () => [
@@ -361,17 +393,18 @@ describe("send_message to an account with an opaque id", () => {
       send: rs.fn(async (_account, chatId) => ({ chatId })),
       query: async () => [],
     };
+    const chats = host();
 
-    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
-    expect(adapter.send).toHaveBeenCalledWith(
-      "telegram",
-      "42",
-      expect.objectContaining({ text: "hi" }),
+    await executeSendMessage(
+      adapter,
+      { channel: "telegram", threadId: "42", text: "hi" },
+      { chats },
     );
+    expectSent(chats, "telegram", "42");
     await expect(
       executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
     ).rejects.toThrow(`Rome has several accounts on "telegram": "telegram", "${FIRST}"`);
-    expect(adapter.send).toHaveBeenCalledTimes(1);
+    expect(chats.send).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a channel named after a platform once its account is gone", async () => {
@@ -411,18 +444,20 @@ describe("send_message to an account with an opaque id", () => {
       send: rs.fn(async (_account, chatId) => ({ chatId })),
       query: async () => [],
     };
+    const chats = host();
 
-    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
-
-    expect(adapter.send).toHaveBeenCalledWith(
-      account,
-      "42",
-      expect.objectContaining({ text: "hi" }),
+    await executeSendMessage(
+      adapter,
+      { platform: "telegram", threadId: "42", text: "hi" },
+      { chats },
     );
+
+    expectSent(chats, FIRST, "42");
   });
 
   it("resolves to: guardian through the link People keys by platform", async () => {
     const adapter = accounts(FIRST);
+    const chats = host();
     const personMappingRepo = {
       findByBondLevel: rs.fn(async () => [
         { channelMappings: [{ channel: "telegram", channelUserId: "1001" }] },
@@ -432,20 +467,18 @@ describe("send_message to an account with an opaque id", () => {
     await executeSendMessage(
       adapter,
       { channel: FIRST, to: "guardian", text: "hi" },
-      { personMappingRepo },
+      { personMappingRepo, chats },
     );
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      FIRST,
-      "1001",
-      expect.objectContaining({ text: "hi" }),
-    );
+    expectSent(chats, FIRST, "1001");
   });
 
   // A host that fills `accounts` names the guardian's link by its platform,
   // whatever `channelMappings` still says.
+
   it("resolves to: guardian through the account on the sending account's platform", async () => {
     const adapter = accounts(FIRST);
+    const chats = host();
     const personMappingRepo = {
       findByBondLevel: rs.fn(async () => [
         {
@@ -461,89 +494,34 @@ describe("send_message to an account with an opaque id", () => {
     await executeSendMessage(
       adapter,
       { channel: FIRST, to: "guardian", text: "hi" },
-      { personMappingRepo },
+      { personMappingRepo, chats },
     );
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      FIRST,
-      "2002",
-      expect.objectContaining({ text: "hi" }),
-    );
+    expectSent(chats, FIRST, "2002");
   });
 });
 
 describe("send_message conversation recording", () => {
-  it("stores a confirmed out-of-band delivery as a pending notification", async () => {
+  it("refuses a send on a host that cannot record it, and sends nothing", async () => {
     const adapter = makeAdapter();
-    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
-      messageId: "platform-out-1",
-      chatId: "thread-1",
-    });
-    const ensureChannelChat = rs.fn(async () => ({
-      id: "channel:discord:thread-1",
-      agentName: null,
-    }));
-    const recordOutboundMessage = rs.fn(async () => undefined);
-
-    const result = await executeSendMessage(
-      adapter,
-      { channel: "discord", threadId: "thread-1", text: "Background update" },
-      {
-        chats: {
-          ensureChannelChat,
-          recordOutboundMessage,
-          addMessage: rs.fn(),
-          promoteMessageToUser: rs.fn(),
-        },
-      },
-    );
-
-    expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
-    expect(ensureChannelChat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "discord",
-        threadId: "thread-1",
-      }),
-    );
-    expect(recordOutboundMessage).toHaveBeenCalledWith({
-      sessionId: "channel:discord:thread-1",
-      content: JSON.stringify([{ type: "text", content: "Background update" }]),
-      platformMessageId: "platform-out-1",
-      senderId: "rome",
-      senderName: "Rome",
-      replyToPlatformMessageId: undefined,
-      turnId: undefined,
-      knownToProvider: false,
-    });
-  });
-
-  it("records a delivery through a host that predates the chat names", async () => {
-    const adapter = makeAdapter();
-    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
-      messageId: "platform-out-1",
-      chatId: "thread-1",
-    });
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    // Only the old method, reading its own receiver as a host repository can.
-    const legacy = {
-      sessionId: "channel:discord:thread-1",
-      async ensureChannelConversation() {
-        return { id: this.sessionId, agentName: null };
-      },
-      recordOutboundMessage,
+    const older = {
+      ensureChannelChat: rs.fn(async () => ({ id: "channel:discord:thread-1", agentName: null })),
       addMessage: rs.fn(),
       promoteMessageToUser: rs.fn(),
-    };
+    } as unknown as ChatRepository;
 
-    await executeSendMessage(
-      adapter,
-      { channel: "discord", threadId: "thread-1", text: "Background update" },
-      { chats: legacy as unknown as ChatRepository },
-    );
-
-    expect(recordOutboundMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "channel:discord:thread-1" }),
-    );
+    for (const deps of [{}, { chats: older }]) {
+      await expect(
+        executeSendMessage(
+          adapter,
+          { channel: "discord", threadId: "thread-1", text: "Background update" },
+          deps,
+        ),
+      ).rejects.toThrow(
+        'This host cannot record a message sent as "discord". No message was sent.',
+      );
+    }
+    expect(adapter.send).not.toHaveBeenCalled();
   });
 
   it("leaves a webchat send to the channel, which writes it into the chat", async () => {
@@ -553,7 +531,7 @@ describe("send_message conversation recording", () => {
       chatId: "session-1",
     });
     const ensureChannelChat = rs.fn();
-    const recordOutboundMessage = rs.fn();
+    const send = rs.fn();
 
     const result = await executeSendMessage(
       adapter,
@@ -561,48 +539,16 @@ describe("send_message conversation recording", () => {
       {
         chats: {
           ensureChannelChat,
-          recordOutboundMessage,
+          send,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
-        },
+        } as unknown as ChatRepository,
       },
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
     expect(ensureChannelChat).not.toHaveBeenCalled();
-    expect(recordOutboundMessage).not.toHaveBeenCalled();
-  });
-
-  it("keeps a confirmed delivery successful when transcript recording fails", async () => {
-    const adapter = makeAdapter();
-    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
-      messageId: "platform-out-2",
-      chatId: "thread-2",
-    });
-
-    await expect(
-      executeSendMessage(
-        adapter,
-        {
-          channel: "discord",
-          threadId: "thread-2",
-          text: "Already delivered",
-          romeSessionId: "channel:discord:thread-2",
-          knownToProvider: true,
-          turnId: "turn-2",
-        },
-        {
-          chats: {
-            ensureChannelChat: rs.fn(),
-            recordOutboundMessage: rs.fn(async () => {
-              throw new Error("database unavailable");
-            }),
-            addMessage: rs.fn(),
-            promoteMessageToUser: rs.fn(),
-          },
-        },
-      ),
-    ).resolves.toEqual({ status: "ok", data: { messageId: "platform-out-2" } });
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -690,20 +636,17 @@ describe("send_message to an agent by name", () => {
 
   it("sends to the agent the name resolves to", async () => {
     const adapter = makeAdapter("agents");
+    const chats = host();
     const agentNames = names({ status: "found", agentId: ATLAS });
 
     await executeSendMessage(
       adapter,
       { channel: "agents", to: "Atlas", text: "hi" },
-      { agentNames },
+      { agentNames, chats },
     );
 
     expect(agentNames.resolve).toHaveBeenCalledWith("Atlas");
-    expect(adapter.send).toHaveBeenCalledWith(
-      "agents",
-      ATLAS,
-      expect.objectContaining({ text: "hi" }),
-    );
+    expectSent(chats, "agents", ATLAS);
   });
 
   it("refuses a name two agents share, naming each with its id", async () => {
@@ -763,20 +706,22 @@ describe("send_message to an agent by name", () => {
 
   it("sends to an id given as `to` in any case without looking it up", async () => {
     const adapter = makeAdapter("agents");
+    const chats = host();
     const agentNames = names({ status: "none" });
 
     await executeSendMessage(
       adapter,
       { channel: "agents", to: ATLAS.toUpperCase(), text: "hi" },
-      { agentNames },
+      { agentNames, chats },
     );
 
     expect(agentNames.resolve).not.toHaveBeenCalled();
-    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+    expectSent(chats, "agents", ATLAS);
   });
 
   it("reads a padded guardian alias as the alias, as the approval card does", async () => {
     const adapter = makeAdapter("agents");
+    const chats = host();
     const agentNames = names({ status: "found", agentId: ATLAS });
     const personMappingRepo = {
       findByBondLevel: rs.fn(async () => [
@@ -787,11 +732,11 @@ describe("send_message to an agent by name", () => {
     await executeSendMessage(
       adapter,
       { channel: "agents", to: " guardian", text: "hi" },
-      { agentNames, personMappingRepo },
+      { agentNames, personMappingRepo, chats },
     );
 
     expect(agentNames.resolve).not.toHaveBeenCalled();
-    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+    expectSent(chats, "agents", ATLAS);
   });
 
   it("says what `to` takes on agents when it is empty", async () => {
@@ -848,7 +793,6 @@ describe("send_message through Chats", () => {
       ensureChannelConversation: rs.fn(),
       addMessage: rs.fn(),
       promoteMessageToUser: rs.fn(),
-      recordOutboundMessage: rs.fn(),
       send: rs.fn(async () => ({ messageId: "platform-out-1" })),
       sendEmail: rs.fn(async () => ({ messageId: "msg_2", threadId: "t1" })),
     };
@@ -868,7 +812,6 @@ describe("send_message through Chats", () => {
 
     expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
     expect(adapter.send).not.toHaveBeenCalled();
-    expect(chats.recordOutboundMessage).not.toHaveBeenCalled();
     expect(chats.ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "discord", threadId: "thread-1", agentName: "main" }),
     );
@@ -1089,17 +1032,19 @@ describe("send_message through Chats", () => {
     );
   });
 
-  it("falls back to the channel and records the line when the host offers no send", async () => {
-    const adapter = makeAdapter();
-    const { send: _send, sendEmail: _sendEmail, ...legacy } = chatsWithWrites();
+  it("refuses an email on a host that offers no sendEmail, and sends nothing", async () => {
+    const adapter = makeAdapter("email");
+    const { send: _send, sendEmail: _sendEmail, ...older } = chatsWithWrites();
 
-    await executeSendMessage(
-      adapter,
-      { channel: "discord", threadId: "thread-1", text: "hi" },
-      { chats: legacy },
-    );
-
-    expect(adapter.send).toHaveBeenCalledTimes(1);
-    expect(legacy.recordOutboundMessage).toHaveBeenCalledTimes(1);
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "email", to: "a@example.com", text: "hi" },
+        {
+          chats: older,
+        },
+      ),
+    ).rejects.toThrow('This host cannot record an email sent as "email". No email was sent.');
+    expect(adapter.send).not.toHaveBeenCalled();
   });
 });

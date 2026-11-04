@@ -13,13 +13,8 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import {
-  type ChannelMessage,
-  type ChatId,
-  ChannelSendRefused,
-  type OutgoingMessage,
-} from "@rome-os/app-runtime";
-import { refuseUnshownParts } from "../outbound/send-refusals.js";
+import { type ChannelMessage, type ChatId, SendRefused } from "@rome-os/app-runtime";
+import { messageAsText, refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -100,13 +95,6 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
     thread: { kind: "dm" },
     raw: message,
   };
-}
-
-function outgoingText(message: OutgoingMessage): string {
-  if (message.text?.trim()) return message.text;
-  return (message.parts ?? [])
-    .flatMap((part) => (part.type === "text" ? [part.content] : []))
-    .join("\n\n");
 }
 
 /** Whether Cloud refused the instance token itself, which no retry fixes: the
@@ -268,7 +256,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       // Cloud carries text and data only. Refusing here keeps a partial send
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
-        throw new ChannelSendRefused(
+        throw new SendRefused(
           "attachment_unsupported",
           "Agent messages carry text only; send the files another way.",
         );
@@ -277,8 +265,8 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       if (!isAgentId(chatId)) {
         throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
-      const text = outgoingText(msg);
-      if (!text.trim()) throw new ChannelSendRefused("empty", "An agent message needs text.");
+      const text = messageAsText(msg);
+      if (!text.trim()) throw new SendRefused("empty", "An agent message needs text.");
       try {
         const sent = await client.send({
           to: chatId,

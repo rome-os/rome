@@ -13,7 +13,7 @@ import type {
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
 import { ChannelNotConnected } from "../chats/connected-accounts/connected-account.js";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -25,6 +25,8 @@ import { appChats } from "./app-chats.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { ChatAdapters, chatAt } from "./chat-adapter.js";
 import { chatKey } from "./chat-ids.js";
+import { messageAsText } from "./outbound/send-refusals.js";
+import { widgetText } from "../chats/widget-text.js";
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
 const SECOND_BOT: Account = { platform: "telegram", id: "rome-bot-2" };
@@ -344,7 +346,7 @@ describe("appChats", () => {
     it("hands a part only the host makes to the channel, which refuses it, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+        throw new SendRefused("part_unsupported", "telegram shows text only");
       };
       const forged = { type: "routine_draft_card", draft: {} } as never;
 
@@ -377,10 +379,34 @@ describe("appChats", () => {
       expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([card]);
     });
 
+    it("hands a text-only connection a card's plain-text line once, in its place", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      const card = {
+        type: "approval_card",
+        approvalId: "ap-1",
+        actionName: "deploy",
+        preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+        status: "pending",
+      } as const;
+
+      await chats.send(group, {
+        parts: [
+          { type: "text", content: "Before I go on:" },
+          card,
+          { type: "text", content: "Back soon." },
+        ],
+      });
+
+      const line = widgetText(card) ?? "";
+      expect(messageAsText(sent[0]?.message ?? {})).toBe(
+        ["Before I go on:", line, "Back soon."].join("\n\n"),
+      );
+    });
+
     it("answers what the channel refuses as unsupported, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+        throw new SendRefused("part_unsupported", "telegram shows text only");
       };
 
       expect(

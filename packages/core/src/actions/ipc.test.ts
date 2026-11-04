@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { context, ROOT_CONTEXT, trace, type Context, type SpanContext } from "@opentelemetry/api";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
-import { ChannelSendRefused, isChannelSendRefused } from "@rome-os/app-runtime";
+import { SendRefused, isSendRefused } from "@rome-os/app-runtime";
 import { installTestSpanHarness, type SpanHarness } from "../test/helpers.js";
 
 let harness: SpanHarness;
@@ -116,24 +116,24 @@ describe("IpcRpc trace context", () => {
 });
 
 describe("IpcRpc errors", () => {
-  it("answers a channel's refusal as a ChannelSendRefused with its reason", async () => {
+  it("answers a channel's refusal as a SendRefused with its reason", async () => {
     const { main, worker } = linkedPeers(ROOT_CONTEXT);
     main.handle("channels.send", async () => {
-      throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+      throw new SendRefused("part_unsupported", "telegram shows text only");
     });
     main.handle("fails", async () => {
       throw new Error("boom");
     });
 
     const refused = await worker.call("channels.send", {}).catch((error: unknown) => error);
-    expect(isChannelSendRefused(refused)).toBe(true);
+    expect(isSendRefused(refused)).toBe(true);
     expect(refused).toMatchObject({
       reason: "part_unsupported",
       message: "telegram shows text only",
     });
 
     const failed = await worker.call("fails", {}).catch((error: unknown) => error);
-    expect(isChannelSendRefused(failed)).toBe(false);
+    expect(isSendRefused(failed)).toBe(false);
     expect(failed).toMatchObject({ message: "boom" });
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE `oauth_pending_attempts` ADD `intent` text;

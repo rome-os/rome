@@ -4,7 +4,12 @@ import type {
   ActionInvocationObserver,
   ActionRuntimeEvent,
 } from "./runtime-events.js";
-import type { ActionWorkerPayload } from "./worker-protocol.js";
+import {
+  fromWireError,
+  toWireError,
+  type ActionWorkerPayload,
+  type WireError,
+} from "./worker-protocol.js";
 import type { ActionResult } from "./types.js";
 import { ActionCancelledError, ActionWorkerExitError } from "./action-errors.js";
 import { getWorkerIpc, type IpcCallContext, type IpcInboundStream, type IpcRpc } from "./ipc.js";
@@ -25,7 +30,7 @@ export interface DetachedActionDispatchRequest {
 
 export type DelegatedActionRunOutcome =
   | { type: "result"; result: ActionResult }
-  | { type: "error"; error: { name: string; message: string } }
+  | { type: "error"; error: WireError }
   | { type: "cancelled"; message: string }
   | { type: "worker_exit"; message: string };
 
@@ -195,7 +200,7 @@ export class ActionWorkerCoordinator {
     if (error.name === "ActionWorkerExitError") {
       return { type: "worker_exit", message: error.message };
     }
-    return { type: "error", error: { name: error.name, message: error.message } };
+    return { type: "error", error: toWireError(error) };
   }
 }
 
@@ -348,9 +353,7 @@ export class DelegatedActionClient implements ActionSubprocessRunner {
       case "worker_exit":
         throw new ActionWorkerExitError(outcome.message);
       case "error": {
-        const error = new Error(outcome.error.message);
-        error.name = outcome.error.name;
-        throw error;
+        throw fromWireError(outcome.error);
       }
     }
   }

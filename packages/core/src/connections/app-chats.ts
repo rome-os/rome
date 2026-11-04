@@ -12,12 +12,8 @@
 // Nothing wires this to apps yet: the Chats switch does, once chats are
 // named by Chats' ids.
 
-import {
-  type Account,
-  type Channel,
-  type ChatId,
-  isChannelSendRefused,
-} from "@rome-os/app-runtime";
+import { partsWithText } from "../chats/storage/message.js";
+import { type Account, type Channel, type ChatId, isSendRefused } from "@rome-os/app-runtime";
 import {
   type ChatMessage,
   type ChatRef as SdkChatRef,
@@ -36,7 +32,6 @@ import {
 import { DeliveryFailure } from "./sending.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
-import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import { DASHBOARD_PLATFORM } from "./send.js";
@@ -97,11 +92,12 @@ async function send(
   // A part the channel does not show, a host-only one among them, is the
   // adapter's to refuse.
   const given = out.parts ?? [];
-  // The text an adapter shows: `text` when it says anything, else the text
-  // parts. A message with no words, such as a card, goes to the adapter as
-  // it is: one that cannot show it refuses it, and so does one given nothing.
+  // The text an adapter shows: `text` when it says anything, else the parts,
+  // which the adapter reads in their order, a widget's line in its place. A
+  // message with no words goes to the adapter as it is: one that cannot show
+  // it refuses it, and so does one given nothing.
   const said = out.text?.trim() ? out.text : undefined;
-  const text = said ?? partsText(given);
+  const text = said ?? "";
   const parts = recordedParts(out, given, said);
   const outbound = {
     text,
@@ -167,7 +163,7 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
     return await deliver();
   } catch (error) {
     if (error instanceof SendError) throw error;
-    if (isChannelSendRefused(error)) throw new SendError("unsupported", error.message);
+    if (isSendRefused(error)) throw new SendError("unsupported", error.message);
     if (
       error instanceof ChannelNotConnected ||
       (error instanceof DeliveryFailure && error.kind === "unauthorized")
@@ -429,10 +425,7 @@ function recordedParts(
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
-  const said: MessagePart[] =
-    text === undefined
-      ? [...given]
-      : [{ type: "text", content: text }, ...given.filter((part) => part.type !== "text")];
+  const said = partsWithText(text, given);
   return notes.length ? [...said, { type: "text", content: notes.join("\n") }] : said;
 }
 

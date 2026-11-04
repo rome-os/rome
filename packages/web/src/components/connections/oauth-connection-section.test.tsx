@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import * as sonner from "sonner";
 import i18n from "@/i18n";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
 import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-cards";
@@ -215,6 +216,27 @@ describe("OAuthConnectionSection", () => {
       "/api/connections/conn-github/grants/user/setup",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("says so when a reconnect reached another account and ended the connection", async () => {
+    const toast = rs.spyOn(sonner, "toast").mockImplementation(() => "t");
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            state: {
+              status: "done",
+              grant: { connectionId: "conn-github-2", ended: "conn-github" },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const onRefresh = rs.fn();
+    renderSection(githubCard("authorized", { activeSetupCid: "setup-reconnect" }), { onRefresh });
+
+    await waitFor(() => expect(toast).toHaveBeenCalledTimes(1));
+    expect(toast.mock.calls[0]![0]).toContain("Rome ended the connection to the earlier account");
   });
 
   it("does NOT auto-forward on a passive reattach; offers manual resume + cancel", async () => {

@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   Page,
@@ -41,8 +41,11 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import {
   type ApiConnection,
   CONNECTIONS_REFRESH_INTERVAL_MS,
+  fetchConnectedAccounts,
   fetchConnections,
+  unlinkConnectedAccount,
 } from "@/lib/connections-api";
+import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
 import { serviceLabel } from "@/lib/connection-cards";
 import { fetchJson } from "@/lib/fetch-json";
 import { Avatar } from "../people/avatar";
@@ -53,7 +56,9 @@ import { BackLink } from "./back-link";
 import { CONNECT_PATH, ConnectAccount } from "./connect-account";
 import {
   type AgentListing,
+  CONNECTED_ACCOUNTS_KEY,
   CONNECTIONS_KEY,
+  type DisconnectedAccount,
   type Envoy,
   type EnvoyAccount,
   buildEnvoys,
@@ -64,7 +69,9 @@ import {
  * accounts it speaks through. Connected accounts with no agent are listed
  * apart, each with a picker that links an agent. An agent's Settings switch or
  * unlink the agent of each of its accounts. Every such row also disconnects
- * its account. Connect an account picks the agent first, then the platform.
+ * its account. A disconnected account keeps its agent and is listed under it
+ * as disconnected, and can be unlinked there. Connect an account picks the
+ * agent first, then the platform.
  */
 export default function EnvoysPage() {
   const open = useRef(true);
@@ -109,6 +116,7 @@ const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent
 
 type EnvoysData = ReturnType<typeof buildEnvoys> & {
   connections: ApiConnection[];
+  connectedAccounts: ConnectedAccountEntry[];
   agentsPending: boolean;
   agentsFailed: boolean;
 };
@@ -122,6 +130,13 @@ function useEnvoys() {
     staleTime: 0,
     refetchInterval: CONNECTIONS_REFRESH_INTERVAL_MS,
   });
+  // Only for the disconnected accounts, so the page renders without them.
+  const connectedAccounts = useQuery({
+    queryKey: CONNECTED_ACCOUNTS_KEY,
+    queryFn: fetchConnectedAccounts,
+    staleTime: 0,
+    refetchInterval: CONNECTIONS_REFRESH_INTERVAL_MS,
+  });
   const agents = useQuery({
     queryKey: ["envoys", "agents"],
     staleTime: 60_000,
@@ -132,8 +147,13 @@ function useEnvoys() {
     // Descriptions are optional, so the list renders without the agents.
     data: connections.data
       ? {
-          ...buildEnvoys(connections.data, agents.data?.agents ?? null),
+          ...buildEnvoys(
+            connections.data,
+            agents.data?.agents ?? null,
+            connectedAccounts.data ?? [],
+          ),
           connections: connections.data,
+          connectedAccounts: connectedAccounts.data ?? [],
           agentsPending: agents.isPending,
           agentsFailed: agents.isError,
         }
@@ -266,6 +286,8 @@ function EnvoyCard({ envoy }: { envoy: Envoy }) {
               <CardTitle className="font-mono">{name}</CardTitle>
               <CardDescription>
                 {t("accountCount", { count: envoy.accounts.length })}
+                {envoy.disconnected.length > 0 &&
+                  ` · ${t("disconnected.count", { count: envoy.disconnected.length })}`}
               </CardDescription>
             </div>
           </div>
@@ -350,6 +372,126 @@ function AccountAgentRow({
       >
         <AccountSummary account={account} linked />
       </AgentChange>
+    </div>
+  );
+}
+
+/** A disconnected account as a row shows it: no connection reaches it, and it
+ *  keeps its agent. */
+function DisconnectedSummary({ account }: { account: DisconnectedAccount }) {
+  return (
+    <>
+      <ConnectionBrandBadge connection={account.platform} />
+      <ListRowContent>
+        <div className="truncate font-medium">{account.name}</div>
+        <div className="truncate text-aux text-muted-foreground">
+          {serviceLabel(account.platform)}
+        </div>
+      </ListRowContent>
+    </>
+  );
+}
+
+function DisconnectedBadge() {
+  const { t } = useTranslation("envoys");
+  return <Badge variant="outline">{t("disconnected.badge")}</Badge>;
+}
+
+/** A disconnected account with Unlink, which asks first. Linking another
+ *  agent waits until the account is connected again. */
+function DisconnectedAgentRow({
+  account,
+  onUnlinked,
+}: {
+  account: DisconnectedAccount;
+  onUnlinked: () => void;
+}) {
+  const { t } = useTranslation("envoys");
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const unlink = useMutation({
+    mutationFn: () =>
+      unlinkConnectedAccount(
+        { platform: account.platform, id: account.accountId },
+        t("change.failed"),
+      ),
+    // The account may have been connected again meanwhile, so the connections
+    // are stale too.
+    onSuccess: () =>
+      Promise.all(
+        [CONNECTED_ACCOUNTS_KEY, CONNECTIONS_KEY, ["connection-detail", "connections"]].map(
+          (queryKey) => queryClient.invalidateQueries({ queryKey }),
+        ),
+      ),
+  });
+  return (
+    <div className="flex flex-col gap-3 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <DisconnectedSummary account={account} />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <DisconnectedBadge />
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={unlink.isPending}
+            aria-label={t("disconnected.unlinkLabel", { account: account.name })}
+            onClick={() => {
+              unlink.reset();
+              setConfirming(true);
+            }}
+          >
+            {t("change.unlink")}
+          </Button>
+        </div>
+      </div>
+      <p className="text-aux text-muted-foreground">{t("disconnected.description")}</p>
+      {confirming && (
+        <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
+          <p>
+            <AgentText
+              k="disconnected.unlinkConfirm"
+              values={{ account: account.name, agent: agentLabel(account.agent) }}
+            />
+          </p>
+          {unlink.error && (
+            <FormError>
+              {unlink.error instanceof Error && unlink.error.message
+                ? unlink.error.message
+                : t("change.failed")}
+            </FormError>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={unlink.isPending}
+              onClick={() =>
+                unlink.mutateAsync().then(
+                  () => {
+                    setConfirming(false);
+                    onUnlinked();
+                  },
+                  () => {},
+                )
+              }
+            >
+              {t("change.unlink")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={unlink.isPending}
+              onClick={() => {
+                unlink.reset();
+                setConfirming(false);
+              }}
+            >
+              {t("change.cancel")}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -462,6 +604,12 @@ function Overview({ envoy }: { envoy: Envoy }) {
           {envoy.accounts.map((account) => (
             <AccountRow key={account.connectionId} account={account} />
           ))}
+          {envoy.disconnected.map((account) => (
+            <ListRow key={`${account.platform}:${account.accountId}`}>
+              <DisconnectedSummary account={account} />
+              <DisconnectedBadge />
+            </ListRow>
+          ))}
         </List>
         <div className="flex flex-wrap gap-2">
           <ConnectButton primary={false} agent={envoy.agent} />
@@ -479,8 +627,12 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
   // accounts that are left rather than the count when they started.
   const keepsAccounts = () => {
     const connections = queryClient.getQueryData<ApiConnection[]>(CONNECTIONS_KEY);
-    if (!connections) return envoy.accounts.length > 1;
-    return buildEnvoys(connections, null).envoys.some((other) => other.agent === envoy.agent);
+    if (!connections) return envoy.accounts.length + envoy.disconnected.length > 1;
+    const connectedAccounts =
+      queryClient.getQueryData<ConnectedAccountEntry[]>(CONNECTED_ACCOUNTS_KEY) ?? [];
+    return buildEnvoys(connections, null, connectedAccounts).envoys.some(
+      (other) => other.agent === envoy.agent,
+    );
   };
   return (
     <Card className="max-w-3xl">
@@ -501,6 +653,15 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
               navigate(agent ? `${envoyPath(agent)}/settings` : "/envoys");
             }}
             onDisconnected={() => {
+              if (!keepsAccounts()) navigate("/envoys");
+            }}
+          />
+        ))}
+        {envoy.disconnected.map((account) => (
+          <DisconnectedAgentRow
+            key={`${account.platform}:${account.accountId}`}
+            account={account}
+            onUnlinked={() => {
               if (!keepsAccounts()) navigate("/envoys");
             }}
           />

@@ -1,4 +1,5 @@
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
+import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../connections/kinds/email/email-control.js";
@@ -16,6 +17,8 @@ import type {
   UpdateChatSettingsInput,
   ResetChatSettingsInput,
   ListChatSettingsInput,
+  PreviewPayload,
+  ThreadContext,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
@@ -43,6 +46,17 @@ const AccountOrChannel = z.union([
   z.string().min(1),
   z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
 ]);
+
+// An approval's card, which a worker asks main to put in the conversation the
+// approval came from, so it is recorded in that chat as main records it.
+const ApprovalCardParams = z.object({
+  approvalId: z.string(),
+  actionName: z.string(),
+  preview: z.custom<PreviewPayload>((val) => typeof val === "object" && val !== null).optional(),
+  channelContext: z
+    .custom<ThreadContext>((val) => typeof val === "object" && val !== null)
+    .optional(),
+});
 
 const ChannelsSendParams = z.object({
   channel: AccountOrChannel,
@@ -288,6 +302,9 @@ export interface WorkerRpcServices {
   appConnections: AppConnectionBrokerPort;
   /** Resolve the owner from the action that the Core IPC boundary captured. */
   appIdForAction: (actionName: string) => string | null;
+  /** Puts an approval's card in the conversation it came from, recorded in
+   *  that chat (`approvals.sendCard`). */
+  sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
 }
 
 export class WorkerRpcServer {
@@ -301,6 +318,10 @@ export class WorkerRpcServer {
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
         "channels.send": (params) => this.handleChannelsSend(params),
+        "approvals.sendCard": (params) =>
+          this.services.sendApprovalCard(
+            parseParams("approvals.sendCard", ApprovalCardParams, params),
+          ),
         "channels.query": (params) => this.handleChannelsQuery(params),
         "agentNames.resolve": (params) => {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);

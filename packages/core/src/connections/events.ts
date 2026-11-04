@@ -18,7 +18,8 @@ export interface ConnectionRef {
  *  - `connected`: the connection was saved for the first time. `profile` and
  *    `account` are the grant's, and absent when it was minted holding no grant.
  *  - `fixed`: a grant replaced the grant of a connection that already
- *    existed. `account` is the account the new grant reaches, when it names one.
+ *    existed. `profile` is the new grant's profile, and `account` the account
+ *    it reaches, when it names one.
  *  - `broken`: the platform stopped accepting the grant. The connection keeps
  *    its account, and Rome neither hears nor speaks through it until a fix.
  *  - `revoked`: the connection's grant was revoked, so it reaches no account
@@ -31,15 +32,15 @@ export type ConnectionEvent =
       profile?: ProfileRecord;
       account?: GrantAccount;
     }
-  | { kind: "fixed"; connection: ConnectionRef; account?: GrantAccount }
+  | {
+      kind: "fixed";
+      connection: ConnectionRef;
+      profile?: ProfileRecord;
+      account?: GrantAccount;
+    }
   | { kind: "broken"; connection: ConnectionRef; reason: string }
   | { kind: "revoked"; connection: ConnectionRef }
-  | {
-      kind: "disconnected";
-      connection: ConnectionRef;
-      /** The account the connection reached, when its grant named one. */
-      account?: GrantAccount;
-    };
+  | { kind: "disconnected"; connection: ConnectionRef };
 
 /** A subscriber to connection events. It runs synchronously inside the
  *  transaction, and a throw rolls the connection's write back. */

@@ -7,6 +7,7 @@ import { createLogger } from "../../../logger.js";
 import {
   ALL_ATTACHMENT_TYPES,
   attachmentsToSend,
+  refuseReplies,
   textToSend,
 } from "../../outbound/send-refusals.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
@@ -1217,6 +1218,7 @@ export class WechatAdapter {
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    refuseReplies("wechat", message);
     const text = textToSend("wechat", message);
     const attachments = await attachmentsToSend("wechat", message, {
       types: ALL_ATTACHMENT_TYPES,

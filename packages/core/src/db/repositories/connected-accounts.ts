@@ -2,10 +2,11 @@
 // it. Vocabulary: docs/domains/chats.md#connected-account.
 
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, type SQL } from "drizzle-orm";
 import { createLogger } from "../../logger.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import {
+  accountProfiles,
   channels,
   connectedAccounts,
   connectedAccountsUnplaced,
@@ -24,6 +25,18 @@ export interface AccountKey {
   accountId: string;
 }
 
+/** One connected account as the dashboard lists it. */
+export interface ConnectedAccountRow extends AccountKey {
+  /** Canonical id of the account's agent, or null for none. */
+  agent: string | null;
+  /** The connection that reaches the account, or null while it is
+   *  disconnected. */
+  connectionId: string | null;
+  /** The name the account's platform last gave it, when Rome has learned
+   *  one. */
+  name: string | null;
+}
+
 /** A link asked of a connection Rome no longer holds, or of one whose grant
  *  has not reported its account yet. */
 export class ConnectedAccountNotFound extends Error {
@@ -39,8 +52,10 @@ export class ConnectedAccountNotFound extends Error {
  * by the connection that reaches it, and the account is read from that
  * connection's grant, else, for a grant that names none (a revoked one), from
  * the account its channel record was claimed for. A connection that reaches
- * no account that way has no connected account. Which connections take an agent is the caller's
- * rule, so `link` stores any agent it is given.
+ * no account that way has no connected account. Which connections take an
+ * agent is the caller's rule, so `link` stores any agent it is given. A
+ * connected account outlives the connection that reached it: disconnecting
+ * leaves it, agent kept, and connecting the same account again finds it.
  */
 export class ConnectedAccountsRepository {
   constructor(private readonly db: DrizzleDb) {}
@@ -70,22 +85,6 @@ export class ConnectedAccountsRepository {
       .where(and(eq(channels.connectionId, connectionId), isNotNull(channels.platformAccountId)))
       .get();
     return claimed?.accountId ? { platform: claimed.platform, accountId: claimed.accountId } : null;
-  }
-
-  /** Whether a grant, as `exec` sees it, reaches `account`. */
-  grantReaches(exec: Exec, account: AccountKey): boolean {
-    return (
-      exec
-        .select({ custody: connectionGrants.custody })
-        .from(connectionGrants)
-        .where(
-          and(
-            eq(connectionGrants.platform, account.platform),
-            eq(connectionGrants.accountId, account.accountId),
-          ),
-        )
-        .get() !== undefined
-    );
   }
 
   /** Make the connected account for the account `connectionId` reaches, in
@@ -188,11 +187,74 @@ export class ConnectedAccountsRepository {
     });
   }
 
-  /** Remove `account`'s connected account, in `exec` (the transaction that
-   *  ends the connection that reached it). */
-  remove(exec: Exec, account: AccountKey): void {
-    exec
-      .delete(connectedAccounts)
+  /** Every connected account with its agent, and the connection that
+   *  reaches it, or null for one that is disconnected. */
+  all(): ConnectedAccountRow[] {
+    return this.rows();
+  }
+
+  /** The connected account for `account`, or null when Rome has none. */
+  get(account: AccountKey): ConnectedAccountRow | null {
+    return (
+      this.rows(
+        and(
+          eq(connectedAccounts.platform, account.platform),
+          eq(connectedAccounts.accountId, account.accountId),
+        ),
+      )[0] ?? null
+    );
+  }
+
+  private rows(where?: SQL): ConnectedAccountRow[] {
+    const accounts = this.db
+      .select({
+        platform: connectedAccounts.platform,
+        accountId: connectedAccounts.accountId,
+        agent: connectedAccounts.agent,
+        displayName: accountProfiles.displayName,
+        handle: accountProfiles.handle,
+      })
+      .from(connectedAccounts)
+      .leftJoin(
+        accountProfiles,
+        and(
+          eq(accountProfiles.platform, connectedAccounts.platform),
+          eq(accountProfiles.accountId, connectedAccounts.accountId),
+        ),
+      )
+      .where(where)
+      .orderBy(connectedAccounts.platform, connectedAccounts.accountId)
+      .all();
+    return accounts.map(({ displayName, handle, ...account }) => ({
+      ...account,
+      connectionId: this.connectionTo(account),
+      name: displayName || handle || null,
+    }));
+  }
+
+  /** The connection that reaches `account`, or null when none does. */
+  connectionTo(account: AccountKey): string | null {
+    return (
+      this.db
+        .select({ id: connections.id })
+        .from(connectionGrants)
+        .innerJoin(connections, eq(connections.id, connectionGrants.custody))
+        .where(
+          and(
+            eq(connectionGrants.platform, account.platform),
+            eq(connectionGrants.accountId, account.accountId),
+          ),
+        )
+        .get()?.id ?? null
+    );
+  }
+
+  /** Unlink the agent of `account`, connected or not. Returns false when Rome
+   *  has no connected account for it. */
+  unlink(account: AccountKey): boolean {
+    const result = this.db
+      .update(connectedAccounts)
+      .set({ agent: null })
       .where(
         and(
           eq(connectedAccounts.platform, account.platform),
@@ -200,5 +262,6 @@ export class ConnectedAccountsRepository {
         ),
       )
       .run();
+    return result.changes > 0;
   }
 }

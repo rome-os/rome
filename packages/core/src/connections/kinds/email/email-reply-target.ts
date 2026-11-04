@@ -69,7 +69,8 @@ export async function resolveEmailReplyTarget(
       reject(
         new Error(
           `Looking up email thread "${threadId}" took longer than ${budgetMs / 1000}s. ` +
-            "No email was sent. Retry, or supply a provider message ID as `replyToMessageId`.",
+            "No email was sent. Retry, or name the email to answer in `inReplyToMessageId` " +
+            "(`replyToMessageId` in send_message).",
         ),
       );
     }, budgetMs);
@@ -129,7 +130,8 @@ async function scan(
   if (state.sentFallback) return { messageId: state.sentFallback, outbound: true, complete: true };
   throw new Error(
     `Cannot resolve email thread "${threadId}" within the reply lookup limits. ` +
-      "No email was sent. Supply a provider message ID as `replyToMessageId`, " +
+      "No email was sent. Name the email to answer in `inReplyToMessageId` " +
+      "(`replyToMessageId` in send_message), " +
       "or omit `threadId` and set `to` to start a new email.",
   );
 }

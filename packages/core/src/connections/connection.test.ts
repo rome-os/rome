@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { brokenGrant, givenGrant, refuseDifferentAccount, renewedGrant } from "./connection.js";
-import { DifferentAccountError } from "./errors.js";
+import { brokenGrant, givenGrant, reachesAnotherAccount, renewedGrant } from "./connection.js";
 import { NO_GRANT } from "./grant.js";
 import type { ConnectionDescriptor } from "./types.js";
 
@@ -14,25 +13,25 @@ const account = { platform: "telegram", accountId: "100" };
 const grantEpoch = "grant-1";
 
 describe("connection rules", () => {
-  it("refuses a fix that reaches another account", () => {
+  it("tells a fix that reaches another account from one that reaches the same", () => {
     const held = givenGrant(now, credential, grantEpoch, { id: 100 }, account);
 
-    expect(() =>
-      refuseDifferentAccount(descriptor, "c1", held, { platform: "telegram", accountId: "200" }),
-    ).toThrow(DifferentAccountError);
-    expect(() => refuseDifferentAccount(descriptor, "c1", held, account)).not.toThrow();
+    expect(
+      reachesAnotherAccount(descriptor, held, { platform: "telegram", accountId: "200" }),
+    ).toBe(true);
+    expect(reachesAnotherAccount(descriptor, held, account)).toBe(false);
   });
 
-  it("refuses by the profile's account when the held grant stored none", () => {
+  it("reads the profile's account when the held grant stored none", () => {
     const held = givenGrant(now, credential, grantEpoch, { id: 100 });
 
-    expect(() =>
-      refuseDifferentAccount(descriptor, "c1", held, { platform: "telegram", accountId: "200" }),
-    ).toThrow(DifferentAccountError);
+    expect(
+      reachesAnotherAccount(descriptor, held, { platform: "telegram", accountId: "200" }),
+    ).toBe(true);
   });
 
-  it("never refuses a fix of a revoked grant", () => {
-    expect(() => refuseDifferentAccount(descriptor, "c1", NO_GRANT, account)).not.toThrow();
+  it("finds no other account behind a revoked grant", () => {
+    expect(reachesAnotherAccount(descriptor, NO_GRANT, account)).toBe(false);
   });
 
   it("breaks a grant in place, keeping its credential and account", () => {

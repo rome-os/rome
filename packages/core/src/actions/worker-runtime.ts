@@ -45,12 +45,11 @@ import {
   ChannelsServiceProxy,
   AppConnectionsProxy,
 } from "./service-proxies.js";
+import { callMain } from "./worker-rpc-client.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
 import { ChatRepository } from "../chats/chat-repository.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -61,7 +60,6 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import { sendApprovalCard } from "./approval-card.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
@@ -148,7 +146,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     speakers: appSpeakers,
     // An app's chats are read and written in Chats here too. The worker holds
     // no channels: a speaker sends through main's, which records nothing, so
@@ -185,7 +182,15 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
-      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
+      // Main sends the card, on the connections it records sends on.
+      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
+        await callMain<void>("approvals.sendCard", {
+          approvalId,
+          actionName,
+          ...(preview ? { preview } : {}),
+          ...(channelContext ? { channelContext } : {}),
+        });
+      },
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);

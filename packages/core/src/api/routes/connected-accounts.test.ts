@@ -27,12 +27,16 @@ describe("connected account routes", () => {
     const held: Array<{ id: string; connectionKind: string }> = [];
     // Connect as the registry does: the connection, its channel and its
     // connected account in one go.
-    const connect = (connection: { id: string; connectionKind: string }, channel?: string) => {
+    const connect = (
+      connection: { id: string; connectionKind: string },
+      channel?: string,
+      account = `acct-${connection.id}`,
+    ) => {
       ledger.save(db, {
         ...connection,
         label: connection.connectionKind,
         createdAt: NOW,
-        grant: grantReaching(platformOf(connection.connectionKind), `acct-${connection.id}`),
+        grant: grantReaching(platformOf(connection.connectionKind), account),
       });
       records.claim(db, connection, NOW, channel ? { id: channel } : {});
       accounts.add(db, connection.id);
@@ -66,7 +70,21 @@ describe("connected account routes", () => {
         headers,
         body: JSON.stringify({ agent }),
       });
-    return { accounts, connect, app, link, changed };
+    // Disconnect as the registry does: the connection and its grant go, and
+    // the connected account stays.
+    const disconnect = (id: string) => ledger.remove(db, id);
+    const linkAccount = (
+      platform: string,
+      accountId: string,
+      agent: string | null,
+      headers: Record<string, string> = SAME_ORIGIN,
+    ) =>
+      app.request(`/connected-accounts/${platform}/${encodeURIComponent(accountId)}/agent`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agent }),
+      });
+    return { accounts, connect, disconnect, app, link, linkAccount, changed };
   }
 
   it("links an agent to a second account of a platform and keeps the first", async () => {
@@ -187,5 +205,104 @@ describe("connected account routes", () => {
 
     expect(res.status).toBe(403);
     expect(accounts.agentOf("c1")).toBe("other:agent");
+  });
+
+  it("lists every connected account, a disconnected one with its agent and no connection", async () => {
+    const { connect, disconnect, app, link } = setup();
+    connect({ id: "c1", connectionKind: "feishu" }, "feishu");
+    connect({ id: "c2", connectionKind: "telegram" }, "telegram");
+    await link("c1", "sales:agent");
+    disconnect("c1");
+
+    const res = await app.request("/connected-accounts");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      accounts: [
+        {
+          account: { platform: "feishu", id: "acct-c1" },
+          name: null,
+          agent: "sales:agent",
+          connection: null,
+        },
+        {
+          account: { platform: "telegram", id: "acct-c2" },
+          name: null,
+          agent: null,
+          connection: "c2",
+        },
+      ],
+    });
+  });
+
+  it("links, switches and unlinks a connected account named by its account", async () => {
+    const { accounts, connect, linkAccount, changed } = setup({
+      "sales:agent": "sales:agent",
+      support: "support:agent",
+    });
+    connect({ id: "c1", connectionKind: "telegram" }, "telegram");
+
+    const linked = await linkAccount("telegram", "acct-c1", "sales:agent");
+    expect(linked.status).toBe(200);
+    expect(await linked.json()).toEqual({
+      account: {
+        account: { platform: "telegram", id: "acct-c1" },
+        name: null,
+        agent: "sales:agent",
+        connection: "c1",
+      },
+    });
+    expect((await linkAccount("telegram", "acct-c1", "support")).status).toBe(200);
+    expect(accounts.agentOf("c1")).toBe("support:agent");
+    expect((await linkAccount("telegram", "acct-c1", null)).status).toBe(200);
+    expect(accounts.agentOf("c1")).toBeNull();
+    expect(changed).toEqual(["c1", "c1", "c1"]);
+  });
+
+  it("unlinks a disconnected account, and refuses it a new agent until it is connected again", async () => {
+    const { accounts, connect, disconnect, link, linkAccount, changed } = setup();
+    connect({ id: "c1", connectionKind: "telegram" }, "telegram");
+    await link("c1", "sales:agent");
+    disconnect("c1");
+    changed.length = 0;
+
+    expect((await linkAccount("telegram", "acct-c1", "sales:agent")).status).toBe(409);
+    const unlinked = await linkAccount("telegram", "acct-c1", null);
+    expect(unlinked.status).toBe(200);
+    expect(await unlinked.json()).toMatchObject({ account: { agent: null, connection: null } });
+    expect(changed).toEqual([]);
+    expect(accounts.all()).toMatchObject([{ accountId: "acct-c1", agent: null }]);
+  });
+
+  it("finds a disconnected account's agent when the same account is connected again", async () => {
+    const { accounts, connect, disconnect, link } = setup();
+    connect({ id: "c1", connectionKind: "telegram" }, "telegram");
+    await link("c1", "sales:agent");
+    disconnect("c1");
+
+    connect({ id: "c2", connectionKind: "telegram" }, undefined, "acct-c1");
+
+    expect(accounts.agentOf("c2")).toBe("sales:agent");
+    expect(accounts.all()).toMatchObject([{ accountId: "acct-c1", connectionId: "c2" }]);
+  });
+
+  it("answers 404 for an account Rome has no connected account for", async () => {
+    const { linkAccount } = setup();
+
+    expect((await linkAccount("telegram", "nobody", "sales:agent")).status).toBe(404);
+    expect((await linkAccount("telegram", "nobody", null)).status).toBe(404);
+  });
+
+  it("rejects a cross-site link by account", async () => {
+    const { accounts, connect, linkAccount } = setup();
+    connect({ id: "c1", connectionKind: "telegram" }, "telegram");
+
+    const res = await linkAccount("telegram", "acct-c1", "sales:agent", {
+      "sec-fetch-site": "cross-site",
+      "content-type": "application/json",
+    });
+
+    expect(res.status).toBe(403);
+    expect(accounts.agentOf("c1")).toBeNull();
   });
 });

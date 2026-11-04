@@ -15,10 +15,9 @@ import {
 } from "./messages-contract.js";
 import { chatsAgentMessages } from "./messages-agent.js";
 
-// Chats' messages read as an `AccountMessages` store: the same transcript
-// `agentMessages` reads from `rome_agent_messages`, read from the direct
-// messages Rome's account on each channel has with the account. The cases
-// mirror messages-agent.test.ts, so the two stores answer alike.
+// Chats' messages read as an `AccountMessages` store: Rome's transcript with
+// an account, read from the direct messages Rome's account on each channel has
+// with it.
 
 const CHANNEL = "telegram";
 /** The two addresses of the one account the fixtures speak to. */
@@ -322,12 +321,40 @@ describe("chatsAgentMessages", () => {
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
   });
 
-  it("reads nothing on a channel whose connection holds no account", async () => {
-    const page = await chatsAgentMessages(db, () => null).read({
-      accounts: [account],
-      limit: WHOLE_HISTORY,
-    });
-    expect(page).toEqual([]);
+  // A connection signed in as another account reads that account's direct
+  // messages. What its earlier account said stays in that account's chats.
+  it("reads the direct messages of the account the channel's record holds, and none where it holds none", async () => {
+    const earlier: Account = { platform: "telegram", id: "rome-earlier-bot" };
+    const key = directMessageAt(earlier, DIRECT, new ChatAddresses(db));
+    const fixture = speakerFixture(db);
+    const chat = fixture.chat(key.platform, key.externalId, "dm");
+    fixture.speaker({ id: "s-earlier", chat, accountId: earlier.id, createdAt: new Date(0) });
+    db.insert(chatMessages)
+      .values({
+        key: "m-earlier",
+        chatId: chat.id,
+        threadId: null,
+        senderAccountId: DIRECT,
+        senderAgent: null,
+        senderName: null,
+        text: "m-earlier",
+        parts: JSON.stringify([{ type: "text", content: "m-earlier" }]),
+        saidAt: new Date(50_000),
+      })
+      .run();
+    const bodiesOf = async (accountOf: (channel: string) => Account | null) =>
+      (
+        await chatsAgentMessages(db, accountOf).read({
+          accounts: [account],
+          limit: WHOLE_HISTORY,
+        })
+      ).map((entry) => entry.body);
+
+    const current = await bodiesOf(accountOn);
+    expect(current).toContain("m-later");
+    expect(current).not.toContain("m-earlier");
+    expect(await bodiesOf(() => earlier)).toEqual(["m-earlier"]);
+    expect(await bodiesOf(() => null)).toEqual([]);
   });
 
   /** How many statements `read` runs against the database. */

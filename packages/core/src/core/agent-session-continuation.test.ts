@@ -37,6 +37,7 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -193,7 +194,7 @@ describe("continuation notice through AgentSessionManager", () => {
     loader = new AgentLoader(artifactIdentity);
     sessionsRepo = new SessionsRepository(testDb.db);
     sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
-    webchatRepo = new WebChatRepository(testDb.db);
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");

@@ -66,8 +66,6 @@ import { WhatsAppAccounts } from "../chats/accounts/whatsapp.js";
 import { createAccountNames } from "../chats/accounts/account-names.js";
 import type { Accounts } from "../chats/accounts/accounts.js";
 import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
 import type {
   ChannelOf,
   ConnectionPortsDeps,
@@ -86,6 +84,7 @@ import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatsWiring } from "../chats-wiring.js";
+import { openChannelChat } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
@@ -634,7 +633,6 @@ export async function buildTestDeps(
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -749,6 +747,23 @@ export async function buildTestDeps(
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo,
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -809,7 +824,6 @@ export async function buildTestDeps(
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
     // The same account Chats reads each test channel as.
     accountOf,
-    transcript: "chats",
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
@@ -1200,7 +1214,6 @@ export async function createAppLifecycleHarness(
       settingsRepo,
       webchatRepo,
       chatRepo: testChatRepository(db),
-      chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {

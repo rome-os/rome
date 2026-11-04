@@ -49,7 +49,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
 
@@ -89,13 +89,16 @@ import { WhatsAppAccounts } from "./chats/accounts/whatsapp.js";
 import { createAccountNames } from "./chats/accounts/account-names.js";
 import { AccountProfiles, refreshingAfter } from "./chats/accounts/account-profiles.js";
 import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
+import {
+  backfillOwnAccountProfiles,
+  rememberOwnAccountProfile,
+} from "./chats/accounts/own-account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./chats/accounts/agents-accounts.js";
 import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import { storedOn } from "./chats/connected-accounts/connected-account.js";
 import {
   WEBCHAT_CHANNEL,
   WEBCHAT_SURFACE,
@@ -118,7 +121,7 @@ import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/acco
 import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
 import { ReplyStreams } from "./participation/reply-delivery/streams.js";
 import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
-import { sendApprovalCard } from "./actions/approval-card.js";
+import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
@@ -290,13 +293,11 @@ import {
 } from "./relay/settings.js";
 import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
-import { ChatEvents } from "./chats/events.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import { StoredMessages } from "./chats/message-repository.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -369,7 +370,8 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db, platformOfChannel);
   // What each platform says about the accounts Rome meets. The two address
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
-  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db));
+  const accountProfilesRepo = new AccountProfilesRepository(db);
+  const accountProfiles = new AccountProfiles(accountProfilesRepo);
   const refreshWhatsAppProfiles = () =>
     accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
   const refreshLinkedInProfiles = () =>
@@ -432,15 +434,6 @@ async function main() {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
   const chatRepo = new ChatRepository(db, channelRecords);
-  // What was said in each place (docs/domains/chats.md#message). Reads find a
-  // platform's chats under every channel it is kept under, built or released.
-  // `channels` is built further down, before anything reads.
-  const chatEvents = new ChatEvents();
-  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
-    channelsOn: (platform) =>
-      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
-    accountOf: (channel) => channelRecords.accountOf(channel),
-  });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
   const appSpeakers = {
@@ -452,7 +445,6 @@ async function main() {
     settingsRepo,
     webchatRepo,
     chatRepo,
-    chatMessages,
     speakers: appSpeakers,
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.
@@ -515,6 +507,13 @@ async function main() {
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
           connectedAccounts.add(tx, record.id);
+          rememberOwnAccountProfile(
+            accountProfilesRepo,
+            tx,
+            connectionRegistry.getDescriptor(record.connectionKind),
+            event.account,
+            event.profile,
+          );
           // A channel that now knows its account moves its legacy chats
           // before it hears anything.
           backfillLegacyChatsIn(tx);
@@ -524,22 +523,24 @@ async function main() {
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
           connectedAccounts.add(tx, connection.id);
+          rememberOwnAccountProfile(
+            accountProfilesRepo,
+            tx,
+            connectionRegistry.getDescriptor(connection.connectionKind),
+            event.account,
+            event.profile,
+          );
           backfillLegacyChatsIn(tx);
           return;
         case "revoked":
           channelRecords.forget();
           return;
         case "disconnected": {
-          // A revoked grant names no account, so its channel record does,
-          // read before the channel is vacated. A stale record can name an
-          // account another connection's grant reaches now, and that
-          // connection keeps its agent.
-          const recorded = event.account ? null : connectedAccounts.accountOf(tx, connection.id);
-          const account =
-            event.account ??
-            (recorded && !connectedAccounts.grantReaches(tx, recorded) ? recorded : null);
+          // The connected account and its agent stay: a disconnect removes
+          // only Rome's reach (docs/domains/chats.md#connected-account). A
+          // link the move to account keys never placed has no account to stay
+          // on, so it goes with the connection.
           channelRecords.vacate(tx, connection.id);
-          if (account) connectedAccounts.remove(tx, account);
           connectedAccounts.forgetUnplaced(tx, connection.id);
           return;
         }
@@ -572,16 +573,19 @@ async function main() {
   // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
+  // The built channels, and each that joins later, recording what is sent on
+  // them in Chats. An approval's card goes out on these, so it is on record as
+  // the platform shows it.
+  const recordedChannels: Channel[] = [];
   // Reply streaming is off until the guardian turns it on under
   // Experimental features in Advanced settings. Off, sends go out unpaced and
   // replies go out whole. On, a channel that can stream paces every write of its
   // Connection, and the session bridge streams a guardian's direct replies
-  // through its replies port.
+  // through the session's speaker.
   const replyStreamingOn = replyStreamingSwitch(settingsRepo);
   const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
   const replyStreams = new ReplyStreams({
     streaming: replyStreamingOn,
-    replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
     // A reply is said through its session's speaker, on the platform's own
     // send port, so it is recorded once.
@@ -601,6 +605,7 @@ async function main() {
     pacing: replyPacing,
     accounts,
   });
+  const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
   const listedAgents = externalAgents({
@@ -841,7 +846,7 @@ async function main() {
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
-      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
+      onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
   );
   const appConnections = new AppConnectionBroker(
@@ -1125,10 +1130,8 @@ async function main() {
       skillCatalog,
       lifecycleDispatcher,
       webchatRepo,
-      chatMessages,
       // Catch-up reads what was said where the session stands from Chats.
       turnLinks: chatsWired.links,
-      platformOfChannel,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
@@ -1592,6 +1595,7 @@ async function main() {
     own: [webchat],
   });
   builtChannels = channels;
+  recordedChannels.push(...chatsWired.recordedSends(channels));
   const accountNames = createAccountNames({
     channels,
     sentinelLogRepo,
@@ -1714,6 +1718,7 @@ async function main() {
       connection,
     );
     if (!channel) return;
+    recordedChannels.push(...chatsWired.recordedSends([channel]));
     const added = legacyChatIdChannels(
       chatsWired.recordedSends(withInboundSpans([channel], "channel-message")),
     );
@@ -1761,6 +1766,15 @@ async function main() {
   // A grant from before grants named their account learns it now, so the next
   // connect of that account is refused.
   await recordGrantAccounts(connectionRegistry);
+  // The account profile cache learns each held chat grant's account name, as
+  // a connect does, so an account connected before it learned from grants
+  // keeps its name after a disconnect.
+  backfillOwnAccountProfiles(
+    accountProfilesRepo,
+    db,
+    (await connectionsRepository.all()).filter((c) => talks(c.connectionKind)),
+    (kind) => connectionRegistry.getDescriptor(kind),
+  );
   // Agent links the move to account keys could not place go to the accounts
   // their connections now reach.
   connectedAccounts.placeUnplaced();
@@ -1848,6 +1862,7 @@ async function main() {
       const metadata = actionRegistry.getMetadata(actionName);
       return metadata?.ownerType === "app" ? metadata.ownerId : null;
     },
+    sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
@@ -1978,7 +1993,6 @@ async function main() {
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
-      transcript: "chats",
       accountNames,
       assistants: listedAgents,
       webchatRepo,

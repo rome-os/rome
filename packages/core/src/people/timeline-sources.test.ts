@@ -1,8 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account, AccountId, Accounts } from "../chats/accounts/accounts.js";
 import type { Channels } from "../chats/connected-accounts/connected-account.js";
-import { romeSessions } from "../db/schema.js";
-import { createTestDb } from "../test/helpers.js";
 import { timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({

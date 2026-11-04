@@ -154,9 +154,9 @@ export const accountProfiles = sqliteTable(
     handle: text("handle"),
     avatarUrl: text("avatar_url"),
     // Where the row was learned. A platform's address book outranks the name a
-    // sender put on a message, so a message never overwrites a row the address
-    // book wrote.
-    source: text("source", { enum: ["address_book", "message"] }).notNull(),
+    // sender put on a message and the name a grant reported for Rome's own
+    // account, so neither overwrites a row the address book wrote.
+    source: text("source", { enum: ["address_book", "message", "connection"] }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
@@ -430,6 +430,10 @@ export const visitorProfiles = sqliteTable("visitor_profiles", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/** What an OAuth attempt was started for: connecting a provider, or signing
+ *  in to Rome. */
+export type OAuthAttemptIntent = "connect" | "sign-in";
+
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -441,6 +445,10 @@ export const oauthPendingAttempts = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     consumedAt: integer("consumed_at", { mode: "timestamp" }),
+    // What the attempt was started for, `connect` or `sign-in`, decided when it
+    // started so a session that changes during the round trip cannot change
+    // it. Null for an attempt started before Rome recorded it.
+    intent: text("intent").$type<OAuthAttemptIntent>(),
   },
   (table) => [index("idx_oauth_pending_attempts_expires_at").on(table.expiresAt)],
 );
@@ -470,15 +478,14 @@ export const projectSyncLinks = sqliteTable("project_sync_links", {
 });
 
 /**
- * Whether a `rome_sessions` row is a guardian chat: a channel row on the
- * webchat channel. The chat indexes below use it as their WHERE, and
- * `isWebchatChat` in `db/session-kind.ts` is the same text, which is what lets
- * SQLite page the sidebar off them. That needs the constants inlined rather
- * than bound, and the unary `+` keeps SQLite off the `source_channel` indexes,
- * which would find the chats but then sort them all.
+ * Whether a `rome_sessions` row is a guardian chat: a channel row whose
+ * session is a speaker in a dashboard chat. The chat indexes below use it as
+ * their WHERE, and `isWebchatChat` in `db/session-kind.ts` is the same text,
+ * which is what lets SQLite page the sidebar off them. That needs the
+ * constants inlined rather than bound.
  */
-export function webchatChatWhere(table: { type: SQLiteColumn; sourceChannel: SQLiteColumn }) {
-  return sql`(${table.type} = 'channel' and +${table.sourceChannel} = 'webchat')`;
+export function webchatChatWhere(table: { type: SQLiteColumn; chatPlatform: SQLiteColumn }) {
+  return sql`(${table.type} = 'channel' and ${table.chatPlatform} = 'webchat')`;
 }
 
 export const romeSessions = sqliteTable(
@@ -1168,10 +1175,12 @@ export const channels = sqliteTable(
   ],
 );
 
-// Chats' record of a connected account: one row per account Rome holds a
-// connection to that lets it chat, keyed by the account (the platform and the
+// Chats' record of a connected account: one row per account a connection that
+// lets Rome chat has reached, keyed by the account (the platform and the
 // platform's own id) and holding the agent that speaks through it, null for
-// none. A connection whose grant has not reported its account yet has no row.
+// none. The row outlives the connection, so disconnecting keeps the agent and
+// connecting the same account again finds it. A connection whose grant has
+// not reported its account yet has no row.
 // Vocabulary: docs/domains/chats.md#connected-account.
 export const connectedAccounts = sqliteTable(
   "connected_accounts",

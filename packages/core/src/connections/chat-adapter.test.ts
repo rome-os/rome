@@ -802,5 +802,8 @@ describe("kindNamedBy", () => {
     expect(kindNamedBy("whatsapp", "120363@g.us")).toBe("group");
     expect(kindNamedBy("whatsapp", "4479@s.whatsapp.net")).toBe("dm");
     expect(kindNamedBy("discord", "1234567890")).toBeNull();
+    expect(kindNamedBy("feishu", "ou_abc")).toBe("dm");
+    expect(kindNamedBy("lark", "ou_abc")).toBe("dm");
+    expect(kindNamedBy("lark", "oc_abc")).toBeNull();
   });
 });

@@ -17,7 +17,7 @@ import type {
   InboundEvent,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
@@ -121,7 +121,7 @@ export interface ChatAdapter {
    * `threadId` or the open chat when null, and answer where it landed once
    * the platform took it. A refusal rejects with the platform's words. A
    * message the channel cannot deliver as given, such as a `replyTo` the
-   * account has no platform id for, rejects with `ChannelSendRefused` and
+   * account has no platform id for, rejects with `SendRefused` and
    * sends nothing. No retry.
    */
   send(chatKey: string, threadId: ChatId | null, out: Outbound): Promise<Sent>;
@@ -131,7 +131,7 @@ export interface ChatAdapter {
    * platform allows, maybe in several messages, and settles to each message
    * the user was shown, or may have been, in order: none when nothing showed.
    * `replyTo` is the adapter's key of the message it answers, and one the
-   * account has no platform id for throws `ChannelSendRefused`.
+   * account has no platform id for throws `SendRefused`.
    */
   stream?(
     chatKey: string,
@@ -232,6 +232,8 @@ export function kindNamedBy(platform: string, address: string): "group" | "dm" |
     return /^[1-9]\d*$/.test(address) ? "dm" : null;
   }
   if (platform === "whatsapp") return address.endsWith("@g.us") ? "group" : "dm";
+  // A Feishu open id names a person, and a chat id a chat of any kind.
+  if (platform === "feishu" || platform === "lark") return address.startsWith("ou_") ? "dm" : null;
   return null;
 }
 
@@ -754,7 +756,7 @@ export function quotable(
   if (messageKey === undefined) return undefined;
   const id = platformIdOfMessage(chat, romeEnd, messageKey);
   if (id === null) {
-    throw new ChannelSendRefused(
+    throw new SendRefused(
       "reply_unaddressable",
       `Account ${romeEnd} holds no platform id for message ${messageKey}, so it cannot answer it`,
     );
