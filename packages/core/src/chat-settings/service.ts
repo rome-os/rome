@@ -571,10 +571,15 @@ export class ChatSettingsService implements ChatSettingsControl {
     if (row !== null) return descriptor.kind;
     const described = this.describedKinds.get(this.key(ref));
     if (described !== undefined) return described;
-    // A group Rome holds there through another of its accounts is a group.
+    // The kind the address names, or a group Rome holds there through
+    // another of its accounts.
     const live = this.deps.connections.all().some((c) => c.id === ref.connectionId);
     const channel = live ? this.channelName(ref) : null;
-    return channel === null ? null : this.deps.repository.heldKind(channel, ref.chatId);
+    if (channel === null) return null;
+    return (
+      this.deps.repository.namedKind(channel, ref.chatId) ??
+      this.deps.repository.heldKind(channel, ref.chatId)
+    );
   }
 
   private async discover(
@@ -671,13 +676,16 @@ export class ChatSettingsService implements ChatSettingsControl {
       return { descriptor: row ? this.descriptorFromRow(row) : remembered, row };
     }
     const connection = this.deps.connections.get(ref.connectionId);
-    const row = this.find(this.deps.channelOf(connection), ref);
+    const channel = this.deps.channelOf(connection);
+    const row = this.find(channel, ref);
     if (row) return { descriptor: this.descriptorFromRow(row), row };
     const descriptor: ChatDescriptor = {
       ref,
       connectionKind: connection.connectionKind,
       service: connection.connectionKind,
-      kind: "channel",
+      // The kind the address names, as the chat would start with, else a
+      // guess that `knownKind` does not count as known.
+      kind: (channel ? this.deps.repository.namedKind(channel, ref.chatId) : null) ?? "channel",
       displayName: ref.chatId,
     };
     this.remember(descriptor);

@@ -208,6 +208,14 @@ export class ChatSettingsRepository {
     return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
   }
 
+  /** The kind platform address `chatId` names by itself on `channel`'s
+   *  platform ({@link kindNamedBy}), or null where it names none or the
+   *  channel knows no account. */
+  namedKind(channel: string, chatId: ChatId): "group" | "dm" | null {
+    const account = this.deps.adapters.knownAccountOn(channel);
+    return account ? kindNamedBy(account.platform, chatId) : null;
+  }
+
   /** "group" when Rome holds a group at address `chatId` on `channel`'s
    *  platform, through any of its accounts, whose kind is then fixed; else
    *  null. */

@@ -890,6 +890,16 @@ describe("ChatSettingsService", () => {
     }
   });
 
+  it("checks a first rule against the kind the address names", async () => {
+    const { service, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+
+    expect((await service.get(ref)).supportedFields).toEqual(["session.reset"]);
+    await expect(
+      service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } }),
+    ).rejects.toThrow('Unsupported conversation setting "enabled"');
+  });
+
   it("starts the direct message an address names when a rule is set before anything is said", async () => {
     const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
     const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
