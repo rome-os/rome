@@ -61,7 +61,7 @@ describe("SessionQueryRepository", () => {
     ).resolves.toEqual([]);
   });
 
-  describe("reading lines from Chats", () => {
+  describe("counting messages from Chats", () => {
     const at = (seconds: number) => new Date(seconds * 1000);
 
     /** A row the session keeps itself in `rome_agent_messages`. */
@@ -93,7 +93,7 @@ describe("SessionQueryRepository", () => {
       own("chat-1", "a", "assistant", 202);
     }
 
-    /** A subagent in no chat, which keeps its prompt, trace and answer. */
+    /** A subagent in no chat, with a prompt, a trace and an answer of its own. */
     function seededSubagent() {
       testDb.db
         .insert(romeSessions)
@@ -119,21 +119,23 @@ describe("SessionQueryRepository", () => {
       seededSubagent();
       const repository = new SessionQueryRepository(testDb.db, "chats");
 
-      expect(await pageCounts(repository)).toEqual({ "chat-1": 3, sub: 3 });
+      expect(await pageCounts(repository)).toEqual({ "chat-1": 3, sub: 1 });
       expect((await repository.getSessionDetailRows("chat-1"))?.messageCount).toBe(3);
-      expect((await repository.getSessionDetailRows("sub"))?.messageCount).toBe(3);
+      expect((await repository.getSessionDetailRows("sub"))?.messageCount).toBe(1);
     });
 
-    it("counts a dashboard chat's notices, which it keeps of its own", async () => {
+    // Of what a session keeps in `rome_agent_messages`, only its traces count:
+    // the rest is not a message in Chats.
+    it("counts none of a session's own rows but its traces", async () => {
       seededChat();
       own("chat-1", "notice", "notification", 203);
       const repository = new SessionQueryRepository(testDb.db, "chats");
 
-      expect(await pageCounts(repository)).toEqual({ "chat-1": 4 });
-      expect((await repository.getSessionDetailRows("chat-1"))?.messageCount).toBe(4);
+      expect(await pageCounts(repository)).toEqual({ "chat-1": 3 });
+      expect((await repository.getSessionDetailRows("chat-1"))?.messageCount).toBe(3);
     });
 
-    it("counts lines only for the sessions on the page", async () => {
+    it("counts messages only for the sessions on the page", async () => {
       seededChat();
       seededSubagent();
       type Statement = { all(...values: unknown[]): unknown[] };
@@ -165,56 +167,6 @@ describe("SessionQueryRepository", () => {
       // One count, over the one session the page shows.
       expect(counted).toHaveLength(1);
       expect(JSON.parse(String(counted[0]?.[0]))).toHaveLength(1);
-    });
-
-    it("counts a message each of Rome's accounts holds a copy of once", async () => {
-      const fixture = speakerFixture(testDb.db);
-      const chat = fixture.chat("telegram", "-42", "group");
-      fixture.speaker({ id: "sales", chat, accountId: "bot-sales", createdAt: at(0) });
-      fixture.speaker({ id: "support", chat, accountId: "bot-support", createdAt: at(0) });
-      // One message, heard by both accounts, and one only the sales bot heard.
-      fixture.say({ id: "bot-sales:4", chat, from: "wei", text: "hi", at: at(10) });
-      fixture.say({ id: "bot-support:8", chat, from: "wei", text: "hi", at: at(10) });
-      fixture.say({ id: "bot-sales:5", chat, from: "wei", text: "later", at: at(20) });
-      own("sales", "trace", "trace", 21);
-      const repository = new SessionQueryRepository(testDb.db, "chats");
-
-      expect(await pageCounts(repository)).toEqual({ sales: 3 });
-      expect((await repository.getSessionDetailRows("sales"))?.messageCount).toBe(3);
-    });
-
-    it("reads a group's copies once for all its speakers, each from when it joined", async () => {
-      const fixture = speakerFixture(testDb.db);
-      const chat = fixture.chat("telegram", "-42", "group");
-      fixture.speaker({ id: "sales", chat, accountId: "bot-sales", createdAt: at(0) });
-      fixture.speaker({ id: "support", chat, accountId: "bot-support", createdAt: at(15) });
-      fixture.say({ id: "bot-sales:4", chat, from: "wei", text: "early", at: at(10) });
-      fixture.say({ id: "bot-sales:5", chat, from: "wei", text: "hi", at: at(20) });
-      fixture.say({ id: "bot-support:9", chat, from: "wei", text: "hi", at: at(20) });
-      fixture.say({ id: "bot-sales:6", chat, from: "wei", text: "later", at: at(30) });
-      own("sales", "trace-sales", "trace", 31);
-      own("support", "trace-support", "trace", 31);
-      type Statement = { all(...values: unknown[]): unknown[] };
-      const client = (testDb.db as unknown as { $client: { prepare(sql: string): Statement } })
-        .$client;
-      const prepare = client.prepare.bind(client);
-      let groupReads = 0;
-      client.prepare = (text: string) => {
-        const statement = prepare(text);
-        const all = statement.all.bind(statement);
-        statement.all = (...values: unknown[]) => {
-          if (text.startsWith("SELECT id, key, sender_account_id")) groupReads += 1;
-          return all(...values);
-        };
-        return statement;
-      };
-      try {
-        const repository = new SessionQueryRepository(testDb.db, "chats");
-        expect(await pageCounts(repository)).toEqual({ sales: 4, support: 3 });
-      } finally {
-        client.prepare = prepare;
-      }
-      expect(groupReads).toBe(1);
     });
 
     it("counts the session's own rows when it reads the legacy tables", async () => {

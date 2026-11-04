@@ -11,7 +11,6 @@ import type { Account } from "@rome-os/app-runtime";
 import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import { chatAt, directMessageAt } from "../connections/chat-adapter.js";
 import { ChatAddresses } from "../connections/chat-addresses.js";
-import { romeAccountsOn } from "../people/timeline-sources.js";
 
 type SessionRow = typeof romeSessions.$inferInsert;
 
@@ -130,7 +129,7 @@ export function sayOnChannel(
   },
 ): number {
   // A fixture channel with no account recorded speaks as its own name.
-  const account = romeAccountsOn(deps, line.channel)[0] ?? {
+  const account = deps.accountOf?.(line.channel) ?? {
     platform: deps.platformOfChannel(line.channel),
     id: line.channel,
   };
