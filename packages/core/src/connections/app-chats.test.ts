@@ -379,7 +379,7 @@ describe("appChats", () => {
       expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([card]);
     });
 
-    it("hands a text-only channel a card's plain-text line once", async () => {
+    it("hands a text-only connection a card's plain-text line once", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       const card = {
         type: "approval_card",
