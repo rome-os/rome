@@ -15,12 +15,13 @@ const WITHHELD_PREVIEW: PreviewPayload = {
 };
 
 /** Whether only the guardian reads the chat: the dashboard, or a private chat
- *  whose sender Rome knows to be the guardian. */
-function readByGuardianOnly(context: ThreadContext): boolean {
-  return (
-    context.channel === "webchat" ||
-    (context.threadType === "private" && context.senderBondLevel === "guardian")
-  );
+ *  whose sender Rome knows to be the guardian. An email thread is never one,
+ *  because Rome marks every email thread private while its other recipients
+ *  read each reply too. */
+function readByGuardianOnly(context: ThreadContext, platform: string | undefined): boolean {
+  if (context.channel === "webchat") return true;
+  if (platform === "email") return false;
+  return context.threadType === "private" && context.senderBondLevel === "guardian";
 }
 
 /**
@@ -37,7 +38,7 @@ export async function sendApprovalCard(
   if (!channelContext) return;
   const target = (await channels.list()).find((channel) => channel.name === channelContext.channel);
   if (!target?.sendable) return;
-  const payload = !readByGuardianOnly(channelContext)
+  const payload = !readByGuardianOnly(channelContext, target.platform)
     ? WITHHELD_PREVIEW
     : (preview ?? {
         kind: "generic" as const,

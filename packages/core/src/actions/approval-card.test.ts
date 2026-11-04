@@ -88,6 +88,28 @@ describe("sendApprovalCard", () => {
     }
   });
 
+  it("keeps the preview off a card in an email thread, which every recipient reads", async () => {
+    const target = {
+      list: async () => [{ name: "gmail", platform: "email", sendable: true }],
+      send: rs.fn<ChannelsService["send"]>(async () => RECEIPT),
+    };
+
+    await sendApprovalCard(target, {
+      ...approval,
+      preview: { kind: "generic", title: "Secret plan", summary: "My private notes" },
+      channelContext: {
+        channel: "gmail",
+        threadId: "t1",
+        threadType: "private",
+        senderBondLevel: "guardian",
+      },
+    } as never);
+
+    const [, , message] = target.send.mock.calls[0] ?? [];
+    expect(JSON.stringify(message)).not.toContain("My private notes");
+    expect(message?.parts?.[0]).toMatchObject({ preview: { title: "an action" } });
+  });
+
   it("rejects with the refusal of a channel that cannot show a card", async () => {
     const target = channels(true);
     target.send.mockRejectedValue(

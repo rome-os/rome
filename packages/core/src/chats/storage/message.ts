@@ -133,6 +133,18 @@ export function plainText(body: Body): string {
   return [text, lines.join("\n")].filter(Boolean).join("\n\n").trim();
 }
 
+/** What the text parts of composed `parts` say, one per line, leaving out a
+ *  turn's narration and every widget. It is the `text` an outbound message
+ *  carries beside its parts, which a text-only channel reads with each
+ *  widget's line added, so a widget's line here would show twice. */
+export function spokenText(parts: readonly MessagePart[]): string {
+  return parts
+    .flatMap((part) =>
+      part.type === "text" && part.turnPhase !== "commentary" ? [part.content] : [],
+    )
+    .join("\n");
+}
+
 /** The plain text of composed `parts`: their text parts and each widget's
  *  own plain-text line, one per line. A turn's narration on its way to the
  *  answer (a commentary part) is no line of the chat. */
