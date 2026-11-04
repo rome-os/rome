@@ -718,6 +718,36 @@ export const conciergeTasks = sqliteTable(
   ],
 );
 
+/**
+ * Events from what the Concierge follows that its triage kept: `notify` ones
+ * go to the Concierge in the next batch, `digest` ones at the next digest time.
+ * Only the triage's one-line description is kept, never the event's text. A
+ * row is owed until `deliveredAt` is set, so a restart loses none.
+ */
+export const conciergeFollowItems = sqliteTable(
+  "concierge_follow_items",
+  {
+    id: text("id").primaryKey(),
+    /** The event's stable id from its connection, so a repeat is kept once. */
+    eventId: text("event_id").notNull(),
+    source: text("source").notNull(),
+    kind: text("kind").notNull(),
+    target: text("target").notNull(),
+    decision: text("decision", { enum: ["notify", "digest"] }).notNull(),
+    /** Why triage decided so, in one line. */
+    reason: text("reason").notNull(),
+    /** What happened, in one line, as triage wrote it. */
+    line: text("line").notNull(),
+    url: text("url"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("idx_concierge_follow_items_event").on(table.eventId),
+    index("idx_concierge_follow_items_owed").on(table.decision, table.deliveredAt),
+  ],
+);
+
 export const webchatWorkspaceLayouts = sqliteTable("webchat_workspace_layouts", {
   sessionId: text("session_id")
     .primaryKey()

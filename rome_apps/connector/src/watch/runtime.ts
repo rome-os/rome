@@ -1,5 +1,5 @@
 // The live reads behind watching: tokens, the relay, Composio, and the
-// connected accounts' identities. The pure parts sit in catalog.ts, judge.ts
+// connected accounts' identities. The pure parts sit in catalog.ts, normalize.ts
 // and sources.ts; the watch actions bind them here.
 
 import { Octokit } from "@octokit/rest";

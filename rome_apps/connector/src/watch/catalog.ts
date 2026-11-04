@@ -21,8 +21,6 @@ export interface WatchKind {
   label: string;
   /** On when the guardian follows something and names no kinds. */
   default: boolean;
-  /** The kind applies only when an option has this value, such as scope = whole_repo. */
-  requires?: { option: string; value: string };
   triggers: WatchTrigger[];
 }
 
@@ -56,58 +54,53 @@ export const GITHUB_WATCHABLE: Watchable = {
   source: "github",
   label: "GitHub",
   target: { format: "A repository as owner/name", example: "rome-os/rome" },
+  // Each kind is a shape of event, whoever it concerns: whether it is about
+  // the guardian is a fact on the event, read when it is triaged.
   kinds: [
     {
       kind: "review_requested",
-      label: "Review requested of you or your team",
+      label: "Review requests",
       default: true,
       triggers: [repo("pull_request")],
     },
     {
       kind: "review_on_your_pr",
-      label: "Reviews of your pull requests",
+      label: "Reviews of pull requests",
       default: true,
       triggers: [repo("pull_request_review")],
     },
     {
       kind: "comment_or_mention",
-      label: "Comments on your pull requests and issues, and mentions of you",
+      label: "Comments on pull requests and issues",
       default: true,
       triggers: [repo("issue_comment"), repo("pull_request_review_comment")],
     },
     {
       kind: "your_ci_failed",
-      label: "Your CI runs that failed",
+      label: "Failed CI runs",
       default: true,
       triggers: [repo("workflow_run")],
     },
     {
       kind: "your_pr_closed",
-      label: "Your pull requests merged or closed",
+      label: "Pull requests merged or closed",
       default: true,
       triggers: [repo("pull_request")],
     },
     {
       kind: "assigned_to_you",
-      label: "Issues and pull requests assigned to you",
+      label: "Assignments",
       default: true,
       triggers: [repo("issues"), repo("pull_request")],
     },
     {
       kind: "new_pr_or_issue",
-      label: "New pull requests and issues in the repository",
+      label: "New pull requests and issues",
       default: false,
-      requires: { option: "scope", value: "whole_repo" },
       triggers: [repo("issues"), repo("pull_request")],
     },
-    {
-      kind: "default_branch_ci_failed",
-      label: "CI failed on the default branch",
-      default: false,
-      requires: { option: "scope", value: "whole_repo" },
-      triggers: [repo("workflow_run")],
-    },
   ],
+  // Guidance for triage, in the guardian's words; no option filters in code.
   options: [
     {
       key: "scope",
@@ -150,7 +143,7 @@ export const GMAIL_WATCHABLE: Watchable = {
   kinds: [
     {
       kind: "new_mail",
-      label: "New mail from people",
+      label: "New mail",
       default: true,
       // One Gmail account is connected at a time, so the event needs no filter.
       triggers: [{ provider: "gmail", type: GMAIL_NEW_MAIL_TYPE }],

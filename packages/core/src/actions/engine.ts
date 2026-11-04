@@ -146,6 +146,7 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // the action's context. `follow` subscribes at the source through connector
   // actions, also called outside the action's context.
   "core:concierge_follow_event",
+  "core:concierge_digest",
   "core:concierge_follow",
   "core:concierge_unfollow",
   "core:concierge_following_list",

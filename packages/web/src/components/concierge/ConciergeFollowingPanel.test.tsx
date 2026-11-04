@@ -97,7 +97,7 @@ function listing(): ConciergeConnectorsResponse {
         capabilities: { chat: UNSUPPORTED, act: { state: "unlocked" }, watch: UNSUPPORTED },
       },
     ],
-    rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
+    rules: { digestTimes: ["09:00", "18:00"], quietHours: null },
   };
 }
 

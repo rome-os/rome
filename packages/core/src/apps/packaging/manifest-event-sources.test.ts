@@ -71,7 +71,7 @@ describe("AppManifestSchema watchProvider", () => {
   const provider = {
     sources: "watch_sources",
     ensure: "watch_ensure",
-    judge: "watch_judge",
+    normalize: "watch_normalize",
     release: "watch_release",
   };
 
@@ -104,7 +104,7 @@ describe("AppManifestSchema watchProvider", () => {
     expect(manifest.watchProvider).toEqual({
       sources: "connector_watch_sources",
       ensure: "connector_watch_ensure",
-      judge: "connector_watch_judge",
+      normalize: "connector_watch_normalize",
       release: "connector_watch_release",
     });
   });

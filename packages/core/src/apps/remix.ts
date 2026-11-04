@@ -537,11 +537,11 @@ async function rewriteRemixManifest(
       );
     }
     if (sourceManifest.watchProvider) {
-      const { sources, ensure, judge, release } = sourceManifest.watchProvider;
+      const { sources, ensure, normalize, release } = sourceManifest.watchProvider;
       document.set("watchProvider", {
         sources: renamed(sources),
         ensure: renamed(ensure),
-        judge: renamed(judge),
+        normalize: renamed(normalize),
         release: renamed(release),
       });
     }

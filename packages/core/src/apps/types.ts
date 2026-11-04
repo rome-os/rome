@@ -192,8 +192,8 @@ export interface RomeAppWatchProvider {
   sources: string;
   /** Checks, or creates, the subscription behind the kinds of one target. */
   ensure: string;
-  /** Turns one raw event into the common shape, or says why it does not concern the guardian. */
-  judge: string;
+  /** Puts one raw event in the common shape for a follow, or says why it is dropped. */
+  normalize: string;
   /** Says a follower no longer needs a target's subscription. */
   release: string;
 }

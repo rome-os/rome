@@ -7,7 +7,7 @@ description: |
   access expired, or null; and, when not working, the call that starts
   connecting it). `watch`: for each service this app can watch, its status
   (ready, not_connected, no_relay, error) with a reason saying what is
-  missing, the account events are judged for, the target format, the kinds of
+  missing, the account events concern, the target format, the kinds of
   event in guardian-readable words with the raw events behind each, and the
   options that tune them. Reads only; changes nothing.
 entry: ./index.ts

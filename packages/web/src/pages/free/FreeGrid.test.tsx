@@ -218,7 +218,7 @@ describe("FreeGrid mobile header", () => {
                         },
                       },
                     ],
-                    rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
+                    rules: { digestTimes: ["09:00", "18:00"], quietHours: null },
                   }
                 : url.startsWith("/api/concierge/tasks")
                   ? {

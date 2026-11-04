@@ -241,7 +241,7 @@ describe("/concierge/connectors", () => {
         watch: null,
       },
     ],
-    rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
+    rules: { digestTimes: ["09:00", "18:00"], quietHours: null },
   };
 
   const app = () => {
@@ -327,12 +327,15 @@ describe("/concierge/connectors", () => {
   });
 
   it("changes the rules and refuses values out of bounds", async () => {
-    const response = await send("/concierge/connectors/rules", "PUT", { minSpacingMinutes: 10 });
+    const response = await send("/concierge/connectors/rules", "PUT", { digestTimes: ["08:00"] });
     await expect(response.json()).resolves.toEqual({
-      rules: { maxTurnsPerHour: 2, minSpacingMinutes: 10, quietHours: null },
+      rules: { digestTimes: ["08:00"], quietHours: null },
     });
-    expect((await send("/concierge/connectors/rules", "PUT", { maxTurnsPerHour: 99 })).status).toBe(
-      400,
-    );
+    expect(
+      (await send("/concierge/connectors/rules", "PUT", { digestTimes: ["8 am"] })).status,
+    ).toBe(400);
+    expect(
+      (await send("/concierge/connectors/rules", "PUT", { quietHours: { start: "22:00" } })).status,
+    ).toBe(400);
   });
 });

@@ -64,21 +64,24 @@ export interface ConciergeQuietHours {
   end: string;
 }
 
-/** How often events from what the Concierge follows may wake it, across every source. */
+/**
+ * The guardian's rules for what the Concierge follows, across every source:
+ * when the digest of less urgent events comes, and an optional quiet window.
+ * How events are batched, and the cap on urgent turns, are fixed in code.
+ */
 export interface ConciergeFollowRules {
-  maxTurnsPerHour: number;
-  minSpacingMinutes: number;
-  /** Off when null. */
+  /** When the digest goes to the Concierge each day, `HH:mm` in the guardian's timezone, sorted. */
+  digestTimes: string[];
+  /** Urgent events wait until it ends. Off when null. */
   quietHours: ConciergeQuietHours | null;
 }
 
 export const CONCIERGE_FOLLOW_DEFAULT_RULES: ConciergeFollowRules = {
-  maxTurnsPerHour: 2,
-  minSpacingMinutes: 15,
+  digestTimes: ["09:00", "18:00"],
   quietHours: null,
 };
-export const CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR = 12;
-export const CONCIERGE_FOLLOW_MAX_SPACING_MINUTES = 120;
+/** The most digest times a day. */
+export const CONCIERGE_FOLLOW_MAX_DIGEST_TIMES = 6;
 /** The longest free-text preference a follow keeps. */
 export const CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH = 500;
 

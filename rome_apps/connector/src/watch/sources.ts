@@ -37,7 +37,7 @@ export interface WatchSection {
   status: WatchStatus;
   /** What is missing and how to fix it, when the status is not ready. */
   statusReason?: string;
-  /** Who events are judged for: the GitHub login, the mailbox address. */
+  /** Whose account the events concern: the GitHub login, the mailbox address. */
   account?: string;
   target: Watchable["target"];
   /** The kinds, each trigger with the bus name of its raw event for the follower's routines. */

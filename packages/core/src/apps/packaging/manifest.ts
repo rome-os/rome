@@ -186,7 +186,7 @@ export const AppManifestSchema = z
       .object({
         sources: ArtifactLocalNameSchema,
         ensure: ArtifactLocalNameSchema,
-        judge: ArtifactLocalNameSchema,
+        normalize: ArtifactLocalNameSchema,
         release: ArtifactLocalNameSchema,
       })
       .strict()
