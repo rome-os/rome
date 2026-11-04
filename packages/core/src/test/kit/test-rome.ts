@@ -34,6 +34,7 @@ import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js
 import { ApprovalHandler } from "../../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../../actions/backend-turn.js";
 import { chatsWiring } from "../../chats-wiring.js";
+import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
@@ -322,11 +323,26 @@ async function buildHarness(
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
-    chats: new ChatsWebChatRepository(db, {
-      chats: chatsWired.chats,
-      lines: chatsWired.messages,
-      links: chatsWired.links,
-    }),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo: new ChatsWebChatRepository(db, {
+              chats: chatsWired.chats,
+              lines: chatsWired.messages,
+              links: chatsWired.links,
+            }),
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
     replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
