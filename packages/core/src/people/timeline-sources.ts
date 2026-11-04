@@ -33,8 +33,7 @@ import {
   type PlatformOfChannel,
 } from "../chats/connected-accounts/connected-account.js";
 import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
-import { agentMessages, chatsAgentMessages } from "../chats/history/messages-agent.js";
-import { sql } from "drizzle-orm";
+import { chatsAgentMessages } from "../chats/history/messages-agent.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 
@@ -60,14 +59,8 @@ export function personMessageStores(deps: {
   platformOfChannel: PlatformOfChannel;
   /** Rome's own account on a channel, or null while its record knows none. */
   accountOf?: (channel: string) => Account | null;
-  /** Where Rome's transcript is read from: its legacy table by default, or
-   *  Chats. */
-  transcript?: "legacy" | "chats";
 }): AccountMessages[] {
-  const transcript =
-    deps.transcript === "chats"
-      ? chatsAgentMessages(deps.db, (channel) => romeAccountsOn(deps, channel))
-      : agentMessages(deps.db);
+  const transcript = chatsAgentMessages(deps.db, (channel) => romeAccountsOn(deps, channel));
   return [...messageStores(deps.channels), transcript];
 }
 
@@ -92,39 +85,16 @@ export async function guardianChannels(deps: {
 }
 
 /**
- * Every account Rome has spoken as on channel `channel`, as the chats it spoke
- * in name them: the channel record's while it holds one, then each account
- * Rome's speakers on that channel spoke as, newest first. A kept connection
- * can be signed in as another account, and a history told to an earlier or
- * disconnected account still reads. Absent any, none: a channel's name
+ * Rome's account on channel `channel`, as the chats it spoke in name it: the
+ * channel record's while it holds one, else none, since a channel's name
  * names no account.
  */
 export function romeAccountsOn(
-  deps: {
-    db: DrizzleDb;
-    platformOfChannel: PlatformOfChannel;
-    accountOf?: (channel: string) => Account | null;
-  },
+  deps: { accountOf?: (channel: string) => Account | null },
   channel: string,
 ): Account[] {
-  const platform = deps.platformOfChannel(channel);
   const recorded = deps.accountOf?.(channel);
-  const spoke = deps.db.all<{ account_id: string }>(sql`
-    SELECT account_id FROM rome_sessions
-    WHERE source_channel = ${channel} AND account_id IS NOT NULL
-    GROUP BY account_id ORDER BY max(created_at) DESC
-  `);
-  const ids = new Set<string>();
-  const accounts: Account[] = [];
-  for (const account of [
-    ...(recorded ? [recorded] : []),
-    ...spoke.map((row) => ({ platform, id: row.account_id })),
-  ]) {
-    if (ids.has(account.id)) continue;
-    ids.add(account.id);
-    accounts.push(account);
-  }
-  return accounts;
+  return recorded ? [recorded] : [];
 }
 
 /**

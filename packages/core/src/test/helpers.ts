@@ -809,7 +809,6 @@ export async function buildTestDeps(
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
     // The same account Chats reads each test channel as.
     accountOf,
-    transcript: "chats",
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,

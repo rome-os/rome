@@ -1978,7 +1978,6 @@ async function main() {
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
-      transcript: "chats",
       accountNames,
       assistants: listedAgents,
       webchatRepo,

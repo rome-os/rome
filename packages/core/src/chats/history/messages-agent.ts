@@ -1,12 +1,13 @@
-// `rome_agent_messages` as an {@link AccountMessages} store: what Rome was told and
-// what it said back, for every channel with no mirror of its own.
+// Rome's transcript as an {@link AccountMessages} store, read from Chats: what
+// Rome was told and what it said back, for every channel with no mirror of its
+// own.
 
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import type { MessagePart } from "../../types.js";
 import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
-import { scopePairs, sqlMessages } from "./messages-sql.js";
+import { sqlMessages } from "./messages-sql.js";
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import { CHAT_MESSAGES, CHATS } from "../storage/messages-sql.js";
 import { addressOf, chatAt } from "../../connections/chat-adapter.js";
@@ -57,80 +58,13 @@ export function isAgentMessageOutbound(role: string, senderId: string | null): b
 }
 
 /**
- * Rome's own transcript of a channel conversation, read for accounts.
- *
- * Reached through the session's thread. A channel session is keyed by the
- * thread it belongs to, so a session addressed by the account is that account's
- * direct conversation. A group's session is addressed by the group rather than
- * by anyone on it, so no account names it. Which sender a message carries makes
- * no difference: a line the account wrote into a group belongs to the group's
- * thread.
- */
-export function agentMessages(db: DrizzleDb): AccountMessages {
-  // No `channel`: the transcript holds every channel that has no mirror of its
-  // own, side by side, so it is scoped by the pair throughout.
-  return sqlMessages({
-    db,
-    view(scope) {
-      const addressed = scopePairs(scope.keys, sql`s.source_channel`, sql`s.source_thread_id`);
-      if (addressed === null) return null;
-      // Addressing already leaves a group out, since a group's session is keyed
-      // by the group and no account answers to that. Said again on the store's
-      // own terms so the guarantee survives a caller that hands over a group id
-      // as if it were an account's address.
-      const held = sql`${addressed} AND coalesce(s.source_thread_type, '') <> 'group'`;
-      return sql`
-        SELECT
-          s.source_channel AS source,
-          s.source_thread_id AS key,
-          m.created_at AS at,
-          ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
-          'agent:' || m.id AS ref,
-          m.content AS body,
-          m.id AS detail_key
-        FROM rome_agent_messages m
-        JOIN rome_sessions s ON s.id = m.session_id
-        WHERE s.type = 'channel'
-          -- A guardian chat is the guardian talking to Rome, not a conversation
-          -- with a person on an account.
-          AND coalesce(s.source_channel, '') <> 'webchat'
-          AND ${held}
-          -- 'notification' is a line that passed outside a turn — something
-          -- the person said without waking the agent, or something Rome sent
-          -- untied to one. Either way it is conversation, and the direction
-          -- above is what tells the two apart. 'trace' is the turn's own
-          -- machinery and belongs to no conversation.
-          AND m.role IN ('user', 'assistant', 'notification')`;
-    },
-    body: messageContentText,
-    detail: {
-      of: (key) => sql`(
-        SELECT json_object(
-          'senderId', m.sender_id,
-          'senderName', m.sender_name,
-          'threadId', s.source_thread_id,
-          'threadName', s.source_thread_name,
-          'threadType', s.source_thread_type
-        )
-        FROM rome_agent_messages m
-        JOIN rome_sessions s ON s.id = m.session_id
-        WHERE m.id = ${key}
-      )`,
-      map: transcriptDetail,
-    },
-  });
-}
-
-/**
  * Rome's own transcript of a channel conversation, read for accounts from
  * Chats: each direct message Rome's account on a channel has with the
- * account's address, every line said there. `accountsOn` names every account
- * Rome has spoken as on a channel, since a kept connection can be signed in as
- * another account and the chats its earlier account had stay keyed by it.
+ * account's address, every line said there. `accountsOn` names the accounts
+ * of Rome's to read under a channel.
  *
- * The same store as {@link agentMessages}, over Chats' messages in place of
- * `rome_agent_messages`. A group answers to no address, and a guardian chat
- * is the guardian talking to Rome, so neither is read. A line is Rome's when
+ * A group answers to no address, and a guardian chat is the guardian talking
+ * to Rome, so neither is read. A line is Rome's when
  * one of its agents said it, or when Rome's account said it, as the guardian
  * can through it. Vocabulary: docs/domains/chats.md.
  */
@@ -232,29 +166,6 @@ function chatsTranscriptDetail(raw: Record<string, unknown>, entry: Message): Me
       id: text(raw.address) ?? addressOf(chatKey(platform, key as ChatId)),
       name: text(raw.threadName),
       kind: "dm",
-    };
-  }
-  return detail;
-}
-
-/** Who said a transcript line and in which session's thread, as the row
- *  recorded them. Rome's own lines carry no sender, the way the sentinel log
- *  reads them. A private thread is a direct one, and a thread type with no kind
- *  of its own reads as unknown. */
-function transcriptDetail(raw: Record<string, unknown>, entry: Message): MessageDetail {
-  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
-  const detail: MessageDetail = {};
-  const sender = { id: text(raw.senderId), name: text(raw.senderName) };
-  if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
-    detail.sender = sender;
-  }
-  const threadId = text(raw.threadId);
-  if (threadId !== null) {
-    const type = text(raw.threadType);
-    detail.conversation = {
-      id: threadId,
-      name: text(raw.threadName),
-      kind: type === "private" ? "dm" : type === "group" || type === "topic" ? type : null,
     };
   }
   return detail;
