@@ -1351,7 +1351,7 @@ export const handlers = [
             ? [
                 {
                   account: connection.account,
-                  name: null,
+                  name: Object.values(connection.display)[0]?.displayName ?? null,
                   agent: connection.agent,
                   connection: connection.id,
                 },
@@ -1421,6 +1421,9 @@ export const handlers = [
     if (!(grant in connection.grants)) {
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
+    // The name the connection showed, which its connected account keeps.
+    const shown = connection.display[grant];
+    const name = shown?.displayName || shown?.handle || null;
     connection.grants[grant] = "unauthorized";
     connection.state = null;
     connection.display[grant] = null;
@@ -1445,7 +1448,7 @@ export const handlers = [
     if (connection.account && connection.agent) {
       disconnectedAccounts.push({
         account: connection.account,
-        name: null,
+        name,
         agent: connection.agent,
         connection: null,
       });
@@ -1458,6 +1461,7 @@ export const handlers = [
       connections.connections.splice(connections.connections.indexOf(connection), 1);
     } else {
       connection.id = null;
+      connection.account = null;
       connection.label = connection.connectionKind;
       connection.channel = null;
       connection.agent = null;
