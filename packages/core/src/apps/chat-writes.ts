@@ -8,6 +8,7 @@
 // Chats switch adds them to the app repositories and moves the inbox and
 // `send_message` onto them.
 
+import { partsWithText } from "../chats/storage/message.js";
 import { actionExecutionContext } from "../actions/context.js";
 import type {
   Channel,
@@ -300,7 +301,12 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           ...agentOf(deps, input.turnId),
           recorded: input.content
             ? recordedOf(input.content)
-            : withNotes(parts ?? [{ type: "text", content: input.text ?? "" }], input.attachments),
+            : withNotes(
+                parts
+                  ? partsWithText(input.text, parts)
+                  : [{ type: "text", content: input.text ?? "" }],
+                input.attachments,
+              ),
         },
       );
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
@@ -324,8 +330,8 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       // its HTML reads as.
       const text = input.text ?? "";
       const shown = text.trim() || (html ? htmlToMarkdown(html, true).trim() : "");
-      const onRecord: readonly MessagePart[] = recorded ??
-        parts ?? [{ type: "text", content: shown }];
+      const onRecord: readonly MessagePart[] =
+        recorded ?? (parts ? partsWithText(input.text, parts) : [{ type: "text", content: shown }]);
       const out: Omit<EmailOutbound, "replyTo"> = {
         text,
         ...(parts ? { parts } : {}),

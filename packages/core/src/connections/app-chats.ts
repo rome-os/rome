@@ -12,6 +12,7 @@
 // Nothing wires this to apps yet: the Chats switch does, once chats are
 // named by Chats' ids.
 
+import { partsWithText } from "../chats/storage/message.js";
 import { type Account, type Channel, type ChatId, isSendRefused } from "@rome-os/app-runtime";
 import {
   type ChatMessage,
@@ -424,10 +425,7 @@ function recordedParts(
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
-  const said: MessagePart[] =
-    text === undefined
-      ? [...given]
-      : [{ type: "text", content: text }, ...given.filter((part) => part.type !== "text")];
+  const said = partsWithText(text, given);
   return notes.length ? [...said, { type: "text", content: notes.join("\n") }] : said;
 }
 

@@ -133,6 +133,17 @@ export function plainText(body: Body): string {
   return [text, lines.join("\n")].filter(Boolean).join("\n\n").trim();
 }
 
+/** `parts` as they go on record beside `text`: text that says anything in
+ *  place of the text parts, as a platform shows it, ahead of every other part.
+ *  Without such text, the parts as given. */
+export function partsWithText(
+  text: string | undefined,
+  parts: readonly MessagePart[],
+): MessagePart[] {
+  if (!text?.trim()) return [...parts];
+  return [{ type: "text", content: text }, ...parts.filter((part) => part.type !== "text")];
+}
+
 /** The plain text of composed `parts`: their text parts and each widget's
  *  own plain-text line, one per line. A turn's narration on its way to the
  *  answer (a commentary part) is no line of the chat. */

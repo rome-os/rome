@@ -16,6 +16,7 @@ import type { ChannelSend } from "../chats/connected-accounts/connected-account.
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
+import { partsWithText } from "../chats/storage/message.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -72,7 +73,7 @@ function recordedParts(out: Out): MessagePart[] {
   );
   // A part only Rome's host makes, such as a routine draft card, never gets
   // here: the adapter refused the send.
-  const parts = [...(out.parts ?? [])];
+  const parts = out.parts?.length ? partsWithText(out.text, out.parts) : [];
   if (parts.length) {
     return notes.length ? [...parts, { type: "text", content: notes.join("\n") }] : parts;
   }
