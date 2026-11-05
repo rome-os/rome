@@ -82,7 +82,7 @@ import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
-import { createTurnReads, SessionQueryRepository } from "../agent-sessions/index.js";
+import { SessionQueryRepository } from "../agent-sessions/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
@@ -209,13 +209,7 @@ export function buildApp(
   api.route("/", terminalRoutes());
   api.route("/", tailscaleRoutes(deps));
   api.route("/", memoryFilesRoutes());
-  api.route(
-    "/",
-    projectsFilesRoutes({
-      ...deps,
-      turns: deps.turns ?? createTurnReads(deps.db, deps.webchatRepo),
-    }),
-  );
+  api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
   const sessionChannelRecords = new ChannelRecordsRepository(

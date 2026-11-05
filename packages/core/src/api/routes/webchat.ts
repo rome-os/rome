@@ -53,7 +53,6 @@ import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import {
-  createTurnReads,
   NoForkPointError,
   type AgentTurnHandle,
   type SessionSurface,
@@ -809,7 +808,7 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
   // Turns and their traces are Sessions'; the route reads them there.
-  const turns = deps.turns ?? createTurnReads(deps.db, deps.webchatRepo);
+  const turns = deps.turns;
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a

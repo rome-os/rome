@@ -121,9 +121,8 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
-  /** Sessions' turns and their traces, read back. Built from the database
-   *  and the dashboard's repository when absent. */
-  turns?: TurnReads;
+  /** Sessions' turns and their traces, read back. */
+  turns: TurnReads;
   /** Where a send into a place is said and put on record in Chats. */
   recording: SendRecording;
   /** The chats Rome takes part in, by their adapter's keys. */

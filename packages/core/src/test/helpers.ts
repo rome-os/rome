@@ -1,4 +1,5 @@
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
+import { createTurnReads } from "../agent-sessions/index.js";
 import { createSessionLog } from "../agent-sessions/rows/session-log.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import { writeFileSync } from "node:fs";
@@ -862,6 +863,7 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
+    turns: createTurnReads(db, webchatRepo),
     chats: chatsWired.chats,
     messages: chatsWired.messages,
     recording: {
