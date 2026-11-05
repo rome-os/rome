@@ -567,27 +567,44 @@ describe("Concierge tools", () => {
     expect(s.chats.interruptTurn).toHaveBeenCalledWith("t2");
   });
 
-  it("chat_list lists the task chats it started, then its other Concierge chats", async () => {
+  it("chat_list labels each chat with its kind, and a task chat with the Concierge chat it came from", async () => {
     const s = setup();
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.turnIn(TOPIC_CHAT);
+    await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" });
+    s.turnIn(CONCIERGE_CHAT);
     const result = await s.tool("chat_list", {});
     expect(JSON.parse(result.content[0].text)).toEqual([
-      { chatId: "task-1", title: "Flights", status: "idle" },
-      { chatId: TOPIC_CHAT, title: "Calendar", kind: "concierge" },
+      { chatId: TOPIC_CHAT, title: "Calendar", kind: "topic chat" },
+      {
+        chatId: "task-1",
+        title: "Flights",
+        kind: "task chat",
+        from: { chatId: CONCIERGE_CHAT, title: "Concierge" },
+        status: "idle",
+      },
+      {
+        chatId: "task-2",
+        title: "Agenda",
+        kind: "task chat",
+        from: { chatId: TOPIC_CHAT, title: "Calendar" },
+        status: "idle",
+      },
     ]);
     // From the topic chat, the main chat is the other one.
     s.turnIn(TOPIC_CHAT);
-    const fromTopic = await s.tool("chat_list", { status: undefined });
-    expect(JSON.parse(fromTopic.content[0].text).at(-1)).toEqual({
+    const fromTopic = await s.tool("chat_list", {});
+    expect(JSON.parse(fromTopic.content[0].text)[0]).toEqual({
       chatId: CONCIERGE_CHAT,
       title: "Concierge",
-      kind: "concierge",
-      main: true,
+      kind: "main chat",
     });
     // A status filter lists task chats only.
     const idle = await s.tool("chat_list", { status: "idle" });
-    expect(JSON.parse(idle.content[0].text)).toEqual([
-      { chatId: "task-1", title: "Flights", status: "idle" },
+    expect(JSON.parse(idle.content[0].text).map((chat: { kind: string }) => chat.kind)).toEqual([
+      "task chat",
+      "task chat",
     ]);
   });
 
@@ -601,6 +618,7 @@ describe("Concierge tools", () => {
     expect(JSON.parse(read.content[0].text)).toMatchObject({
       chatId: TOPIC_CHAT,
       title: "Calendar",
+      kind: "topic chat",
       messages: [{ role: "user", text: "only interviews" }],
     });
     s.sessions.set("plain", { id: "plain", name: "Plain", triggerKind: null });

@@ -4,6 +4,7 @@
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import {
+  CONCIERGE_CHAT_ID,
   CONCIERGE_TASK_STATES,
   CONCIERGE_TASK_SUMMARY_MAX_LENGTH,
   type ConciergeTaskState,
@@ -577,6 +578,12 @@ export async function buildConciergeTools(
           return {
             chatId,
             title: chat.name,
+            kind:
+              chat.triggerKind === TASK_CHAT_TRIGGER_KIND
+                ? "task chat"
+                : chat.id === CONCIERGE_CHAT_ID
+                  ? "main chat"
+                  : "topic chat",
             status: statusOf(
               service.dashboard.chats.isRunning(chatId),
               await findListEntry(chatId),
@@ -611,7 +618,7 @@ export async function buildConciergeTools(
     {
       name: "chat_list",
       description:
-        "List the task chats you started, newest first, with their status, and your other Concierge chats (kind concierge), which chat_read can read.",
+        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), newest first, each with the Concierge chat it came from and its status. chat_read reads any of them.",
       inputSchema: {
         type: "object",
         properties: { status: { type: "string", enum: [...TASK_STATUSES] } },
@@ -622,11 +629,21 @@ export async function buildConciergeTools(
           const { chats } = service.dashboard;
           const { chatId: here } = currentTurn();
           const all = await webchatRepo.listSessions("all");
+          // The Concierge chat each task chat came from, by its task row.
+          const cameFrom = new Map(
+            (await tasks.repo.listForAgent(true)).flatMap(({ row, conciergeChat }) =>
+              row.sessionId
+                ? [[row.sessionId, { chatId: conciergeChat.id, title: conciergeChat.name }]]
+                : [],
+            ),
+          );
           const taskChats = all
             .filter((chat) => chat.triggerKind === TASK_CHAT_TRIGGER_KIND && !chat.archivedAt)
             .map((chat) => ({
               chatId: chat.id,
               title: chat.name,
+              kind: "task chat",
+              ...(cameFrom.has(chat.id) ? { from: cameFrom.get(chat.id) } : {}),
               status: statusOf(chats.isRunning(chat.id), chat),
             }))
             .filter((chat) => !wanted || chat.status === wanted);
@@ -637,10 +654,9 @@ export async function buildConciergeTools(
                 .map((chat) => ({
                   chatId: chat.id,
                   title: chat.name,
-                  kind: "concierge",
-                  ...(chat.main ? { main: true } : {}),
+                  kind: chat.main ? "main chat" : "topic chat",
                 }));
-          return [...taskChats, ...conciergeChats];
+          return [...conciergeChats, ...taskChats];
         }),
     },
     {
