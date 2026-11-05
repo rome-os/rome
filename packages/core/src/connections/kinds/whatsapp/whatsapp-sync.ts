@@ -75,9 +75,10 @@ export interface WhatsAppSyncSink {
    * arrived: a history sync's, and the ones the guardian said on the account
    * themselves. The adapter never hands over a message it also delivers
    * inbound, so recording one here never takes its place. `selfName` is the
-   * account's own display name, which the guardian's messages carry.
+   * account's own display name, which the guardian's messages carry. Answers
+   * the ids of the messages now on record.
    */
-  recordHistory?(messages: WaMessageInput[], self: string, selfName?: string): void;
+  recordHistory?(messages: WaMessageInput[], self: string, selfName?: string): readonly string[];
 }
 
 /**

@@ -308,6 +308,7 @@ describe("WhatsAppAdapter", () => {
         const { sink } = makeSink();
         sink.recordHistory = (messages, self) => {
           recorded.push({ ids: messages.map((m) => m.id), self });
+          return messages.map((m) => m.id);
         };
         return { sink, recorded };
       }
@@ -600,6 +601,7 @@ describe("WhatsAppAdapter", () => {
         const { sink } = makeSink();
         sink.recordHistory = (_messages, _self, selfName) => {
           names.push(selfName);
+          return [];
         };
         adapter.onSync(sink);
         adapter.onInbound(async () => {});

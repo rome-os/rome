@@ -1530,13 +1530,14 @@ async function main() {
         // One transaction for a batch: a full history sync hands over
         // thousands of messages at once.
         recordHistory(messages, self, selfName) {
-          db.transaction(() => {
-            recordSynced(
-              chatsWired,
-              { platform: "whatsapp", id: self },
-              messages.flatMap((message) => syncedFromWhatsApp(message, self, selfName) ?? []),
-            );
-          });
+          return db.transaction(
+            () =>
+              recordSynced(
+                chatsWired,
+                { platform: "whatsapp", id: self },
+                messages.flatMap((message) => syncedFromWhatsApp(message, self, selfName) ?? []),
+              ).onRecord,
+          );
         },
       } satisfies WhatsAppSyncSink,
       ["upsertContacts", "upsertChats"],

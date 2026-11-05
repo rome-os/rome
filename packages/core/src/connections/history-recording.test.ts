@@ -65,7 +65,7 @@ describe("recordSynced", () => {
       }),
     ]);
 
-    expect(recorded).toBe(2);
+    expect(recorded).toEqual({ recorded: 2, onRecord: ["m1", "g1"] });
     expect(said(directMessageKey("whatsapp", SELF, "2000@s.whatsapp.net"))).toEqual([
       { key: "m1", sender: "2000@s.whatsapp.net", text: "hello" },
     ]);
@@ -84,8 +84,11 @@ describe("recordSynced", () => {
   });
 
   it("records a message already on record once, and skips one with nothing in it", () => {
-    expect(recordSynced(deps, ACCOUNT, [synced()])).toBe(1);
-    expect(recordSynced(deps, ACCOUNT, [synced(), synced({ id: "empty", text: "  " })])).toBe(0);
+    expect(recordSynced(deps, ACCOUNT, [synced()])).toEqual({ recorded: 1, onRecord: ["m1"] });
+    expect(recordSynced(deps, ACCOUNT, [synced(), synced({ id: "empty", text: "  " })])).toEqual({
+      recorded: 0,
+      onRecord: ["m1"],
+    });
 
     expect(said(directMessageKey("whatsapp", SELF, "2000@s.whatsapp.net"))).toHaveLength(1);
   });

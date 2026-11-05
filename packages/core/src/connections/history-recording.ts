@@ -47,18 +47,27 @@ export interface HistoryRecordingDeps {
   addresses: Pick<ChatAddresses, "keyAt">;
 }
 
+/** What `recordSynced` did with a batch. */
+export interface SyncedRecording {
+  /** How many messages were new. */
+  readonly recorded: number;
+  /** The platform's ids of the messages now on record, new or not. */
+  readonly onRecord: readonly string[];
+}
+
 /**
- * Records `synced`, which Rome's account `account` heard, each in its chat,
- * and answers how many were new. A message with neither text nor attachments
- * is skipped, as inbound recording skips it. A message that fails to record is
- * logged and the rest are still recorded.
+ * Records `synced`, which Rome's account `account` heard, each in its chat.
+ * A message with neither text nor attachments is skipped, as inbound
+ * recording skips it. A message that fails to record is logged and the rest
+ * are still recorded.
  */
 export function recordSynced(
   deps: HistoryRecordingDeps,
   account: Account,
   synced: readonly SyncedMessage[],
-): number {
+): SyncedRecording {
   let recorded = 0;
+  const onRecord: string[] = [];
   for (const message of synced) {
     const text = withNotes(message);
     if (!text) continue;
@@ -76,6 +85,7 @@ export function recordSynced(
         at: message.at,
       });
       if (deps.messages.record(said) !== null) recorded += 1;
+      onRecord.push(message.id);
     } catch (error) {
       log.error("failed to record a synced message", {
         platform: account.platform,
@@ -84,7 +94,7 @@ export function recordSynced(
       });
     }
   }
-  return recorded;
+  return { recorded, onRecord };
 }
 
 /** `message`'s text with a note for each attachment, since a sync keeps no

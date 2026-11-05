@@ -494,7 +494,7 @@ export class WhatsAppAdapter {
   }
 
   /** Hand `messages`, which nothing delivers inbound and Rome's account `self`
-   *  heard, to Chats as history, and answer the ids of those handed over. */
+   *  heard, to Chats as history, and answer the ids of those now on record. */
   private recordHistory(messages: WAMessage[], self = this.selfPnJid()): string[] {
     if (!this.syncSink?.recordHistory || !self || messages.length === 0) return [];
     // Chats records what Rome sends when it sends it. An edit or a deletion
@@ -504,8 +504,7 @@ export class WhatsAppAdapter {
     );
     if (inputs.length === 0) return [];
     try {
-      this.syncSink.recordHistory(inputs, self, this.sock?.user?.name ?? undefined);
-      return inputs.map((input) => input.id);
+      return [...this.syncSink.recordHistory(inputs, self, this.sock?.user?.name ?? undefined)];
     } catch (err) {
       log.error("failed to record whatsapp history", { error: errMsg(err) });
       return [];
