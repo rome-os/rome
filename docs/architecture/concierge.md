@@ -55,6 +55,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 - **Each owner has exactly one main chat, and it is never archived or deleted.** The dashboard refuses both.
 - **Archiving or deleting a topic chat moves its follows, its unfinished task rows and the events still owed to it to the main chat,** and the Concierge says so there. Restoring the chat moves nothing back.
 - **A topic chat starts on the model the main chat uses,** and keeps its own selection after that.
+- **A topic chat is named from its first message, as an ordinary chat is.** The main chat keeps its fixed name.
 
 ### Owners
 

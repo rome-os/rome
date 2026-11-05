@@ -231,22 +231,17 @@ describe("RecentChats", () => {
       expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
     });
 
-    it("starts a topic chat from the plus beside the Concierge entry, and opens it", async () => {
+    it("opens a blank topic chat from the plus beside the Concierge entry, creating nothing yet", async () => {
       mockTopics();
       const user = userEvent.setup();
       renderRecentChats();
       await user.click(await screen.findByRole("button", { name: "New topic chat" }));
-      await user.type(screen.getByRole("textbox", { name: "Topic chat name" }), "Trips{Enter}");
-      await waitFor(() =>
-        expect(requests).toContainEqual({
-          url: "/api/concierge/chats",
-          method: "POST",
-          body: { name: "Trips" },
-        }),
-      );
-      await waitFor(() =>
-        expect(screen.getByTestId("location-path").textContent).toBe("/chat/topic-2"),
-      );
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+      expect(screen.getByTestId("location-state").textContent).toBe('{"conciergeTopic":true}');
+      // Like New chat, nothing exists until the first send, and New chat is not the open row.
+      expect(requests).toEqual([]);
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(screen.getByRole("link", { name: "New chat" }).className).not.toContain("shadow-1");
     });
 
     it("archives an open topic chat from its menu and returns to the main chat", async () => {

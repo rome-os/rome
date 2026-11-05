@@ -296,6 +296,11 @@ export interface ChatProps {
    * this instance mounted for it.
    */
   onSessionCreated?: (sessionId: string) => void;
+  /**
+   * Creates the session a draft's first send goes to, in place of an ordinary
+   * dashboard chat, as a Concierge topic chat does. Answers its id.
+   */
+  startSession?: () => Promise<string>;
   /** Rendered in place of the transcript while the chat has no session. */
   emptyState?: ReactNode;
   /**
@@ -331,6 +336,7 @@ export function Chat({
   recoverMissingSession,
   onSessionMessage,
   onSessionCreated,
+  startSession,
   emptyState,
   centerDraftComposer = false,
   initialProjectName,
@@ -1571,18 +1577,21 @@ export function Chat({
         if (creatingSessionRef.current) return;
         creatingSessionRef.current = true;
         try {
-          const created = await createSession({
-            name: t("sidebar.newChat"),
-            personaId: snapshot.personaId,
-            projectPath: snapshot.projectPath,
-            largeModelSelection: snapshot.largeModelSelection,
-            reasoningEffort: snapshot.reasoningEffort,
-            agentName: snapshot.agentMention?.agentName,
-            deviceFolder: snapshot.deviceFolder
-              ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
-              : undefined,
-          });
-          sendingSessionId = created.id;
+          sendingSessionId = startSession
+            ? await startSession()
+            : (
+                await createSession({
+                  name: t("sidebar.newChat"),
+                  personaId: snapshot.personaId,
+                  projectPath: snapshot.projectPath,
+                  largeModelSelection: snapshot.largeModelSelection,
+                  reasoningEffort: snapshot.reasoningEffort,
+                  agentName: snapshot.agentMention?.agentName,
+                  deviceFolder: snapshot.deviceFolder
+                    ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
+                    : undefined,
+                })
+              ).id;
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
@@ -1673,6 +1682,7 @@ export function Chat({
       workspaceContextRegistry,
       t,
       onSessionCreated,
+      startSession,
       notifySessionsChanged,
       concierge,
     ],
@@ -1777,11 +1787,10 @@ export function Chat({
 
   // Concierge before its first message. It waits for the history fetch, so a
   // chat with messages never flashes the guidance while they load.
+  // A topic chat's draft, before its first send, shows the same empty state.
   const conciergeEmpty =
     concierge &&
-    !!mainSessionId &&
-    messages.has(mainSessionId) &&
-    rows.length === 0 &&
+    (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
     !displayedStreaming;
 
   // The composer is memoized so a streaming turn does not render it, which only

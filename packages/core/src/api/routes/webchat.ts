@@ -3550,6 +3550,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
+    // The main Concierge chat keeps its fixed name; a topic chat is named from
+    // its first message, as an ordinary chat is.
+    const autoTitle =
+      policy.autoTitle || (isConciergeChat(session) && sessionId !== CONCIERGE_CHAT_ID);
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
@@ -3622,7 +3626,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
         const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
         enqueueStream(sessionId, stream);
-        if (policy.autoTitle) {
+        if (autoTitle) {
           void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
         }
         await deps.webchatRepo.addMessage(
@@ -3681,7 +3685,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
-      if (policy.autoTitle) {
+      if (autoTitle) {
         void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
       }
 

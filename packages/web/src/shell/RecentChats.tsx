@@ -377,6 +377,9 @@ export function RecentChats({
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
+  // A blank topic chat opened from the Concierge entry is not New chat.
+  const isTopicDraft =
+    (location.state as { conciergeTopic?: unknown } | null)?.conciergeTopic === true;
 
   // A chat that starts running before the list has it, such as a task chat
   // Concierge just started, would show only when its first turn ends. The
@@ -1149,7 +1152,7 @@ export function RecentChats({
         <div className="shrink-0 px-3 pb-1">
           <Link
             to="/chat"
-            className={`${LINK_CLASS} ${location.pathname === "/chat" ? ACTIVE_CLASS : IDLE_CLASS}`}
+            className={`${LINK_CLASS} ${location.pathname === "/chat" && !isTopicDraft ? ACTIVE_CLASS : IDLE_CLASS}`}
           >
             <span
               className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"

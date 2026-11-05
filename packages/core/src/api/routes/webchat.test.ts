@@ -2461,6 +2461,56 @@ describe("Webchat API", () => {
     expect((await deps.webchatRepo.getSession(session.id))?.name).toBe("Q4 Launch Plan");
   });
 
+  it("names a topic chat from its first message, and never the main Concierge chat", async () => {
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => {
+        throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
+          code: "model_provider_unavailable",
+          provider: "openai",
+          reason: "not_logged_in",
+        });
+      }),
+      peek: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+    rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+      name: "concierge",
+      policy: { finalText: "private", autoTitle: false },
+    } as ReturnType<typeof deps.agentLoader.get>);
+    deps.concierge = {
+      switchIfExhausted: async () => null,
+      conciergeChat: async () => null,
+    } as never;
+    const generateTitle = rs.fn(async () => "Calendar");
+    deps.conversationTitleGenerator = { generate: generateTitle };
+    for (const id of ["concierge", "topic-1"]) {
+      await deps.webchatRepo.createSession(
+        id,
+        "New Chat",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+    }
+    const app = createWebchatRuntime(deps).routes;
+    for (const id of ["concierge", "topic-1"]) {
+      const response = await app.request(`/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Remind me before each meeting" }),
+      });
+      expect(response.status).toBe(200);
+    }
+    await rs.waitFor(async () =>
+      expect((await deps.webchatRepo.getSession("topic-1"))?.name).toBe("Calendar"),
+    );
+    expect(generateTitle).toHaveBeenCalledOnce();
+    expect((await deps.webchatRepo.getSession("concierge"))?.name).toBe("New Chat");
+  });
+
   it("does not delay the turn terminal event while conversation naming is still running", async () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {

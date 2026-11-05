@@ -320,6 +320,48 @@ describe("ChatComponent Concierge chats", () => {
   });
 });
 
+describe("ChatComponent topic chat draft", () => {
+  beforeEach(() => {
+    chatStub.enabled = false;
+  });
+
+  it("opens blank with the Concierge layout, and its first send creates a topic chat", async () => {
+    const posted: Array<{ url: string; body: unknown }> = [];
+    const onSessionCreated = rs.fn();
+    const { fetchSpy } = renderChatComponent(
+      { onSessionCreated },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      { pathname: "/chat", state: { conciergeTopic: true } },
+    );
+    const original = fetchSpy.getMockImplementation()!;
+    fetchSpy.mockImplementation((async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (
+        init?.method === "POST" &&
+        (url === "/api/concierge/chats" || url === "/api/chat/sessions")
+      ) {
+        posted.push({ url, body: JSON.parse(String(init.body)) });
+        return Response.json({ id: "topic-9", name: "New Chat", main: false, unread: 0 });
+      }
+      return original(input, init);
+    }) as typeof fetch);
+    // The Concierge's empty state, not the home greeting.
+    expect(await screen.findByRole("region")).toBeTruthy();
+    const composer = await screen.findByRole("textbox");
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    expect(posted).toEqual([]);
+    await userEvent.setup().keyboard("Plan my week{Enter}");
+    await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith("topic-9"));
+    // A topic chat, named like any new chat until its first message names it.
+    expect(posted).toEqual([{ url: "/api/concierge/chats", body: { name: "New Chat" } }]);
+    const turnPost = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        String(url) === "/api/chat/sessions/topic-9/turns" && init?.method === "POST",
+    );
+    expect((turnPost?.[1]?.body as FormData | undefined)?.get("text")).toBe("Plan my week");
+  });
+});
+
 describe("ChatComponent agent identity", () => {
   beforeEach(() => {
     chatStub.enabled = true;

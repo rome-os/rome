@@ -23,7 +23,6 @@ import {
   CONCIERGE_CHATS_QUERY_KEY,
   CONCIERGE_SESSION_QUERY_KEY,
   CONCIERGE_UNREAD_CAP,
-  startConciergeTopicChat,
   useConciergeChats,
   useConciergeUnread,
 } from "@/hooks/use-concierge";
@@ -111,7 +110,8 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
 /**
  * The sidebar's Concierge entries: the main chat's entry, then one row per
  * topic chat, each with its unread badge and a menu to rename, archive or
- * delete it. The plus beside the main entry starts a topic chat.
+ * delete it. The plus beside the main entry opens a blank topic chat, which
+ * its first message creates and names.
  */
 export function ConciergeChats({
   mainChatId,
@@ -124,25 +124,10 @@ export function ConciergeChats({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const topics = useConciergeChats().filter((chat) => !chat.main);
-  const [naming, setNaming] = useState(false);
-  const [name, setName] = useState("");
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
   }, [queryClient]);
   useSessionsChanged(refresh);
-  const start = async () => {
-    const trimmed = name.trim();
-    setNaming(false);
-    setName("");
-    if (!trimmed) return;
-    try {
-      const chat = await startConciergeTopicChat(trimmed);
-      refresh();
-      navigate(`/chat/${chat.id}`);
-    } catch {
-      toast.error(t("recentChats.topicChatStartFailed"));
-    }
-  };
   return (
     <>
       <div className="group/concierge relative flex items-center">
@@ -154,32 +139,11 @@ export function ConciergeChats({
           label={t("recentChats.newTopicChat")}
           icon={<Plus aria-hidden />}
           className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/concierge:opacity-100"
-          onClick={() => setNaming(true)}
+          // A blank topic chat, as New chat opens a blank chat: its first send creates it.
+          onClick={() => navigate("/chat", { state: { conciergeTopic: true } })}
           data-concierge-new-topic
         />
       </div>
-      {naming ? (
-        <input
-          autoFocus
-          value={name}
-          aria-label={t("recentChats.topicChatName")}
-          placeholder={t("recentChats.topicChatName")}
-          onChange={(event) => setName(event.target.value)}
-          onBlur={() => void start()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void start();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              setName("");
-              setNaming(false);
-            }
-          }}
-          className="my-1 ml-6 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
-          data-concierge-topic-name
-        />
-      ) : null}
       {topics.map((chat) => (
         <ConciergeTopicEntry
           key={chat.id}
