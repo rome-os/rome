@@ -1,5 +1,16 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, rename, rm, stat, symlink } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { createLogger } from "../logger.js";
 import { getProjectRoot } from "../paths.js";
@@ -185,6 +196,7 @@ async function installProductionDeps(stagingRoot: string): Promise<void> {
     cwd: stagingRoot,
     depCount,
   });
+  await stripDevDependencies(pkgPath);
   // `--no-frozen-lockfile`: apps may not ship per-app lockfiles, so the
   // install host is allowed to solve prod deps once for this content hash.
   //
@@ -196,6 +208,20 @@ async function installProductionDeps(stagingRoot: string): Promise<void> {
     cwd: stagingRoot,
   });
   await linkWorkspaceRuntimeDependency(stagingRoot, pkg);
+}
+
+/**
+ * `pnpm install --prod` skips linking devDependencies but still resolves and
+ * downloads them into the store. A packed artifact's devDependencies are
+ * build-time only (its outputs are already built), so drop them from the
+ * staged manifest before installing.
+ */
+async function stripDevDependencies(pkgPath: string): Promise<void> {
+  const raw = await readFile(pkgPath, "utf-8");
+  const pkg = JSON.parse(raw) as Record<string, unknown>;
+  if (!("devDependencies" in pkg)) return;
+  delete pkg.devDependencies;
+  await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, "utf-8");
 }
 
 export function buildProductionInstallArgs(stagingRoot: string): string[] {

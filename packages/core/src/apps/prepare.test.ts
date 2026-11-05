@@ -203,6 +203,63 @@ describe("prepare", () => {
     }
   });
 
+  it("drops devDependencies before installing prod deps so pnpm never fetches them", async () => {
+    const depRoot = join(sourceRoot, "dist", "runtime-dep");
+    mkdirSync(depRoot, { recursive: true });
+    writeFileSync(
+      join(depRoot, "package.json"),
+      JSON.stringify({ name: "rome-fixture-runtime-dep", version: "1.0.0" }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(sourceRoot, "app.yaml"),
+      [
+        `formatVersion: 1`,
+        `id: prep-dev-deps`,
+        `version: 0.0.1`,
+        `description: test app`,
+        `appRoot: dist`,
+        `actions:`,
+        `  - actions/ping`,
+        ``,
+      ].join("\n"),
+      "utf-8",
+    );
+    writeFileSync(
+      join(sourceRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "prep-dev-deps",
+          version: "0.0.1",
+          packageManager: "pnpm@11.6.0",
+          dependencies: { "rome-fixture-runtime-dep": "file:dist/runtime-dep" },
+          // Unresolvable on purpose: pnpm fails if it resolves devDependencies.
+          devDependencies: { "rome-fixture-missing-dev-dep": "file:does-not-exist" },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    mkdirSync(join(sourceRoot, "dist", "actions", "ping"), { recursive: true });
+    writeFileSync(
+      join(sourceRoot, "dist", "actions", "ping", "action.yaml"),
+      VALID_ACTION_YAML,
+      "utf-8",
+    );
+
+    await packArtifact(sourceRoot, packedRoot);
+    const installed = await prepare(
+      { kind: "artifact", appId: "prep-dev-deps", artifactRoot: packedRoot },
+      { installedRoot },
+    );
+
+    expect(existsSync(join(installed.root, "node_modules", "rome-fixture-runtime-dep"))).toBe(true);
+    const pkg = JSON.parse(await readFile(join(installed.root, "package.json"), "utf-8"));
+    expect(pkg.devDependencies).toBeUndefined();
+    expect(pkg.dependencies).toEqual({ "rome-fixture-runtime-dep": "file:dist/runtime-dep" });
+  });
+
   it("honors app-local allowBuilds approvals during the prod deps reinstall", async () => {
     const depRoot = join(sourceRoot, "dist", "build-dep");
     mkdirSync(depRoot, { recursive: true });
