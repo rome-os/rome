@@ -15,6 +15,12 @@
 // keeping that stringly-typed seam in one typed place instead of scattered
 // across action bodies.
 
+import type {
+  ChatsPort,
+  ConnectedAccount,
+  ConnectedAccounts,
+  Sent,
+} from "@rome-os/app-runtime/chats";
 import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
@@ -323,6 +329,34 @@ export class ChannelsServiceProxy implements ChannelsService {
       }),
     );
   }
+}
+
+/** A send's answer as it crosses the worker boundary, its date a string. */
+type WireSent = Omit<Sent, "delivery"> & {
+  delivery: { state: "sent"; at: string | Date };
+};
+
+/** Worker-side port onto the main process's Chats. Typing is a session that
+ *  lives in the main process, so a worker shows none. */
+export const chatsPortProxy: ChatsPort = {
+  async send(place, out, opts) {
+    const sent = await callMain<WireSent>("chats.send", { place, out, ...(opts ? { opts } : {}) });
+    return { ...sent, delivery: { state: "sent", at: new Date(sent.delivery.at) } };
+  },
+  dm: (account, opts) => callMain("chats.dm", { account, ...(opts ? { opts } : {}) }),
+  group: (query) => callMain("chats.group", query),
+};
+
+/** Worker-side proxy for the main process's connected accounts. History is
+ *  read as the channels service reads it. */
+export function connectedAccountsProxy(
+  channels: Pick<ChannelsService, "query">,
+): ConnectedAccounts {
+  return {
+    list: () => callMain<ConnectedAccount[]>("connectedAccounts.list", {}),
+    query: (account, query = {}) =>
+      channels.query({ platform: account.platform, id: account.id }, query),
+  };
 }
 
 export class ChatSettingsControlProxy implements ChatSettingsControl {

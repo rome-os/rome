@@ -24,6 +24,7 @@ import {
   SendError,
   type SendOptions,
   type Sent as SdkSent,
+  type TypingSession,
 } from "@rome-os/app-runtime/chats";
 import {
   AccountNotConnected,
@@ -51,7 +52,13 @@ export interface AppChatsDeps {
   channelsOn(platform: string): readonly string[];
   adapters: Pick<
     ChatAdapters,
-    "of" | "accountOn" | "knownAccountOn" | "channelOf" | "keyOf" | "directMessageReached"
+    | "of"
+    | "accountOn"
+    | "knownAccountOn"
+    | "channelOf"
+    | "keyOf"
+    | "directMessageReached"
+    | "addressAt"
   >;
   chats: Pick<ChatRepository, "get" | "byKey" | "start" | "list">;
   speakers: Pick<Speakers, "speakerIn" | "speaksIn" | "accountsIn">;
@@ -65,7 +72,35 @@ export function appChats(deps: AppChatsDeps): ChatsPort {
     send: (place, out, opts) => send(deps, place, out, opts),
     dm: (account, opts) => dm(deps, account, opts),
     group: async (query) => group(deps, query),
+    typing: (place, opts) => typing(deps, place, opts),
   };
+}
+
+/**
+ * Typing in `place` as the account a send there would go out as, or null
+ * where its platform shows none. A place or sender a send would refuse is
+ * refused the same way. Typing is cosmetic, so a platform that fails to show
+ * it is logged and answers null.
+ */
+async function typing(
+  deps: AppChatsDeps,
+  place: SdkPlace,
+  opts: SendOptions | undefined,
+): Promise<TypingSession | null> {
+  const chat = heldChat(deps, chatOf(place));
+  const { at } = placeOf(deps, chat, place);
+  const sender = senderIn(deps, chat, at, opts?.as);
+  const activity = sender.channel.send?.activity;
+  if (!activity) return null;
+  try {
+    return await activity.begin({ chatId: deps.adapters.addressAt(sender.channel.name, at) });
+  } catch (error) {
+    log.warn("could not show typing", {
+      chat: chat.ref.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /** One of Rome's accounts, with the channel it speaks through. */

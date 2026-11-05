@@ -1,6 +1,7 @@
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
+import type { ChatMessage, ChatsPort, ConnectedAccounts } from "@rome-os/app-runtime/chats";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../connections/kinds/email/email-control.js";
 import { emailConnection } from "../apps/accounts-service.js";
@@ -76,6 +77,32 @@ const ChannelsQueryParams = z
     after: z.string().optional(),
     limit: z.number().int().positive().optional(),
   })
+  .strict();
+
+const AccountParam = z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict();
+const SendOptionsParam = z.object({ as: AccountParam.optional() }).strict();
+const ChatRefParam = z.object({ platform: z.string().min(1), id: z.number().int() }).strict();
+const PlaceParam = z.union([
+  ChatRefParam,
+  z.object({ chat: ChatRefParam, id: z.number().int() }).strict(),
+]);
+
+const ChatsSendParams = z
+  .object({
+    place: PlaceParam,
+    out: z.custom<ChatMessage>((val) => typeof val === "object" && val !== null, {
+      message: "out must be an object",
+    }),
+    opts: SendOptionsParam.optional(),
+  })
+  .strict();
+
+const ChatsDmParams = z
+  .object({ account: AccountParam, opts: SendOptionsParam.optional() })
+  .strict();
+
+const ChatsGroupParams = z
+  .object({ platform: z.string().min(1), name: z.string(), as: AccountParam.optional() })
   .strict();
 
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
@@ -244,6 +271,11 @@ function parseAppConnectionParams<T extends z.ZodType>(
 export interface WorkerRpcServices {
   /** How a worker's actions send and read on channels (`channels.*`). */
   channelsService: ChannelsService;
+  /** How a worker's actions send into chats (`chats.*`). Absent, those calls
+   *  are refused. */
+  chats?: ChatsPort;
+  /** Rome's accounts, for a worker's `connectedAccounts.list`. */
+  connectedAccounts?: Pick<ConnectedAccounts, "list">;
   connectionRegistry: ConnectionRegistry;
   channelOf: ChannelOf;
   chatSettings: ChatSettingsControl;
@@ -323,6 +355,21 @@ export class WorkerRpcServer {
             parseParams("approvals.sendCard", ApprovalCardParams, params),
           ),
         "channels.query": (params) => this.handleChannelsQuery(params),
+        "chats.send": (params) => {
+          const { place, out, opts } = parseParams("chats.send", ChatsSendParams, params);
+          return this.chats().send(place, out, opts);
+        },
+        "chats.dm": (params) => {
+          const { account, opts } = parseParams("chats.dm", ChatsDmParams, params);
+          return this.chats().dm(account, opts);
+        },
+        "chats.group": (params) =>
+          this.chats().group(parseParams("chats.group", ChatsGroupParams, params)),
+        "connectedAccounts.list": () => {
+          const accounts = this.services.connectedAccounts;
+          if (!accounts) throw new Error("connectedAccounts is not available");
+          return accounts.list();
+        },
         "agentNames.resolve": (params) => {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
           return this.services.agentNames.resolve(name);
@@ -529,6 +576,11 @@ export class WorkerRpcServer {
     const turn = parseParams("session.continue", SessionContinueParams, params);
     await this.services.backendTurnRunner.runAndDeliver(turn);
     return { ok: true };
+  }
+
+  private chats(): ChatsPort {
+    if (!this.services.chats) throw new Error("chats is not available");
+    return this.services.chats;
   }
 
   private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {

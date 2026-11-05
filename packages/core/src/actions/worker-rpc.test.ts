@@ -94,6 +94,8 @@ function makeServer(
     notify?: { send: ReturnType<typeof rs.fn> };
     feedback?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
+    chats?: unknown;
+    connectedAccounts?: unknown;
     connectionRegistry?: unknown;
     agentNames?: unknown;
     appConnections?: unknown;
@@ -133,6 +135,8 @@ function makeServer(
     notify: overrides.notify ?? { send: rs.fn() },
     feedback: overrides.feedback ?? { send: rs.fn() },
     channelsService: overrides.channelsService,
+    chats: overrides.chats,
+    connectedAccounts: overrides.connectedAccounts,
     connectionRegistry: overrides.connectionRegistry,
     channelOf: (connection: { service: string }) => connection.service,
     agentNames: overrides.agentNames,
@@ -452,6 +456,39 @@ describe("WorkerRpcServer param validation", () => {
       expect(ingest).toHaveBeenCalledWith("email-1", params);
       expect(skipped.result).toEqual({ status: "skipped", reason: "channel_inactive" });
       expect(ingest).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends into a chat, resolves a direct message and lists Rome's accounts over Chats", async () => {
+      const chats = {
+        send: rs.fn(async () => ({ delivery: { state: "sent", at: new Date(0) } })),
+        dm: rs.fn(async () => ({ platform: "telegram", id: 7 })),
+        group: rs.fn(async () => []),
+      };
+      const connectedAccounts = {
+        list: rs.fn(async () => [{ account: { platform: "telegram", id: "8" } }]),
+      };
+      const { server } = makeServer({ chats, connectedAccounts });
+      const fake = connect(server);
+      const as = { platform: "telegram", id: "8" };
+
+      await rpc(fake, "chats.send", {
+        place: { chat: { platform: "telegram", id: 7 }, id: 3 },
+        out: { text: "hi" },
+        opts: { as },
+      });
+      const opened = await rpc(fake, "chats.dm", { account: { platform: "telegram", id: "9" } });
+      const listed = await rpc(fake, "connectedAccounts.list", {});
+      const refused = await rpc(fake, "chats.send", { place: { platform: "telegram" }, out: {} });
+
+      expect(chats.send).toHaveBeenCalledWith(
+        { chat: { platform: "telegram", id: 7 }, id: 3 },
+        { text: "hi" },
+        { as },
+      );
+      expect(opened.result).toEqual({ platform: "telegram", id: 7 });
+      expect(listed.result).toEqual([{ account: { platform: "telegram", id: "8" } }]);
+      expect(refused.error).toMatch(/chats\.send: invalid params/);
+      expect(chats.send).toHaveBeenCalledTimes(1);
     });
 
     it("rejects a read with no channel", async () => {

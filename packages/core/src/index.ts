@@ -117,6 +117,9 @@ import { romeAccounts } from "./apps/rome-accounts.js";
 import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
+import { appChats } from "./connections/app-chats.js";
+import { createConnectedAccounts } from "./apps/connected-accounts.js";
+import { chatsOver } from "@rome-os/app-runtime/chats";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
 import { ReplyStreams } from "./participation/reply-delivery/streams.js";
@@ -606,6 +609,25 @@ async function main() {
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
+  // What an app's `deps.chats` reaches: sends into the places Chats names,
+  // through the raw channels, so each send goes on record once.
+  const appChatsPort = appChats({
+    channels: () => builtChannels ?? [],
+    channelsOn: (platform) => channelRecords.namesOn(platform),
+    adapters: chatsWired.adapters,
+    chats: chatsWired.chats,
+    speakers: chatsWired.speakers,
+    replies: chatsWired.replies,
+    messages: chatsWired.messages,
+  });
+  const appChatsForApps = chatsOver(appChatsPort);
+  // Rome's accounts as an app lists them. `accountNames` is built further
+  // down; a list runs after boot.
+  const appConnectedAccounts = createConnectedAccounts({
+    rows: () => connectedAccounts.all(),
+    names: (listed) => accountNames.displayNames(listed),
+    query: (account, query) => channelsService.query(account, query),
+  });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
   const listedAgents = externalAgents({
@@ -1279,6 +1301,8 @@ async function main() {
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
     channelsService: legacyChatIdChannelsService(channelsService),
+    chats: appChatsForApps,
+    connectedAccounts: appConnectedAccounts,
     chatSettings: appChatSettings,
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
@@ -1662,6 +1686,8 @@ async function main() {
         chatSettings: appChatSettings,
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
+        chats: appChatsForApps,
+        connectedAccounts: appConnectedAccounts,
         channels: hookChannels,
         messagesSaid: hookMessagesSaid,
         accountAgentOf: hookAgentOf,
@@ -1705,6 +1731,8 @@ async function main() {
           chatSettings: appChatSettings,
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
+          chats: appChatsForApps,
+          connectedAccounts: appConnectedAccounts,
           channels: hookChannels,
           messagesSaid: hookMessagesSaid,
           accountAgentOf: hookAgentOf,
@@ -1855,6 +1883,8 @@ async function main() {
 
   const workerRpcServer = new WorkerRpcServer({
     channelsService,
+    chats: appChatsPort,
+    connectedAccounts: appConnectedAccounts,
     connectionRegistry,
     channelOf,
     chatSettings,
