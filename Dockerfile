@@ -12,12 +12,7 @@ ARG APT_MIRROR=""
 ARG NPM_REGISTRY=""
 
 # ---------------------------------------------------------------------------
-# Stage 0: Tailscale binaries
-# ---------------------------------------------------------------------------
-FROM tailscale/tailscale:latest AS tailscale
-
-# ---------------------------------------------------------------------------
-# Stage 1: Dependency cache inputs
+# Stage 0: Dependency cache inputs
 # ---------------------------------------------------------------------------
 FROM node:24-slim AS docker-manifests
 
@@ -51,7 +46,7 @@ RUN set -eux; \
     ' sh {} +
 
 # ---------------------------------------------------------------------------
-# Stage 2: Fetch dependencies into pnpm content-addressed store
+# Stage 1: Fetch dependencies into pnpm content-addressed store
 # ---------------------------------------------------------------------------
 # `pnpm fetch` downloads the runtime workspace closure into /pnpm/store.
 # Copy the manifest workspace instead of only pnpm-lock.yaml so Docker cache
@@ -109,7 +104,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     rm -rf node_modules
 
 # ---------------------------------------------------------------------------
-# Stage 3: Build application
+# Stage 2: Build application
 # ---------------------------------------------------------------------------
 FROM fetch AS builder
 ARG ROME_DOCKER_APP_CODE_MODE=source
@@ -152,7 +147,7 @@ RUN rm -rf node_modules/.pnpm/electron@* \
 RUN pnpm build:docker-runtime
 
 # ---------------------------------------------------------------------------
-# Stage 4: Production image
+# Stage 3: Production image
 # ---------------------------------------------------------------------------
 FROM node:24-slim AS production
 ARG TARGETARCH
@@ -298,13 +293,8 @@ RUN mkdir -p /opt/rome-corepack && \
     COREPACK_HOME=/opt/rome-corepack corepack prepare pnpm@11.6.0 --activate && \
     chown -R rome:rome /opt/rome-corepack
 
-# Tailscale binaries + state dirs
-COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
-COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscaled
-RUN mkdir -p /var/lib/tailscale /var/run/tailscale && \
-    echo "rome ALL=(root) NOPASSWD: /usr/local/bin/tailscale" > /etc/sudoers.d/rome-tailscale && \
-    echo "rome ALL=(root) NOPASSWD: /bin/sh /app/scripts/docker/rome-hostfs-remote-access-provision.sh *" > /etc/sudoers.d/rome-hostfs && \
-    chmod 0440 /etc/sudoers.d/rome-tailscale /etc/sudoers.d/rome-hostfs
+RUN echo "rome ALL=(root) NOPASSWD: /bin/sh /app/scripts/docker/rome-hostfs-remote-access-provision.sh *" > /etc/sudoers.d/rome-hostfs && \
+    chmod 0440 /etc/sudoers.d/rome-hostfs
 
 # s6-overlay, with its published sha256 verified like the Notion CLI above.
 RUN set -eux; \
@@ -373,7 +363,6 @@ COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencl
 # /opt/rome, which the rome user owns, so rome cannot change what root runs.
 COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
-COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
 COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
 # rome-init.sh has the rome and user shells source this. It sits outside /app
 # because user cannot read /app.

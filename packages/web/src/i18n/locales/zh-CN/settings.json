@@ -549,77 +549,9 @@
     "decliningApprovalRequest": "正在拒绝审批请求",
     "startingPackPurchase": "正在购买 favor 套餐"
   },
-  "tailscale": {
-    "title": "Tailscale",
-    "daemonMode": "守护进程模式",
-    "status": {
-      "connected": "已连接",
-      "notConnected": "未连接",
-      "authenticating": "正在认证",
-      "notConfigured": "未配置"
-    },
-    "connectButton": "连接到 Tailscale",
-    "connectButtonOauth": "连接 Tailscale",
-    "authPrompt": "在浏览器中完成认证：",
-    "polling": "正在轮询完成状态…",
-    "infoLabels": {
-      "ip": "Tailscale IP",
-      "hostname": "主机名",
-      "fqdn": "FQDN"
-    },
-    "peersTable": {
-      "hostname": "主机名",
-      "fqdn": "FQDN",
-      "ip": "IP",
-      "os": "系统",
-      "status": "状态",
-      "thisDevice": "本机"
-    },
-    "noPeers": "未在 tailnet 中找到对端节点。",
-    "exitNode": {
-      "title": "出口节点",
-      "updating": "正在更新出口节点设置…",
-      "updateFailed": "更新出口节点设置失败。",
-      "termTooltip": "出口节点会将其他设备的互联网流量通过此服务器转发。"
-    },
-    "downloadBannerPrefix": "在 Docker 之外运行。请下载",
-    "downloadBannerLink": "Tailscale 桌面应用",
-    "downloadBannerSuffix": "以将本机连接到你的 tailnet。",
-    "devicesTable": {
-      "name": "名称",
-      "os": "系统",
-      "ipAddresses": "IP 地址",
-      "version": "版本",
-      "status": "状态",
-      "lastSeen": "最后在线"
-    },
-    "noDevices": "未在 tailnet 中找到设备。",
-    "modal": {
-      "title": "连接 Tailscale",
-      "introPrefix": "输入你的 Tailscale OAuth 客户端凭证。可在",
-      "introLink": "Tailscale 管理控制台",
-      "introSuffix": "中创建。客户端至少需要 <code>devices:read</code> 权限。",
-      "clientIdLabel": "Client ID",
-      "clientIdPlaceholder": "k1234567890abcdef",
-      "clientSecretLabel": "Client Secret",
-      "clientSecretPlaceholder": "tskey-client-...",
-      "cancel": "取消"
-    }
-  },
   "publicAccess": {
     "title": "访问控制",
     "description": "在此处的所有设置下，仪表盘都仍需登录。",
-    "savedFlash": "公开访问设置已保存",
-    "saveFailedFallback": "保存公开访问设置失败。",
-    "openFirst": "请先在本设备上打开 Rome 的 Tailscale URL，然后再开启访问控制。",
-    "handoffFailed": "无法将你的会话切换到 Tailscale URL。",
-    "toggleLabel": "限制为仅 Tailscale 主机访问",
-    "restrictedNote": "公网访问已受限。请继续使用 Tailscale 主机名访问仪表盘。",
-    "needTailscaleNote": "请先将本机连接到 Tailscale，然后再将仪表盘限制为仅 Tailscale 主机访问。",
-    "needHttpsNote": "请先完成 Tailscale HTTPS 设置，然后再开启访问控制。",
-    "openTailnetNote": "请先在本设备上打开 Rome 的 Tailscale URL，让 Rome 验证连接是否正常。",
-    "checkingSuffix": " 检查中…",
-    "publicEnabledNote": "已启用公网主机访问。仪表盘仍需登录，但公开应用和 Rome Cloud 邮箱访问应用除外。",
     "dashboardEmails": {
       "title": "允许的邮箱",
       "description": "授予的是完整仪表盘权限，而不只是单个应用。",

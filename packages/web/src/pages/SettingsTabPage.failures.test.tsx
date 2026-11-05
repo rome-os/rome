@@ -38,9 +38,6 @@ function response(ok: boolean, status: number, json: unknown): Response {
 }
 
 function defaultResponse(url: string): Response {
-  if (url === "/api/tailscale/devices") {
-    return response(true, 200, { mode: "oauth", configured: false, devices: [] });
-  }
   if (url === "/api/diagnosis") {
     return response(true, 200, {
       status: "ok",

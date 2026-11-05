@@ -11,7 +11,6 @@
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import Database from "better-sqlite3";
 
 import { generateCaddyfile, resolveWebRoot } from "../packages/core/src/lib/caddyfile-generator.js";
@@ -51,19 +50,6 @@ function readPublicAccessConfig(): PublicAccessConfig {
   return DEFAULT_PUBLIC_ACCESS_CONFIG;
 }
 
-function detectTailnetDns(): string | null {
-  try {
-    const stdout = execFileSync("tailscale", ["status", "--json"], {
-      timeout: 5000,
-      encoding: "utf-8",
-    });
-    const status = JSON.parse(stdout);
-    return status.Self?.DNSName?.replace(/\.$/, "") || null;
-  } catch {
-    return null;
-  }
-}
-
 // Sync sibling of `lib/gateway-page.ts:getInstanceName` — the runtime path
 // uses async Drizzle, but at boot time we only have a raw sqlite handle.
 function getInstanceName(): string {
@@ -79,9 +65,6 @@ function getInstanceName(): string {
   }
 
   if (process.env.PANTHEON_SLUG) return process.env.PANTHEON_SLUG;
-
-  const tailnetDns = detectTailnetDns();
-  if (tailnetDns) return tailnetDns.split(".")[0];
 
   return "This";
 }

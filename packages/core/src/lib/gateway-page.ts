@@ -1,29 +1,12 @@
 import { writeFile, mkdir } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { persons } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { buildGatewayHtml } from "./gateway-html.js";
 import type { PublicAccessConfig } from "./public-access-config.js";
 
-const execFileAsync = promisify(execFile);
-
 const GATEWAY_DIR = "/etc/caddy/static";
 const GATEWAY_HTML_PATH = `${GATEWAY_DIR}/gateway.html`;
-
-export async function detectTailnetDns(): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync("tailscale", ["status", "--json"], {
-      timeout: 5000,
-    });
-    const status = JSON.parse(stdout);
-    const dnsName = status.Self?.DNSName?.replace(/\.$/, "") || null;
-    return dnsName;
-  } catch {
-    return null;
-  }
-}
 
 export async function getInstanceName(db: DrizzleDb | null): Promise<string> {
   if (db) {
@@ -42,15 +25,6 @@ export async function getInstanceName(db: DrizzleDb | null): Promise<string> {
   }
 
   if (process.env.PANTHEON_SLUG) return process.env.PANTHEON_SLUG;
-
-  try {
-    const tailnetDns = await detectTailnetDns();
-    if (tailnetDns) {
-      return tailnetDns.split(".")[0];
-    }
-  } catch {
-    // Ignore
-  }
 
   return "This";
 }

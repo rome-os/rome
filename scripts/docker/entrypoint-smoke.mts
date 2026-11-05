@@ -12,7 +12,6 @@
 //   FROM zoolsher/rome:main
 //   COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 //   COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
-//   COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
 //   COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
 //   EOF
 //   node scripts/docker/entrypoint-smoke.mts rome-entrypoint-smoke

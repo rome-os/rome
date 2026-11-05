@@ -107,7 +107,7 @@ handle @nonCanonicalPath {
     //     non-`/api/*` path), so serving them from Caddy drops a pointless
     //     double round-trip to Hono with zero change to the auth posture.
     //     Unknown paths fall back to `index.html` for the client router.
-    //     Hono keeps its own copy for loopback/tailnet callers that reach
+    //     Hono keeps its own copy for loopback callers that reach
     //     `:4141` without going via Caddy.
     //   - `@appDocs` (`/apps/*`, `/full/apps/*`) is the shell too, but served
     //     by Hono so the social meta can be swapped per app. Public, no
@@ -273,7 +273,7 @@ handle ${getFullAppHref(appId)}/* {
     body = `
 root * ${webRoot}
 ${canonicalPathGuard}
-@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*
+@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/*
 handle @publicApi {
 \t${proxy}
 }

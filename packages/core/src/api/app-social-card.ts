@@ -52,7 +52,7 @@ export async function buildAppSocialCard(
   if (!isResolvedWebApp(view)) return null;
 
   // Echoes the requested host on purpose: the crawler already holds this
-  // URL; getInstanceOrigin would break loopback/tailnet previews.
+  // URL; getInstanceOrigin would break loopback previews.
   const { origin } = getExternalRequestOrigin(request);
   // The card image is auxiliary: any lookup failure just means "no image yet"
   // and the shell keeps its static og:image.

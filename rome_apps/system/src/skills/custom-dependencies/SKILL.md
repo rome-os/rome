@@ -20,7 +20,7 @@ Install custom software under `/home/rome`. Commands in `~/.local/bin` run by na
 | `/home/rome`: `~/.local`, `~/.cache`, `~/.npmrc`, the shell profiles, app repos, installed apps, app data, the database, the pnpm store | Kept |
 | `/home/user` | Kept |
 | `/app` | Rome's own code, replaced by the new image. `/app/memory` is kept. |
-| System directories such as `/usr`, `/opt`, and `/etc`, including anything installed with `apt-get` | Replaced by the new image, except Rome's SSH host keys and Tailscale state |
+| System directories such as `/usr`, `/opt`, and `/etc`, including anything installed with `apt-get` | Replaced by the new image, except Rome's SSH host keys |
 
 Rome publishes a new image every weekday on a schedule, plus manual releases ([release schedule](https://github.com/rome-os/rome/blob/main/docs/releases.md#scheduled-patch-releases)). An instance upgrades at these times:
 

@@ -104,7 +104,7 @@ describe("generateCaddyfile", () => {
   it("falls back to the gateway page in publicAccess mode and drops forward_auth", () => {
     const out = generateCaddyfile(config({ enableAccessControl: true, allowedApps: [] }));
     expect(out).toContain(
-      "@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*",
+      "@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/*",
     );
     expect(out).toContain("handle @publicApi {");
     expect(out).toContain("rewrite * /gateway.html");

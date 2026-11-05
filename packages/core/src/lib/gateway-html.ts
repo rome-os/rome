@@ -117,17 +117,9 @@ export function buildGatewayHtml(input: GatewayPageInput): string {
     ul li.empty { color: var(--muted); font-style: italic; }
     a { color: var(--link); text-decoration: none; }
     a:hover { color: var(--link-hover); text-decoration: underline; }
-    .footer { font-size: 0.8rem; color: var(--muted); }
-    .footer a { color: var(--muted); text-decoration: underline; }
-    #redirecting {
-      position: fixed; inset: 0; background: var(--bg);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.1rem; color: var(--muted); z-index: 100;
-    }
   </style>
 </head>
 <body>
-  <div id="redirecting" style="display:none">Redirecting to private network...</div>
   <div id="landing" class="container">
     <h1>${escapeHtml(config.instanceName)}'s Rome</h1>
     <div id="private-notice" class="notice" style="display:none">
@@ -137,7 +129,6 @@ export function buildGatewayHtml(input: GatewayPageInput): string {
     <ul>
       ${routeListHtml}
     </ul>
-    <p class="footer">To access the full dashboard, connect via <a href="https://tailscale.com/download">Tailscale</a>.</p>
   </div>
   <script>
     const config = ${escapeForInlineScript(config)};
@@ -151,51 +142,6 @@ export function buildGatewayHtml(input: GatewayPageInput): string {
       if (requestedPathname !== "/" && pathEl && noticeEl) {
         pathEl.textContent = requestedPath;
         noticeEl.style.display = "block";
-      }
-
-      var tailnetDns = null;
-      var certReady = false;
-      try {
-        var infoRes = await fetch("/api/tailnet", { cache: "no-store" });
-        if (infoRes.ok) {
-          var info = await infoRes.json();
-          if (info && typeof info.tailnetDns === "string" && info.tailnetDns.length > 0) {
-            tailnetDns = info.tailnetDns;
-          }
-          certReady = info && info.certReady === true;
-        }
-      } catch(e) {
-        // Best-effort only
-      }
-
-      if (!tailnetDns || !certReady) return;
-
-      function tryProto(proto, dns) {
-        var c = new AbortController();
-        var t = setTimeout(function() { c.abort(); }, 2000);
-        return fetch(proto + "://" + dns + "/api/health", {
-          signal: c.signal, mode: "cors",
-        }).then(function(r) {
-          clearTimeout(t);
-          if (!r.ok) throw new Error("not ok");
-          return proto;
-        }).catch(function(e) {
-          clearTimeout(t);
-          throw e;
-        });
-      }
-
-      try {
-        var winner = await Promise.any([
-          tryProto("https", tailnetDns),
-          tryProto("http", tailnetDns),
-        ]);
-        document.getElementById("redirecting").style.display = "flex";
-        document.getElementById("landing").style.display = "none";
-        window.location.href = winner + "://" + tailnetDns + requestedPath;
-        return;
-      } catch(e) {
-        // Neither protocol reachable
       }
     })();
   </script>

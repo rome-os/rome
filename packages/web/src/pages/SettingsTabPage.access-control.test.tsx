@@ -20,11 +20,7 @@ function ok(json: unknown): Response {
   return { ok: true, status: 200, json: async () => structuredClone(json) } as Response;
 }
 
-function mockSettingsBackend(options?: {
-  cloudEmailAccess?: string[];
-  failPut?: boolean;
-  tailscaleMode?: "daemon" | "oauth";
-}) {
+function mockSettingsBackend(options?: { cloudEmailAccess?: string[]; failPut?: boolean }) {
   const putBodies: unknown[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
@@ -32,11 +28,6 @@ function mockSettingsBackend(options?: {
   ) => {
     const url = String(input);
     if (url === "/api/settings") return ok({});
-    if (url === "/api/tailscale/devices") {
-      return options?.tailscaleMode === "daemon"
-        ? ok({ mode: "daemon", status: "disconnected", configured: false, devices: [] })
-        : ok({ mode: "oauth", configured: false, devices: [] });
-    }
     if (url === "/api/public-access") {
       return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
     }
@@ -49,9 +40,6 @@ function mockSettingsBackend(options?: {
         return ok({});
       }
       return ok({ cloudEmailAccess: options?.cloudEmailAccess ?? ["ada@example.com"] });
-    }
-    if (url === "/api/tailnet") {
-      return ok({ tailnetDns: null, httpsEnabled: false, certReady: false });
     }
     if (url === "/api/uptime") return ok({ uptime: 120 });
     if (url === "/api/build-info") return ok({ sha: null, builtAt: null });
@@ -89,19 +77,7 @@ function renderAdvancedSettings() {
 }
 
 describe("SettingsPage Access Control section", () => {
-  it.each([
-    ["OAuth", "oauth", "Connect Tailscale"],
-    ["daemon", "daemon", "Connect to Tailscale"],
-  ] as const)("uses a standard outline connect button in %s mode", async (_label, mode, name) => {
-    mockSettingsBackend({ tailscaleMode: mode });
-    renderAdvancedSettings();
-
-    const connectButton = await screen.findByRole("button", { name });
-    expect(connectButton.dataset.variant).toBe("outline");
-    expect(connectButton.dataset.size).toBe("md");
-  });
-
-  it("renders Access Control as the section title with Allowed emails before Tailscale", async () => {
+  it("renders Access Control as the section title with Allowed emails beneath it", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
@@ -113,17 +89,9 @@ describe("SettingsPage Access Control section", () => {
       level: 3,
       name: "Allowed emails",
     });
-    const tailscaleTitle = await screen.findByRole("heading", { level: 3, name: "Tailscale" });
 
-    // Tailscale is a subsection of Access Control, not a first-level section.
-    expect(screen.queryByRole("heading", { level: 2, name: "Tailscale" })).toBeNull();
-
-    // Document order: Access Control → Allowed emails → Tailscale.
     expect(
       sectionTitle.compareDocumentPosition(emailsTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      emailsTitle.compareDocumentPosition(tailscaleTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 

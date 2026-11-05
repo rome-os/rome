@@ -37,9 +37,6 @@ function mockConnectionsFetch(
     const url = String(input);
     if (url === "/api/approvals") return new Response("[]", { status: 200 });
     if (url === "/api/settings") return ok({});
-    if (url === "/api/tailscale/devices") {
-      return ok({ mode: "oauth", configured: false, devices: [] });
-    }
     if (url === "/api/integrations/composio/status") return ok({});
     if (url === "/api/connections") return loadConnections();
     return ok({});

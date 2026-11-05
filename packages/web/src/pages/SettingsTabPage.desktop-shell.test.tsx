@@ -11,16 +11,6 @@ rs.mock("@/components/system-diagnosis-section", () => ({
   SystemDiagnosisSection: () => null,
 }));
 
-rs.mock("@/hooks/use-tailscale-connect", () => ({
-  useTailscaleConnect: () => ({
-    authUrl: null,
-    connecting: false,
-    error: null,
-    handleConnect: rs.fn(),
-    clearAuthUrl: rs.fn(),
-  }),
-}));
-
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });

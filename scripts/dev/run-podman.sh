@@ -10,7 +10,7 @@ PODMAN_STORAGE="${PODMAN_STORAGE:-$CURRENT_DIR/.rome/podman-storage}"
 MOUNT_MASK_DIR="$CURRENT_DIR/.rome/mount-mask"
 PROFILE="${ROME_PROFILE:-default}"
 
-mkdir -p "$BASE"/{app,user_home,rome_home,ssh_host_keys,tailscale}
+mkdir -p "$BASE"/{app,user_home,rome_home,ssh_host_keys}
 mkdir -p "$PODMAN_STORAGE" "$MOUNT_MASK_DIR"
 
 PODMAN=(
@@ -40,7 +40,6 @@ PODMAN=(
   -v "$BASE/user_home:/home/user" \
   -v "$BASE/rome_home:/home/rome" \
   -v "$BASE/ssh_host_keys:/etc/ssh/ssh_host_keys" \
-  -v "$BASE/tailscale:/var/lib/tailscale" \
   -v "$CURRENT_DIR:/home/rome/.rome/$PROFILE/projects/mount" \
   -v "$MOUNT_MASK_DIR:/home/rome/.rome/$PROFILE/projects/mount/.rome:ro" \
   "$IMAGE"

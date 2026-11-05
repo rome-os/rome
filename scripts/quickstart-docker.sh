@@ -186,7 +186,6 @@ docker_run_args=(
   -v "${container_name}-user-home:/home/user"
   -v "${container_name}-rome-home:/home/rome"
   -v "${container_name}-ssh-host-keys:/etc/ssh/ssh_host_keys"
-  -v "${container_name}-tailscale:/var/lib/tailscale"
   # SYS_ADMIN + fuse: the runtime mounts host-project sshfs aliases in-container.
   --cap-add SYS_ADMIN
   --device /dev/fuse:/dev/fuse

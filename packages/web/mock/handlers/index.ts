@@ -1006,14 +1006,11 @@ const projectFileHandlers = fileBrowserHandlers({
 });
 
 /**
- * The two remaining reads the Settings page makes. The page holds its
- * loading gate until `/api/tailscale/devices` settles, and the Connections tab
- * waits on the Composio status alongside `/api/connections`. In strict E2E
- * mode, unhandled reads hit the 503 fallback and leave those panels in an
- * error state. These fixtures keep the page usable without a backend.
+ * The Connections tab waits on the Composio status alongside
+ * `/api/connections`. In strict E2E mode, unhandled reads hit the 503 fallback
+ * and leave that panel in an error state. This fixture keeps the page usable
+ * without a backend.
  */
-const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
-
 const composioStatus: { composio: ComposioCliStatus } = {
   composio: {
     installed: true,
@@ -1468,7 +1465,6 @@ export const handlers = [
     }
     return HttpResponse.json({ ok: true, connection: null });
   }),
-  http.get("/api/tailscale/devices", () => HttpResponse.json(tailscale)),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
   http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
   // Auto-save writes through on every edit, so mock mode needs a real write

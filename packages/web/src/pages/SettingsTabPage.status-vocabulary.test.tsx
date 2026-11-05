@@ -14,16 +14,6 @@ rs.mock("@/components/system-diagnosis-section", () => ({
   SystemDiagnosisSection: () => null,
 }));
 
-rs.mock("@/hooks/use-tailscale-connect", () => ({
-  useTailscaleConnect: () => ({
-    authUrl: null,
-    connecting: false,
-    error: null,
-    handleConnect: rs.fn(),
-    clearAuthUrl: rs.fn(),
-  }),
-}));
-
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -41,11 +31,10 @@ function response(json: unknown): Response {
   } as Response;
 }
 
-function renderAdvanced(tailscale: Record<string, unknown>, relay: Record<string, unknown> | null) {
+function renderAdvanced(relay: Record<string, unknown> | null) {
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === "/api/settings") return response({});
-    if (url === "/api/tailscale/devices") return response(tailscale);
     if (url === "/api/integrations/relay") return response({ relay });
     if (url === "/api/public-access") {
       return response({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
@@ -72,47 +61,18 @@ async function expectStatusIndicator(label: string) {
 }
 
 describe("Settings connection status vocabulary", () => {
-  it.each([
-    [{ mode: "daemon", status: "connected", peers: [] }, "Connected"],
-    [{ mode: "daemon", status: "authenticating", peers: [] }, "Authenticating"],
-  ])("renders the Tailscale daemon status through StatusIndicator", async (tailscale, label) => {
-    renderAdvanced(tailscale, null);
-
-    await screen.findByRole("heading", { name: "Tailscale" });
-    await expectStatusIndicator(label);
-  });
-
-  it("describes Tailscale OAuth without credentials as Not configured", async () => {
-    renderAdvanced({ mode: "oauth", configured: false, devices: [] }, null);
-
-    await screen.findByRole("heading", { name: "Tailscale" });
-    await expectStatusIndicator("Not configured");
-    expect(screen.queryByText("Not Connected")).toBeNull();
-  });
-
-  it("describes a stopped Tailscale daemon as Not connected", async () => {
-    renderAdvanced({ mode: "daemon", status: "stopped", peers: [] }, null);
-
-    await screen.findByRole("heading", { name: "Tailscale" });
-    await expectStatusIndicator("Not connected");
-    expect(screen.queryByText("Disconnected")).toBeNull();
-  });
-
   it("describes a configured relay that is down as Not connected", async () => {
-    renderAdvanced(
-      { mode: "oauth", configured: false, devices: [] },
-      {
-        configured: true,
-        drainUrl: "https://relay.test/drain",
-        depositUrl: "https://relay.test/deposit",
-        targetApp: "inbox",
-        connected: false,
-        error: null,
-        connectedSince: null,
-        lastEventAt: null,
-        deliveredCount: 0,
-      },
-    );
+    renderAdvanced({
+      configured: true,
+      drainUrl: "https://relay.test/drain",
+      depositUrl: "https://relay.test/deposit",
+      targetApp: "inbox",
+      connected: false,
+      error: null,
+      connectedSince: null,
+      lastEventAt: null,
+      deliveredCount: 0,
+    });
 
     const developerSettings = await screen.findByText("Developer Settings");
     const details = developerSettings.closest("details");

@@ -73,8 +73,7 @@ describe("Public-access API", () => {
     process.env.CADDY_CONFIG_PATH = caddyPath;
     process.env.CADDY_SPY_FILE = spyFile;
     process.env.PATH = `${binDir}:${process.env.PATH}`;
-    // getInstanceName falls back to `tailscale status` when neither a guardian
-    // person nor PANTHEON_SLUG exists — pin the slug so no real binary runs.
+    // Pin the slug so getInstanceName does not depend on the guardian person.
     process.env.PANTHEON_SLUG = "test-instance";
     delete process.env.CADDY_FAKE_FAIL;
 
