@@ -30,13 +30,37 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
     @Test func pollingEndsOnlyOnTheTargetOrTheTimeout() {
         let since = Date(timeIntervalSince1970: 1_800_000_000)
         let soon = since.addingTimeInterval(60)
-        #expect(UpdateGate.pollOutcome(version: nil, target: "0.42.0", since: since, now: soon) == .wait)
-        #expect(UpdateGate.pollOutcome(version: "0.41.0", target: "0.42.0", since: since, now: soon) == .wait)
-        #expect(UpdateGate.pollOutcome(version: "0.42.0", target: "0.42.0", since: since, now: soon) == .done)
+        #expect(UpdateGate.pollOutcome(version: nil, target: "0.42.0", from: "0.41.0", since: since, now: soon) == .wait)
+        #expect(UpdateGate.pollOutcome(version: "0.41.0", target: "0.42.0", from: "0.41.0", since: since, now: soon) == .wait)
+        #expect(UpdateGate.pollOutcome(version: "0.42.0", target: "0.42.0", from: "0.41.0", since: since, now: soon) == .done)
         let late = since.addingTimeInterval(UpdateGate.upgradeTimeout)
-        #expect(UpdateGate.pollOutcome(version: nil, target: "0.42.0", since: since, now: late) == .timedOut)
+        #expect(UpdateGate.pollOutcome(version: nil, target: "0.42.0", from: "0.41.0", since: since, now: late) == .timedOut)
         // The target answering at the deadline still counts.
-        #expect(UpdateGate.pollOutcome(version: "0.42.0", target: "0.42.0", since: since, now: late) == .done)
+        #expect(UpdateGate.pollOutcome(version: "0.42.0", target: "0.42.0", from: "0.41.0", since: since, now: late) == .done)
+    }
+
+    @Test func aTargetThatWillNeverComeEndsTheWait() {
+        let since = Date(timeIntervalSince1970: 1_800_000_000)
+        let soon = since.addingTimeInterval(60)
+        // Back on another release than it started from: updated further, or rolled back.
+        #expect(UpdateGate.pollOutcome(version: "0.43.0", target: "0.42.0", from: "0.41.0", since: since, now: soon) == .movedOn)
+        #expect(UpdateGate.pollOutcome(version: "0.40.0", target: "0.42.0", from: "0.41.0", since: since, now: soon) == .movedOn)
+        // Without the starting release, only the check can tell.
+        #expect(UpdateGate.pollOutcome(version: "0.43.0", target: "0.42.0", from: nil, since: since, now: soon) == .wait)
+
+        #expect(UpdateGate.pending(target: "0.42.0", after: .upToDate) == .finished)
+        #expect(UpdateGate.pending(target: "0.42.0", after: .unknown(reason: "network")) == .keepWaiting)
+        #expect(UpdateGate.pending(target: "0.42.0", after: .required(current: "0.41.0", latest: "0.42.0")) == .keepWaiting)
+        #expect(UpdateGate.pending(target: "0.42.0", after: .required(current: "0.41.0", latest: "0.43.0"))
+                == .stale(.required(current: "0.41.0", latest: "0.43.0")))
+    }
+
+    @Test func startFailuresReadAsWords() {
+        for code in ["pantheon_unreachable", "pantheon_unconfigured", "unversioned_build", "upgrade_in_progress"] {
+            let message = UpdateGate.startFailureMessage(APIError.server(status: 502, message: code))
+            #expect(!message.contains("_"), "\(code) shows as \(message)")
+        }
+        #expect(UpdateGate.startFailureMessage(APIError.offline) == APIError.offline.errorDescription)
     }
 
     @Test func recognizesANewerReleaseRefusal() {
@@ -109,4 +133,89 @@ private func check(current: String?, latest: String?, available: Bool?) -> Upgra
         #expect(target == "0.42.0")
         updater.reset()
     }
+
+    @Test func aRememberedTargetIsDroppedWhenTheCheckSaysUpToDate() async {
+        let backend = FakeBackend()
+        let store = makeStore()
+        store.save(PendingUpgrade(target: "0.42.0", since: .now, from: "0.41.0"), for: "i1")
+        // Someone updated it from the web; Rome Cloud says it is current.
+        backend.check = .success(check(current: "0.43.0", latest: "0.43.0", available: false))
+        let updater = InstanceUpdater(store: store)
+        var finished = false
+        updater.onFinished = { finished = true }
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(!updater.blocking)
+        #expect(finished)
+        #expect(store.load("i1") == nil)
+    }
+
+    @Test func aStaleTargetShowsTheNewLatest() async {
+        let backend = FakeBackend()
+        let store = makeStore()
+        store.save(PendingUpgrade(target: "0.42.0", since: .now, from: "0.41.0"), for: "i1")
+        backend.check = .success(check(current: "0.41.0", latest: "0.43.0", available: true))
+        let updater = InstanceUpdater(store: store)
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(updater.state == .required(current: "0.41.0", latest: "0.43.0", latestChanged: false))
+        #expect(store.load("i1") == nil)
+    }
+
+    @Test func resetLeavesNothingBehindForTheNextInstance() async {
+        let backend = FakeBackend()
+        backend.check = .success(check(current: "0.41.0", latest: "0.42.0", available: true))
+        let updater = InstanceUpdater(store: makeStore())
+        await updater.attach(backend: backend, instanceID: "a")
+        #expect(updater.blocking)
+
+        // Switching away (to an instance that then fails to open) resets it.
+        updater.reset()
+        #expect(!updater.blocking)
+        await updater.updateNow()
+        #expect(backend.started.isEmpty)
+        await updater.check()
+        #expect(updater.state == .idle)
+    }
+}
+
+/// Answers every request with one status, for testing the client.
+final class StubProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var status = 200
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+@Suite(.serialized) struct BuildInfoProbeTests {
+    @Test func aRestartingInstancesUnauthorizedIsNotAnExpiredSession() async {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        StubProtocol.status = 401
+        let reported = Counter()
+        let client = APIClient(origin: URL(string: "https://rome.test")!, token: { "t" }, configuration: configuration) {
+            reported.add()
+        }
+        let backend = LiveBackend(client: client)
+
+        await #expect(throws: APIError.unauthorized) { try await backend.buildInfo() }
+        #expect(reported.value == 0)
+
+        // Any other call still reports it.
+        await #expect(throws: APIError.unauthorized) { try await backend.upgradeCheck() }
+        #expect(reported.value == 1)
+    }
+}
+
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func add() { lock.withLock { count += 1 } }
 }

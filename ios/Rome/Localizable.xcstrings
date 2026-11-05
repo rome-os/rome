@@ -1171,6 +1171,26 @@
         }
       }
     },
+    "Rome Cloud could not be reached. Try again in a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接 Rome Cloud。请稍后再试。"
+          }
+        }
+      }
+    },
+    "Rome Cloud could not start the update. Try again in a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome Cloud 未能开始更新。请稍后再试。"
+          }
+        }
+      }
+    },
     "Rome Cloud sign-in expired" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1625,6 +1645,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新用时过长"
+          }
+        }
+      }
+    },
+    "This Rome is a development build and cannot be updated." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 Rome 是开发版本，无法更新。"
+          }
+        }
+      }
+    },
+    "This Rome is not connected to Rome Cloud, so it cannot update here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 Rome 没有连接 Rome Cloud，无法在这里更新。"
           }
         }
       }

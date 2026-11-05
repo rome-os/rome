@@ -34,14 +34,58 @@ enum UpdateGate {
         }
     }
 
-    enum PollOutcome: Equatable { case done, wait, timedOut }
+    enum PollOutcome: Equatable {
+        case done, wait, timedOut
+        /// The instance came back on a release that is neither the one it
+        /// started from nor the target: the target will never answer.
+        case movedOn
+    }
 
     /// After an upgrade starts, the instance restarts on the target release.
-    /// Failed probes while it restarts are expected (`version` nil); only the
-    /// target answering ends the wait, and the timeout ends it as a failure.
-    static func pollOutcome(version: String?, target: String, since: Date, now: Date) -> PollOutcome {
+    /// Failed probes while it restarts are expected (`version` nil). The target
+    /// answering ends the wait; so does another release than the one it started
+    /// from (someone updated further, or Rome Cloud rolled back to an older
+    /// one), and the timeout ends it as a failure.
+    static func pollOutcome(version: String?, target: String, from: String?, since: Date, now: Date) -> PollOutcome {
         if version == target { return .done }
+        if let version, let from, version != from { return .movedOn }
         return now.timeIntervalSince(since) >= upgradeTimeout ? .timedOut : .wait
+    }
+
+    enum PendingDecision: Equatable {
+        case keepWaiting
+        /// The instance is on its latest release.
+        case finished
+        /// The remembered target is not what Rome Cloud offers anymore.
+        case stale(Verdict)
+    }
+
+    /// What a check that answers says about a remembered target. A check that
+    /// cannot decide (the instance is restarting) keeps the wait.
+    static func pending(target: String, after verdict: Verdict) -> PendingDecision {
+        switch verdict {
+        case .upToDate: return .finished
+        case .unknown: return .keepWaiting
+        case .required(_, let latest): return latest == target ? .keepWaiting : .stale(verdict)
+        }
+    }
+
+    /// Why Rome Cloud did not start an upgrade, in words. Codes from the
+    /// instance or Rome Cloud never reach the screen as they are.
+    static func startFailureMessage(_ error: Error) -> String {
+        if case APIError.server(_, let code) = error {
+            switch code {
+            case "pantheon_unreachable":
+                return String(localized: "Rome Cloud could not be reached. Try again in a moment.")
+            case "pantheon_unconfigured":
+                return String(localized: "This Rome is not connected to Rome Cloud, so it cannot update here.")
+            case "unversioned_build":
+                return String(localized: "This Rome is a development build and cannot be updated.")
+            default:
+                return String(localized: "Rome Cloud could not start the update. Try again in a moment.")
+            }
+        }
+        return (error as? LocalizedError)?.errorDescription ?? String(localized: "Could not reach your Rome")
     }
 
     /// Rome Cloud refused the target because a newer release came out.
@@ -56,6 +100,8 @@ enum UpdateGate {
 struct PendingUpgrade: Codable, Equatable {
     var target: String
     var since: Date
+    /// The release the instance ran when the upgrade started.
+    var from: String?
 }
 
 struct PendingUpgradeStore {
@@ -126,6 +172,9 @@ final class InstanceUpdater {
     private let store: PendingUpgradeStore
     private var generation = 0
     private var poll: Task<Void, Never>?
+    private var reconnecting = false
+    /// Probes since the last check while waiting; a check runs every few.
+    private var probesSinceCheck = 0
 
     init(store: PendingUpgradeStore = PendingUpgradeStore()) {
         self.store = store
@@ -153,6 +202,15 @@ final class InstanceUpdater {
         return true
     }
 
+    /// Returns once the first check answers, or after `limit`.
+    func waitForFirstAnswer(upTo limit: Duration) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        while state == .idle, clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
     func reset() {
         generation += 1
         poll?.cancel()
@@ -170,12 +228,17 @@ final class InstanceUpdater {
     func check() async {
         guard let backend, let instanceID else { return }
         if case .starting = state { return }
+        if let pending = store.load(instanceID), expired(pending) { store.clear(instanceID) }
         if let pending = store.load(instanceID) {
-            if !expired(pending) {
-                if poll == nil { startPolling(pending) } else { await probe(pending) }
+            // Waiting for a remembered target: show the wait at once, and let a
+            // check that answers end it if the target is reached or stale.
+            if poll == nil {
+                startPolling(pending)
+            } else if await probe(pending) {
                 return
             }
-            store.clear(instanceID)
+            await checkWhileWaiting(pending)
+            return
         }
         if case .updating = state { return }
         generation += 1
@@ -184,6 +247,31 @@ final class InstanceUpdater {
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
         guard mine == generation else { return }
         apply(UpdateGate.verdict(result), latestChanged: false)
+    }
+
+    private func checkWhileWaiting(_ pending: PendingUpgrade) async {
+        guard let backend, let instanceID else { return }
+        probesSinceCheck = 0
+        let mine = generation
+        let result: Result<UpgradeCheck, Error>
+        do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        guard mine == generation, case .updating = state else { return }
+        switch UpdateGate.pending(target: pending.target, after: UpdateGate.verdict(result)) {
+        case .keepWaiting:
+            break
+        case .finished:
+            await finish()
+        case .stale(let verdict):
+            store.clear(instanceID)
+            stopPolling()
+            apply(verdict, latestChanged: false)
+        }
+    }
+
+    private func stopPolling() {
+        generation += 1
+        poll?.cancel()
+        poll = nil
     }
 
     private func apply(_ verdict: UpdateGate.Verdict, latestChanged: Bool) {
@@ -203,7 +291,7 @@ final class InstanceUpdater {
         do {
             let started = try await backend.startUpgrade(target: latest)
             guard mine == generation else { return }
-            let pending = PendingUpgrade(target: started.target ?? latest, since: .now)
+            let pending = PendingUpgrade(target: started.target ?? latest, since: .now, from: current)
             store.save(pending, for: instanceID)
             startPolling(pending)
         } catch {
@@ -216,8 +304,7 @@ final class InstanceUpdater {
                 apply(UpdateGate.verdict(result), latestChanged: true)
                 return
             }
-            let message = (error as? LocalizedError)?.errorDescription ?? String(localized: "Could not reach your Rome")
-            state = .failed(.start(current: current, latest: latest, message: message))
+            state = .failed(.start(current: current, latest: latest, message: UpdateGate.startFailureMessage(error)))
         }
     }
 
@@ -253,6 +340,7 @@ final class InstanceUpdater {
 
     private func startPolling(_ pending: PendingUpgrade) {
         poll?.cancel()
+        probesSinceCheck = 0
         state = .updating(target: pending.target, since: pending.since)
         let mine = generation
         poll = Task { [weak self] in
@@ -269,23 +357,47 @@ final class InstanceUpdater {
     private func probe(_ pending: PendingUpgrade) async -> Bool {
         let mine = generation
         guard let backend else {
-            await reconnect?()
-            if mine == generation, UpdateGate.pollOutcome(version: nil, target: pending.target, since: pending.since, now: .now) == .timedOut {
+            // Its own task: a reconnect that opens the instance attaches it,
+            // which cancels this poll, and must not cancel the opening with it.
+            if let reconnect, !reconnecting {
+                reconnecting = true
+                Task { [weak self] in
+                    await reconnect()
+                    self?.reconnecting = false
+                }
+            }
+            if UpdateGate.pollOutcome(version: nil, target: pending.target, from: pending.from, since: pending.since, now: .now) == .timedOut {
                 state = .failed(.timedOut(target: pending.target))
                 return true
             }
-            return mine != generation
+            return false
         }
         let version = try? await backend.buildInfo().version
         guard mine == generation else { return true }
-        switch UpdateGate.pollOutcome(version: version, target: pending.target, since: pending.since, now: .now) {
+        switch UpdateGate.pollOutcome(version: version, target: pending.target, from: pending.from, since: pending.since, now: .now) {
         case .done:
             await finish()
             return true
         case .timedOut:
             state = .failed(.timedOut(target: pending.target))
             return true
+        case .movedOn:
+            // Not the target and not where it started: ask what is latest now.
+            if let instanceID { store.clear(instanceID) }
+            stopPolling()
+            state = .idle
+            // Its own task: this poll was just cancelled, and so would the check be.
+            Task { [weak self] in await self?.check() }
+            return true
         case .wait:
+            // The instance answers but not on the target yet. Every so often ask
+            // Rome Cloud too, which notices a target that will never come.
+            probesSinceCheck += 1
+            if version != nil, probesSinceCheck >= 6 {
+                await checkWhileWaiting(pending)
+                if mine == generation, case .updating = state { return false }
+                return true
+            }
             return false
         }
     }
