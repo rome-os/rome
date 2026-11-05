@@ -73,6 +73,9 @@ rs.mock("@whiskeysockets/baileys", () => {
 
 // Helpers
 
+/** The options of a message the adapter sends: an id it minted. */
+const ROME_SEND = expect.objectContaining({ messageId: expect.stringMatching(/^3EB0524F4D45/) });
+
 function makeWAMessage(overrides: Record<string, unknown> = {}) {
   return {
     key: {
@@ -348,29 +351,34 @@ describe("WhatsAppAdapter", () => {
         expect(recorded.map((batch) => batch.ids)).toEqual([["own1"]]);
       });
 
-      it("keeps the echoes of Rome's own sends out, whether they come during the send or after", async () => {
+      it("keeps out what Rome sent, as its echo and when a history sync reports it again", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);
         adapter.onInbound(async () => {});
         await adapter.start();
-        const echo = (id: string) =>
-          eventHandlers["messages.upsert"]({
-            messages: [
-              makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe: true } }),
-            ],
-          });
-        mockSendMessage.mockImplementationOnce(async () => {
-          await echo("during");
-          return { key: { id: "during" } };
+        const sentIds: string[] = [];
+        mockSendMessage.mockImplementation(
+          async (_jid: string, _content: unknown, options: { messageId: string }) => {
+            sentIds.push(options.messageId);
+            return { key: { id: options.messageId } };
+          },
+        );
+
+        await adapter.send("111@s.whatsapp.net" as ChatId, { text: "on it" });
+        const fromMe = (id: string) =>
+          makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe: true } });
+        await eventHandlers["messages.upsert"]({
+          messages: [fromMe(sentIds[0]!), fromMe("typed-on-phone")],
         });
-        mockSendMessage.mockImplementationOnce(async () => ({ key: { id: "after" } }));
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [fromMe(sentIds[0]!), fromMe("typed-earlier")],
+        });
 
-        await adapter.send("111@s.whatsapp.net" as ChatId, { text: "first" });
-        await adapter.send("111@s.whatsapp.net" as ChatId, { text: "second" });
-        await echo("after");
-        await echo("typed-on-phone");
-
-        expect(recorded.map((batch) => batch.ids)).toEqual([["typed-on-phone"]]);
+        expect(sentIds).toHaveLength(1);
+        expect(recorded.map((batch) => batch.ids)).toEqual([["typed-on-phone"], ["typed-earlier"]]);
+        mockSendMessage.mockReset();
       });
 
       it("hands over every live message while nothing is delivered inbound", async () => {
@@ -709,9 +717,11 @@ describe("WhatsAppAdapter", () => {
         text: "hi from bot",
       });
 
-      expect(mockSendMessage).toHaveBeenCalledWith("jid@s.whatsapp.net", {
-        text: "hi from bot",
-      });
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        "jid@s.whatsapp.net",
+        { text: "hi from bot" },
+        ROME_SEND,
+      );
       expect(receipt).toStrictEqual({ chatId: CHAT, messageId: "sent-1" });
     });
 
@@ -775,7 +785,11 @@ describe("WhatsAppAdapter", () => {
     it("strips the device suffix from a non-self send target", async () => {
       await adapter.start();
       await adapter.send("5551234:9@s.whatsapp.net" as ChatId, { text: "hi" });
-      expect(mockSendMessage).toHaveBeenCalledWith("5551234@s.whatsapp.net", { text: "hi" });
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        "5551234@s.whatsapp.net",
+        { text: "hi" },
+        ROME_SEND,
+      );
     });
 
     it("routes a send to any self form onto the canonical phone-number JID", async () => {
@@ -787,7 +801,7 @@ describe("WhatsAppAdapter", () => {
       ]) {
         mockSendMessage.mockClear();
         await adapter.send(form as ChatId, { text: "note" });
-        expect(mockSendMessage).toHaveBeenCalledWith(SELF_PN, { text: "note" });
+        expect(mockSendMessage).toHaveBeenCalledWith(SELF_PN, { text: "note" }, ROME_SEND);
       }
     });
 
