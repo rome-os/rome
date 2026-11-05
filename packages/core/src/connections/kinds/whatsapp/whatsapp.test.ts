@@ -315,7 +315,6 @@ describe("WhatsAppAdapter", () => {
       it("hands a history sync's messages to Chats as Rome's account heard them", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);
-        adapter.onInbound(async () => {});
         await adapter.start();
 
         eventHandlers["messaging-history.set"]({
@@ -330,7 +329,7 @@ describe("WhatsAppAdapter", () => {
         expect(recorded).toEqual([{ ids: ["h1", "h2"], self: "1234567890@s.whatsapp.net" }]);
       });
 
-      it("delivers inbound what someone else said since connecting, when a history sync reports it", async () => {
+      it("holds what someone else said in a history sync until its live copy has had time to arrive", async () => {
         const { sink, recorded } = recordingSink();
         const delivered: string[] = [];
         adapter.onSync(sink);
@@ -338,30 +337,51 @@ describe("WhatsAppAdapter", () => {
           delivered.push(message.messageId);
         });
         await adapter.start();
-        eventHandlers["connection.update"]({ connection: "open" });
-        // Whole seconds, so the second the socket opened in reads as before it.
-        const openSecond = Math.floor(Date.now() / 1000);
-        const from = (id: string, fromMe: boolean, messageTimestamp: number) =>
-          makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe }, messageTimestamp });
+        rs.useFakeTimers();
+        try {
+          const from = (id: string, fromMe: boolean) =>
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe } });
 
-        await eventHandlers["messages.upsert"]({ messages: [from("heard", false, 1700000000)] });
+          await eventHandlers["messages.upsert"]({ messages: [from("heard", false)] });
+          eventHandlers["messaging-history.set"]({
+            contacts: [],
+            chats: [],
+            messages: [
+              from("heard", false),
+              from("live-later", false),
+              from("old", false),
+              from("guardian", true),
+            ],
+          });
+          expect(recorded.map((batch) => batch.ids)).toEqual([["guardian"]]);
+
+          // Its live copy comes after the history sync reported it.
+          await eventHandlers["messages.upsert"]({ messages: [from("live-later", false)] });
+          rs.advanceTimersByTime(30_000);
+
+          expect(delivered).toEqual(["heard", "live-later"]);
+          expect(recorded.map((batch) => batch.ids)).toEqual([["guardian"], ["old"]]);
+        } finally {
+          rs.useRealTimers();
+        }
+      });
+
+      it("records what it still holds when it stops", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
         eventHandlers["messaging-history.set"]({
           contacts: [],
           chats: [],
           messages: [
-            from("heard", false, 1700000000),
-            // Folded into the sync, or reported before its live upsert.
-            from("since-connect", false, openSecond),
-            from("before-connect", false, 1700000001),
-            from("guardian-since-connect", true, openSecond),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "old", fromMe: false } }),
           ],
         });
-        await new Promise((resolve) => setImmediate(resolve));
+        await adapter.stop();
 
-        expect(delivered).toEqual(["heard", "since-connect"]);
-        expect(recorded.map((batch) => batch.ids)).toEqual([
-          ["before-connect", "guardian-since-connect"],
-        ]);
+        expect(recorded.map((batch) => batch.ids)).toEqual([["old"]]);
       });
 
       it("hands over only what the guardian said while messages are delivered inbound", async () => {
@@ -419,10 +439,13 @@ describe("WhatsAppAdapter", () => {
           ],
         });
 
+        await adapter.stop();
+
         expect(sentIds).toHaveLength(1);
         expect(recorded.map((batch) => batch.ids)).toEqual([
           ["typed-on-phone"],
-          ["typed-earlier", otherRome],
+          ["typed-earlier"],
+          [otherRome],
         ]);
         mockSendMessage.mockReset();
       });

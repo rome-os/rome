@@ -46,9 +46,9 @@ import {
  */
 const ROME_ID_PREFIX = "3EB0524F4D45";
 
-/** How long before a socket opens a message may be said and still be
- *  delivered live. */
-const OPEN_MARGIN_MS = 60_000;
+/** How long a history sync's message from someone else waits for its live
+ *  copy before it is recorded as history. */
+const HISTORY_HOLD_MS = 30_000;
 
 /** How many ids of live messages an adapter keeps, to leave out of a history sync. */
 const HEARD_IDS_KEPT = 5000;
@@ -111,8 +111,10 @@ export class WhatsAppAdapter {
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
   private qrCallback?: (qr: string) => void;
   private syncSink?: WhatsAppSyncSink;
-  /** When the current socket connected, or null before it has. */
-  private openedAt: Date | null = null;
+  /** A history sync's messages from others, by id, waiting to see whether
+   *  they also arrive live. */
+  private readonly heldHistory = new Map<string, { message: WAMessage; until: number }>();
+  private historyHoldTimer?: ReturnType<typeof setTimeout>;
   /** Ids of messages from others heard live, which a history sync may
    *  report again. */
   private readonly heardLive = new Set<string>();
@@ -207,7 +209,6 @@ export class WhatsAppAdapter {
       if (connection === "open") {
         this.reconnectDelay = 1_000; // reset on successful connection
         this.connectionStatus = "open";
-        this.openedAt = new Date();
         this.currentQr = null;
         log.info("connected");
 
@@ -299,19 +300,13 @@ export class WhatsAppAdapter {
         this.recordHistory(messages ?? []);
         return;
       }
-      // What someone else said since the socket opened is inbound recording's
-      // to record and raise, so it is delivered inbound from here: WhatsApp
-      // can report it in a history sync before its live upsert, or fold the
-      // upsert into the sync and never send it live. Inbound recording keeps
-      // whichever copy comes first and raises it once. One already heard live
-      // is inbound recording's too.
+      // A message someone else said can come in a history sync and live as
+      // well, in either order. Live, it is inbound recording's to record and
+      // raise, and a copy recorded here first would raise nothing. So it waits
+      // a while for its live copy before it is recorded as history.
       const heard = (m: WAMessage) => m.key.id != null && this.heardLive.has(m.key.id);
-      const theirs = (messages ?? []).filter((m) => !m.key.fromMe);
-      const live = theirs.filter((m) => !heard(m) && this.saidSinceOpen(m));
-      this.recordHistory(
-        (messages ?? []).filter((m) => m.key.fromMe || (!heard(m) && !live.includes(m))),
-      );
-      void this.deliverInbound(live);
+      this.recordHistory((messages ?? []).filter((m) => m.key.fromMe || !m.key.id));
+      this.holdHistory((messages ?? []).filter((m) => !m.key.fromMe && m.key.id && !heard(m)));
     });
 
     this.sock.ev.on("contacts.upsert", (contacts) => {
@@ -389,16 +384,41 @@ export class WhatsAppAdapter {
     });
   }
 
-  /**
-   * Whether `message` was said since this socket opened, or close enough
-   * before it that WhatsApp may also deliver it live. Its timestamp counts
-   * whole seconds on WhatsApp's clock, so the margin covers both the rounding
-   * and a local clock that runs ahead.
-   */
-  private saidSinceOpen(message: WAMessage): boolean {
-    const seconds = toSeconds(message.messageTimestamp);
-    if (this.openedAt === null || seconds == null) return false;
-    return seconds * 1000 >= this.openedAt.getTime() - OPEN_MARGIN_MS;
+  /** Hold `messages` until their live copies have had time to arrive. */
+  private holdHistory(messages: WAMessage[]): void {
+    const until = Date.now() + HISTORY_HOLD_MS;
+    for (const message of messages) {
+      if (!this.heldHistory.has(message.key.id!)) {
+        this.heldHistory.set(message.key.id!, { message, until });
+      }
+    }
+    this.scheduleRelease();
+  }
+
+  private scheduleRelease(): void {
+    if (this.historyHoldTimer) return;
+    const first = this.heldHistory.values().next().value;
+    if (!first) return;
+    this.historyHoldTimer = setTimeout(
+      () => {
+        this.historyHoldTimer = undefined;
+        this.releaseHistory(Date.now());
+        this.scheduleRelease();
+      },
+      Math.max(0, first.until - Date.now()),
+    );
+  }
+
+  /** Record as history what has been held until `now`, leaving out what has
+   *  since arrived live. */
+  private releaseHistory(now: number): void {
+    const due: WAMessage[] = [];
+    for (const [id, held] of this.heldHistory) {
+      if (held.until > now) break;
+      this.heldHistory.delete(id);
+      if (!this.heardLive.has(id)) due.push(held.message);
+    }
+    this.recordHistory(due);
   }
 
   /** Hand what someone else said in `messages` to the inbound handler. */
@@ -463,6 +483,11 @@ export class WhatsAppAdapter {
   }
 
   async stop(): Promise<void> {
+    if (this.historyHoldTimer) {
+      clearTimeout(this.historyHoldTimer);
+      this.historyHoldTimer = undefined;
+    }
+    this.releaseHistory(Number.POSITIVE_INFINITY);
     this.stopped = true;
     this.socketGeneration += 1;
     this.connectionStatus = "disconnected";
