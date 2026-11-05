@@ -10,21 +10,11 @@ export type { ForkRunMode, ForkSourceCheckpoint, ThreadContext } from "@rome-os/
 export interface RunParams extends SdkRunParams {
   /** Internal continuations should not be treated as guardian-authored turns. */
   initiatedBy?: "user" | "system";
-  /** Whether the session's log keeps the turn's trace. Defaults to true. On
-   *  the dashboard chat, a run that leaves it unset keeps only the trace,
-   *  since the chat writes the turn's lines itself. */
-  persistTrace?: boolean;
-  /** Whether a saved trace also writes the turn's user and assistant
-   *  transcript rows. Defaults to true. A caller whose channel keeps its own
-   *  transcript turns it off. A turn routed into a recorded subagent or fork
-   *  conversation writes them anyway, since that conversation has no other
-   *  transcript, while an explicit `persistTrace: false` still skips both. */
-  persistTranscript?: boolean;
-  /** Whether those transcript rows include the turn's answer. Defaults to
-   *  true. A caller that puts the answer on record as it delivers it turns it
-   *  off, so the answer is recorded once, and only once it went out. A
-   *  recorded subagent or fork conversation keeps it anyway. */
-  persistAnswer?: boolean;
+  /** Whether the run puts the turn's answer on record in the chat it replies
+   *  into, as Chats' copy. Defaults to true. A caller that puts the answer on
+   *  record as it delivers it turns it off, so the chat holds it once, and
+   *  only once it went out. The session keeps its own copy either way. */
+  chatAnswer?: boolean;
   /** Keeps this turn's prompt in its saved trace under this label, as a
    *  `system_input` block. Only callers that ask for it; nothing more is
    *  sent to the model. */

@@ -43,9 +43,6 @@ export interface AgentTraceRecorderInput {
   /** A reply the host streams records its own assistant row, as the text it
    *  showed, so the turn's answer is not recorded twice. */
   persistAssistantTranscript?: boolean | (() => boolean);
-  /** Keep the turn's prompt and answer in the session's own rows too, whatever
-   *  of them the caller writes itself. Set by the session's log. */
-  keepSessionMessages?: boolean;
   /**
    * Explicit trigger metadata stamped on the trace message row. When absent,
    * falls back to the ambient action context.
@@ -144,7 +141,6 @@ export class AgentTraceRecorder {
   private seq = 0;
   private persistedUserTurnIds = new Set<string>();
   private persistedAssistantTurnIds = new Set<string>();
-  private keptSessionMessageIds = new Set<string>();
 
   constructor(private input: AgentTraceRecorderInput) {}
 
@@ -182,7 +178,6 @@ export class AgentTraceRecorder {
     const sessionId = this.romeSessionId();
     const trigger = this.triggerMetadata();
     const transcriptMessages = this.transcriptMessages(sessionId, messages);
-    const sessionMessages = this.sessionMessages(sessionId, messages);
     await this.input.webchatRepo.appendTraceBlocks({
       messageId: this.traceMessageId(sessionId),
       sessionId,
@@ -191,10 +186,8 @@ export class AgentTraceRecorder {
       blocks,
       trigger,
       transcriptMessages,
-      ...(sessionMessages.length > 0 ? { sessionMessages } : {}),
     });
     this.markTranscriptMessagesPersisted(transcriptMessages);
-    for (const message of sessionMessages) this.keptSessionMessageIds.add(message.id);
     this.seq = Math.max(this.seq, startSeq + blocks.length);
   }
 
@@ -299,30 +292,6 @@ export class AgentTraceRecorder {
           turnId: this.input.turnId,
         });
       }
-    }
-    return rows;
-  }
-
-  /**
-   * The turn's prompt and answer as the session keeps them, beside its trace,
-   * whatever the caller writes of them itself. Where the session stands in a
-   * chat they are its own copy; Chats keeps its own in the chat.
-   */
-  private sessionMessages(
-    sessionId: string,
-    messages: (AgentEvent & { agent?: string })[],
-  ): RomeAgentTranscriptMessageInput[] {
-    if (!this.input.keepSessionMessages) return [];
-    const rows: RomeAgentTranscriptMessageInput[] = [];
-    const keep = (turnId: string, role: "user" | "assistant", text: string) => {
-      const id = transcriptMessageId(sessionId, turnId, role);
-      if (this.keptSessionMessageIds.has(id)) return;
-      rows.push({ id, sessionId, role, content: textMessageContent(text), turnId });
-    };
-    for (const msg of messages) {
-      if (msg.type === "turn_start") keep(msg.turnId, "user", msg.userPrompt);
-      else if (msg.type === "result" && msg.content.trim())
-        keep(this.input.turnId, "assistant", msg.content);
     }
     return rows;
   }

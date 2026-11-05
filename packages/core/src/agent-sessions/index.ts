@@ -20,7 +20,6 @@ export {
   type SessionOpenOptions,
   type SessionResetRule,
   type SessionSurface,
-  type SurfaceKeeps,
   type TurnBriefing,
   type TurnInitiator,
 } from "./agent-session.js";

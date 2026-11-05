@@ -6623,7 +6623,6 @@ function logged(surface: SessionSurface, caller: string, fake: FakeSession): Age
         ? { origin: "named", id: surface.replies.romeSessionId }
         : undefined,
       child: false,
-      keeps: surface.keeps,
     });
     const writer = entry?.writer;
     if (!writer) return handle;

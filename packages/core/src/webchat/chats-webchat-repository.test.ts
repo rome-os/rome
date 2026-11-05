@@ -307,9 +307,43 @@ describe("ChatsWebChatRepository", () => {
       ["out-1", "assistant", "turn-1"],
     ]);
   });
-  it("says the prompt and answer of a fork promoted while its turn runs in its chat", async () => {
+  it("keeps a turn's prompt and answer in the session's own rows, apart from the chat's copy", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.promoteForkToChat("fork-1");
+    // The chat's copy, as its caller says it.
+    await repo.addMessage("said-in", "fork-1", "user", text("Hi"), "turn-1");
+    await repo.appendTraceBlocks({
+      messageId: "trace-1",
+      sessionId: "fork-1",
+      turnId: "turn-1",
+      startSeq: 0,
+      blocks: [{ type: "text", content: "thinking" }],
+      transcriptMessages: [
+        { id: "in-1", sessionId: "fork-1", turnId: "turn-1", role: "user", content: text("Hi") },
+        {
+          id: "out-1",
+          sessionId: "fork-1",
+          turnId: "turn-1",
+          role: "assistant",
+          content: text("Hello"),
+        },
+      ],
+    });
+    await repo.recordAnswerInChat("fork-1", "turn-1", "Hello");
+
+    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["user", "trace", "assistant"]);
+    // The chat shows its own copy, each message once.
+    expect((await repo.getMessages("fork-1")).map((line) => [line.role, line.turnId])).toEqual([
+      ["user", "turn-1"],
+      ["trace", "turn-1"],
+      ["assistant", "turn-1"],
+    ]);
+    expect(await repo.getMessageCount("fork-1")).toBe(3);
+  });
+
+  it("keeps one prompt of a turn in a session in no chat when its caller recorded the input", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.addMessage("said-in", "fork-1", "user", text("Hi"), "turn-1");
     await repo.appendTraceBlocks({
       messageId: "trace-1",
       sessionId: "fork-1",
@@ -328,54 +362,11 @@ describe("ChatsWebChatRepository", () => {
       ],
     });
 
-    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["trace"]);
-    expect(
-      (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
-    ).toEqual([
-      ["in-1", "user", "turn-1"],
-      ["trace-1", "trace", "turn-1"],
-      ["out-1", "assistant", "turn-1"],
+    expect(ownRows("fork-1").map((row) => [row.id, row.role])).toEqual([
+      ["said-in", "user"],
+      ["trace-1", "trace"],
+      ["out-1", "assistant"],
     ]);
-  });
-
-  it("keeps the session's own copy of a turn beside its trace while the chat keeps its own", async () => {
-    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
-    await repo.promoteForkToChat("fork-1");
-    const prompt = {
-      id: "in-1",
-      sessionId: "fork-1",
-      turnId: "turn-1",
-      role: "user" as const,
-      content: text("Hi"),
-    };
-    const answer = {
-      id: "out-1",
-      sessionId: "fork-1",
-      turnId: "turn-1",
-      role: "assistant" as const,
-      content: text("Hello"),
-    };
-    await repo.appendTraceBlocks({
-      messageId: "trace-1",
-      sessionId: "fork-1",
-      turnId: "turn-1",
-      startSeq: 0,
-      blocks: [{ type: "text", content: "thinking" }],
-      // The caller wrote neither in the chat, so the log says both there too.
-      transcriptMessages: [prompt, answer],
-      sessionMessages: [prompt, answer],
-    });
-
-    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["user", "trace", "assistant"]);
-    // The chat shows each once.
-    expect(
-      (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
-    ).toEqual([
-      ["in-1", "user", "turn-1"],
-      ["trace-1", "trace", "turn-1"],
-      ["out-1", "assistant", "turn-1"],
-    ]);
-    expect(await repo.getMessageCount("fork-1")).toBe(3);
   });
 
   it("leaves a fork whose promotion failed a fork, so promoting it again finishes", async () => {
@@ -424,59 +415,6 @@ describe("ChatsWebChatRepository", () => {
       "disk full",
     );
     expect(emitted).toEqual([]);
-  });
-
-  it("writes nothing of a trace batch whose answer could not be said, so a retry finishes it", async () => {
-    let failures = 1;
-    class Failing extends MessageRepository {
-      override record(message: Message): RecordedMessage | null {
-        if (message.key === "out-1" && failures > 0) {
-          failures -= 1;
-          throw new Error("disk full");
-        }
-        return super.record(message);
-      }
-    }
-    const failing = new ChatsWebChatRepository(testDb.db, {
-      links,
-      lines: new Failing(testDb.db),
-    });
-    await failing.createSession("chat-1", "Plans");
-    const batch = {
-      messageId: "trace-1",
-      sessionId: "chat-1",
-      turnId: "turn-1",
-      startSeq: 0,
-      blocks: [{ type: "text", content: "thinking" }],
-      transcriptMessages: [
-        {
-          id: "in-1",
-          sessionId: "chat-1",
-          turnId: "turn-1",
-          role: "user" as const,
-          content: text("Hi"),
-        },
-        {
-          id: "out-1",
-          sessionId: "chat-1",
-          turnId: "turn-1",
-          role: "assistant" as const,
-          content: text("Hello"),
-        },
-      ],
-    };
-
-    await expect(failing.appendTraceBlocks(batch)).rejects.toThrow("disk full");
-    expect(ownRows("chat-1")).toEqual([]);
-    expect(testDb.db.select().from(chatMessages).all()).toEqual([]);
-    await failing.appendTraceBlocks(batch);
-    expect(
-      (await failing.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]),
-    ).toEqual([
-      ["in-1", "user", "turn-1"],
-      ["trace-1", "trace", "turn-1"],
-      ["out-1", "assistant", "turn-1"],
-    ]);
   });
 
   it("records an input with its queued link or not at all", async () => {
@@ -733,38 +671,6 @@ describe("ChatsWebChatRepository", () => {
     }
   });
 
-  it("reads a trace batch's prompt, trace and answer in order across a second's edge", async () => {
-    rs.useFakeTimers();
-    try {
-      rs.setSystemTime(new Date("2030-01-01T12:00:00.999Z"));
-      await repo.createSession("chat-1", "Plans");
-      await repo.appendTraceBlocks({
-        messageId: "trace-1",
-        sessionId: "chat-1",
-        turnId: "turn-1",
-        startSeq: 0,
-        blocks: [{ type: "text", content: "thinking" }],
-        transcriptMessages: [
-          { id: "in-1", sessionId: "chat-1", turnId: "turn-1", role: "user", content: text("Hi") },
-          {
-            id: "out-1",
-            sessionId: "chat-1",
-            turnId: "turn-1",
-            role: "assistant",
-            content: text("Hello"),
-          },
-        ],
-      });
-
-      expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
-        "in-1",
-        "trace-1",
-        "out-1",
-      ]);
-    } finally {
-      rs.useRealTimers();
-    }
-  });
   it("ends a deleted session's dashboard chat with every line said in it", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.createSession("chat-2", "Other");

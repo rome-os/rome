@@ -490,19 +490,7 @@ describe("AgentSessionBridge answer recording", () => {
       sessionId: "session-1",
       sendTurn: () => ({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
-    let lent: SessionSurface | undefined;
-    const manager = {
-      open: async (_agent: string, _caller: string, surface: SessionSurface) => {
-        lent = surface;
-        return session;
-      },
-    } as unknown as AgentSessionManager;
-    // Whether the session's log leaves the answer to the caller, as the
-    // session asks once the answer arrives.
-    const keepsAnswer = () => {
-      const answer = lent?.keeps?.answer;
-      return typeof answer === "function" ? answer() : !!answer;
-    };
+    const manager = { open: async () => session } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(
@@ -530,7 +518,7 @@ describe("AgentSessionBridge answer recording", () => {
     });
     const turnEnd = () =>
       child.sent.find((message) => JSON.stringify(message).includes('"type":"turn_end"'));
-    return { turnEnd, keepsAnswer };
+    return { turnEnd };
   }
 
   const turnStart: StreamAgentEvent = {
@@ -569,26 +557,23 @@ describe("AgentSessionBridge answer recording", () => {
     return { repo, answers, close: () => testDb.close() };
   }
 
-  for (const stands of [true, false]) {
-    it(`records the answer ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
-      const { repo, close } = await recorded();
-      try {
-        const { turnEnd, keepsAnswer } = run(turnEvents(...answer), {
-          repo,
-          runLineDeps: {
-            lines: { recorded: async () => null, stands: () => stands },
-            links: { prompt: () => {} },
-          },
-        });
+  it("writes no answer itself: the session keeps its copy and the caller says Chats'", async () => {
+    const { repo, answers, close } = await recorded();
+    try {
+      const { turnEnd } = run(turnEvents(...answer), {
+        repo,
+        runLineDeps: {
+          lines: { recorded: async () => null, stands: () => true },
+          links: { prompt: () => {} },
+        },
+      });
 
-        await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-        // A caller that stands in the chat records its own send.
-        expect(keepsAnswer()).toBe(stands);
-      } finally {
-        close();
-      }
-    });
-  }
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      expect(await answers()).toEqual([]);
+    } finally {
+      close();
+    }
+  });
 
   it("leaves the reply to its caller even when the run asks to stream it", async () => {
     const { turnEnd } = run(turnEvents(...answer), { streamReply: true });

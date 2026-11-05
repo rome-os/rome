@@ -12,6 +12,7 @@ import { automatedSource, speaksForGuardian } from "./automated-source.js";
 // WebChatRepository at startup. The contract step folds it into that class.
 
 import { randomUUID } from "node:crypto";
+import { textMessageContent, transcriptMessageId } from "../chats/storage/transcript-rows.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
@@ -212,42 +213,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
-   * Write a turn's trace batch. The prompt and answer it carries are said in
-   * the chat of a session that stands in one, such as a fork promoted while
-   * its turn ran, in the same transaction as the trace, which stays the
-   * session's own: a batch whose answer could not be said leaves nothing
-   * behind, so the recorder's place in the trace stays true.
-   */
-  protected override writeTraceBatch(input: TraceBatch, now = new Date()): void {
-    const said = input.transcriptMessages ?? [];
-    const inChat = said.flatMap((message) => {
-      const standing = this.standingOf(message.sessionId);
-      return standing ? [{ message, standing }] : [];
-    });
-    // A session that stands in a chat keeps its own copy of the turn's prompt
-    // and answer beside its trace, apart from the chat's. One in no chat
-    // keeps them as its transcript, which the batch already carries.
-    const kept = this.standingOf(input.sessionId) ? (input.sessionMessages ?? []) : [];
-    if (inChat.length === 0 && kept.length === 0) return super.writeTraceBatch(input, now);
-    const own = [
-      ...said.filter((message) => !inChat.some((line) => line.message === message)),
-      ...kept,
-    ];
-    // Prompt, trace, answer, at the times the base class gives them.
-    const sayAll = (role: "user" | "assistant", at: Date) => {
-      for (const { message, standing } of inChat) {
-        if (message.role !== role) continue;
-        this.say(standing, message.id, role, partsOf(message.content), message.turnId, at);
-      }
-    };
-    this.db.transaction(() => {
-      sayAll("user", now);
-      super.writeTraceBatch({ ...input, transcriptMessages: own }, now);
-      sayAll("assistant", new Date(now.getTime() + 2));
-    });
-  }
-
-  /**
    * The sessions among `sessionIds` whose traces are archived, as
    * WebChatRepository decides, counting the lines said where each session
    * or an ancestor stands as its activity too.
@@ -371,6 +336,22 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const standing = role === "user" || role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.addMessage(id, sessionId, role, content, turnId);
     this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
+  }
+
+  override async recordAnswerInChat(
+    sessionId: string,
+    turnId: string,
+    content: string,
+  ): Promise<void> {
+    const standing = this.standingOf(sessionId);
+    if (!standing) return;
+    this.say(
+      standing,
+      transcriptMessageId(sessionId, turnId, "assistant"),
+      "assistant",
+      partsOf(textMessageContent(content)),
+      turnId,
+    );
   }
 
   protected override async insertBackendMessage(

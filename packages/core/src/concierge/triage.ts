@@ -6,7 +6,6 @@
 // event gets a decision, so an event the run missed lands in the digest
 // rather than nowhere.
 
-import { textMessageContent, transcriptMessageId } from "../chats/storage/transcript-rows.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { AddressedTo } from "./event-shape.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -136,8 +135,8 @@ export function parseTriage(output: unknown, events: FollowEvent[]): TriageDecis
   });
 }
 
-/** Where triage runs are recorded: the session, and each run's input as its user message. */
-export type TriageRecordStore = Pick<WebChatRepository, "ensureRomeSession" | "addMessage">;
+/** Where triage runs are recorded: the one session they gather in. */
+export type TriageRecordStore = Pick<WebChatRepository, "ensureRomeSession">;
 
 /** Makes sure the one triage session exists. */
 async function ensureTriageSession(store: TriageRecordStore): Promise<void> {
@@ -172,18 +171,9 @@ export async function runTriage(
       agentName: TRIAGE_AGENT,
       prompt,
       initiatedBy: "system",
-      ...(record ? { romeSessionId: TRIAGE_SESSION_ID } : { persistTrace: false }),
+      ...(record ? { romeSessionId: TRIAGE_SESSION_ID } : {}),
     })) {
-      // A run in a named session keeps its trace and answer; its input is ours to keep.
-      if (message.type === "turn_start" && record) {
-        await record.addMessage(
-          transcriptMessageId(TRIAGE_SESSION_ID, message.turnId, "user"),
-          TRIAGE_SESSION_ID,
-          "user",
-          textMessageContent(prompt),
-          message.turnId,
-        );
-      }
+      // A run in a named session keeps its input, trace and answer there.
       if (message.type === "result") content = message.content;
       if (message.type === "error") error = message.error;
     }

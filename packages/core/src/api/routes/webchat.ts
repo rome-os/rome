@@ -1796,8 +1796,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     cards: true,
     replies: threadContext,
     wake: true,
-    // The route writes the chat's own lines; the session's log keeps the trace.
-    keeps: { prompt: true, answer: true },
     about,
   });
 

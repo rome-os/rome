@@ -272,7 +272,7 @@ describe("runTriage", () => {
 });
 
 describe("runTriage records", () => {
-  it("runs fresh, in the one triage session, and keeps each run's input as its user message", async () => {
+  it("runs fresh, in the one triage session, which keeps each run's input itself", async () => {
     const params: Record<string, unknown>[] = [];
     const runner: AgentRunnerInterface = {
       run: (p) =>
@@ -306,16 +306,11 @@ describe("runTriage records", () => {
       name: "Concierge triage",
       agentName: TRIAGE_AGENT,
     });
-    // Each run's input, under its own turn.
-    expect(messages.map((m) => [m[1], m[2], m[4]])).toEqual([
-      [TRIAGE_SESSION_ID, "user", "turn-1"],
-      [TRIAGE_SESSION_ID, "user", "turn-2"],
-    ]);
-    expect(String(messages[0]?.[3])).toContain('\\"id\\": \\"a\\"');
-    expect(String(messages[1]?.[3])).toContain('\\"id\\": \\"b\\"');
+    // The session keeps each run's input; triage writes none of it.
+    expect(messages).toEqual([]);
   });
 
-  it("keeps no trace without a record store", async () => {
+  it("names no triage session without a record store", async () => {
     const params: Record<string, unknown>[] = [];
     const runner: AgentRunnerInterface = {
       run: (p) =>
@@ -325,7 +320,6 @@ describe("runTriage records", () => {
         })(),
     };
     await runTriage(runner, input([event("a")]));
-    expect(params[0]).toMatchObject({ persistTrace: false });
     expect(params[0]).not.toHaveProperty("romeSessionId");
   });
 });

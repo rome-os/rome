@@ -294,10 +294,6 @@ export interface TraceBatch {
   blocks: unknown[];
   trigger?: RomeAgentTraceTriggerMetadata;
   transcriptMessages?: RomeAgentTranscriptMessageInput[];
-  /** The turn's prompt and answer as the session keeps them beside its
-   *  trace. A session in no chat keeps its transcript in the same rows, so
-   *  only a repository that knows the session's chat writes them apart. */
-  sessionMessages?: RomeAgentTranscriptMessageInput[];
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
@@ -606,6 +602,30 @@ function mergeTraceContent(stubContent: string, blockContents: string[]): string
 const TRACE_BLOCK_INSERT_CHUNK = 200;
 export const INTERRUPTED_TURN_ERROR =
   "Rome restarted while this was running. The task did not finish.";
+
+/** Whether session `sessionId` keeps a `role` message of turn `turnId` in its
+ *  own rows. */
+export function keptTurnMessage(
+  db: Pick<DrizzleDb | DrizzleTx, "select">,
+  sessionId: string,
+  turnId: string,
+  role: "user" | "assistant",
+): boolean {
+  return (
+    db
+      .select({ id: romeAgentMessages.id })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.turnId, turnId),
+          eq(romeAgentMessages.role, role),
+        ),
+      )
+      .limit(1)
+      .all().length > 0
+  );
+}
 
 function traceAccountingColumns(role: string, content: string): TraceAccountingTotals | null {
   if (role !== "trace") return null;
@@ -1972,6 +1992,12 @@ export class WebChatRepository {
   }
 
   /**
+   * Put turn `turnId`'s answer on record in the chat session `sessionId`
+   * stands in, as Chats' copy. A repository without Chats keeps none.
+   */
+  async recordAnswerInChat(_sessionId: string, _turnId: string, _content: string): Promise<void> {}
+
+  /**
    * Persist a backend-initiated message and notify subscribers.
    *
    * Backend-initiated messages — turn recaps, approval-continuation replies,
@@ -2151,6 +2177,14 @@ export class WebChatRepository {
     this.db.transaction((tx) => {
       const insertTranscriptMessages = (messages: RomeAgentTranscriptMessageInput[]) => {
         for (const message of messages) {
+          // An input its caller recorded in the session's own rows, as the
+          // dashboard does, is already the turn's prompt there.
+          if (
+            message.role === "user" &&
+            message.turnId &&
+            keptTurnMessage(tx, message.sessionId, message.turnId, "user")
+          )
+            continue;
           const accounting = traceAccountingColumns(message.role, message.content);
           const createdAt = message.role === "user" ? now : new Date(now.getTime() + 2);
           const result = tx
