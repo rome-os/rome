@@ -118,7 +118,7 @@ describe("normalizeStripe", () => {
       keep: true,
       event: {
         id: "stripe:Acme Inc:ch_2:refunded:2000",
-        subject: "Refunded 20.00 USD",
+        subject: "20.00 USD refunded so far of 50.00 USD",
         labels: ["refund", "partial-refund"],
       },
     });
@@ -233,14 +233,56 @@ describe("normalizeStripe, a canceled subscription's amount", () => {
     expect(one.keep && one.event.subject).toBe("A subscription of 29.00 USD a month ended");
   });
 
-  it("leaves the amount out for several units, several items, or several intervals", () => {
+  it("leaves the amount out for several units, items or intervals, or a metered price", () => {
     for (const items of [
       [item({ quantity: 3 })],
       [item(), item()],
       [item({}, { interval_count: 3 })],
+      [item({}, { usage_type: "metered" })],
     ]) {
       const result = ended({ items: { data: items } });
       expect(result.keep && result.event.subject).toBe("A subscription ended");
     }
+  });
+});
+
+describe("normalizeStripe, refunds in a row", () => {
+  // A 50.00 charge refunded 20.00 and then 10.00: `amount_refunded` is the total so far.
+  const charge = (total: number, refunds?: number[]) =>
+    event({
+      id: "ch_9",
+      amount: 5000,
+      amount_refunded: total,
+      currency: "usd",
+      refunded: false,
+      ...(refunds
+        ? {
+            refunds: {
+              data: refunds.map((amount, i) => ({ id: `re_${i}`, amount, currency: "usd" })),
+            },
+          }
+        : {}),
+    });
+  const subjectOf = (payload: Record<string, unknown>) => {
+    const result = normalizeStripe("stripe_charge_refunded", payload, ctx);
+    return result.keep ? result.event.subject : undefined;
+  };
+
+  it("gives each refund's own amount when the charge lists its refunds, newest first", () => {
+    expect(subjectOf(charge(2000, [2000]))).toBe("Refunded 20.00 USD");
+    expect(subjectOf(charge(3000, [1000, 2000]))).toBe("Refunded 10.00 USD");
+  });
+
+  it("words the total as a total when the charge lists no refunds", () => {
+    expect(subjectOf(charge(2000))).toBe("20.00 USD refunded so far of 50.00 USD");
+    expect(subjectOf(charge(3000))).toBe("30.00 USD refunded so far of 50.00 USD");
+  });
+
+  it("keeps the two refunds apart", () => {
+    const idOf = (payload: Record<string, unknown>) => {
+      const result = normalizeStripe("stripe_charge_refunded", payload, ctx);
+      return result.keep ? result.event.id : undefined;
+    };
+    expect(idOf(charge(2000))).not.toBe(idOf(charge(3000)));
   });
 });

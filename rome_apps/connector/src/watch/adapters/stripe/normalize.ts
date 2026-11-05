@@ -119,11 +119,22 @@ export function normalizeStripe(
       });
     }
     case "stripe_charge_refunded": {
-      const refunded = amountOf(object.amount_refunded, object.currency);
+      // `amount_refunded` is the charge's running total. This refund's own
+      // amount comes from the newest refund, when the charge lists its refunds.
+      const latest = obj(
+        (Array.isArray(obj(object.refunds).data) ? (obj(object.refunds).data as unknown[]) : [])[0],
+      );
+      const thisRefund = amountOf(latest.amount, latest.currency ?? object.currency);
+      const total = amountOf(object.amount_refunded, object.currency);
+      const charged = amountOf(object.amount, object.currency);
       const full = object.refunded === true;
       return keep("stripe", `${prefix}:refunded:${str(object.amount_refunded) ?? ""}`, kind, {
         ...base,
-        subject: `Refunded ${refunded ?? "an unknown amount"}`,
+        subject: thisRefund
+          ? `Refunded ${thisRefund}`
+          : total
+            ? `${total} refunded so far${charged ? ` of ${charged}` : ""}`
+            : "Refunded an unknown amount",
         url: `${dashboard}payments/${id}`,
         text: str(object.description),
         labels: ["refund", full ? "full-refund" : "partial-refund", ...facts],
@@ -143,7 +154,9 @@ export function normalizeStripe(
         items.length <= 1 &&
         count(item.quantity) <= 1 &&
         count(object.quantity) <= 1 &&
-        count(recurring.interval_count) <= 1;
+        count(recurring.interval_count) <= 1 &&
+        // A metered price bills what was used, so its unit amount is no total.
+        str(recurring.usage_type) !== "metered";
       const amount = simple ? amountOf(price.unit_amount, price.currency) : undefined;
       const every = str(recurring.interval);
       const why = obj(object.cancellation_details);
