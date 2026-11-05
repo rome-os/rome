@@ -148,6 +148,7 @@ describe("WhatsApp setup discovery", () => {
     const descriptor = createWhatsAppDescriptor({
       syncSink: { upsertContacts: rs.fn(), upsertChats: rs.fn(), insertMessages: rs.fn() } as never,
       onGuardianConnected: () => {},
+      sendTag: "0000ABCD",
       openPairing: () => makePairingFake(new Promise<string>(() => {})),
     });
     return {

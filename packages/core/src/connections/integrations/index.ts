@@ -67,6 +67,8 @@ export interface BuiltinConnectionDeps {
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
   onWhatsAppGuardianConnected: (selfJid: string) => void;
+  /** This Rome's WhatsApp send tag (`whatsAppSendTag`). */
+  whatsAppSendTag: string;
   /** Rome Cloud mail client for the Email adapter. */
   mailProvider: MailProvider;
   /** Optional email dep mirrored from index.ts (whoami resolver). */
@@ -141,6 +143,7 @@ export function registerBuiltinConnections(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,
       onGuardianConnected: deps.onWhatsAppGuardianConnected,
+      sendTag: deps.whatsAppSendTag,
     }),
   );
   registry.register(

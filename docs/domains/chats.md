@@ -77,6 +77,8 @@ One thing a participant said or did in a chat.
 
 - Every message goes one way: to Rome or from Rome.
 - A message that reaches Rome is recorded in its chat before anything acts on it, whether or not an agent is woken by it. A platform delivering the same message again records nothing new.
+- Chats is the one record of what was said. A platform that reports its history, as WhatsApp does when the guardian connects, has those messages recorded in their chats too, and nothing acts on them. A connection keeps no copy of its own (Ouou, 2026-11-05).
+- A message the guardian says themselves on one of Rome's accounts, in the platform's own app, is from Rome: said under that account, with no agent (Ouou, 2026-11-05).
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.

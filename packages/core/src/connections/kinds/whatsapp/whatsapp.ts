@@ -27,6 +27,7 @@ import {
   saveIncomingAttachmentPayloads,
 } from "../../inbound/attachment-files.js";
 
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createLogger } from "../../../logger.js";
 import {
@@ -35,6 +36,45 @@ import {
   refuseReplies,
   textToSend,
 } from "../../outbound/send-refusals.js";
+
+/**
+ * How every message id the adapter mints starts, before its send tag: the
+ * "3EB0" WhatsApp Web's own ids start with.
+ */
+const WEB_ID_PREFIX = "3EB0";
+
+/**
+ * A new send tag: 8 hex digits that every message id this Rome mints carries
+ * after `WEB_ID_PREFIX`. WhatsApp echoes back each message Rome sends, and its
+ * history sync reports them again after a relink, so this is how an echo is
+ * told from a message the guardian sent. The tag is this Rome's own, so a
+ * second Rome linked to the same account is told apart too. A WhatsApp Web id
+ * carries it by chance once in 2^32.
+ */
+export function newSendTag(): string {
+  return randomBytes(4).toString("hex").toUpperCase();
+}
+
+/** Whether `tag` is a send tag `newSendTag` could have minted. */
+export function isSendTag(tag: unknown): tag is string {
+  return typeof tag === "string" && /^[0-9A-F]{8}$/.test(tag);
+}
+
+/** How long a history sync's message from someone else waits for its live
+ *  copy before it is recorded as history. */
+const HISTORY_HOLD_MS = 30_000;
+
+/** How many ids of live messages an adapter keeps, to leave out of a history sync. */
+const HEARD_IDS_KEPT = 5000;
+
+/** Add `id` to `ids`, keeping the latest few thousand. */
+function remember(ids: Set<string>, id: string): void {
+  ids.add(id);
+  if (ids.size > HEARD_IDS_KEPT) {
+    const oldest = ids.values().next().value;
+    if (oldest !== undefined) ids.delete(oldest);
+  }
+}
 
 const log = createLogger("whatsapp");
 
@@ -84,6 +124,20 @@ export class WhatsAppAdapter {
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
   private qrCallback?: (qr: string) => void;
   private syncSink?: WhatsAppSyncSink;
+  /** A history sync's messages from others, by id, waiting to see whether
+   *  they also arrive live. */
+  private readonly heldHistory = new Map<
+    string,
+    { message: WAMessage; self: string; until: number }
+  >();
+  private historyHoldTimer?: ReturnType<typeof setTimeout>;
+  /** Ids of messages from others heard live, which a history sync may
+   *  report again. */
+  private readonly heardLive = new Set<string>();
+  /** Ids of messages from others recorded as history, whose live copy may
+   *  still come. The adapter hands each message over once, so it is not
+   *  delivered inbound again. */
+  private readonly recordedAsHistory = new Set<string>();
   private reconnectDelay = 1_000;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -95,6 +149,8 @@ export class WhatsAppAdapter {
   private socketGeneration = 0;
 
   private readonly authProvider: WhatsAppAuthProvider;
+  /** How every message id this adapter mints starts. */
+  private readonly sendPrefix: string;
 
   /**
    * Two auth-state sources:
@@ -104,11 +160,18 @@ export class WhatsAppAdapter {
    *   - `{ authProvider }` — an injected provider. Each socket
    *     generation calls it for `{ state, saveCreds }`; the descriptor threads a
    *     custom in-memory state whose `saveCreds` is `kit.persist` write-through.
+   *
+   * `sendTag` is this Rome's send tag (`newSendTag`). It must outlive the
+   * process, or a history sync after a restart reports Rome's sends as the
+   * guardian's. Left out, the adapter mints one of its own.
    */
   constructor(
-    private config: { authStatePath: string } | { authProvider: WhatsAppAuthProvider },
+    private config: ({ authStatePath: string } | { authProvider: WhatsAppAuthProvider }) & {
+      sendTag?: string;
+    },
     private readonly socketFactory: WhatsAppSocketFactory = makeWASocket,
   ) {
+    this.sendPrefix = `${WEB_ID_PREFIX}${config.sendTag ?? newSendTag()}`;
     this.authProvider =
       "authProvider" in config
         ? config.authProvider
@@ -240,34 +303,12 @@ export class WhatsAppAdapter {
       // Mirror every message — including our own and group traffic, both of
       // which the agent pipeline below skips — into the address-book store.
       this.persistMessages(messages);
+      // What the guardian said on the account themselves is never delivered
+      // below, so Chats records it here. With nothing listening below, nothing
+      // is delivered at all, and every message is recorded here instead.
+      this.recordHistory(this.handler ? messages.filter((m) => m.key.fromMe) : messages);
 
-      if (!this.handler) return;
-      for (const waMsg of messages) {
-        if (!waMsg.message || waMsg.key.fromMe) continue;
-        // A reaction is an emoji pinned to another message, not an inbound turn —
-        // it is mirrored into the store above, but the agent should not answer it.
-        if (waMsg.message.reactionMessage) continue;
-
-        const msg = this.toChannelMessage(waMsg);
-        // Protocol/system frames (sender-key distribution, app-state sync,
-        // history-sync notifications) carry no text or attachments — they are
-        // mirrored above for completeness but are not an inbound turn.
-        if (!msg.text && msg.attachments.length === 0) continue;
-        log.info("message received", {
-          from: msg.senderId,
-          chatId: msg.chatId,
-          threadKind: msg.thread?.kind,
-        });
-
-        try {
-          await this.handler!(msg);
-        } catch (err) {
-          log.error("message handler error", {
-            messageId: msg.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      await this.deliverInbound(messages);
     });
 
     // The initial history sync delivers contacts, chats, and recent messages in
@@ -284,6 +325,17 @@ export class WhatsAppAdapter {
       this.persistContacts(contacts ?? []);
       this.persistChats(chats ?? []);
       this.persistMessages(messages ?? []);
+      if (!this.handler) {
+        this.recordHistory(messages ?? []);
+        return;
+      }
+      // A message someone else said can come in a history sync and live as
+      // well, in either order. Live, it is inbound recording's to record and
+      // raise, and a copy recorded here first would raise nothing. So it waits
+      // a while for its live copy before it is recorded as history.
+      const heard = (m: WAMessage) => m.key.id != null && this.heardLive.has(m.key.id);
+      this.recordHistory((messages ?? []).filter((m) => m.key.fromMe || !m.key.id));
+      this.holdHistory((messages ?? []).filter((m) => !m.key.fromMe && m.key.id && !heard(m)));
     });
 
     this.sock.ev.on("contacts.upsert", (contacts) => {
@@ -339,9 +391,10 @@ export class WhatsAppAdapter {
     });
   }
 
-  private persistMessages(messages: WAMessage[]): void {
-    if (!this.syncSink || messages.length === 0) return;
-    const inputs = messages
+  /** `messages` as the sync contract has them, every address in the form a
+   *  live message is keyed by. */
+  private syncInputs(messages: WAMessage[]): WaMessageInput[] {
+    return messages
       .map(mapWaMessage)
       .filter((m): m is WaMessageInput => m !== null)
       .map((m) => ({
@@ -349,13 +402,145 @@ export class WhatsAppAdapter {
         chatJid: this.canonicalJid(m.chatJid),
         senderJid: m.senderJid ? this.canonicalJid(m.senderJid) : null,
       }));
+  }
+
+  private persistMessages(messages: WAMessage[]): void {
+    if (!this.syncSink || messages.length === 0) return;
+    const inputs = this.syncInputs(messages);
     if (inputs.length === 0) return;
     void this.syncSink.upsertMessages(inputs).catch((err) => {
       log.error("failed to persist whatsapp messages", { error: errMsg(err) });
     });
   }
 
+  /** Hold `messages` until their live copies have had time to arrive. Each
+   *  keeps the account that heard it, since the socket may be gone or
+   *  replaced by the time it is recorded. */
+  private holdHistory(messages: WAMessage[]): void {
+    const self = this.selfPnJid();
+    if (!self) return;
+    const until = Date.now() + HISTORY_HOLD_MS;
+    for (const message of messages) {
+      if (!this.heldHistory.has(message.key.id!)) {
+        this.heldHistory.set(message.key.id!, { message, self, until });
+      }
+    }
+    this.scheduleRelease();
+  }
+
+  private scheduleRelease(): void {
+    if (this.historyHoldTimer) return;
+    const first = this.heldHistory.values().next().value;
+    if (!first) return;
+    this.historyHoldTimer = setTimeout(
+      () => {
+        this.historyHoldTimer = undefined;
+        this.releaseHistory(Date.now());
+        this.scheduleRelease();
+      },
+      Math.max(0, first.until - Date.now()),
+    );
+  }
+
+  /** Record as history what has been held until `now`, leaving out what has
+   *  since arrived live. */
+  private releaseHistory(now: number): void {
+    const due = new Map<string, WAMessage[]>();
+    for (const [id, held] of this.heldHistory) {
+      if (held.until > now) break;
+      this.heldHistory.delete(id);
+      if (this.heardLive.has(id)) continue;
+      const batch = due.get(held.self);
+      if (batch) batch.push(held.message);
+      else due.set(held.self, [held.message]);
+    }
+    for (const [self, messages] of due) {
+      for (const id of this.recordHistory(messages, self)) remember(this.recordedAsHistory, id);
+    }
+  }
+
+  /** Hand what someone else said in `messages` to the inbound handler. */
+  private async deliverInbound(messages: WAMessage[]): Promise<void> {
+    if (!this.handler) return;
+    const deliverable: ChannelMessage[] = [];
+    for (const waMsg of messages) {
+      if (!waMsg.message || waMsg.key.fromMe) continue;
+      // A live copy that came after its history copy was recorded is the
+      // same message again.
+      if (waMsg.key.id && this.recordedAsHistory.has(waMsg.key.id)) continue;
+      // A reaction is an emoji pinned to another message, not an inbound turn —
+      // it is mirrored into the store, but the agent should not answer it.
+      if (waMsg.message.reactionMessage) continue;
+
+      const msg = this.toChannelMessage(waMsg);
+      // Protocol/system frames (sender-key distribution, app-state sync,
+      // history-sync notifications) carry no text or attachments — they are
+      // mirrored for completeness but are not an inbound turn.
+      if (!msg.text && msg.attachments.length === 0) continue;
+      // Only what is delivered counts as heard, so a stub that failed to
+      // decrypt leaves its history copy to be recorded. All of a batch is
+      // remembered before any of it is handled, since handling waits.
+      this.rememberHeard(waMsg.key.id);
+      deliverable.push(msg);
+    }
+    for (const msg of deliverable) {
+      log.info("message received", {
+        from: msg.senderId,
+        chatId: msg.chatId,
+        threadKind: msg.thread?.kind,
+      });
+
+      try {
+        await this.handler!(msg);
+      } catch (err) {
+        log.error("message handler error", {
+          messageId: msg.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  /** Remember that message `id` was heard live, keeping the latest few thousand. */
+  private rememberHeard(id: string | null | undefined): void {
+    if (id) remember(this.heardLive, id);
+  }
+
+  /** Hand `messages`, which nothing delivers inbound and Rome's account `self`
+   *  heard, to Chats as history, and answer the ids of those now on record. */
+  private recordHistory(messages: WAMessage[], self = this.selfPnJid()): string[] {
+    if (!this.syncSink?.recordHistory || !self || messages.length === 0) return [];
+    // Chats records what Rome sends when it sends it. An edit or a deletion
+    // answers a message rather than being one, as a reaction does.
+    const inputs = this.syncInputs(
+      messages.filter((message) => !this.sentHere(message) && !answersAMessage(message)),
+    );
+    if (inputs.length === 0) return [];
+    try {
+      return [...this.syncSink.recordHistory(inputs, self, this.sock?.user?.name ?? undefined)];
+    } catch (err) {
+      log.error("failed to record whatsapp history", { error: errMsg(err) });
+      return [];
+    }
+  }
+
+  /** A new id for a message the adapter sends. */
+  private newMessageId(): string {
+    return `${this.sendPrefix}${randomBytes(8).toString("hex").toUpperCase()}`;
+  }
+
+  /** Whether `message` is one this Rome sent through this account. Another
+   *  Rome's sends carry another tag, and another account's are not `fromMe`. */
+  private sentHere(message: WAMessage): boolean {
+    return message.key.fromMe === true && (message.key.id?.startsWith(this.sendPrefix) ?? false);
+  }
+
   async stop(): Promise<void> {
+    if (this.historyHoldTimer) {
+      clearTimeout(this.historyHoldTimer);
+      this.historyHoldTimer = undefined;
+    }
+    this.releaseHistory(Number.POSITIVE_INFINITY);
     this.stopped = true;
     this.socketGeneration += 1;
     this.connectionStatus = "disconnected";
@@ -432,11 +617,14 @@ export class WhatsAppAdapter {
     });
     const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
+    const sock = this.sock;
+    const sendOne = (jid: string, content: Parameters<typeof sock.sendMessage>[1]) =>
+      sock.sendMessage(jid, content, { messageId: this.newMessageId() });
 
     try {
       let messageId: string | undefined;
       if (text) {
-        const sent = await this.sock.sendMessage(jid, { text });
+        const sent = await sendOne(jid, { text });
         messageId = sent?.key.id ?? undefined;
       }
 
@@ -445,22 +633,22 @@ export class WhatsAppAdapter {
         const media = await readFile(att.source);
         switch (att.type) {
           case "image":
-            await this.sock.sendMessage(jid, {
+            await sendOne(jid, {
               image: media,
               caption: att.caption,
             });
             break;
           case "video":
-            await this.sock.sendMessage(jid, {
+            await sendOne(jid, {
               video: media,
               caption: att.caption,
             });
             break;
           case "audio":
-            await this.sock.sendMessage(jid, { audio: media, mimetype: "audio/mpeg" });
+            await sendOne(jid, { audio: media, mimetype: "audio/mpeg" });
             break;
           case "document":
-            await this.sock.sendMessage(jid, {
+            await sendOne(jid, {
               document: media,
               mimetype: "application/octet-stream",
               fileName: att.source.split("/").pop() ?? "file",
@@ -756,6 +944,21 @@ function summarizeLocation(label: string, location: unknown): string {
     return `${label}: ${r.degreesLatitude}, ${r.degreesLongitude}`;
   }
   return label;
+}
+
+/** Whether `message` acts on another message rather than saying one: an edit,
+ *  a deletion, a pin, keeping it in a disappearing chat, or a poll vote. */
+function answersAMessage(message: WAMessage): boolean {
+  const content = unwrapMessageContent(message.message);
+  if (!content) return false;
+  const protocol = content.protocolMessage;
+  return (
+    protocol?.editedMessage != null ||
+    Number(protocol?.type) === 0 ||
+    content.pinInChatMessage != null ||
+    content.keepInChatMessage != null ||
+    content.pollUpdateMessage != null
+  );
 }
 
 function unwrapMessageContent(message: WAMessage["message"]): WaMessageContent | null {

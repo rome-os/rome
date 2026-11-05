@@ -73,6 +73,11 @@ rs.mock("@whiskeysockets/baileys", () => {
 
 // Helpers
 
+/** The options of a message the adapter sends: an id it minted. */
+const ROME_SEND = expect.objectContaining({
+  messageId: expect.stringMatching(/^3EB0[0-9A-F]{24}$/),
+});
+
 function makeWAMessage(overrides: Record<string, unknown> = {}) {
   return {
     key: {
@@ -296,6 +301,366 @@ describe("WhatsAppAdapter", () => {
         id: "h1",
         chatJid: "111@s.whatsapp.net",
         text: "hello from whatsapp",
+      });
+    });
+
+    describe("history for Chats", () => {
+      function recordingSink() {
+        const recorded: { ids: string[]; self: string }[] = [];
+        const { sink } = makeSink();
+        sink.recordHistory = (messages, self) => {
+          recorded.push({ ids: messages.map((m) => m.id), self });
+          return messages.map((m) => m.id);
+        };
+        return { sink, recorded };
+      }
+
+      it("hands a history sync's messages to Chats as Rome's account heard them", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        await adapter.start();
+
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "h1", fromMe: false } }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "h2", fromMe: true } }),
+          ],
+        });
+
+        expect(recorded).toEqual([{ ids: ["h1", "h2"], self: "1234567890@s.whatsapp.net" }]);
+      });
+
+      it("holds what someone else said in a history sync until its live copy has had time to arrive", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+        rs.useFakeTimers();
+        try {
+          const from = (id: string, fromMe: boolean) =>
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe } });
+
+          await eventHandlers["messages.upsert"]({ messages: [from("heard", false)] });
+          eventHandlers["messaging-history.set"]({
+            contacts: [],
+            chats: [],
+            messages: [
+              from("heard", false),
+              from("live-later", false),
+              from("old", false),
+              from("guardian", true),
+            ],
+          });
+          expect(recorded.map((batch) => batch.ids)).toEqual([["guardian"]]);
+
+          // Its live copy comes after the history sync reported it.
+          await eventHandlers["messages.upsert"]({ messages: [from("live-later", false)] });
+          rs.advanceTimersByTime(30_000);
+
+          expect(delivered).toEqual(["heard", "live-later"]);
+          expect(recorded.map((batch) => batch.ids)).toEqual([["guardian"], ["old"]]);
+        } finally {
+          rs.useRealTimers();
+        }
+      });
+
+      it("records what it held as the account that heard it, while the socket is being replaced", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        rs.useFakeTimers();
+        const user = mockSock.user;
+        try {
+          eventHandlers["messaging-history.set"]({
+            contacts: [],
+            chats: [],
+            messages: [
+              makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "old", fromMe: false } }),
+            ],
+          });
+          mockSock.user = undefined as unknown as typeof user;
+          rs.advanceTimersByTime(30_000);
+
+          expect(recorded).toEqual([{ ids: ["old"], self: "1234567890@s.whatsapp.net" }]);
+        } finally {
+          mockSock.user = user;
+          rs.useRealTimers();
+        }
+      });
+
+      it("records the history copy of a message whose live copy could not be read", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
+        // A stub that failed to decrypt carries no content.
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            {
+              ...makeWAMessage({
+                key: { remoteJid: "111@s.whatsapp.net", id: "stub", fromMe: false },
+              }),
+              message: null,
+            },
+          ],
+        });
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "stub", fromMe: false } }),
+          ],
+        });
+        await adapter.stop();
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["stub"]]);
+      });
+
+      it("does not deliver inbound a live copy that comes after its history copy was recorded", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+        rs.useFakeTimers();
+        try {
+          const late = makeWAMessage({
+            key: { remoteJid: "111@s.whatsapp.net", id: "late", fromMe: false },
+          });
+          eventHandlers["messaging-history.set"]({ contacts: [], chats: [], messages: [late] });
+          rs.advanceTimersByTime(30_000);
+          await eventHandlers["messages.upsert"]({ messages: [late] });
+
+          expect(recorded.map((batch) => batch.ids)).toEqual([["late"]]);
+          expect(delivered).toEqual([]);
+        } finally {
+          rs.useRealTimers();
+        }
+      });
+
+      it("delivers inbound a live copy whose history copy could not be read", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+        rs.useFakeTimers();
+        try {
+          const key = { remoteJid: "111@s.whatsapp.net", id: "unread", fromMe: false };
+          eventHandlers["messaging-history.set"]({
+            contacts: [],
+            chats: [],
+            messages: [{ ...makeWAMessage({ key }), message: null }],
+          });
+          rs.advanceTimersByTime(30_000);
+          await eventHandlers["messages.upsert"]({ messages: [makeWAMessage({ key })] });
+
+          expect(recorded).toEqual([]);
+          expect(delivered).toEqual(["unread"]);
+        } finally {
+          rs.useRealTimers();
+        }
+      });
+
+      it("records what it still holds when it stops", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "old", fromMe: false } }),
+          ],
+        });
+        await adapter.stop();
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["old"]]);
+      });
+
+      it("hands over only what the guardian said while messages are delivered inbound", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "in1", fromMe: false } }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+          ],
+        });
+
+        // Inbound recording keeps the one it is handed, so it raises it.
+        expect(delivered).toEqual(["in1"]);
+        expect(recorded.map((batch) => batch.ids)).toEqual([["own1"]]);
+      });
+
+      it("keeps out what Rome sent, as its echo and when a history sync reports it again", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        const sentIds: string[] = [];
+        mockSendMessage.mockImplementation(
+          async (_jid: string, _content: unknown, options: { messageId: string }) => {
+            sentIds.push(options.messageId);
+            return { key: { id: options.messageId } };
+          },
+        );
+
+        await adapter.send("111@s.whatsapp.net" as ChatId, { text: "on it" });
+        const fromMe = (id: string) =>
+          makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe: true } });
+        await eventHandlers["messages.upsert"]({
+          messages: [fromMe(sentIds[0]!), fromMe("typed-on-phone")],
+        });
+        // Another account's Rome mints the same prefix, and what it said here
+        // is someone else's message.
+        const otherRome = `${sentIds[0]!.slice(0, 12)}0000000000000000`;
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            fromMe(sentIds[0]!),
+            fromMe("typed-earlier"),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: otherRome, fromMe: false },
+            }),
+          ],
+        });
+
+        await adapter.stop();
+
+        expect(sentIds).toHaveLength(1);
+        expect(recorded.map((batch) => batch.ids)).toEqual([
+          ["typed-on-phone"],
+          ["typed-earlier"],
+          [otherRome],
+        ]);
+        mockSendMessage.mockReset();
+      });
+
+      it("keeps what another Rome linked to the same account sent, which carries another tag", async () => {
+        adapter = new WhatsAppAdapter({ authStatePath: "/tmp/auth", sendTag: "0000ABCD" });
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        const fromMe = (id: string) =>
+          makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe: true } });
+        const mine = "3EB00000ABCD0123456789ABCDEF";
+        const otherRome = "3EB01111AAAA0123456789ABCDEF";
+
+        await eventHandlers["messages.upsert"]({ messages: [fromMe(mine), fromMe(otherRome)] });
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [fromMe(mine), fromMe(`${otherRome.slice(0, -1)}0`)],
+        });
+        await adapter.stop();
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([
+          [otherRome],
+          [`${otherRome.slice(0, -1)}0`],
+        ]);
+      });
+
+      it("leaves out the guardian's edits, deletions, pins and poll votes, which act on a message", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "edit", fromMe: true },
+              message: {
+                protocolMessage: { type: 14, editedMessage: { conversation: "fixed typo" } },
+              },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "revoke", fromMe: true },
+              message: { protocolMessage: { type: 0, key: { id: "own0" } } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "pin", fromMe: true },
+              message: { pinInChatMessage: { key: { id: "own0" }, type: 1 } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "keep", fromMe: true },
+              message: { keepInChatMessage: { key: { id: "own0" }, keepType: 1 } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "vote", fromMe: true },
+              message: { pollUpdateMessage: { pollCreationMessageKey: { id: "poll0" } } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "shared-phone", fromMe: true },
+              message: { protocolMessage: { type: 11 } },
+            }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+          ],
+        });
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["shared-phone", "own1"]]);
+      });
+
+      it("hands over the account's display name with what the guardian said", async () => {
+        const names: (string | undefined)[] = [];
+        const { sink } = makeSink();
+        sink.recordHistory = (_messages, _self, selfName) => {
+          names.push(selfName);
+          return [];
+        };
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        const user = mockSock.user;
+        mockSock.user = { ...user, name: "Ouou" };
+        try {
+          await eventHandlers["messages.upsert"]({
+            messages: [
+              makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+            ],
+          });
+        } finally {
+          mockSock.user = user;
+        }
+
+        expect(names).toEqual(["Ouou"]);
+      });
+
+      it("hands over every live message while nothing is delivered inbound", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        await adapter.start();
+
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "in1", fromMe: false } }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+          ],
+        });
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["in1", "own1"]]);
       });
     });
 
@@ -619,9 +984,11 @@ describe("WhatsAppAdapter", () => {
         text: "hi from bot",
       });
 
-      expect(mockSendMessage).toHaveBeenCalledWith("jid@s.whatsapp.net", {
-        text: "hi from bot",
-      });
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        "jid@s.whatsapp.net",
+        { text: "hi from bot" },
+        ROME_SEND,
+      );
       expect(receipt).toStrictEqual({ chatId: CHAT, messageId: "sent-1" });
     });
 
@@ -685,7 +1052,11 @@ describe("WhatsAppAdapter", () => {
     it("strips the device suffix from a non-self send target", async () => {
       await adapter.start();
       await adapter.send("5551234:9@s.whatsapp.net" as ChatId, { text: "hi" });
-      expect(mockSendMessage).toHaveBeenCalledWith("5551234@s.whatsapp.net", { text: "hi" });
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        "5551234@s.whatsapp.net",
+        { text: "hi" },
+        ROME_SEND,
+      );
     });
 
     it("routes a send to any self form onto the canonical phone-number JID", async () => {
@@ -697,7 +1068,7 @@ describe("WhatsAppAdapter", () => {
       ]) {
         mockSendMessage.mockClear();
         await adapter.send(form as ChatId, { text: "note" });
-        expect(mockSendMessage).toHaveBeenCalledWith(SELF_PN, { text: "note" });
+        expect(mockSendMessage).toHaveBeenCalledWith(SELF_PN, { text: "note" }, ROME_SEND);
       }
     });
 

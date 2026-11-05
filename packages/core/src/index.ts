@@ -87,6 +87,11 @@ import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
+import { recordSynced } from "./connections/history-recording.js";
+import {
+  syncedFromWhatsApp,
+  type WhatsAppSyncSink,
+} from "./connections/kinds/whatsapp/whatsapp-sync.js";
 import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
 import { WhatsAppAccounts } from "./chats/accounts/whatsapp.js";
 import { createAccountNames } from "./chats/accounts/account-names.js";
@@ -268,6 +273,7 @@ import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
+import { whatsAppSendTag } from "./connections/integrations/whatsapp.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -1514,11 +1520,30 @@ async function main() {
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,
+    whatsAppSendTag: await whatsAppSendTag(settingsRepo),
     chatSettings,
     chatStop,
     peopleRepo,
     whatsAppSyncSink: refreshingAfter(
-      whatsAppStoreRepo,
+      {
+        upsertContacts: (contacts) => whatsAppStoreRepo.upsertContacts(contacts),
+        upsertChats: (chats) => whatsAppStoreRepo.upsertChats(chats),
+        upsertMessages: (messages) => whatsAppStoreRepo.upsertMessages(messages),
+        // The mirror above still answers WhatsApp history reads. Chats keeps
+        // its own record beside it, to take over those reads.
+        // One transaction for a batch: a full history sync hands over
+        // thousands of messages at once.
+        recordHistory(messages, self, selfName) {
+          return db.transaction(
+            () =>
+              recordSynced(
+                chatsWired,
+                { platform: "whatsapp", id: self },
+                messages.flatMap((message) => syncedFromWhatsApp(message, self, selfName) ?? []),
+              ).onRecord,
+          );
+        },
+      } satisfies WhatsAppSyncSink,
       ["upsertContacts", "upsertChats"],
       refreshWhatsAppProfiles,
     ),

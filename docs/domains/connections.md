@@ -18,6 +18,7 @@ Rome's access to one external account: what the guardian gave so Rome can act or
 - Connecting an account again after a disconnect reaches the same account, by platform and the platform's own id, through a new connection. The connected account is the same one, with the agent the guardian linked to it, and its earlier messages are still its own.
 - Signing in to Rome, as the guardian does to open the dashboard with Google or GitHub, makes no connection and changes none, even when it reaches an account a connection holds ([ADR](../adrs/sign-in-links-separate-from-provider-connections.md)). Sign-in is outside this domain and is not modelled yet (Ouou, 2026-11-04).
 - A working connection that lets Rome chat is how an account's messages reach Rome and how its agent's replies go back. There is no separate word for that plumbing.
+- A connection hands each message over once. When its platform reports a message twice, as WhatsApp does with a history sync and the live copy, the connection hands over one and drops the other. It prefers the live copy when that comes in time, so the message can wake an agent. Chats does not sort it out (Ouou, 2026-11-05).
 - A connection is used in two ways. In chats, its grant lets Rome send and receive as the account, and then the account has one agent speaking through it (the rule under [Account](chats.md#account)). Outside chats, its grant lets Rome call the external system, as with GitHub, and then no agent is bonded to it: any agent, or Rome's own code, may use that access.
 
 ## Grant
