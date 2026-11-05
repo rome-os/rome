@@ -209,8 +209,19 @@ checks.push({
 });
 
 // --- C6 One id per session at the API -------------------------------------
+/** The type name of `method`'s last parameter in interface `owner`. */
+function lastParamType(owner: string, method: string): string | undefined {
+  const decl = declarations.get(owner);
+  if (!decl || !ts.isInterfaceDeclaration(decl)) return undefined;
+  for (const member of decl.members) {
+    if (!ts.isMethodSignature(member) || member.name.getText(decl.getSourceFile()) !== method)
+      continue;
+    return paramType(owner, method, member.parameters.length - 1);
+  }
+  return undefined;
+}
 const openOptions =
-  paramType("AgentSessionManager", "open", 2) ?? paramType("AgentSessionManager", "acquire", 1);
+  lastParamType("AgentSessionManager", "open") ?? paramType("AgentSessionManager", "acquire", 1);
 const turnOptions = paramType("AgentSession", "sendTurn", 1);
 const SECOND_IDS = ["romeSessionId", "romeSessionType", "resumeSessionId", "channelThreadKey"];
 const idFields = [
@@ -233,33 +244,28 @@ checks.push({
 });
 
 // --- C7 The caller is a typed union of the five kinds ----------------------
-// The union lives in the codec or, once apps share it, in the SDK.
+// The SDK still names the caller's kinds for apps, which mint and read them.
 const SDK_INDEX = join(REPO, "packages/app-runtime-sdk/src/index.ts");
-const callerKinds = [join(SRC, "core/session-caller.ts"), SDK_INDEX]
-  .filter((file) => existsSync(file))
-  .map((file) => read(file).match(/export type SessionCaller\s*=([\s\S]*?);\n/)?.[1])
-  .filter((union): union is string => !!union)
-  .flatMap((union) => [...union.matchAll(/kind:\s*"([^"]+)"/g)].map((match) => match[1]!))
-  .filter((kind, index, all) => all.indexOf(kind) === index);
-const EXPECTED_KINDS = ["chat", "place", "parent-turn", "fork-point", "execution"];
-const kindsMatch =
-  callerKinds.length === EXPECTED_KINDS.length &&
-  EXPECTED_KINDS.every((kind) => callerKinds.includes(kind));
-const openTakesCaller = (() => {
+// Sessions takes the caller as an opaque string: a string type, or an alias of one.
+const sessionSource = MODULE.map(code).join("\n");
+const openCallerType = (() => {
   const decl = declarations.get("AgentSessionManager");
-  if (!decl || !ts.isInterfaceDeclaration(decl)) return false;
-  return decl.members.some(
-    (member) =>
-      ts.isMethodSignature(member) &&
-      member.name.getText(decl.getSourceFile()) === "open" &&
-      member.parameters[1]?.type?.getText(decl.getSourceFile()) === "SessionCaller",
-  );
+  if (!decl || !ts.isInterfaceDeclaration(decl)) return undefined;
+  for (const member of decl.members) {
+    if (ts.isMethodSignature(member) && member.name.getText(decl.getSourceFile()) === "open")
+      return member.parameters[1]?.type?.getText(decl.getSourceFile());
+  }
+  return undefined;
 })();
+const opaqueCaller =
+  openCallerType === "string" ||
+  (!!openCallerType &&
+    new RegExp(`export type ${openCallerType}\\s*=\\s*string\\s*;`).test(sessionSource));
 checks.push({
   id: "C7",
-  name: "The caller is a typed union of exactly five kinds (chat, place, parent turn, fork point, execution) and open takes it",
-  measured: `kinds: ${callerKinds.join(", ") || "none"}; open takes it: ${openTakesCaller}`,
-  pass: kindsMatch && openTakesCaller,
+  name: "open takes the caller as an opaque string its owning context mints",
+  measured: `open's caller: ${openCallerType ?? "none"}; opaque: ${opaqueCaller}`,
+  pass: opaqueCaller,
 });
 
 const KEY_HELPERS =
@@ -363,6 +369,64 @@ checks.push({
   name: "The SDK exports the typed caller and every turn, run, fork and action context it hands apps carries it",
   measured: `exports SessionCaller: ${sdkExportsCaller}; missing on: ${missingCaller.join(", ") || "none"}`,
   pass: sdkExportsCaller && missingCaller.length === 0,
+});
+
+// --- C14 The session reads no field of the caller ----------------------------
+const CALLER_READS =
+  /(\bcaller\.(kind|chatId|connection|place|watcher|parent|source|id)\b|\bcallerChatId\b|\bcallerConnection\b|\bcallerFromKey\b|\bcallerKey\b|\bchatOfCaller\b|session-caller\.js)/g;
+const callerReads = MODULE.flatMap((file) =>
+  (code(file).match(CALLER_READS) ?? []).map((hit) => `${rel(file)}: ${hit}`),
+);
+quantities.callerReads = callerReads.length;
+checks.push({
+  id: "C14",
+  name: "The session reads no field of the caller and imports no caller codec",
+  measured: `${callerReads.length} reads`,
+  pass: callerReads.length === 0,
+  detail: [...new Set(callerReads)],
+});
+
+// --- C15 Open and turn take only what the draft lists -----------------------
+const OPEN_LIMIT = 3;
+const TURN_LIMIT = 2;
+checks.push({
+  id: "C15",
+  name: `open options carry at most ${OPEN_LIMIT} fields (workingDir, model, effort) and turn options at most ${TURN_LIMIT} (initiator, briefing)`,
+  measured: `${openOptions}: ${openCount}, ${turnOptions}: ${turnCount}`,
+  pass: openCount <= OPEN_LIMIT && turnCount <= TURN_LIMIT,
+});
+
+// --- C16 The session records its own turns ----------------------------------
+const sessionMembers = members("AgentSession");
+const RECORD_LEAKS = ["recordsTo", "conversation", "forkPoint"].filter((name) =>
+  sessionMembers.includes(name),
+);
+const MANAGER_LEAKS = ["recordConversation"].filter((name) => managerMembers.includes(name));
+const turnLeaks = ["execution"].filter((name) => members(turnOptions ?? "").includes(name));
+const RUNNERS = [
+  "core/agent-runner.ts",
+  "core/agent-session-bridge.ts",
+  "core/rpc-agent-runner.ts",
+];
+const RUNNER_RECORDING =
+  /\b(AgentTraceRecorder|recordAgentTraceBestEffort|assignConversationMessageTurn|recordsTo)\b/g;
+const runnerRecording = RUNNERS.map((file) => join(SRC, file))
+  .filter((file) => existsSync(file))
+  .flatMap((file) =>
+    (code(file).match(RUNNER_RECORDING) ?? []).map((hit) => `${rel(file)}: ${hit}`),
+  );
+const recordLeaks = [
+  ...RECORD_LEAKS.map((name) => `AgentSession.${name}`),
+  ...MANAGER_LEAKS.map((name) => `AgentSessionManager.${name}`),
+  ...turnLeaks.map((name) => `${turnOptions}.${name}`),
+  ...new Set(runnerRecording),
+];
+checks.push({
+  id: "C16",
+  name: "The session records its own turns: no member says where a turn is recorded, and the runners record nothing",
+  measured: `${recordLeaks.length} leaks`,
+  pass: recordLeaks.length === 0,
+  detail: recordLeaks,
 });
 
 // --- Quantities without a target -------------------------------------------
