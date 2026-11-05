@@ -48,6 +48,7 @@ export const AREA_PATHS = {
   rest: [
     "packages/lib/",
     "packages/discord-cli/",
+    "packages/signer/",
     "packages/rome-node-cli/",
     "packages/rome-node-core/",
     "packages/app-runtime-sdk/",

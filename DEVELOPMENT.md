@@ -59,6 +59,8 @@ For standalone design pages, run `pnpm storybook`. Startup, source HMR, static b
 - Builds the Rome dev image and brings up the worktree's Compose project.
 - Writes `.obs/env` with discovery URLs and attaches to `docker compose logs`.
 
+`ROME_DEV_SIGNER=1 pnpm dev:all` also starts the signer, so the stack authenticates to Rome Cloud with short-lived signed tokens instead of the instance token. It is off by default, because a signed stack registers its instance's key with Rome Cloud, and a dev token that gets registered stops working for any stack without the signer. After you change `packages/signer`, run `./r pnpm --filter @rome/signer build` and restart the signer.
+
 For other flows:
 
 ```bash

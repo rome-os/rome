@@ -1,4 +1,4 @@
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 
@@ -201,8 +201,8 @@ export class RomeCloudMailProvider implements MailProvider {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }
 
-  private resolve(): { token: string; origin: string } {
-    const token = getInstanceToken();
+  private async resolve(): Promise<{ token: string; origin: string }> {
+    const token = await cloudBearer();
     if (!token) {
       throw new MailProviderError(
         "instance is not enrolled (no instance token)",
@@ -221,7 +221,7 @@ export class RomeCloudMailProvider implements MailProvider {
     path: string,
     init: { method: "GET" | "POST"; body?: unknown } = { method: "GET" },
   ): Promise<T> {
-    const { token, origin } = this.resolve();
+    const { token, origin } = await this.resolve();
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
       "Cache-Control": "no-store",

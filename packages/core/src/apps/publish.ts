@@ -32,7 +32,7 @@ import {
 import { renderOgSvg, type OgIcon } from "./og/template.js";
 import { svgToPng } from "./og/rasterize.js";
 import type { SpecSource } from "./lockfile.js";
-import { getInstanceToken } from "../lib/instance-identity.js";
+import { cloudBearer } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 import { getFirstPartyArtifactDir, getProjectRoot } from "../paths.js";
@@ -136,7 +136,7 @@ export async function publishAppBundle(
   }
   if (actualHash !== expectedHash) return { status: "artifact_drifted" };
 
-  const token = getInstanceToken();
+  const token = await cloudBearer();
   if (!token) return { status: "no_token" };
 
   const origin = getRomeCloudOrigin();

@@ -7,7 +7,7 @@ import { resolveAndRecordAccount } from "../../lib/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../lib/bootstrap-state.js";
 import { applySetupDefaults } from "../../lib/guardian-profile.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import { getInstanceToken } from "../../lib/instance-identity.js";
+import { isInstanceLinked } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
@@ -34,7 +34,7 @@ export function onboardRoutes(deps: ApiDeps): Hono {
     const state = await resolveBootstrapState(deps.db, {
       cloudAuthEnabled: await deps.isCloudAuthEnabled(),
       romeCloudConfigured: getRomeCloudOrigin() !== null,
-      instanceEnrolled: getInstanceToken() !== null,
+      instanceEnrolled: isInstanceLinked(),
       hasSession: session !== null || visitorHasDashboardAccess,
       dashboardVisitorAccessEnabled: deps.dashboardAccessState.hasCloudEmailAccess(),
     });

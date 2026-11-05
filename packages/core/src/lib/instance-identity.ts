@@ -1,3 +1,4 @@
+import { requestSignerToken, SignerError, signerHealth } from "@rome-os/node-core/signer";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 import { type CloudProfile, readCloudProfile } from "./cloud-profile.js";
@@ -10,6 +11,11 @@ const INSTANCE_TOKEN_PREFIX = "romeinst_";
 
 // The DB key (in the `settings` table) that holds the durable instance token.
 export const INSTANCE_TOKEN_SETTING_KEY = "instanceToken";
+
+// The DB key holding the thumbprint of the signer key Rome Cloud has registered
+// for this instance. Only set in signer mode, where its presence replaces the
+// instance token as the "linked" signal.
+export const INSTANCE_KEY_SETTING_KEY = "instanceKeyId";
 
 // The minimal settings reader/writer this module needs. `SettingsRepository`
 // satisfies it; keeping the surface narrow lets instance-identity stay free of
@@ -31,19 +37,62 @@ export function isValidInstanceToken(token: string | null | undefined): token is
 // the same way. `getInstanceToken` only ever reads the in-memory cache that
 // `hydrateInstanceToken` fills from the DB — it never touches the env.
 let cachedInstanceToken: string | null = null;
+let cachedKeyId: string | null = null;
 const instanceTokenListeners = new Set<() => void>();
 
+/** The signer's unix socket path, or null in legacy mode. */
+export function signerSocketPath(): string | null {
+  return process.env.ROME_SIGNER_SOCKET?.trim() || null;
+}
+
+/** True when a signer service is configured: Rome Cloud calls carry signer tokens, not the instance token. */
+export function signerMode(): boolean {
+  return signerSocketPath() !== null;
+}
+
+/** Only the legacy path and the signer registration read this. Everything else uses `cloudBearer`. */
 export function getInstanceToken(): string | null {
   return isValidInstanceToken(cachedInstanceToken) ? cachedInstanceToken : null;
 }
 
-// Update the in-process cache without touching the DB. Call after persisting a
-// freshly-minted token so synchronous `getInstanceToken` callers see it at once.
-export function setInstanceTokenInMemory(token: string | null): void {
-  const nextToken = isValidInstanceToken(token) ? token : null;
-  if (cachedInstanceToken === nextToken) return;
-  cachedInstanceToken = nextToken;
-  // The token is already persisted; a failing listener must not fail that write.
+/**
+ * Whether Rome Cloud knows this instance: a durable instance token in legacy
+ * mode, a registered signer key in signer mode.
+ */
+export function isInstanceLinked(): boolean {
+  return signerMode() ? cachedKeyId !== null : getInstanceToken() !== null;
+}
+
+/**
+ * A stable name for the credential `cloudBearer` presents: the signer key's
+ * thumbprint in signer mode, the instance token otherwise. Null when not linked.
+ * Signer tokens change every call, so use this where the credential's identity matters.
+ */
+export function instanceCredentialId(): string | null {
+  return signerMode() ? cachedKeyId : getInstanceToken();
+}
+
+/**
+ * The bearer for a Rome Cloud call, or null when the instance is not linked.
+ * Signer mode returns a fresh 60-second token for each call, so never cache
+ * it. A signer that cannot be reached also returns null.
+ */
+export async function cloudBearer(): Promise<string | null> {
+  const socket = signerSocketPath();
+  if (!socket) return getInstanceToken();
+  if (cachedKeyId === null) return null;
+  try {
+    return await requestSignerToken(socket);
+  } catch (err) {
+    log.warn("signer token unavailable", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+function notifyLinkChanged(): void {
+  // The state is already persisted; a failing listener must not fail that write.
   for (const listener of instanceTokenListeners) {
     try {
       listener();
@@ -55,7 +104,24 @@ export function setInstanceTokenInMemory(token: string | null): void {
   }
 }
 
-/** Subscribe to minted and revoked instance credentials in this process. */
+// Update the in-process cache without touching the DB. Call after persisting a
+// freshly-minted token so synchronous `getInstanceToken` callers see it at once.
+export function setInstanceTokenInMemory(token: string | null): void {
+  const nextToken = isValidInstanceToken(token) ? token : null;
+  if (cachedInstanceToken === nextToken) return;
+  cachedInstanceToken = nextToken;
+  notifyLinkChanged();
+}
+
+async function setKeyId(store: InstanceTokenStore, keyId: string | null): Promise<void> {
+  if (cachedKeyId === keyId) return;
+  if (keyId) await store.set(INSTANCE_KEY_SETTING_KEY, keyId);
+  else await store.delete(INSTANCE_KEY_SETTING_KEY);
+  cachedKeyId = keyId;
+  notifyLinkChanged();
+}
+
+/** Subscribe to changes in whether this instance is linked to Rome Cloud. */
 export function onInstanceTokenChanged(listener: () => void): () => void {
   instanceTokenListeners.add(listener);
   return () => instanceTokenListeners.delete(listener);
@@ -64,40 +130,57 @@ export function onInstanceTokenChanged(listener: () => void): () => void {
 // Load the persisted token from the DB into the cache. Run once at boot, before
 // anything calls `getInstanceToken`.
 export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<void> {
+  const keyId = await store.get<string>(INSTANCE_KEY_SETTING_KEY);
+  cachedKeyId = typeof keyId === "string" ? keyId : null;
   const stored = await store.get<string>(INSTANCE_TOKEN_SETTING_KEY);
   setInstanceTokenInMemory(stored ?? null);
+}
+
+// The token a hosted `.env` injects. Dev can ignore it to boot un-enrolled.
+function envInstanceToken(): string | null {
+  // Dev only: force the box to boot un-enrolled even when a token is in the env,
+  // so the dev stack exercises the real browser consent → enroll round trip
+  // instead of short-circuiting to the seeded token. Prod never sets this.
+  if (process.env.ROME_DEV_SKIP_TOKEN_SEED === "1") return null;
+  const envToken = process.env.ROME_INSTANCE_TOKEN?.trim();
+  return isValidInstanceToken(envToken) ? envToken : null;
 }
 
 // Cloud-only seeding: a provisioned VM gets `ROME_INSTANCE_TOKEN` injected into
 // its env. Persist it to the DB so the runtime has one read path. Upserts on
 // every boot so a rotated env token propagates. Desktop/local have no env token
 // and fall through to the in-app enroll flow. Returns whether a token was seeded.
+// Signer mode never seeds: the env token is only offered to key registration.
 export async function seedInstanceTokenFromEnv(store: InstanceTokenStore): Promise<boolean> {
-  // Dev only: force the box to boot un-enrolled even when a token is in the env,
-  // so the dev stack exercises the real browser consent → enroll round trip
-  // instead of short-circuiting to the seeded token. Prod never sets this.
-  if (process.env.ROME_DEV_SKIP_TOKEN_SEED === "1") return false;
-  const envToken = process.env.ROME_INSTANCE_TOKEN?.trim();
-  if (!isValidInstanceToken(envToken)) return false;
+  const envToken = envInstanceToken();
+  if (signerMode() || !envToken) return false;
   await store.set(INSTANCE_TOKEN_SETTING_KEY, envToken);
   return true;
 }
 
 // Persist a freshly-minted token (from the in-app OAuth enroll flow) and refresh
-// the cache so it takes effect without a restart.
+// the cache so it takes effect without a restart. In signer mode the token is
+// only a one-time proof: it registers the signer key right away and is deleted.
 export async function persistInstanceToken(
   store: InstanceTokenStore,
   token: string,
 ): Promise<void> {
   await store.set(INSTANCE_TOKEN_SETTING_KEY, token);
   setInstanceTokenInMemory(token);
+  if (signerMode()) await syncInstanceIdentity(store);
 }
 
 // Fail closed on a token Rome Cloud has rejected (revoked/unknown): drop it from
 // the DB and the cache so `getInstanceToken` returns null, `instanceEnrolled`
 // flips false, and the web routes back to the connect flow. Used by the identity
-// heartbeat and any caller that observes a terminal auth signal.
+// heartbeat and any caller that observes a terminal auth signal. In signer mode
+// it also forgets the registered key, because the caller has seen the instance rejected.
 export async function clearInstanceToken(store: InstanceTokenStore): Promise<void> {
+  await dropStoredToken(store);
+  await setKeyId(store, null);
+}
+
+async function dropStoredToken(store: InstanceTokenStore): Promise<void> {
   await store.delete(INSTANCE_TOKEN_SETTING_KEY);
   setInstanceTokenInMemory(null);
 }
@@ -122,13 +205,43 @@ export interface InstanceIdentity {
 // tombstone (403) from a never-known/garbled token (401). `no_token` and
 // `unconfigured` are local preconditions (not enrolled / no Rome Cloud origin);
 // `unreachable` is a transient network failure — the only non-terminal miss.
+//
+// Four more states are faults the guardian can fix, and none of them is
+// terminal: `key_conflict` (the instance registered a different signer key, so
+// it needs a new sign-in), `clock_skew` (the host clock is off by more than two
+// minutes), `signer_unavailable` (the signer does not answer) and
+// `upgrade_required` (Rome Cloud retired the instance token in favor of a
+// signer key this deployment does not have).
 export type ProveIdentityResult =
   | { status: "ok"; identity: InstanceIdentity }
   | { status: "revoked" }
   | { status: "unknown" }
   | { status: "no_token" }
   | { status: "unconfigured" }
-  | { status: "unreachable" };
+  | { status: "unreachable" }
+  | { status: IdentityIssue };
+
+export type IdentityIssue =
+  | "key_conflict"
+  | "clock_skew"
+  | "signer_unavailable"
+  | "upgrade_required";
+
+const IDENTITY_ISSUE_MESSAGES: Record<IdentityIssue, string> = {
+  key_conflict: "This instance's credential was registered elsewhere. Sign in again.",
+  clock_skew: "System clock is off.",
+  signer_unavailable: "Signing service is not running.",
+  upgrade_required: "Update your compose file to add the signer service.",
+};
+
+let identityIssue: IdentityIssue | null = null;
+
+/** The fault the last identity check found, with one short message for the guardian, or null. */
+export function getIdentityIssue(): { state: IdentityIssue; message: string } | null {
+  return identityIssue
+    ? { state: identityIssue, message: IDENTITY_ISSUE_MESSAGES[identityIssue] }
+    : null;
+}
 
 export interface ProveIdentityOptions {
   /** Override fetch (tests). Defaults to global `fetch`. */
@@ -138,15 +251,20 @@ export interface ProveIdentityOptions {
   bootVersion?: string | null;
 }
 
-// The single client-side seam: present the durable instance token
-// to Rome Cloud and learn who we are. This is the one place Appendix A swaps a
-// bearer header for a key-signed challenge — every future service call brokers
-// through here rather than handling the durable secret itself.
-//
-// The durable token is presented ONLY to Rome Cloud, never to a service edge.
+// The single client-side seam: present the instance's credential to Rome Cloud
+// and learn who we are. The credential is a fresh signer token in signer mode
+// (even before the key is registered, since a 200 is what proves it is) and the
+// durable instance token otherwise. It is presented ONLY to Rome Cloud, never
+// to a service edge.
 export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<ProveIdentityResult> {
   const fetchImpl = opts.fetch ?? globalThis.fetch;
-  const token = getInstanceToken();
+  const socket = signerSocketPath();
+  let token: string | null;
+  try {
+    token = socket ? await requestSignerToken(socket) : getInstanceToken();
+  } catch {
+    return { status: "signer_unavailable" };
+  }
   if (!token) return { status: "no_token" };
 
   const origin = getRomeCloudOrigin();
@@ -171,8 +289,10 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
     return { status: "unreachable" };
   }
 
-  if (response.status === 401) return { status: "unknown" };
+  if (response.status === 401)
+    return (await isClockSkew(response)) ? { status: "clock_skew" } : { status: "unknown" };
   if (response.status === 403) return { status: "revoked" };
+  if (response.status === 426) return { status: "upgrade_required" };
   if (!response.ok) return { status: "unreachable" };
 
   const data = (await response.json().catch(() => null)) as {
@@ -196,6 +316,106 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
   };
 }
 
+async function isClockSkew(response: Response): Promise<boolean> {
+  const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  return body?.error === "clock_skew";
+}
+
+// Offers the instance token to Rome Cloud once, together with a signer token
+// proving the signer's key. Cloud stores the key and retires the instance token,
+// and a repeat with the same key succeeds again, so a lost response is safe to retry.
+async function registerInstanceKey(
+  socket: string,
+  fetchImpl: typeof fetch,
+): Promise<"registered" | Exclude<ProveIdentityResult["status"], "ok">> {
+  const instanceToken = getInstanceToken() ?? envInstanceToken();
+  if (!instanceToken) return "no_token";
+  const origin = getRomeCloudOrigin();
+  if (!origin) return "unconfigured";
+  let response: Response;
+  try {
+    response = await fetchImpl(new URL("/api/instance/key", origin), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${instanceToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ assertion: await requestSignerToken(socket) }),
+      cache: "no-store",
+    });
+  } catch (err) {
+    return err instanceof SignerError ? "signer_unavailable" : "unreachable";
+  }
+  if (response.ok) return "registered";
+  if (response.status === 401) return (await isClockSkew(response)) ? "clock_skew" : "unknown";
+  if (response.status === 403) return "revoked";
+  if (response.status === 409) return "key_conflict";
+  log.warn("instance key registration failed", { status: response.status });
+  return "unreachable";
+}
+
+const IDENTITY_RETRY_MS = 30_000;
+let identityRetry: ReturnType<typeof setTimeout> | undefined;
+
+// The identity check every trigger runs (boot, heartbeat, right after sign-in).
+// Legacy mode is `proveIdentity` plus the state it reports. Signer mode also
+// links the instance: a 200 with a signer token means Cloud holds the key; a
+// 401 with an instance token on hand registers the key; a 401 without one means
+// sign in. Faults the guardian must fix keep every credential and recheck every
+// 30 seconds. Never rejects.
+export async function syncInstanceIdentity(
+  store: InstanceTokenStore,
+  opts: ProveIdentityOptions = {},
+): Promise<ProveIdentityResult> {
+  const socket = signerSocketPath();
+  let result = await proveIdentity(opts);
+  if (socket) {
+    try {
+      result = await linkSignerKey(store, socket, opts, result);
+    } catch (err) {
+      if (!(err instanceof SignerError)) throw err;
+      result = { status: "signer_unavailable" };
+    }
+  }
+  identityIssue = Object.hasOwn(IDENTITY_ISSUE_MESSAGES, result.status)
+    ? (result.status as IdentityIssue)
+    : null;
+  clearTimeout(identityRetry);
+  if (result.status === "clock_skew" || result.status === "signer_unavailable") {
+    identityRetry = setTimeout(() => void syncInstanceIdentity(store), IDENTITY_RETRY_MS);
+    identityRetry.unref?.();
+  }
+  return result;
+}
+
+async function linkSignerKey(
+  store: InstanceTokenStore,
+  socket: string,
+  opts: ProveIdentityOptions,
+  first: ProveIdentityResult,
+): Promise<ProveIdentityResult> {
+  const link = async () => {
+    await setKeyId(store, (await signerHealth(socket)).jkt);
+    await dropStoredToken(store);
+  };
+  if (first.status === "ok") {
+    await link();
+    return first;
+  }
+  if (first.status !== "unknown" && first.status !== "revoked") return first;
+
+  await setKeyId(store, null);
+  const registered = await registerInstanceKey(socket, opts.fetch ?? globalThis.fetch);
+  if (registered === "registered") {
+    await link();
+    return proveIdentity(opts);
+  }
+  if (registered === "no_token") return first;
+  // A token Cloud rejected, or a key it holds for another signer, helps no later attempt.
+  if (registered === "unknown" || registered === "revoked" || registered === "key_conflict")
+    await dropStoredToken(store);
+  if (registered === "key_conflict")
+    log.warn("security event: instance key registered elsewhere", { event: "key_conflict" });
+  return { status: registered } as ProveIdentityResult;
+}
+
 // Best-effort identity announcement at boot. Authenticate is "constant,
 // invisible" — a single prove at startup gives operators
 // visibility into which account this instance is bound to and bumps the
@@ -203,10 +423,11 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
 // the caller can record the bound account from this one check instead of
 // proving a second time.
 export async function logInstanceIdentityAtBoot(
+  store: InstanceTokenStore,
   version: string | null,
 ): Promise<ProveIdentityResult> {
   try {
-    const result = await proveIdentity({ bootVersion: version });
+    const result = await syncInstanceIdentity(store, { bootVersion: version });
     switch (result.status) {
       case "ok":
         log.info("instance enrolled", { instanceId: result.identity.instanceId });
@@ -226,6 +447,12 @@ export async function logInstanceIdentityAtBoot(
         // token store would clear it here; core only holds an injected env var,
         // so it just surfaces the state loudly for operators.
         log.warn("instance token rejected by Rome Cloud", { reason: result.status });
+        break;
+      case "key_conflict":
+      case "clock_skew":
+      case "signer_unavailable":
+      case "upgrade_required":
+        log.warn("instance identity needs attention", { reason: result.status });
         break;
     }
     return result;

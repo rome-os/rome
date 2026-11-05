@@ -9,12 +9,15 @@ import { loadConfig } from "./config.js";
 import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
-  getInstanceToken,
+  cloudBearer,
   hydrateInstanceToken,
+  instanceCredentialId,
+  isInstanceLinked,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
   proveIdentity,
+  signerMode,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
@@ -1065,9 +1068,9 @@ async function main() {
     turnStreams: agentTurnStreamRegistry,
   });
   const romeCloudAccess = (): RomeCloudAccess | null => {
-    const token = getInstanceToken();
+    const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
-    return token && origin ? { token, origin } : null;
+    return credentialId && origin ? { credentialId, bearer: cloudBearer, origin } : null;
   };
   const usageAttribution = new UsageAttributionResolver(
     {
@@ -1095,7 +1098,7 @@ async function main() {
     attribution: usageAttribution,
     credential: () => {
       const access = romeCloudAccess();
-      return access ? credentialFingerprint(access.token) : null;
+      return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
@@ -2058,7 +2061,7 @@ async function main() {
   const favorDispatchRunner = new FavorDispatchRunner({
     favorService,
     actionEngine,
-    canSync: () => getInstanceToken() !== null,
+    canSync: () => isInstanceLinked(),
   });
 
   await routineEngine.start();
@@ -2172,10 +2175,12 @@ async function main() {
   // It also gates connecting email for a seat created before sign-in connected
   // it: only an enrolled instance can provision an inbox, and a warm-pool
   // instance with no seat has no owner to provision one for.
-  void logInstanceIdentityAtBoot(getBuildInfo().version)
+  void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
       if (identity.status !== "ok") return;
+      // Signer mode links the instance during this check, which is when the caller can use the signer.
+      if (signerMode()) void provisionNodeCaller();
       if (!(await getGuardianAuthState(db)).exists) return;
       await connectEmailWithoutClick("boot");
     })

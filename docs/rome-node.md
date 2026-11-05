@@ -365,6 +365,11 @@ When the server environment already supplies `ROME_INSTANCE_TOKEN`, run:
 rome-node auth --server --cloud https://romeos.cc
 ```
 
+When `ROME_SIGNER_SOCKET` is set, the same command writes `caller.json` with the
+Cloud origin and the signer's socket path, and no token. The caller asks the signer
+for a short-lived token on every Cloud call and Gateway connection, and extends the
+Gateway deadline every 60 seconds while it is connected.
+
 For manual configuration, exchange the Instance Token through Cloud and pass
 the returned `deviceToken` to the CLI through stdin:
 

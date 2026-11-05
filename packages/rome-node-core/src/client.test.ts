@@ -51,7 +51,7 @@ function fixture() {
   });
   const client = connectGateway({
     gatewayUrl: "wss://gateway.test/connect",
-    deviceToken: `romedev_${"a".repeat(43)}`,
+    getToken: () => `romedev_${"a".repeat(43)}`,
     createSocket: factory,
     onMessage: messages,
     onFrame: frames,
@@ -214,7 +214,7 @@ describe("device connection helper", () => {
     const factory = vi.fn(() => new Socket());
     const client = connectGateway({
       gatewayUrl,
-      deviceToken: `romedev_${"a".repeat(43)}`,
+      getToken: () => `romedev_${"a".repeat(43)}`,
       createSocket: factory,
       onMessage: vi.fn(),
     });
@@ -239,7 +239,7 @@ describe("device connection helper", () => {
       expect(() =>
         connectGateway({
           gatewayUrl,
-          deviceToken: `romedev_${"a".repeat(43)}`,
+          getToken: () => `romedev_${"a".repeat(43)}`,
           createSocket: vi.fn(),
           onMessage: vi.fn(),
         }),
@@ -261,7 +261,7 @@ describe("device connection helper", () => {
       .mockResolvedValueOnce("ws://127.0.0.1:8080/connect");
     const client = connectGateway({
       gatewayUrl: "wss://gateway.test/connect",
-      deviceToken: `romedev_${"a".repeat(43)}`,
+      getToken: () => `romedev_${"a".repeat(43)}`,
       createSocket: factory,
       onMessage: vi.fn(),
       beforeConnect,
@@ -279,6 +279,122 @@ describe("device connection helper", () => {
       "ws://127.0.0.1:8080/connect",
       `Bearer romedev_${"a".repeat(43)}`,
     );
+    client.stop();
+  });
+});
+
+describe("JWT connections", () => {
+  const jwt = (n: number) => `eyJ${n}.e30.sig`;
+  function jwtFixture(fetchStatus = 200) {
+    vi.useFakeTimers();
+    const sockets: Socket[] = [];
+    const factory = vi.fn((_url: string, _authorization: string) => {
+      const socket = new Socket();
+      sockets.push(socket);
+      return socket;
+    });
+    let issued = 0;
+    const getToken = vi.fn(() => jwt(++issued));
+    const reauth = vi.fn(async (_url: URL | string, _init?: RequestInit) =>
+      Response.json({}, { status: fetchStatus }),
+    );
+    const client = connectGateway({
+      gatewayUrl: "wss://gateway.test/connect",
+      getToken,
+      fetch: reauth as unknown as typeof fetch,
+      createSocket: factory,
+      onMessage: vi.fn(),
+      random: () => 0.5,
+    });
+    return { client, sockets, factory, getToken, reauth };
+  }
+
+  it("takes a fresh token for every connect and reconnect", async () => {
+    const f = jwtFixture();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.factory).toHaveBeenLastCalledWith("wss://gateway.test/connect", `Bearer ${jwt(1)}`);
+    f.sockets[0].open();
+    f.sockets[0].close(1006);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.factory).toHaveBeenLastCalledWith("wss://gateway.test/connect", `Bearer ${jwt(2)}`);
+    f.client.stop();
+  });
+
+  it("refreshes the deadline every 60 seconds with a fresh token while connected", async () => {
+    const f = jwtFixture();
+    await vi.advanceTimersByTimeAsync(0);
+    f.sockets[0].open();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(f.reauth).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.reauth).toHaveBeenCalledTimes(1);
+    const [url, init] = f.reauth.mock.calls[0];
+    expect(String(url)).toBe("https://gateway.test/reauth");
+    expect(init).toMatchObject({ method: "POST", headers: { Authorization: `Bearer ${jwt(2)}` } });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.reauth.mock.calls[1][1]).toMatchObject({
+      headers: { Authorization: `Bearer ${jwt(3)}` },
+    });
+    f.client.stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.reauth).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops refreshing once the connection closes", async () => {
+    const f = jwtFixture();
+    await vi.advanceTimersByTimeAsync(0);
+    f.sockets[0].open();
+    f.sockets[0].close(1006);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.reauth).not.toHaveBeenCalled();
+    f.client.stop();
+  });
+
+  it("reconnects when the Gateway reports no live connection", async () => {
+    const f = jwtFixture(404);
+    await vi.advanceTimersByTimeAsync(0);
+    f.sockets[0].open();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.sockets[0].readyState).toBe(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.factory).toHaveBeenCalledTimes(2);
+    f.client.stop();
+  });
+
+  it("leaves the connection to expire when the refresh is rejected", async () => {
+    const f = jwtFixture(401);
+    await vi.advanceTimersByTimeAsync(0);
+    f.sockets[0].open();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.sockets[0].readyState).toBe(1);
+    f.client.stop();
+  });
+
+  it("reconnects with a fresh token after close 4004", async () => {
+    const f = jwtFixture();
+    await vi.advanceTimersByTimeAsync(0);
+    f.sockets[0].open();
+    f.sockets[0].close(CLOSE.expired);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.factory).toHaveBeenCalledTimes(2);
+    expect(f.factory).toHaveBeenLastCalledWith("wss://gateway.test/connect", `Bearer ${jwt(2)}`);
+    f.client.stop();
+  });
+
+  it("does not refresh a device token connection", async () => {
+    vi.useFakeTimers();
+    const reauth = vi.fn();
+    const socket = new Socket();
+    const client = connectGateway({
+      gatewayUrl: "wss://gateway.test/connect",
+      getToken: () => `romedev_${"a".repeat(43)}`,
+      fetch: reauth as unknown as typeof fetch,
+      createSocket: () => socket,
+      onMessage: vi.fn(),
+    });
+    socket.open();
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(reauth).not.toHaveBeenCalled();
     client.stop();
   });
 });

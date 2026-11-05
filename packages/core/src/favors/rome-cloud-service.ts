@@ -1,6 +1,6 @@
 import type { FavorRequiredActionDefinition } from "@rome-os/app-runtime";
 import type { ResolvedApp } from "../apps/state.js";
-import { getInstanceToken } from "../lib/instance-identity.js";
+import { cloudBearer } from "../lib/instance-identity.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import type { RomeAppViewer } from "../lib/visitor-session.js";
 import type {
@@ -55,15 +55,15 @@ function requesterAppIdentity(app: ResolvedApp): Record<string, unknown> {
 export class RomeCloudFavorService implements FavorService {
   constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
 
-  private access(): { origin: string; token: string } {
-    const token = getInstanceToken();
+  private async access(): Promise<{ origin: string; token: string }> {
+    const token = await cloudBearer();
     const origin = getRomeCloudOrigin();
     if (!token || !origin) throw new FavorServiceUnavailableError();
     return { origin, token };
   }
 
   private async headers(options?: { json?: boolean }): Promise<Headers> {
-    const { token } = this.access();
+    const { token } = await this.access();
     const headers = new Headers({
       Authorization: `Bearer ${token}`,
       "Cache-Control": "no-store",
@@ -120,7 +120,7 @@ export class RomeCloudFavorService implements FavorService {
   }
 
   private async json<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const { origin } = this.access();
+    const { origin } = await this.access();
     const response = await this.fetchImpl(new URL(path, origin), {
       ...init,
       headers: await this.headers({

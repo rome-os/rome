@@ -104,7 +104,7 @@ export async function connectHost(options: HostOptions): Promise<void> {
     const abort = () => finish();
     const connection = connectGateway({
       gatewayUrl,
-      deviceToken: active.token,
+      getToken: () => active.token,
       createSocket: createNodeSocket,
       beforeConnect: async () => {
         try {

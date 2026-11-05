@@ -4,7 +4,8 @@ import { hostname } from "node:os";
 import { Hono } from "hono";
 import {
   clearInstanceToken,
-  getInstanceToken,
+  getIdentityIssue,
+  isInstanceLinked,
   persistInstanceToken,
   proveIdentity,
   type ProveIdentityResult,
@@ -74,7 +75,10 @@ export interface InstanceEnrollSeams {
 
 type EnrollStartGate = { ok: true } | { ok: false; status: 409 | 503; error: string };
 
-async function clearRejectedInstanceState(deps: ApiDeps, reason: "revoked" | "unknown") {
+async function clearRejectedInstanceState(
+  deps: ApiDeps,
+  reason: "revoked" | "unknown" | "key_conflict",
+) {
   await clearInstanceToken(deps.settingsRepo);
   await deps.settingsRepo.delete(RELAY_SETTING_KEY);
   try {
@@ -92,7 +96,7 @@ async function checkExistingEnrollment(
   deps: ApiDeps,
   seams: InstanceEnrollSeams,
 ): Promise<EnrollStartGate> {
-  if (!getInstanceToken()) return { ok: true };
+  if (!isInstanceLinked()) return { ok: true };
 
   let auth: ProveIdentityResult;
   try {
@@ -112,6 +116,7 @@ async function checkExistingEnrollment(
       return { ok: false, status: 409, error: "already_enrolled" };
     case "revoked":
     case "unknown":
+    case "key_conflict":
       await clearRejectedInstanceState(deps, auth.status);
       return { ok: true };
     case "no_token":
@@ -120,6 +125,10 @@ async function checkExistingEnrollment(
       return { ok: false, status: 503, error: "pantheon_origin_unconfigured" };
     case "unreachable":
       return { ok: false, status: 503, error: "identity_unreachable" };
+    case "clock_skew":
+    case "signer_unavailable":
+    case "upgrade_required":
+      return { ok: false, status: 503, error: auth.status };
   }
 }
 
@@ -254,7 +263,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
 
   // Lightweight gate signal for the web onboarding: is this instance enrolled?
   app.get("/instance/enroll/status", (c) => {
-    return c.json({ enrolled: getInstanceToken() !== null });
+    return c.json({ enrolled: isInstanceLinked(), issue: getIdentityIssue() });
   });
 
   return app;

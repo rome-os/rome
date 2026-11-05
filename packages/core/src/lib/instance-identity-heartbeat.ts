@@ -1,7 +1,8 @@
 import {
   clearInstanceToken,
-  getInstanceToken,
-  proveIdentity,
+  isInstanceLinked,
+  signerMode,
+  syncInstanceIdentity,
   type InstanceTokenStore,
   type ProveIdentityResult,
 } from "./instance-identity.js";
@@ -25,8 +26,8 @@ export interface InstanceIdentityHeartbeatDeps {
   store: InstanceTokenStore;
   /** Override the cadence (tests). Defaults to 15 minutes. */
   intervalMs?: number;
-  /** Inject proveIdentity (tests). Defaults to the real Rome Cloud call. */
-  prove?: typeof proveIdentity;
+  /** Inject the identity check (tests). Defaults to the real Rome Cloud call. */
+  prove?: () => Promise<ProveIdentityResult>;
 }
 
 // Run one heartbeat tick. Exported for tests; the interval just calls this.
@@ -34,11 +35,13 @@ export async function runInstanceIdentityHeartbeatTick(
   deps: Pick<InstanceIdentityHeartbeatDeps, "store" | "prove">,
 ): Promise<void> {
   // No credential to verify — nothing to do (a not-yet-enrolled instance).
-  if (!getInstanceToken()) return;
+  // Signer mode always checks: it also registers the key, and finds a signer
+  // that came back after being down.
+  if (!signerMode() && !isInstanceLinked()) return;
 
   let result: ProveIdentityResult;
   try {
-    result = await (deps.prove ?? proveIdentity)();
+    result = await (deps.prove ?? (() => syncInstanceIdentity(deps.store)))();
   } catch (err) {
     log.warn("instance identity heartbeat failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -46,7 +49,8 @@ export async function runInstanceIdentityHeartbeatTick(
     return;
   }
 
-  if (FATAL_STATES.has(result.status)) {
+  // Signer mode clears what Rome Cloud rejected inside the check itself.
+  if (!signerMode() && FATAL_STATES.has(result.status)) {
     await clearInstanceToken(deps.store);
     log.warn("instance token rejected by Rome Cloud; cleared local credential", {
       reason: result.status,

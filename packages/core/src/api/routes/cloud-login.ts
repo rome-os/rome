@@ -17,7 +17,7 @@ import {
 } from "../../lib/guardian-auth-state.js";
 import { applySetupDefaults, defaultGuardianName } from "../../lib/guardian-profile.js";
 import {
-  getInstanceToken,
+  isInstanceLinked,
   isValidInstanceToken,
   persistInstanceToken,
 } from "../../lib/instance-identity.js";
@@ -187,7 +187,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     const attempt = createPendingLogin("browser", redirectUri);
     setLoginStateCookie(c, attempt.state);
 
-    const scope = getInstanceToken() === null ? "openid instance:enroll" : "openid";
+    const scope = isInstanceLinked() ? "openid" : "openid instance:enroll";
 
     const authorizeUrl = new URL("/oauth2/authorize", origin);
     authorizeUrl.searchParams.set("response_type", "code");
@@ -211,7 +211,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     if (!(await deps.isCloudAuthEnabled())) {
       return c.json({ error: "cloud_auth_disabled" }, 404);
     }
-    if (!isValidInstanceToken(getInstanceToken())) {
+    if (!isInstanceLinked()) {
       return c.json({ error: "instance_not_enrolled" }, 409);
     }
     if (!getRomeCloudOrigin()) {
@@ -317,7 +317,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
 
     // Whether this is a vanilla (enroll-and-bind) or bound (sign-in) round trip
     // depends on local state and decides whether we expect an instance token back.
-    const vanilla = getInstanceToken() === null;
+    const vanilla = !isInstanceLinked();
 
     const state = c.req.query("state");
     const code = c.req.query("code");
