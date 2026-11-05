@@ -612,11 +612,12 @@ export function startConciergeFollowing(
     flush: (events) => outsideAction(() => triageBatch(events)),
   });
 
-  /** Hands the owed digest to the Concierge as one turn, or does nothing when none is owed. */
+  /** Hands the owed digest to the Concierge as one turn, an empty one included. */
   const deliverDigest = async (): Promise<{ items: number }> => {
     if (!(await service.isEnabled())) return { items: 0 };
+    // An empty digest still runs, with count="0", so the guardian hears that
+    // nothing new came in.
     const owed = await deps.items.owedToDigest();
-    if (owed.length === 0) return { items: 0 };
     const chatId = await service.findChatId();
     const at = guardianNow(now(), await resolveGuardianTimezone(deps.settings));
     // The digest goes to the main chat and groups every chat's items under it.

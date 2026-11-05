@@ -77,7 +77,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 - **Triage reads the normalized event, the follow's options rendered as words from the catalog, its preference in the guardian's words, and what was told recently.** It has no tools and answers important, digest or ignore for each event. Its prompt names no service. When it is unsure, it answers digest.
 - **Triage never decides delivery.** An important item reaches the Concierge promptly, in the [Concierge chat](concierge.md) its follow reports to, and the Concierge decides whether to tell the guardian now or stay silent. The digest goes to the main chat.
 - **Every message to the guardian is a Concierge turn.** No part of following posts into the chat by itself.
-- **Every important and digest item goes into the next digest, whether or not the Concierge told it.** Important items lead the digest. The Concierge tells what is new: an item it already told is not news.
+- **A digest runs at every digest time, an empty one included.** Every important and digest item goes into the next digest, whether or not the Concierge told it. Important items lead the digest. The Concierge tells what is new: an item it already told is not news.
 - **A failure loses no event silently.** A triage run that fails sends its events to the digest. A batch that fails is tried again with later batches before it is dropped with a warning. An important turn that fails leaves its items owed and is tried again.
 
 ### Limits apply to Concierge turns, not to events

@@ -991,11 +991,14 @@ describe("the follow pipeline", () => {
     s.stop();
   });
 
-  it("hands the owed digest to the Concierge at a digest time, and nothing when none is owed", async () => {
+  it("hands the owed digest to the Concierge at a digest time, and an empty one when none is owed", async () => {
     const s = setup({ triage: { e1: "digest" } });
     const digest = s.action("core:concierge_digest");
     expect(await digest.execute({}, {} as never)).toEqual({ status: "ok", data: { items: 0 } });
-    expect(s.turns).toEqual([]);
+    // Nothing new still makes one digest turn, so the guardian hears so.
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0]).toContain('delivery="digest" count="0"');
+    s.turns.length = 0;
     await s.items.add(
       [
         {
@@ -1012,7 +1015,7 @@ describe("the follow pipeline", () => {
       new Date(),
     );
     expect(await digest.execute({}, {} as never)).toEqual({ status: "ok", data: { items: 1 } });
-    expect(s.turns[0]).toContain('delivery="digest"');
+    expect(s.turns[0]).toContain('delivery="digest" count="1"');
     expect(s.turns[0]).toContain("Ana cc'd you on the offsite plan");
     expect(await s.items.owedToDigest()).toEqual([]);
     s.stop();
