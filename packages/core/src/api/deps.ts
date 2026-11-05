@@ -41,8 +41,6 @@ import type { AppKeysRepository } from "../db/repositories/app-keys.js";
 import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import type { SessionManager } from "../agent-sessions/index.js";
-import type { SessionsRepository } from "../db/repositories/sessions.js";
 import type { AgentSessionManager } from "../agent-sessions/index.js";
 import type { ActiveSubagentRegistry } from "../agent-sessions/index.js";
 import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
@@ -186,8 +184,6 @@ export interface ApiDeps {
   appConnections?: AppConnectionsContextFactory;
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
-  sessionManager: SessionManager;
-  sessionsRepo: SessionsRepository;
   agentSessionManager: AgentSessionManager;
   /** Lightweight, tool-free small-model request used to name a new chat. */
   conversationTitleGenerator: ConversationTitleGenerator;

@@ -1,4 +1,5 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
+import { callerFromKey } from "./session-caller.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -9,7 +10,8 @@ import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "../agent-sessions/agent-turn-stream-registry.js";
 import type {
   AgentSession,
-  AgentSessionInit,
+  SessionOpenOptions,
+  SessionSurface,
   AgentSessionManager,
   AgentTurnHandle,
 } from "../agent-sessions/agent-session.js";
@@ -52,14 +54,15 @@ describe("AgentSessionBridge turn routing", () => {
       yield { type: "turn_end", turnId: "turn-1", status: "completed", durationMs: 1 };
     })();
     const session = {
-      key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+      key: { agentName: "main", caller: callerFromKey("discord:channel-1") },
+      caller: callerFromKey("discord:channel-1"),
       sessionId: "session-1",
       conversation: { origin: "named", id: "channel:discord:channel-1" },
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => session,
-      peek: () => session,
+      open: async () => session,
+      live: () => session,
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -108,83 +111,6 @@ describe("AgentSessionBridge turn routing", () => {
   });
 });
 
-describe("AgentSessionBridge conversation", () => {
-  it("records a turn with no caller conversation in the one the session recorded", async () => {
-    const testDb = createTestDb();
-    try {
-      const repo = new ChatsWebChatRepository(testDb.db);
-      await repo.ensureRomeSession({
-        id: "child-chat",
-        type: "subagent",
-        name: "researcher: Parent",
-        agentName: "researcher",
-      });
-      type TurnRef = { romeSessionId?: string; romeSessionType?: string };
-      const sent: TurnRef[] = [];
-      const session = {
-        key: { agentName: "main", channelThreadKey: "discord:channel-1" },
-        sessionId: "session-1",
-        conversation: {
-          origin: "recorded" as const,
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        },
-        sendTurn: (_input: unknown, options: TurnRef) => {
-          sent.push({
-            romeSessionId: options.romeSessionId,
-            romeSessionType: options.romeSessionType,
-          });
-          return {
-            turnId: "turn-1",
-            events: (async function* (): AsyncIterable<StreamAgentEvent> {
-              yield {
-                type: "turn_start",
-                turnId: "turn-1",
-                sessionId: "session-1",
-                userPrompt: "follow up",
-                agent: "main",
-              };
-              yield { type: "result", content: "Done", agent: "main" };
-            })(),
-            interrupt: async () => undefined,
-          } as unknown as AgentTurnHandle;
-        },
-      } as unknown as AgentSession;
-      const manager = {
-        acquire: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
-      const child = new FakeChild();
-      new AgentSessionBridge(manager, repo).attach(
-        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
-        child as unknown as ChildProcess,
-      );
-
-      child.emit("message", {
-        type: "rpc_request",
-        reqId: "request-1",
-        method: "agent.session.runTurn",
-        params: {
-          key: session.key,
-          input: { prompt: "follow up" },
-          init: {},
-        },
-      });
-
-      await rs.waitFor(() =>
-        expect(sent).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]),
-      );
-      await rs.waitFor(async () => {
-        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
-        expect(roles).toContain("user");
-      });
-    } finally {
-      testDb.close();
-    }
-  });
-});
-
 describe("AgentSessionBridge working dir", () => {
   const summonCall = { actionName: "system:summon", agentName: "main" };
   const tempDirs: string[] = [];
@@ -197,9 +123,10 @@ describe("AgentSessionBridge working dir", () => {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
-    const acquired: AgentSessionInit[] = [];
+    const acquired: SessionOpenOptions[] = [];
     const session = {
-      key: { agentName: "coder", channelThreadKey: "coder:1" },
+      key: { agentName: "coder", caller: callerFromKey("coder:1") },
+      caller: callerFromKey("coder:1"),
       sessionId: "summoned-1",
       sendTurn: () =>
         ({
@@ -209,15 +136,20 @@ describe("AgentSessionBridge working dir", () => {
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async (_key: unknown, init: AgentSessionInit) => {
+      open: async (
+        _agent: string,
+        _caller: unknown,
+        _surface: unknown,
+        init: SessionOpenOptions,
+      ) => {
         acquired.push(init);
         return session;
       },
-      acquireBySessionId: async (_id: string, _agent: string, init: AgentSessionInit) => {
+      session: async (_id: string, _agent: string, _surface: unknown, init: SessionOpenOptions) => {
         acquired.push(init);
         return session;
       },
-      peek: () => undefined,
+      live: () => undefined,
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
@@ -358,7 +290,8 @@ describe("AgentSessionBridge worker disconnect", () => {
   ) {
     const queue = [...handles];
     const session = {
-      key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+      key: { agentName: "main", caller: callerFromKey("discord:channel-1") },
+      caller: callerFromKey("discord:channel-1"),
       sessionId: "session-1",
       conversation: options.romeSessionId
         ? { origin: "named", id: options.romeSessionId }
@@ -366,11 +299,11 @@ describe("AgentSessionBridge worker disconnect", () => {
       sendTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => {
+      open: async () => {
         await options.beforeAcquire?.();
         return session;
       },
-      peek: () => session,
+      live: () => session,
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -515,7 +448,12 @@ describe("AgentSessionBridge worker disconnect", () => {
       romeSessionId: "channel:discord:channel-1",
     });
 
-    const result = await response(requestTurn({ platformMessageId: "message-1" }));
+    const result = await response(
+      requestTurn({
+        platformMessageId: "message-1",
+        init: { threadContext: { channel: "discord", threadId: "channel-1" } },
+      }),
+    );
 
     expect(result.error).toContain("db down");
     await rs.waitFor(() => expect(turn.interrupt).toHaveBeenCalledWith("agent turn setup failed"));
@@ -545,12 +483,26 @@ describe("AgentSessionBridge answer recording", () => {
       runLineDeps?: RunLineDeps;
     } = {},
   ) {
+    const caller = callerFromKey("telegram:chat-1");
     const session = {
-      key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
+      key: { agentName: "main", caller },
+      caller,
       sessionId: "session-1",
       sendTurn: () => ({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
-    const manager = { acquire: async () => session } as unknown as AgentSessionManager;
+    let lent: SessionSurface | undefined;
+    const manager = {
+      open: async (_agent: string, _caller: string, surface: SessionSurface) => {
+        lent = surface;
+        return session;
+      },
+    } as unknown as AgentSessionManager;
+    // Whether the session's log leaves the answer to the caller, as the
+    // session asks once the answer arrives.
+    const keepsAnswer = () => {
+      const answer = lent?.keeps?.answer;
+      return typeof answer === "function" ? answer() : !!answer;
+    };
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(
@@ -567,7 +519,6 @@ describe("AgentSessionBridge answer recording", () => {
         platformMessageId: "msg-1",
         ...(streamReply === undefined ? {} : { streamReply }),
         init: {
-          romeSessionId: "conversation-1",
           threadContext: {
             channel: "telegram",
             connectionId: "c",
@@ -579,7 +530,7 @@ describe("AgentSessionBridge answer recording", () => {
     });
     const turnEnd = () =>
       child.sent.find((message) => JSON.stringify(message).includes('"type":"turn_end"'));
-    return { turnEnd };
+    return { turnEnd, keepsAnswer };
   }
 
   const turnStart: StreamAgentEvent = {
@@ -620,9 +571,9 @@ describe("AgentSessionBridge answer recording", () => {
 
   for (const stands of [true, false]) {
     it(`records the answer ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
-      const { repo, answers, close } = await recorded();
+      const { repo, close } = await recorded();
       try {
-        const { turnEnd } = run(turnEvents(...answer), {
+        const { turnEnd, keepsAnswer } = run(turnEvents(...answer), {
           repo,
           runLineDeps: {
             lines: { recorded: async () => null, stands: () => stands },
@@ -631,9 +582,8 @@ describe("AgentSessionBridge answer recording", () => {
         });
 
         await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-        expect(await answers()).toEqual(
-          stands ? [] : [JSON.stringify([{ type: "text", content: "hi there" }])],
-        );
+        // A caller that stands in the chat records its own send.
+        expect(keepsAnswer()).toBe(stands);
       } finally {
         close();
       }

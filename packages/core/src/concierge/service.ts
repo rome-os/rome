@@ -7,11 +7,10 @@ import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
 import type { AIToolStateValue } from "../core/ai-tool-state.js";
-import { webchatSessionKey } from "../core/agent-session-key.js";
+import { callerKey, type SessionCaller } from "../core/session-caller.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SessionManager } from "../agent-sessions/index.js";
 import {
   resolveWebchatLargeModelSelection,
   WEBCHAT_LARGE_MODEL_SELECTIONS,
@@ -83,9 +82,8 @@ export interface ConciergeDeps {
   tasks: ConciergeTasks;
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
-  sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
-  agentSessionManager: Pick<AgentSessionManager, "peek">;
+  agentSessionManager: Pick<AgentSessionManager, "live" | "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
@@ -182,19 +180,20 @@ export class ConciergeService {
     if (chatId !== CONCIERGE_CHAT_ID) return null;
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (!chat) return null;
-    const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
+    const caller: SessionCaller = { kind: "chat", chatId };
     const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection)?.providerId;
     const pinned =
       selected ??
-      (await this.deps.sessionManager.findReusableSession(key.channelThreadKey, key.agentName))
-        ?.provider;
+      (await this.deps.agentSessionManager.find(CONCIERGE_AGENT_ID, callerKey(caller)))?.provider;
     const state = this.deps.aiToolState.get();
     const from = pinned ?? soleExhaustedProvider(state);
     if (from !== "openai" && from !== "anthropic") return null;
     const target = quotaSwitchTarget(state, from);
     if (!target) return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
-    this.deps.agentSessionManager.peek(key)?.selectModel(target.selectionId);
+    this.deps.agentSessionManager
+      .live(CONCIERGE_AGENT_ID, callerKey(caller))
+      ?.selectModel(target.selectionId);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {
         type: "quota_switch",
@@ -208,11 +207,11 @@ export class ConciergeService {
 
   /** The runtime session id of the Concierge chat, or null before its first turn. */
   async runtimeSessionId(chatId: string): Promise<string | null> {
-    const row = await this.deps.sessionManager.findReusableSession(
-      webchatSessionKey(chatId),
+    const stored = await this.deps.agentSessionManager.find(
       CONCIERGE_AGENT_ID,
+      callerKey({ kind: "chat", chatId }),
     );
-    return row?.id ?? null;
+    return stored?.sessionId ?? null;
   }
 
   /**

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { callerKey } from "../../core/session-caller.js";
 import type {
   ProjectDashboardChat,
   ProjectDashboardChatPage,
@@ -26,7 +27,6 @@ import {
   resolveNearestGitTarget,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
-import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { parseTimeZone } from "../../lib/timezone.js";
@@ -38,7 +38,7 @@ const PROJECT_DASHBOARD_MAX_CHAT_LIMIT = 100;
 const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 
 type ProjectsRouteDeps = {
-  agentSessionManager?: Pick<ApiDeps["agentSessionManager"], "peek">;
+  agentSessionManager?: Pick<ApiDeps["agentSessionManager"], "live">;
   // Optional only because `ApiDeps.settingsRepo` is still optional and the
   // production callsite passes the full ApiDeps; when absent, dashboard
   // dates fall back to UTC.
@@ -158,10 +158,10 @@ async function closeLiveProjectSessions(
 
   await Promise.all(
     sessions.map(async (session) => {
-      const liveSession = agentSessionManager.peek({
-        agentName: session.agentName ?? "main",
-        channelThreadKey: webchatSessionKey(session.id),
-      });
+      const liveSession = agentSessionManager.live(
+        session.agentName ?? "main",
+        callerKey({ kind: "chat", chatId: session.id }),
+      );
       if (liveSession) {
         await liveSession.close("user").catch(() => undefined);
       }

@@ -110,13 +110,17 @@ describe("RpcAgentRunner turn stream routing", () => {
     ]);
   });
 
-  it("attaches main's authoritative Rome session metadata to session_init", async () => {
+  it("passes on the session_init the session names its conversation in", async () => {
     const runner = setup(
       new Map([
         [
           "p1",
           [
-            { type: "session_init", sessionId: "runtime-session" } as StreamAgentEvent,
+            {
+              type: "session_init",
+              sessionId: "runtime-session",
+              romeSession: { _romeSessionId: "action:test:reviewer", _type: "action" },
+            } as StreamAgentEvent,
             { type: "result", content: "done" } as StreamAgentEvent,
           ],
         ],
@@ -147,7 +151,7 @@ describe("RpcAgentRunner turn stream routing", () => {
 
     expect(requests[0]).toMatchObject({
       sessionId: "session-123",
-      key: { agentName: "a", channelThreadKey: "telegram:t-1" },
+      key: { agentName: "a", caller: { kind: "place", connection: "telegram", place: "t-1" } },
     });
   });
 

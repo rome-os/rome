@@ -10,7 +10,12 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/help
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import {
+  createTestSessionManager,
+  conversationOf,
+  type TestSessionManager,
+  withKeys,
+} from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
@@ -22,10 +27,12 @@ import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "worker";
 
-describe("AgentSessionManager working dirs", () => {
+describe("TestSessionManager working dirs", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: TestSessionManager;
+  /** A manager of children, as a session opens for its subagents. */
+  let children: TestSessionManager;
   let sessionsRepo: SessionsRepository;
   let webchatRepo: WebChatRepository;
   const previousProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -71,30 +78,30 @@ describe("AgentSessionManager working dirs", () => {
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Working dir test prompt");
-    manager = createAgentSessionManager(
-      {
-        agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
-        sessionsRepo,
-        webchatRepo,
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
-        modelResolver: createModelResolver({
-          providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
-        }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
-      },
-      { keepAliveAcrossTurns: true },
-    );
+    const deps = {
+      agentLoader: loader,
+      sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
+      sessionsRepo,
+      webchatRepo,
+      promptBuilder,
+      actionRegistry,
+      actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+      modelResolver: createModelResolver({
+        providers: [provider],
+        aiToolState: { get: () => state, refresh: async () => state },
+      }),
+      capabilityDiscovery: new CapabilityDiscovery(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
+      lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      channelSurface: testChannelSurface,
+    };
+    manager = createTestSessionManager(deps, { keepAliveAcrossTurns: true });
+    children = createTestSessionManager(deps, { keepAliveAcrossTurns: true, isSubagent: true });
   });
 
   afterEach(async () => {
     await manager.shutdown();
+    await children.shutdown();
     testDb.close();
     await rm(directory, { recursive: true, force: true });
     if (previousProjectsRoot === undefined) delete process.env.ROME_PROJECTS_ROOT;
@@ -112,8 +119,8 @@ describe("AgentSessionManager working dirs", () => {
       { agentName: AGENT, channelThreadKey: "webchat:working-dir" },
       { workingDir: parentDir },
     );
-    const childManager = (parent as unknown as { childManager: AgentSessionManager }).childManager;
-    const child = await childManager.acquire(
+    const childManager = (parent as unknown as { childManager: TestSessionManager }).childManager;
+    const child = await withKeys(childManager).acquire(
       { agentName: AGENT, channelThreadKey: "webchat:working-dir:subagent:1" },
       { workingDir: childDir },
     );
@@ -194,7 +201,7 @@ describe("AgentSessionManager working dirs", () => {
     const projectDir = join(directory, "moved-away");
     await mkdir(projectDir);
     await webchatRepo.createSession("conv-1", "Conversation");
-    const key = { agentName: AGENT, channelThreadKey: "webchat:conv-1" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:conv-1" };
     const original = await manager.acquire(key, {
       workingDir: projectDir,
       romeSessionId: "conv-1",
@@ -207,45 +214,37 @@ describe("AgentSessionManager working dirs", () => {
 
     expect(replacement.sessionId).not.toBe(original.sessionId);
     expect((await sessionsRepo.findById(replacement.sessionId))?.chatId).toBe("conv-1");
-    expect(replacement.conversation).toMatchObject({ origin: "recorded", id: "conv-1" });
+    expect(conversationOf(replacement)).toMatchObject({ origin: "recorded", id: "conv-1" });
   });
 
   it("runs a reuse or resume that names no conversation in the one the row recorded", async () => {
     await webchatRepo.createSession("stored", "Stored");
-    const key = { agentName: AGENT, channelThreadKey: "webchat:stored" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:stored" };
     const original = await manager.acquire(key, { romeSessionId: "stored" });
     const sessionId = original.sessionId;
     await original.close("idle");
 
     const byKey = await manager.acquire(key);
     expect(byKey.sessionId).toBe(sessionId);
-    expect(byKey.conversation).toMatchObject({ origin: "recorded", id: "stored" });
+    expect(conversationOf(byKey)).toMatchObject({ origin: "recorded", id: "stored" });
     await byKey.close("idle");
 
     const byId = await manager.acquireBySessionId(sessionId, AGENT);
-    expect(byId.conversation).toMatchObject({ origin: "recorded", id: "stored" });
+    expect(conversationOf(byId)).toMatchObject({ origin: "recorded", id: "stored" });
   });
 
-  it("shows a conversation recorded after open on the cached session", async () => {
-    const session = await manager.acquire({
+  it("records a fresh child under its own session id, as a subagent", async () => {
+    const session = await children.acquire({
       agentName: AGENT,
       channelThreadKey: "webchat:late:subagent:1",
     });
-    expect(session.conversation).toBeUndefined();
-    await webchatRepo.ensureRomeSession({
-      id: session.sessionId,
-      type: "subagent",
-      name: "worker: Parent",
-      agentName: AGENT,
-    });
 
-    await manager.recordConversation!(session.sessionId, session.sessionId);
-
-    expect(session.conversation).toMatchObject({
+    expect(conversationOf(session)).toMatchObject({
       origin: "recorded",
       id: session.sessionId,
       type: "subagent",
     });
+    expect((await sessionsRepo.findById(session.sessionId))?.chatId).toBe(session.sessionId);
   });
 
   it("looks the recorded conversation up at open, and skips one since deleted", async () => {
@@ -263,16 +262,16 @@ describe("AgentSessionManager working dirs", () => {
     const reopened = await manager.acquire(kept);
     const orphaned = await manager.acquire(gone);
 
-    expect(reopened.conversation).toMatchObject({
+    expect(conversationOf(reopened)).toMatchObject({
       origin: "recorded",
       id: "channel:telegram:kept",
       type: "channel",
     });
-    expect(orphaned.conversation).toBeUndefined();
+    expect(conversationOf(orphaned)).toBeUndefined();
   });
 
   it("records the conversation on a reused row that had none", async () => {
-    const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:legacy" };
     const original = await manager.acquire(key);
     await original.close("idle");
     expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBeNull();
@@ -284,38 +283,25 @@ describe("AgentSessionManager working dirs", () => {
   });
 
   it("keeps a reused row's conversation when the caller names another", async () => {
-    const key = { agentName: AGENT, channelThreadKey: "webchat:kept" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:kept-row" };
     const original = await manager.acquire(key, { romeSessionId: "kept" });
     await original.close("idle");
 
     const reused = await manager.acquire(key, { romeSessionId: "other" });
 
     expect(reused.sessionId).toBe(original.sessionId);
-    expect(reused.conversation).toEqual({ origin: "named", id: "other" });
+    expect(conversationOf(reused)).toEqual({ origin: "named", id: "other" });
     expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("kept");
   });
 
-  it("records a conversation learned after acquire, without overwriting it", async () => {
-    const child = await manager.acquire({
-      agentName: AGENT,
-      channelThreadKey: "main:subagent:1",
-    });
-    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBeNull();
-
-    await manager.recordConversation(child.sessionId, child.sessionId);
-    await manager.recordConversation(child.sessionId, "other");
-
-    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBe(child.sessionId);
-  });
-
   it("fills a row with no conversation when a resume names one", async () => {
-    const original = await manager.acquire({
+    const original = await children.acquire({
       agentName: AGENT,
       channelThreadKey: "main:subagent:2",
     });
     await original.close("idle");
 
-    await manager.acquireBySessionId!(original.sessionId, AGENT, {
+    await children.acquireBySessionId!(original.sessionId, AGENT, {
       romeSessionId: original.sessionId,
     });
 

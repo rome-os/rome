@@ -15,8 +15,12 @@ import type {
   PersonRecord,
   PolicyEngine,
   SentinelLogRepository,
+  SessionCaller,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
+
+/** A place on a connection, as the caller of the sessions that answer in it. */
+type PlaceCaller = Extract<SessionCaller, { kind: "place" }>;
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
@@ -354,7 +358,7 @@ async function resolveAgent<F extends string | null>(
 async function handleTrustedMessage(
   deps: MessageHandlerRuntimeDeps,
   args: Record<string, unknown>,
-  channelThreadKey: string,
+  place: PlaceCaller,
   contextSuffix: string,
   chatId: string,
   targetAgent: string,
@@ -380,8 +384,8 @@ async function handleTrustedMessage(
     {
       agentName: targetAgent,
       prompt: text,
-      channelThreadKey,
-      romeSessionId: chatId,
+      // The place on the connection, recording its turns in the inbox chat.
+      caller: { ...place, chatId },
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
       threadContext: {
@@ -502,7 +506,7 @@ async function handleTrustedMessage(
 async function handleUntrustedMessage(
   deps: MessageHandlerRuntimeDeps,
   args: Record<string, unknown>,
-  channelThreadKey: string,
+  place: PlaceCaller,
   contextSuffix: string,
   chatId: string,
   targetAgent: string,
@@ -521,7 +525,8 @@ async function handleUntrustedMessage(
     {
       agentName: "sentinel",
       prompt: `Triage this message from ${displayName} (${bondLevel}):\n\n${text}`,
-      channelThreadKey: `sentinel:${channelThreadKey}`,
+      // The sentinel follows the place without answering in it.
+      caller: { ...place, watcher: true },
       contextSuffix,
       workingDir,
     },
@@ -539,7 +544,7 @@ async function handleUntrustedMessage(
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
-      channelThreadKey,
+      place,
       contextSuffix,
       chatId,
       targetAgent,
@@ -579,7 +584,7 @@ async function handleUntrustedMessage(
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
-      channelThreadKey,
+      place,
       contextSuffix,
       chatId,
       targetAgent,
@@ -754,7 +759,7 @@ export function createMessageHandlerAction(
           return { status: "ok", data: { action: "ignored_by_reply_settings", bondLevel } };
         }
 
-        const channelThreadKey = `${channel}:${threadId}`;
+        const place: PlaceCaller = { kind: "place", connection: channel, place: threadId };
         const contextSuffix = buildMessageContext({
           channel,
           threadId,
@@ -808,7 +813,7 @@ export function createMessageHandlerAction(
           return handleTrustedMessage(
             deps,
             enrichedArgs,
-            channelThreadKey,
+            place,
             contextSuffix,
             conversation.id,
             targetAgent,
@@ -818,7 +823,7 @@ export function createMessageHandlerAction(
         return handleUntrustedMessage(
           deps,
           enrichedArgs,
-          channelThreadKey,
+          place,
           contextSuffix,
           conversation.id,
           targetAgent,

@@ -6,7 +6,7 @@
 // event gets a decision, so an event the run missed lands in the digest
 // rather than nowhere.
 
-import { textMessageContent, transcriptMessageId } from "../agent-sessions/index.js";
+import { textMessageContent, transcriptMessageId } from "../chats/storage/transcript-rows.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { AddressedTo } from "./event-shape.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";

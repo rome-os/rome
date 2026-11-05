@@ -9,7 +9,8 @@ import type {
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
 } from "../../db/repositories/webchat.js";
-import type { AgentEvent, MessagePart } from "../../types.js";
+import type { AgentEvent } from "../../types.js";
+import { textMessageContent, transcriptMessageId } from "../../chats/storage/transcript-rows.js";
 import type { ThreadContext } from "../../core/types.js";
 import { toTraceEvent, type TraceableEvent } from "../../api/helpers.js";
 import type { Logger } from "../../logger.js";
@@ -41,7 +42,7 @@ export interface AgentTraceRecorderInput {
   persistUserTranscript?: boolean;
   /** A reply the host streams records its own assistant row, as the text it
    *  showed, so the turn's answer is not recorded twice. */
-  persistAssistantTranscript?: boolean;
+  persistAssistantTranscript?: boolean | (() => boolean);
   /**
    * Explicit trigger metadata stamped on the trace message row. When absent,
    * falls back to the ambient action context.
@@ -277,7 +278,8 @@ export class AgentTraceRecorder {
       }
     }
 
-    if (this.input.persistAssistantTranscript ?? true) {
+    const persistAnswer = this.input.persistAssistantTranscript;
+    if (typeof persistAnswer === "function" ? persistAnswer() : (persistAnswer ?? true)) {
       for (const msg of messages) {
         if (msg.type !== "result") continue;
         if (!msg.content.trim()) continue;
@@ -304,23 +306,6 @@ export class AgentTraceRecorder {
       }
     }
   }
-}
-
-export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean {
-  return threadContext?.channel !== "webchat";
-}
-
-export function textMessageContent(content: string): string {
-  const parts: MessagePart[] = [{ type: "text", content }];
-  return JSON.stringify(parts);
-}
-
-export function transcriptMessageId(
-  sessionId: string,
-  turnId: string,
-  role: RomeAgentTranscriptMessageInput["role"],
-): string {
-  return `transcript-message:${sessionId}:${turnId}:${role}`;
 }
 
 export async function recordAgentTraceBestEffort(

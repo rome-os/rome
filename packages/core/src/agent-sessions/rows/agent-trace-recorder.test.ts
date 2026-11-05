@@ -12,6 +12,7 @@ import {
   recordAgentTraceBestEffort,
   resolveRomeSessionId,
   resolveRomeSessionType,
+  resolveTurnConversation,
 } from "./agent-trace-recorder.js";
 
 describe("resolveRomeSessionId", () => {
@@ -52,6 +53,97 @@ describe("resolveRomeSessionId", () => {
         actionContext: { executionId: "exec-1" },
       }),
     ).toBe("action:exec-1:researcher");
+  });
+});
+
+// Where a session records a turn when the caller that resumed it names no
+// conversation, so only the session's own record can say.
+describe("resolveTurnConversation", () => {
+  const recorded = (id: string, type: "subagent" | "fork" | "channel" | "webchat") => ({
+    origin: "recorded" as const,
+    id,
+    name: id,
+    type,
+  });
+  const base = { agentName: "main", agentSessionId: "agent-session", channelThreadKey: "x" };
+
+  it("leaves a recorded channel conversation to the inbox", () => {
+    const turn = resolveTurnConversation({
+      ...base,
+      sessionConversation: recorded("channel:telegram:t1", "channel"),
+    });
+    expect(turn.romeSessionId).toMatch(/^action:/);
+    expect(turn).toMatchObject({ romeSessionType: "action", recorderOwned: false });
+  });
+
+  it("leaves a recorded webchat conversation to the webchat route", () => {
+    const turn = resolveTurnConversation({
+      ...base,
+      sessionConversation: recorded("user-chat", "webchat"),
+    });
+    expect(turn.romeSessionId).toMatch(/^action:/);
+  });
+
+  it("records into a recorded subagent conversation it alone writes", () => {
+    expect(
+      resolveTurnConversation({ ...base, sessionConversation: recorded("child-chat", "subagent") }),
+    ).toEqual({
+      romeSessionId: "child-chat",
+      romeSessionType: "subagent",
+      existing: true,
+      promptPersisted: false,
+      recorderOwned: true,
+    });
+  });
+
+  it("leaves a turn under a webchat thread to that chat", () => {
+    const turn = resolveTurnConversation({
+      ...base,
+      sessionConversation: recorded("child-chat", "subagent"),
+      threadContext: {
+        channel: "webchat",
+        threadId: "parent-chat",
+        threadType: "private",
+        romeSessionId: "parent-chat",
+      },
+    });
+    expect(turn).toMatchObject({ romeSessionId: "parent-chat", romeSessionType: "webchat" });
+  });
+
+  it("leaves a turn under a messaging thread to that thread", () => {
+    const turn = resolveTurnConversation({
+      ...base,
+      sessionConversation: recorded("child-chat", "subagent"),
+      threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
+    });
+    expect(turn).toMatchObject({
+      romeSessionId: "channel:telegram:t1",
+      romeSessionType: "channel",
+    });
+  });
+
+  it("leaves a saved side chat to the webchat route on a backend turn", () => {
+    const turn = resolveTurnConversation({
+      ...base,
+      sessionConversation: recorded("side-chat", "fork"),
+      threadContext: {
+        channel: "webchat",
+        threadId: "side-chat",
+        threadType: "private",
+        romeSessionId: "side-chat",
+      },
+    });
+    expect(turn).toMatchObject({
+      romeSessionId: "side-chat",
+      romeSessionType: "webchat",
+      recorderOwned: false,
+    });
+  });
+
+  it("derives a new conversation when the recorded one is gone", () => {
+    const turn = resolveTurnConversation(base);
+    expect(turn.romeSessionId).toMatch(/^action:/);
+    expect(turn).toMatchObject({ romeSessionType: "action", existing: false });
   });
 });
 

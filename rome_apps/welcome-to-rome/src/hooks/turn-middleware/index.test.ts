@@ -1,6 +1,7 @@
 import type {
   AgentMessage,
   AppLogger,
+  SessionCaller,
   TurnMiddlewareContext,
   TurnMiddlewareHookDeps,
 } from "@rome-os/app-runtime";
@@ -41,12 +42,12 @@ const logger: AppLogger = {
 function makeContext(
   agentName: string,
   emitted: AgentMessage[],
-  channelThreadKey = "webchat:chat-1",
+  caller: SessionCaller = { kind: "chat", chatId: "chat-1" },
 ): TurnMiddlewareContext {
   return {
     input: { prompt: "hello" },
     // The AgentSession id and the chat id differ, as they do in core.
-    session: { id: "agent-session-1", agentName, channelThreadKey },
+    session: { id: "agent-session-1", agentName, caller, channelThreadKey: "" },
     emit: (event) => emitted.push(event),
     meta: {},
   };
@@ -86,7 +87,7 @@ describe("welcome-to-rome turn middleware routing", () => {
     expect(emitted).toEqual([]);
   });
 
-  async function runWelcomeTurn(channelThreadKey: string): Promise<void> {
+  async function runWelcomeTurn(caller: SessionCaller): Promise<void> {
     rs.useFakeTimers();
     const appContext = {
       db: {},
@@ -94,7 +95,7 @@ describe("welcome-to-rome turn middleware routing", () => {
     } as unknown as RomeAppContext;
     const deps: TurnMiddlewareHookDeps = { appId: "welcome-to-rome", logger, appContext };
     const promise = createHook(deps).handle(
-      makeContext("welcome-to-rome:welcome-to-rome", [], channelThreadKey),
+      makeContext("welcome-to-rome:welcome-to-rome", [], caller),
       rs.fn(async () => {}),
     );
     await rs.runAllTimersAsync();
@@ -104,19 +105,25 @@ describe("welcome-to-rome turn middleware routing", () => {
   it("records the chat the welcome run is taking turns in, not the agent session", async () => {
     mocks.row = { node: "done", sessionId: "older-chat" };
 
-    await runWelcomeTurn("webchat:chat-1");
+    await runWelcomeTurn({ kind: "chat", chatId: "chat-1" });
 
     expect(mocks.patch).toHaveBeenCalledWith({ sessionId: "chat-1" });
   });
 
   it.each([
-    ["outside webchat", "telegram:123"],
-    ["in a subagent of a chat", "webchat:chat-1:subagent:sub-1"],
-    ["in a fork of a chat", "webchat:chat-1#fork:fork-1"],
-  ])("records no chat for a turn %s", async (_label, channelThreadKey) => {
+    ["outside a dashboard chat", { kind: "place", connection: "telegram", place: "123" }],
+    [
+      "in a subagent of a chat",
+      { kind: "parent-turn", parent: { kind: "chat", chatId: "chat-1" }, childId: "sub-1" },
+    ],
+    [
+      "in a fork of a chat",
+      { kind: "fork-point", source: { kind: "chat", chatId: "chat-1" }, forkSessionId: "fork-1" },
+    ],
+  ] as Array<[string, SessionCaller]>)("records no chat for a turn %s", async (_label, caller) => {
     mocks.row = { node: "done", sessionId: "older-chat" };
 
-    await runWelcomeTurn(channelThreadKey);
+    await runWelcomeTurn(caller);
 
     expect(mocks.patch).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: expect.anything() }),

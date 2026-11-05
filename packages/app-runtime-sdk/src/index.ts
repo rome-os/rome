@@ -509,10 +509,35 @@ export interface LifecycleThreadContext {
   projectPath?: string;
 }
 
+/**
+ * Whatever hands a session its next input. The agent and the caller find the
+ * session, so an app names a session by its caller, never by a string it
+ * builds or parses.
+ *
+ * - `chat`: a person in a dashboard chat.
+ * - `place`: one of Rome's accounts in a place on a connection. A `watcher`
+ *   follows the place without answering in it.
+ * - `parent-turn`: a subagent's parent turn.
+ * - `fork-point`: a session at one completed turn.
+ * - `execution`: a trigger execution, or a run that names no conversation.
+ *
+ * `chatId` on a place or an execution names the conversation its turns are
+ * recorded in, when the caller knows it.
+ */
+export type SessionCaller =
+  | { kind: "chat"; chatId: string }
+  | { kind: "place"; connection: string; place: string; watcher?: boolean; chatId?: string }
+  | { kind: "parent-turn"; parent: SessionCaller; childId: string }
+  | { kind: "fork-point"; source: SessionCaller; forkSessionId: string }
+  | { kind: "execution"; id: string; chatId?: string };
+
 export interface AgentTurnRef {
   sessionId: string;
   turnId: string;
   agentName: string;
+  /** Whatever handed the session this turn. */
+  caller?: SessionCaller;
+  /** @deprecated Read `caller`. */
   channelThreadKey?: string;
   threadContext?: LifecycleThreadContext;
   parent?: {
@@ -638,6 +663,9 @@ export interface TurnMiddlewareSession {
   /** AgentSession id (stable across turns of a conversation). */
   id: string;
   agentName: string;
+  /** Whatever hands the session its input. */
+  caller?: SessionCaller;
+  /** @deprecated Read `caller`. */
   channelThreadKey: string;
 }
 
@@ -1156,10 +1184,15 @@ export interface RunParams {
    * without it ignore them.
    */
   images?: string[];
-  /** Used for session reuse lookup: `${channel}:${threadId}` */
+  /**
+   * Whatever hands the session this input. The agent and the caller find the
+   * session; a caller's `chatId` names the conversation its turns record in.
+   */
+  caller?: SessionCaller;
+  /** @deprecated Pass `caller`. */
   channelThreadKey?: string;
   threadContext?: ThreadContext;
-  /** Stable Rome conversation to bind to the provider/runtime session. */
+  /** @deprecated Pass the conversation as the caller's `chatId`. */
   romeSessionId?: string;
   /** Platform id of the inbound message that triggers this turn. */
   platformMessageId?: string;
@@ -1218,7 +1251,10 @@ export interface ForkRunParams {
   prompt: string;
   /** Optional provider-agnostic capability tier override for the forked turn. */
   tier?: "large" | "medium" | "small";
-  channelThreadKey: string;
+  /** The source session's caller, as its turn's `AgentTurnRef` names it. */
+  caller?: SessionCaller;
+  /** @deprecated Pass `caller`. */
+  channelThreadKey?: string;
   threadContext?: ThreadContext;
   workingDir?: string;
   /**
@@ -2115,6 +2151,9 @@ export interface CurrentActionContext {
   sessionId?: string;
   turnId?: string;
   agentName?: string;
+  /** Whatever handed the calling session its turn. */
+  caller?: SessionCaller;
+  /** @deprecated Read `caller`. */
   channelThreadKey?: string;
   sharedContext?: Record<string, unknown>;
 }

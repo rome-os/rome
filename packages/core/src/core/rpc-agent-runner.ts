@@ -18,7 +18,7 @@ import {
 import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
-import { adhocSessionKey } from "./agent-session-key.js";
+import { callerOfRun } from "./session-caller.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 
 const log = createLogger("rpc-agent-runner");
@@ -68,17 +68,19 @@ export class RpcAgentRunner implements AgentRunnerInterface {
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
     const ipc = this.getIpc();
     const router = agentTurnStreamRouterFor(ipc);
-    const channelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
-
     const req: RunTurnRequest = {
-      key: { agentName: params.agentName, channelThreadKey },
+      key: {
+        agentName: params.agentName,
+        caller:
+          params.caller ??
+          callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId),
+      },
       init: {
         workingDir: params.workingDir,
         threadContext: params.threadContext,
-        romeSessionId: params.romeSessionId,
-        sharedContext: params.sharedContext,
         contextSuffix: params.contextSuffix,
       },
+      sharedContext: params.sharedContext,
       input: { prompt: params.prompt, images: params.images },
       platformMessageId: params.platformMessageId,
       replyTo: params.replyTo,
@@ -135,7 +137,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     try {
       while (true) {
         if (values.length > 0) {
-          yield attachRomeSession(values.shift()!, response.romeSession);
+          yield values.shift()!;
           continue;
         }
         if (done) {
@@ -149,17 +151,10 @@ export class RpcAgentRunner implements AgentRunnerInterface {
           if (error) throw error;
           return;
         }
-        yield attachRomeSession(next.value, response.romeSession);
+        yield next.value;
       }
     } finally {
       router.release(streamName);
     }
   }
-}
-
-function attachRomeSession(
-  message: StreamAgentEvent,
-  romeSession: RunTurnResponse["romeSession"],
-): StreamAgentEvent {
-  return message.type === "session_init" ? { ...message, romeSession } : message;
 }

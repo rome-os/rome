@@ -8,7 +8,7 @@ import { create as tarCreate } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
 import { AgentLoader } from "../core/agent-loader.js";
-import { createAgentSessionManager } from "../agent-sessions/agent-session.js";
+import { createTestSessionManager } from "../test/session-compat.js";
 import { createAgentLifecycleDispatcher } from "../agent-sessions/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
@@ -475,7 +475,7 @@ function parseMcpJson<T>(result: McpToolResult): T {
 }
 
 async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Promise<{
-  manager: ReturnType<typeof createAgentSessionManager>;
+  manager: ReturnType<typeof createTestSessionManager>;
   provider: McpSessionModelProvider;
   agentName: string;
 }> {
@@ -507,7 +507,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     { processRole: "worker" },
   );
 
-  const manager = createAgentSessionManager({
+  const manager = createTestSessionManager({
     agentLoader,
     sessionManager,
     sessionsRepo,

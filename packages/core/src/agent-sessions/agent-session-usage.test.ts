@@ -12,7 +12,7 @@ import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
@@ -35,7 +35,7 @@ async function drain(events: AsyncIterable<unknown>): Promise<void> {
 describe("AgentSession turn usage", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: TestSessionManager;
   let recorded: TurnUsageFacts[];
   // Each run decides whether it reaches the provider. One that does mints a
   // provider turn id, like Codex does on turn/start.
@@ -118,7 +118,7 @@ describe("AgentSession turn usage", () => {
       },
       size: () => 1,
     };
-    manager = createAgentSessionManager(
+    manager = createTestSessionManager(
       {
         agentLoader: loader,
         sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
