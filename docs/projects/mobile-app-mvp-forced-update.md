@@ -3,13 +3,11 @@
 Worker result for "Instance always on the latest version" in [`mobile-app-mvp.md`](mobile-app-mvp.md). The decision came from the user: the app always requires the instance's latest release. The instance API stays backward compatible, so the app's and the instance's versions never need to match.
 
 - Branch: `feat/ios-app` (local only, not pushed)
-- Commits: `1e0d7f18` (API calls and demo data), `4cef5d7d` (decision and upgrade tracking), `588bd463` (update page and wiring), `8868c7e5` (snapshots), plus the commit that adds this file
+- Commits: `1e0d7f18` (API calls and demo data), `4cef5d7d` (decision and upgrade tracking), `588bd463` (update page and wiring), `8868c7e5` (snapshots), `2a50dc60` (this file), `4c3debe2` (Chinese placeholder fix), `d5ef8af2` (no foreground check)
 
 ## What changed
 
-- **When it checks.** The app calls `GET /api/system/upgrade/check` at these times:
-  - each time an instance opens: on launch, after sign-in, and after an instance switch;
-  - when the app returns to the foreground.
+- **When it checks.** The app calls `GET /api/system/upgrade/check` each time an instance opens: on launch, after sign-in, and after an instance switch. It does not check when the app returns to the foreground: releases ship about once a day, so the user dropped that check (`d5ef8af2`).
 - **When it blocks.** It blocks only when `upgradeAvailable` is true and the latest version differs from the current one. The page covers everything, the sign-in screen included. It shows current → latest and one primary "Update now". There is no dismiss or skip. A menu on the instance name keeps "Switch instance" and "Sign out".
 - **When it does not block.** A check that cannot decide never blocks: `unversioned_build`, `pantheon_unconfigured`, `pantheon_unreachable`, any other server error, or no network. The app works as usual, and Settings shows a quiet "Can't check for updates" line under the Version row.
 - **Updating.**
@@ -29,7 +27,7 @@ Worker result for "Instance always on the latest version" in [`mobile-app-mvp.md
 
 ## What was checked
 
-- **Unit tests:** 45 pass on the iPhone 17 simulator (iOS 27.2); the live tests were skipped. New tests:
+- **Unit tests:** 44 pass on the iPhone 17 simulator (iOS 27.2); the live tests were skipped. New tests:
   - `UpdateGateTests` covers four rules:
     - It blocks only on a newer release, and never when the flag says yes but the versions match.
     - Each "cannot decide" error and a network failure never block.
