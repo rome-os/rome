@@ -626,7 +626,6 @@ async function main() {
   const appConnectedAccounts = createConnectedAccounts({
     rows: () => connectedAccounts.all(),
     names: (listed) => accountNames.displayNames(listed),
-    query: (account, query) => channelsService.query(account, query),
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.

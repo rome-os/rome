@@ -218,7 +218,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       resolveArtifactReference,
       channelsService: legacyChatIdChannelsService(channelsService),
       chats: chatsOver(chatsPortProxy),
-      connectedAccounts: connectedAccountsProxy(channelsService),
+      connectedAccounts: connectedAccountsProxy(),
       chatSettings: appChatSettings,
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,

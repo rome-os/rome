@@ -13,7 +13,7 @@
 // destination, so no destination is ever guessed into a direct message or a
 // group.
 
-import type { Account, ChannelMessage, ChannelMessageQuery, OutgoingChatMessage } from "./index.js";
+import type { Account, OutgoingChatMessage } from "./index.js";
 
 /**
  * A chat, as Chats names it: its platform and the id Chats gave it. The id is
@@ -267,10 +267,6 @@ export interface ConnectedAccount {
 export interface ConnectedAccounts {
   /** Every one of Rome's accounts, disconnected ones included. */
   list(): Promise<ConnectedAccount[]>;
-  /** What was said through `account`, newest first, from its kind of
-   *  connection's history. Rejects where no history of the account can be
-   *  read. */
-  query(account: Account, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
 }
 
 function sameChat(a: ChatRef, b: ChatRef): boolean {

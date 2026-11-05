@@ -349,14 +349,8 @@ export const chatsPortProxy: ChatsPort = {
 
 /** Worker-side proxy for the main process's connected accounts. History is
  *  read as the channels service reads it. */
-export function connectedAccountsProxy(
-  channels: Pick<ChannelsService, "query">,
-): ConnectedAccounts {
-  return {
-    list: () => callMain<ConnectedAccount[]>("connectedAccounts.list", {}),
-    query: (account, query = {}) =>
-      channels.query({ platform: account.platform, id: account.id }, query),
-  };
+export function connectedAccountsProxy(): ConnectedAccounts {
+  return { list: () => callMain<ConnectedAccount[]>("connectedAccounts.list", {}) };
 }
 
 export class ChatSettingsControlProxy implements ChatSettingsControl {

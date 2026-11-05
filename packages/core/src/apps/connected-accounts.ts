@@ -4,7 +4,7 @@
  * not this. Vocabulary: docs/domains/chats.md#connected-account.
  */
 
-import type { Account, ChannelMessage, ChannelMessageQuery } from "@rome-os/app-runtime";
+import type { Account } from "@rome-os/app-runtime";
 import type { ConnectedAccount, ConnectedAccounts } from "@rome-os/app-runtime/chats";
 import type { ConnectedAccountRow } from "../db/repositories/connected-accounts.js";
 
@@ -13,8 +13,6 @@ export interface ConnectedAccountsDeps {
   rows: () => readonly ConnectedAccountRow[];
   /** What each account is called, from its profile, in the order given. */
   names: (accounts: readonly Account[]) => Promise<ReadonlyArray<string | null>>;
-  /** What was said through an account, from its kind's history. */
-  query: (account: Account, query: ChannelMessageQuery) => Promise<ChannelMessage[]>;
 }
 
 export function createConnectedAccounts(deps: ConnectedAccountsDeps): ConnectedAccounts {
@@ -30,7 +28,5 @@ export function createConnectedAccounts(deps: ConnectedAccountsDeps): ConnectedA
         connected: row.connectionId !== null,
       }));
     },
-    query: (account, query = {}) =>
-      deps.query({ platform: account.platform, id: account.id }, query),
   };
 }

@@ -285,9 +285,9 @@ Each app gets a persistent data directory for files outside the database, plus d
 
 An app reaches chats and Rome's accounts through two services, the same in the main process and in an action worker. They name an account by its platform and the platform's own id, never by a channel's name.
 
-**Chats** (`deps.chats`) sends into a [chat](../domains/chats.md#chat). An app finds the chat with `dm`, `group` or `byRef`, each answering a chat handle, and says a message in a place with one `send`, which answers once the platform took it. The SDK defines it ([`chats.ts`](../../packages/app-runtime-sdk/src/chats.ts)), and this page does not restate it. `typing(place, { as })` shows that Rome is typing in a place, and takes `as` under the same rule as `send`: one of Rome's accounts in the place. It answers a session that is updated as the work goes on and finished when it ends, or null where the platform shows no typing. The session lives in the main process, so in an action worker `typing` answers null.
+**Chats** (`deps.chats`) sends into a [chat](../domains/chats.md#chat). An app finds the chat with `dm`, `group` or `byRef`, each answering a chat handle, and says a message in a place with one `send`, which answers once the platform took it. The SDK defines it ([`chats.ts`](../../packages/app-runtime-sdk/src/chats.ts)), and this page does not restate it. `typing(place, { as })` shows that Rome is typing in a place, and takes `as` under the same rule as `send`: one of Rome's accounts in the place. It answers a session that is updated as the work goes on and finished when it ends, or null where the platform shows no typing. The session lives in the main process, and app actions run in a worker, so in practice `typing` shows only from a hook.
 
-**Connected accounts** (`deps.connectedAccounts`) answers which of Rome's accounts the app can act as, each a [connected account](../domains/chats.md#connected-account). `list()` answers each one with its agent, or none, and whether a connection reaches it now. Its name comes from the account's profile, not from the connection. `query(account, query)` reads what was said through the account, newest first, from its [kind of connection](../domains/connections.md#connection-kind)'s history.
+**Connected accounts** (`deps.connectedAccounts`) answers which of Rome's accounts the app can act as, each a [connected account](../domains/chats.md#connected-account). `list()` answers each one with its agent, or none, and whether a connection reaches it now. Its name comes from the account's profile, not from the connection.
 
 A hook hears what is said to Rome through `deps.messagesSaid`, once each message is recorded in its chat.
 
@@ -300,7 +300,7 @@ A hook hears what is said to Rome through `deps.messagesSaid`, once each message
 
 **Not to be confused with:**
 
-- **`ChannelsService`, `Channel`, `deps.channels`**: the deprecated channel-named surface these replace. It works until it is removed in a major release. `ChannelsService` becomes `ConnectedAccounts` and `Chats.send`. A channel's `send` becomes `Chats.send` and `Chats.typing`, and its `inbound` becomes `messagesSaid`.
+- **`ChannelsService`, `Channel`, `deps.channels`**: the deprecated channel-named surface these replace. It works until it is removed in a major release. `ChannelsService` becomes `ConnectedAccounts` and `Chats.send`. Its `query` has no replacement yet: a chat's history is moving into Chats, and an app reads it through `channelsService.query` until then. A channel's `send` becomes `Chats.send` and `Chats.typing`, and its `inbound` becomes `messagesSaid`.
 
 ## Hooks
 
