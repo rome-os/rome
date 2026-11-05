@@ -1,4 +1,6 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
+import { recordsToOf } from "../test/session-compat.js";
+import { callerFromKey } from "./session-caller.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -9,7 +11,7 @@ import type { Channel, ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
-  AgentSessionInit,
+  SessionOpenOptions,
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
@@ -61,14 +63,18 @@ describe("AgentSessionBridge turn routing", () => {
       yield { type: "turn_end", turnId: "turn-1", status: "completed", durationMs: 1 };
     })();
     const session = {
-      key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+      key: { agentName: "main", caller: callerFromKey("discord:channel-1") },
+      caller: callerFromKey("discord:channel-1"),
+      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+        return recordsToOf(this, options);
+      },
       sessionId: "session-1",
       conversation: { origin: "named", id: "channel:discord:channel-1" },
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => session,
-      peek: () => session,
+      open: async () => session,
+      live: () => session,
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -131,7 +137,11 @@ describe("AgentSessionBridge conversation", () => {
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const sent: TurnRef[] = [];
       const session = {
-        key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+        key: { agentName: "main", caller: callerFromKey("discord:channel-1") },
+        caller: callerFromKey("discord:channel-1"),
+        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+          return recordsToOf(this, options);
+        },
         sessionId: "session-1",
         conversation: {
           origin: "recorded" as const,
@@ -161,8 +171,8 @@ describe("AgentSessionBridge conversation", () => {
         },
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        peek: () => session,
+        open: async () => session,
+        live: () => session,
       } as unknown as AgentSessionManager;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
@@ -206,9 +216,13 @@ describe("AgentSessionBridge working dir", () => {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
-    const acquired: AgentSessionInit[] = [];
+    const acquired: SessionOpenOptions[] = [];
     const session = {
-      key: { agentName: "coder", channelThreadKey: "coder:1" },
+      key: { agentName: "coder", caller: callerFromKey("coder:1") },
+      caller: callerFromKey("coder:1"),
+      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+        return recordsToOf(this, options);
+      },
       sessionId: "summoned-1",
       sendTurn: () =>
         ({
@@ -218,15 +232,15 @@ describe("AgentSessionBridge working dir", () => {
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async (_key: unknown, init: AgentSessionInit) => {
+      open: async (_agent: string, _caller: unknown, init: SessionOpenOptions) => {
         acquired.push(init);
         return session;
       },
-      acquireBySessionId: async (_id: string, _agent: string, init: AgentSessionInit) => {
+      session: async (_id: string, _agent: string, init: SessionOpenOptions) => {
         acquired.push(init);
         return session;
       },
-      peek: () => undefined,
+      live: () => undefined,
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
@@ -367,7 +381,11 @@ describe("AgentSessionBridge worker disconnect", () => {
   ) {
     const queue = [...handles];
     const session = {
-      key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+      key: { agentName: "main", caller: callerFromKey("discord:channel-1") },
+      caller: callerFromKey("discord:channel-1"),
+      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+        return recordsToOf(this, options);
+      },
       sessionId: "session-1",
       conversation: options.romeSessionId
         ? { origin: "named", id: options.romeSessionId }
@@ -375,11 +393,11 @@ describe("AgentSessionBridge worker disconnect", () => {
       sendTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => {
+      open: async () => {
         await options.beforeAcquire?.();
         return session;
       },
-      peek: () => session,
+      live: () => session,
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -597,11 +615,15 @@ describe("AgentSessionBridge reply streaming", () => {
     const { written, edits } = recording;
     const transport = own ?? recording.transport;
     const session = {
-      key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
+      key: { agentName: "main", caller: callerFromKey("telegram:chat-1") },
+      caller: callerFromKey("telegram:chat-1"),
+      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+        return recordsToOf(this, options);
+      },
       sessionId: "session-1",
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
-    const manager = { acquire: async () => session } as unknown as AgentSessionManager;
+    const manager = { open: async () => session } as unknown as AgentSessionManager;
     const targets: ReplyTarget[] = [];
     const replies = replacement
       ? ({

@@ -1561,14 +1561,15 @@ describe("Projects files API", () => {
       const closeMain = rs.fn(async () => undefined);
       const closeChild = rs.fn(async () => undefined);
       type LiveAgentSession = NonNullable<
-        ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["peek"]>
+        ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["live"]>
       >;
       const agentSessionManager: RouteDeps["agentSessionManager"] = {
-        peek: ({ agentName, channelThreadKey }) => {
-          if (agentName === "main" && channelThreadKey === "webchat:sess-demo") {
+        live: (agentName, caller) => {
+          const chatId = caller.kind === "chat" ? caller.chatId : undefined;
+          if (agentName === "main" && chatId === "sess-demo") {
             return { close: closeMain } as unknown as LiveAgentSession;
           }
-          if (agentName === "designer" && channelThreadKey === "webchat:sess-demo-child") {
+          if (agentName === "designer" && chatId === "sess-demo-child") {
             return { close: closeChild } as unknown as LiveAgentSession;
           }
           return undefined;

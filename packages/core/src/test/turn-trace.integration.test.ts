@@ -19,8 +19,9 @@ async function drainOneTurn(
   rig: GoldenTraceRig,
   opts?: { linkFromSpanContext?: SpanContext },
 ): Promise<{ turnContext: Context }> {
-  const session = await rig.manager.acquire(
-    { agentName: "test-main", channelThreadKey: "webchat:turn-trace-test" },
+  const session = await rig.manager.open(
+    "test-main",
+    { kind: "chat", chatId: "turn-trace-test" },
     { workingDir: "/tmp" },
   );
 

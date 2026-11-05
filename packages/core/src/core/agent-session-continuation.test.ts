@@ -25,11 +25,8 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import {
-  createAgentSessionManager,
-  type AgentSession,
-  type AgentSessionManager,
-} from "./agent-session.js";
+import { type AgentSession } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "./model-selector.js";
 import { createModelResolver } from "./model-resolver.js";
@@ -93,7 +90,7 @@ function continuationOf(prompt: string | undefined): string | null {
   return prompt?.match(/<continuation[\s\S]*?<\/continuation>/)?.[0] ?? null;
 }
 
-describe("continuation notice through AgentSessionManager", () => {
+describe("continuation notice through TestSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -104,14 +101,14 @@ describe("continuation notice through AgentSessionManager", () => {
   let anthropic: ReturnType<typeof createProvider>;
   let artifactIdentity: ArtifactIdentityContext;
   let now: number;
-  const managers: AgentSessionManager[] = [];
+  const managers: TestSessionManager[] = [];
 
   function at(seconds: number) {
     now = START + seconds * 1000;
     rs.setSystemTime(new Date(now));
   }
 
-  function createManager(): AgentSessionManager {
+  function createManager(): TestSessionManager {
     const actionRegistry = new ActionRegistryImpl();
     actionRegistry.register({
       config: {
@@ -124,7 +121,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       {
         agentLoader: loader,
         sessionManager,
@@ -149,7 +146,7 @@ describe("continuation notice through AgentSessionManager", () => {
     return manager;
   }
 
-  function acquire(manager: AgentSessionManager, selectionId?: ModelSelectionId | null) {
+  function acquire(manager: TestSessionManager, selectionId?: ModelSelectionId | null) {
     return manager.acquire(key, {
       workingDir: directory,
       threadContext,
@@ -168,10 +165,7 @@ describe("continuation notice through AgentSessionManager", () => {
       JSON.stringify([{ type: "text", content: text }]),
     );
     at((now - START) / 1000 + 1);
-    const handle = session.sendTurn(
-      { prompt: text, inputId },
-      { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
-    );
+    const handle = session.sendTurn({ prompt: text, inputId }, { threadContext });
     for await (const _event of handle.events) {
       // drain
     }
@@ -377,10 +371,8 @@ describe("continuation notice through AgentSessionManager", () => {
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, romeSessionId: chatId, selectionId: from },
     );
-    for await (const _ of session.sendTurn(
-      { prompt: "first" },
-      { threadContext: context, romeSessionId: chatId },
-    ).events) {
+    for await (const _ of session.sendTurn({ prompt: "first" }, { threadContext: context })
+      .events) {
     }
     if (concierge) {
       const raw = healthyState();

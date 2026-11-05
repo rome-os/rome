@@ -233,7 +233,7 @@ function setup(
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
-    agentSessionManager: { peek: rs.fn(() => ({ selectModel: rs.fn() })) },
+    agentSessionManager: { live: rs.fn(() => ({ selectModel: rs.fn() })) },
     aiToolState: {
       get: () => ({
         claude: { loggedIn: true, quotaExhausted: false },
@@ -1475,7 +1475,7 @@ describe("Concierge quota failover", () => {
       async () => ({ provider: "openai" }) as never,
     );
     const selectModel = rs.fn();
-    s.deps.agentSessionManager.peek = rs.fn(() => ({ selectModel }) as never);
+    s.deps.agentSessionManager.live = rs.fn(() => ({ selectModel }) as never);
     const inserted = rs.fn();
     s.storedChats.onMessageInserted(inserted);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toEqual({

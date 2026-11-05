@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
+import { callerFromKey } from "./session-caller.js";
 import { version as uuidVersion } from "uuid";
-import { AgentRunner } from "./agent-runner.js";
+import { AgentRunner, type WakeDeps } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
 import { SessionManager } from "./session-manager.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
@@ -58,12 +59,16 @@ import type {
 } from "./agent-runner.js";
 import { createModelResolver, type ModelResolver } from "./model-resolver.js";
 import {
-  createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
   subagentToolName,
 } from "./agent-session.js";
+import {
+  recordsToOf,
+  createTestSessionManager,
+  type TestSessionManager,
+} from "../test/session-compat.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
@@ -241,7 +246,7 @@ describe("AgentRunner", () => {
     const modelResolver = createTestModelResolver({
       providers: [anthropic],
     });
-    const manager = createAgentSessionManager(managerDeps(modelResolver));
+    const manager = createTestSessionManager(managerDeps(modelResolver));
 
     // Webchat retains long-lived conversation semantics across reacquires.
     const key = {
@@ -267,7 +272,7 @@ describe("AgentRunner", () => {
     });
     const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
     const modelResolver = createTestModelResolver({ providers: [provider] });
-    const manager = createAgentSessionManager({
+    const manager = createTestSessionManager({
       ...managerDeps(modelResolver),
       agentLoader: namespacedLoader,
       sessionManager: namespacedSessionManager,
@@ -292,7 +297,7 @@ describe("AgentRunner", () => {
     const acquireBySessionId = rs.fn(async () => {
       throw stop;
     });
-    const manager = { acquireBySessionId } as unknown as AgentSessionManager;
+    const manager = { session: acquireBySessionId } as unknown as AgentSessionManager;
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
 
     await expect(
@@ -329,7 +334,7 @@ describe("AgentRunner", () => {
         yield { type: "result", content: "Deferred check done." };
       }),
     };
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       managerDeps(createTestModelResolver({ providers: [provider] })),
     );
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
@@ -364,7 +369,7 @@ describe("AgentRunner", () => {
         yield { type: "result", content: "Deferred check done." };
       }),
     };
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       managerDeps(createTestModelResolver({ providers: [provider] })),
     );
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
@@ -414,7 +419,7 @@ describe("AgentRunner", () => {
         );
       },
     };
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       managerDeps(createTestModelResolver({ providers: [provider] })),
     );
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
@@ -453,7 +458,7 @@ describe("AgentRunner", () => {
         yield { type: "result", content: "" };
       }),
     };
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       managerDeps(createTestModelResolver({ providers: [provider] })),
     );
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
@@ -486,7 +491,11 @@ describe("AgentRunner", () => {
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {
-      key: { agentName: "test-main", channelThreadKey: "webchat:sess-1" },
+      key: { agentName: "test-main", caller: callerFromKey("webchat:sess-1") },
+      caller: callerFromKey("webchat:sess-1"),
+      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+        return recordsToOf(this, options);
+      },
       sessionId: "source-session",
       status: "idle" as const,
       sendTurn: rs.fn(),
@@ -500,8 +509,8 @@ describe("AgentRunner", () => {
       close: rs.fn(async () => undefined),
     };
     const manager = {
-      acquire: rs.fn(),
-      peek: rs.fn(() => source),
+      open: rs.fn(),
+      live: rs.fn(() => source),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const runner = new AgentRunner(manager, agentLoader);
@@ -527,7 +536,11 @@ describe("AgentRunner", () => {
       await repo.createSession("parent-chat", "Fixing the build");
 
       const source = {
-        key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
+        key: { agentName: "main", caller: callerFromKey("webchat:parent-chat") },
+        caller: callerFromKey("webchat:parent-chat"),
+        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+          return recordsToOf(this, options);
+        },
         sessionId: "source-session",
         status: "idle" as const,
         sendTurn: rs.fn(),
@@ -555,8 +568,8 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager = {
-        acquire: rs.fn(),
-        peek: rs.fn(() => source),
+        open: rs.fn(),
+        live: rs.fn(() => source),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
       const runner = new AgentRunner(manager, agentLoader, repo);
@@ -613,7 +626,11 @@ describe("AgentRunner", () => {
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const turns: TurnRef[] = [];
       const session = {
-        key: { agentName: "main", channelThreadKey: "telegram:t1" },
+        key: { agentName: "main", caller: callerFromKey("telegram:t1") },
+        caller: callerFromKey("telegram:t1"),
+        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+          return recordsToOf(this, options);
+        },
         sessionId: "agent-session",
         conversation: recorded && { origin: "recorded" as const, ...recorded },
         status: "idle" as const,
@@ -643,9 +660,9 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager = {
-        acquire: rs.fn(),
-        acquireBySessionId: rs.fn(async () => session),
-        peek: rs.fn(),
+        open: rs.fn(),
+        session: rs.fn(async () => session),
+        live: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
       return { manager, turns };
@@ -916,7 +933,11 @@ describe("AgentRunner", () => {
       await repo.createSession("stored-chat", "Stored chat");
 
       const source = {
-        key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
+        key: { agentName: "main", caller: callerFromKey("webchat:stored-chat") },
+        caller: callerFromKey("webchat:stored-chat"),
+        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+          return recordsToOf(this, options);
+        },
         sessionId: "source-session",
         conversation: { origin: "named" as const, id: "stored-chat" },
         status: "idle" as const,
@@ -937,8 +958,8 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager = {
-        acquire: rs.fn(),
-        peek: rs.fn(() => source),
+        open: rs.fn(),
+        live: rs.fn(() => source),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
       const runner = new AgentRunner(manager, agentLoader, repo);
@@ -965,7 +986,11 @@ describe("AgentRunner", () => {
 
   it("publishes forked runs for live session inspection", async () => {
     const source = {
-      key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
+      key: { agentName: "main", caller: callerFromKey("webchat:parent-chat") },
+      caller: callerFromKey("webchat:parent-chat"),
+      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+        return recordsToOf(this, options);
+      },
       sessionId: "source-session",
       status: "idle" as const,
       sendTurn: rs.fn(),
@@ -993,8 +1018,8 @@ describe("AgentRunner", () => {
       close: rs.fn(async () => undefined),
     };
     const manager = {
-      acquire: rs.fn(),
-      peek: rs.fn(() => source),
+      open: rs.fn(),
+      live: rs.fn(() => source),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const turnStreams = createAgentTurnStreamRegistry();
@@ -1229,7 +1254,7 @@ describe("AgentRunner", () => {
             })(),
           }),
       );
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true, idleTtlMs: 100 },
       );
@@ -1972,7 +1997,7 @@ describe("AgentRunner", () => {
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
       );
       const session = await manager.acquire(
@@ -2020,7 +2045,7 @@ describe("AgentRunner", () => {
           }),
       );
       const modelResolver = createTestModelResolver({ providers: [provider] });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const runner = new AgentRunner(manager, agentLoader);
@@ -2122,17 +2147,17 @@ describe("AgentRunner", () => {
     const modelResolver = createTestModelResolver({
       providers: [active],
     });
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       {
         ...managerDeps(modelResolver, lifecycleDispatcher, options.appCatalog),
-        ...(options.resetPolicy
-          ? { resolveProviderSessionReset: async () => options.resetPolicy! }
-          : {}),
-        ...(options.turnLinks ? { turnLinks: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
-    return new AgentRunner(manager, agentLoader);
+    const wake: WakeDeps = {
+      ...(options.turnLinks ? { catchUp: { turnLinks: options.turnLinks } } : {}),
+      ...(options.resetPolicy ? { resolveReset: async () => options.resetPolicy! } : {}),
+    };
+    return new AgentRunner(manager, agentLoader, undefined, undefined, undefined, undefined, wake);
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
@@ -2171,7 +2196,7 @@ describe("AgentRunner", () => {
   }
 
   describe("turn middleware terminal", () => {
-    let manager: AgentSessionManager | undefined;
+    let manager: TestSessionManager | undefined;
     let recorded: TurnUsageFacts[];
 
     afterEach(async () => {
@@ -2193,7 +2218,7 @@ describe("AgentRunner", () => {
         turnMiddleware = middleware;
       }
       recorded = [];
-      manager = createAgentSessionManager(
+      manager = createTestSessionManager(
         {
           ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
           turnMiddleware,
@@ -2426,7 +2451,7 @@ describe("AgentRunner", () => {
         interrupt,
         sendUserInput,
       }));
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         {
           ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
           turnMiddleware,
@@ -2458,7 +2483,7 @@ describe("AgentRunner", () => {
     });
 
     it("cancels a turn before dispatch without sending its input", async () => {
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [mockProvider] })),
         { keepAliveAcrossTurns: true },
       );
@@ -2531,7 +2556,7 @@ describe("AgentRunner", () => {
           };
         },
       };
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
@@ -2652,7 +2677,7 @@ describe("AgentRunner", () => {
           };
         },
       };
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
@@ -2712,7 +2737,11 @@ describe("AgentRunner", () => {
       }));
       const session: AgentSession = {
         selectModel: () => {},
-        key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
+        key: { agentName: "test-main", caller: callerFromKey("telegram:t-1") },
+        caller: callerFromKey("telegram:t-1"),
+        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
+          return recordsToOf(this, options);
+        },
         sessionId: "sess-1",
         status: "idle",
         sendTurn,
@@ -2724,11 +2753,12 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager: AgentSessionManager = {
-        acquire: rs.fn(async () => {
+        open: rs.fn(async () => {
           throw new Error("implicit acquire should not be used");
         }),
-        acquireBySessionId: rs.fn(async () => session),
-        peek: rs.fn(() => undefined),
+        session: rs.fn(async () => session),
+        live: rs.fn(() => undefined),
+        reset: rs.fn(),
         findWorkingDirBySessionId: rs.fn(),
         recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
@@ -2743,12 +2773,12 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(manager.acquireBySessionId).toHaveBeenCalledWith(
+      expect(manager.session).toHaveBeenCalledWith(
         "sess-1",
         "test-main",
         expect.objectContaining({}),
       );
-      expect(manager.acquire).not.toHaveBeenCalled();
+      expect(manager.open).not.toHaveBeenCalled();
       expect(sendTurn).toHaveBeenCalledWith(
         { prompt: "Continue approval" },
         expect.objectContaining({ initiatedBy: "user" }),
@@ -2917,7 +2947,7 @@ describe("AgentRunner", () => {
       const modelResolver = createTestModelResolver({
         providers: [provider],
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const key = { agentName: "test-main", channelThreadKey: "telegram:t-1" };
@@ -3160,7 +3190,7 @@ describe("AgentRunner", () => {
         [{ type: "result", content: "Two" }],
         [{ type: "result", content: "Three" }],
       ]);
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
@@ -3190,7 +3220,7 @@ describe("AgentRunner", () => {
       const open = provider.openSession.bind(provider);
       provider.openSession = async (params) =>
         Object.defineProperty(await open(params), "appliedReasoningEffort", { value: "max" });
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
@@ -3594,7 +3624,7 @@ describe("AgentRunner", () => {
       const modelResolver = createTestModelResolver({
         providers: [provider],
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver, lifecycle), {
+      const manager = createTestSessionManager(managerDeps(modelResolver, lifecycle), {
         keepAliveAcrossTurns: true,
       });
 
@@ -4099,7 +4129,7 @@ describe("AgentRunner", () => {
       const modelResolver = createTestModelResolver({
         providers: [alwaysResultProvider()],
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire(
@@ -4171,7 +4201,7 @@ describe("AgentRunner", () => {
       const modelResolver = createTestModelResolver({
         providers: [alwaysResultProvider()],
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         isSubagent: true,
       });
       const session = await manager.acquire(
@@ -4193,7 +4223,7 @@ describe("AgentRunner", () => {
         deviceFolder: { deviceId: "mac-1", deviceName: "macbook", platform: "macos", path: "/w" },
       };
       for (const isSubagent of [false, true]) {
-        const manager = createAgentSessionManager(
+        const manager = createTestSessionManager(
           managerDeps(createTestModelResolver({ providers: [alwaysResultProvider()] })),
           { keepAliveAcrossTurns: true, isSubagent },
         );
@@ -4242,7 +4272,7 @@ describe("AgentRunner", () => {
       };
       // The same channel conversation as above, but its surface says every
       // message already reaches the agent, as webchat's does.
-      const manager = createAgentSessionManager({
+      const manager = createTestSessionManager({
         ...managerDeps(createTestModelResolver({ providers: [provider] })),
         channelSurface: () => ({ interactiveCards: false, promptContext: false }),
       });
@@ -4580,7 +4610,7 @@ describe("AgentRunner", () => {
       };
 
       const modelResolver = createTestModelResolver({ providers: [anthropic, openai] });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
       const session = await manager.acquire(
         { agentName: "test-pinned", channelThreadKey: "webchat:pinned-1" },
         {},
@@ -4600,7 +4630,7 @@ describe("AgentRunner", () => {
         providers: [anthropic, openai],
         aiToolState: { get: () => codexLoggedOut, refresh: async () => codexLoggedOut },
       });
-      const loggedOutManager = createAgentSessionManager(managerDeps(loggedOutResolver));
+      const loggedOutManager = createTestSessionManager(managerDeps(loggedOutResolver));
 
       await expect(
         loggedOutManager.acquire(
@@ -4652,7 +4682,7 @@ describe("AgentRunner", () => {
       const modelResolver = createTestModelResolver({
         providers: [anthropic, openai],
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
 
       const session = await manager.acquire(
         {
@@ -4689,7 +4719,7 @@ describe("AgentRunner", () => {
         },
       };
       const modelResolver = createTestModelResolver({ providers: [openai] });
-      const firstManager = createAgentSessionManager(managerDeps(modelResolver));
+      const firstManager = createTestSessionManager(managerDeps(modelResolver));
       const key = {
         agentName: "test-main",
         channelThreadKey: "webchat:session-cold",
@@ -4698,7 +4728,7 @@ describe("AgentRunner", () => {
       await collectMessages(firstSession.sendTurn({ prompt: "Start" }).events);
       await firstManager.shutdown();
 
-      const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
+      const resumedManager = createTestSessionManager(managerDeps(modelResolver));
       const resumedRunner = new AgentRunner(resumedManager, agentLoader);
       const resumedMessages = await collectMessages(
         resumedRunner.run({
@@ -4774,7 +4804,7 @@ describe("AgentRunner", () => {
         providers: [codex, claude],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -4837,7 +4867,7 @@ describe("AgentRunner", () => {
         providers: [codex],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -4902,7 +4932,7 @@ describe("AgentRunner", () => {
         providers: [codex],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -4958,7 +4988,7 @@ describe("AgentRunner", () => {
         providers: [codex, claude],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -5030,7 +5060,7 @@ describe("AgentRunner", () => {
         providers: [codexProvider(opens)],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -5086,7 +5116,7 @@ describe("AgentRunner", () => {
             key === "tierModelMappings" ? (tierModelMappings as T) : null,
         },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -5135,7 +5165,7 @@ describe("AgentRunner", () => {
         providers: [codexProvider(opens), claude],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
       const session = await manager.acquire({
@@ -5190,7 +5220,7 @@ describe("AgentRunner", () => {
       // A pre-cutover row: provider + thread persisted, model NULL.
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
       await collectMessages(
         runner.run({ agentName: "test-main", sessionId: legacyId, prompt: "Continue" }),
@@ -5233,7 +5263,7 @@ describe("AgentRunner", () => {
       // A subagent reuses the parent's channelThreadKey; session lookup is
       // agent-scoped, so its fresh session resolves from its own tier (small
       // → Terra without Luna access) instead of inheriting the parent's pin.
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
       const session = await manager.acquire({
         agentName: "test-explore",
         channelThreadKey: "webchat:shared-thread",
@@ -5257,7 +5287,7 @@ describe("AgentRunner", () => {
         providers: [codexProvider(opens)],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const firstManager = createAgentSessionManager(managerDeps(modelResolver));
+      const firstManager = createTestSessionManager(managerDeps(modelResolver));
       const first = await firstManager.acquire({
         agentName: "test-main",
         channelThreadKey: "telegram:pin-resume",
@@ -5269,7 +5299,7 @@ describe("AgentRunner", () => {
       // Entitlements improved while the session was cold. Tier resolution
       // would now pick Sol; the pin keeps the resume on Terra.
       state.codex.solAccess = true;
-      const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
+      const resumedManager = createTestSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(resumedManager, agentLoader);
       await collectMessages(
         runner.run({ agentName: "test-main", sessionId: first.sessionId, prompt: "Continue" }),
@@ -5308,7 +5338,7 @@ describe("AgentRunner", () => {
       // The guardian picks Claude Opus in the selector. Precedence is explicit
       // selection → pin → tier, so the selection wins over the pinned Terra and
       // the turn runs Opus — reusing the existing session, not a new chat.
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
       const session = await manager.acquire(
         { agentName: "test-main", channelThreadKey: "webchat:override-pin" },
         { selectionId: "claude-opus" },
@@ -5352,7 +5382,7 @@ describe("AgentRunner", () => {
       // Resuming on the pin alone fails closed — the pinned model cannot run and
       // there is no silent substitution, so acquiring the session throws the
       // structured resolution error rather than opening a backend.
-      const failManager = createAgentSessionManager(managerDeps(modelResolver));
+      const failManager = createTestSessionManager(managerDeps(modelResolver));
       await expect(
         failManager.acquire({ agentName: "test-main", channelThreadKey: "webchat:rescue" }),
       ).rejects.toMatchObject({
@@ -5365,7 +5395,7 @@ describe("AgentRunner", () => {
 
       // The guardian selects an available model (Terra). The very same session
       // runs again — no new chat — and re-pins to the selected model.
-      const rescueManager = createAgentSessionManager(managerDeps(modelResolver));
+      const rescueManager = createTestSessionManager(managerDeps(modelResolver));
       const rescueSession = await rescueManager.acquire(
         { agentName: "test-main", channelThreadKey: "webchat:rescue" },
         { selectionId: "gpt-5-6-terra" },
@@ -5415,7 +5445,7 @@ describe("AgentRunner", () => {
       });
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
       const messages = await collectMessages(
         runner.run({
@@ -5476,7 +5506,7 @@ describe("AgentRunner", () => {
       });
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const manager = createTestSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
       const messages = await collectMessages(
         runner.run({
@@ -5531,7 +5561,7 @@ describe("AgentRunner", () => {
       });
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
         isSubagent: true,
       });
       const runner = new AgentRunner(manager, agentLoader);
@@ -6248,7 +6278,7 @@ describe("AgentRunner", () => {
         calls.push(params);
         yield { type: "result", content: "provider text is normalized", structuredOutput: payload };
       });
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
       );
       const session = await manager.acquire({
@@ -6281,7 +6311,7 @@ describe("AgentRunner", () => {
           structuredOutput: { decision: "NOPE", reason: "invalid enum" },
         };
       });
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
       );
       const session = await manager.acquire({
@@ -6303,7 +6333,7 @@ describe("AgentRunner", () => {
       const provider = structuredProvider(async function* () {
         yield { type: "result", content: "plain text" };
       });
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
       );
       const session = await manager.acquire({
@@ -6331,7 +6361,7 @@ describe("AgentRunner", () => {
         };
         yield { type: "result", content: JSON.stringify(payload), structuredOutput: payload };
       });
-      const manager = createAgentSessionManager(
+      const manager = createTestSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
       );
       const session = await manager.acquire({

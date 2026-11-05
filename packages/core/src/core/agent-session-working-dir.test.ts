@@ -10,7 +10,7 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/help
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
@@ -22,10 +22,10 @@ import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "worker";
 
-describe("AgentSessionManager working dirs", () => {
+describe("TestSessionManager working dirs", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: TestSessionManager;
   let sessionsRepo: SessionsRepository;
   let webchatRepo: WebChatRepository;
   const previousProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -71,7 +71,7 @@ describe("AgentSessionManager working dirs", () => {
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Working dir test prompt");
-    manager = createAgentSessionManager(
+    manager = createTestSessionManager(
       {
         agentLoader: loader,
         sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
@@ -112,7 +112,7 @@ describe("AgentSessionManager working dirs", () => {
       { agentName: AGENT, channelThreadKey: "webchat:working-dir" },
       { workingDir: parentDir },
     );
-    const childManager = (parent as unknown as { childManager: AgentSessionManager }).childManager;
+    const childManager = (parent as unknown as { childManager: TestSessionManager }).childManager;
     const child = await childManager.acquire(
       { agentName: AGENT, channelThreadKey: "webchat:working-dir:subagent:1" },
       { workingDir: childDir },

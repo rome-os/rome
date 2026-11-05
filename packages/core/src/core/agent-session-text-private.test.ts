@@ -15,7 +15,7 @@ import {
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
@@ -23,10 +23,10 @@ import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
-describe("AgentSessionManager textPrivate", () => {
+describe("TestSessionManager textPrivate", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: TestSessionManager;
   let opened: ModelSessionParams[];
 
   async function writeAgent(name: string, policy?: Record<string, unknown>): Promise<void> {
@@ -77,7 +77,7 @@ describe("AgentSessionManager textPrivate", () => {
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("textPrivate test prompt");
-    manager = createAgentSessionManager(
+    manager = createTestSessionManager(
       {
         agentLoader: loader,
         sessionManager: new SessionManager(sessionsRepo, artifactIdentity),

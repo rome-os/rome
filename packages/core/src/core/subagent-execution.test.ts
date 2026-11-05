@@ -1,4 +1,5 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
+import { callerFromKey } from "./session-caller.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -31,7 +32,15 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   });
   const session: AgentSession = {
     selectModel: () => {},
-    key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
+    key: { agentName: "researcher", caller: callerFromKey(`subagent:${sessionId}`) },
+    caller: callerFromKey(`subagent:${sessionId}`),
+    recordsTo: () => ({
+      romeSessionId: sessionId,
+      romeSessionType: "subagent",
+      existing: true,
+      promptPersisted: true,
+      recorderOwned: false,
+    }),
     sessionId,
     status: "idle",
     sendTurn(input, options) {
@@ -108,9 +117,9 @@ describe("SubagentExecutionService", () => {
     const children = [first.session, second.session];
     const recordConversation = rs.fn(async () => undefined);
     const childManager = {
-      acquire: rs.fn(async () => children.shift()!),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
+      open: rs.fn(async () => children.shift()!),
+      session: rs.fn(),
+      live: rs.fn(),
       recordConversation,
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
@@ -126,7 +135,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "parent-turn-1",
       parentToolUseId: "tool-1",
       parentAgentName: "main",
-      parentChannelThreadKey: "webchat:parent-1",
+      parentCaller: { kind: "chat" as const, chatId: "parent-1" },
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -138,10 +147,12 @@ describe("SubagentExecutionService", () => {
       turnId: "child-turn-1",
       agentName: "researcher",
     });
-    expect(first.calls[0].options?.lifecycleParent).toEqual({
-      sessionId: "parent-runtime-1",
-      turnId: "parent-turn-1",
-      agentName: "main",
+    expect(first.calls[0].options?.initiatedBy).toEqual({
+      parentTurn: {
+        sessionId: "parent-runtime-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
     });
     expect(registry.getLinkByParent(parentRef)?.child).toEqual({
       sessionId: "child-1",
@@ -197,9 +208,9 @@ describe("SubagentExecutionService", () => {
   it("still runs a fresh Child when recording its conversation fails", async () => {
     const child = fakeChildSession("child-unrecorded", ["child-turn"]);
     const childManager = {
-      acquire: rs.fn(async () => child.session),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
+      open: rs.fn(async () => child.session),
+      session: rs.fn(),
+      live: rs.fn(),
       recordConversation: rs.fn(async () => {
         throw new Error("database is locked");
       }),
@@ -220,7 +231,7 @@ describe("SubagentExecutionService", () => {
         parentTurnId: "parent-turn-1",
         parentToolUseId: "tool-1",
         parentAgentName: "main",
-        parentChannelThreadKey: "webchat:parent-1",
+        parentCaller: { kind: "chat" as const, chatId: "parent-1" },
         childManager,
         workingDir: "/tmp/project-a",
       },
@@ -247,9 +258,9 @@ describe("SubagentExecutionService", () => {
     });
     const resumed = fakeChildSession("child-resume", ["resumed-turn"]);
     const childManager = {
-      acquire: rs.fn(),
-      acquireBySessionId: rs.fn(async () => resumed.session),
-      peek: rs.fn(),
+      open: rs.fn(),
+      session: rs.fn(async () => resumed.session),
+      live: rs.fn(),
       recordConversation: rs.fn(async () => undefined),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
@@ -264,7 +275,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "new-parent-turn",
       parentToolUseId: "tool-resume",
       parentAgentName: "main",
-      parentChannelThreadKey: "webchat:parent-1",
+      parentCaller: { kind: "chat" as const, chatId: "parent-1" },
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -275,10 +286,10 @@ describe("SubagentExecutionService", () => {
       context,
     );
     expect(execution).toMatchObject({ sessionId: "child-resume", turnId: "resumed-turn" });
-    expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
+    expect(childManager.session).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
-      expect.objectContaining({ romeSessionId: "child-resume" }),
+      expect.objectContaining({ workingDir: "/tmp/project-a" }),
     );
     resumed.releases[0].resolve();
     await execution.completion;
