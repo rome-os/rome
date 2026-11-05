@@ -2592,7 +2592,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "largeModelSelection must be a model selection id" }, 400);
     }
     if (
-      sessionId !== CONCIERGE_CHAT_ID &&
+      !isConciergeChat(lookup.session) &&
       (await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY)) !== true
     ) {
       return c.json({ error: "The model selector is turned off" }, 409);

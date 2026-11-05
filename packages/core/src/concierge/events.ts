@@ -9,7 +9,6 @@ import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
   CONCIERGE_ACCOUNT,
-  CONCIERGE_CHAT_ID,
   type ConciergeService,
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
@@ -167,7 +166,6 @@ export function startConciergeEvents(
       active.finished = event;
       return;
     }
-    if (chatId !== CONCIERGE_CHAT_ID) return;
     if (event.status === "error") {
       const failure = event.output.failure;
       const reason = failoverReason(failure, service.deps.aiToolState.get());

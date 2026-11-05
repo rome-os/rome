@@ -5,7 +5,7 @@
 
 ## Context
 
-Each [Concierge chat](../domains/chats.md#concierge-chat) is a long-lived chat the guardian texts. It delegates work to task chats whose state Rome records. A new provider thread can recover the conversation from stored messages and the task list. A [continuation notice](../concepts/sessions.md#continuation) points a replacement thread to `system:fetch_channel_history`. A provider thread is a cache of the conversation, not its record.
+Concierge is one long-lived chat the guardian texts. It delegates work to task chats whose state Rome records. A new provider thread can recover the conversation from stored messages and the task list. A [continuation notice](../concepts/sessions.md#continuation) points a replacement thread to `system:fetch_channel_history`. A provider thread is a cache of the conversation, not its record.
 
 The [session pin](pinned-session-model-fails-closed.md) prevents silent substitution. A quota switch must be visible, even if the next turn fails or Concierge says nothing.
 
@@ -26,7 +26,7 @@ A Concierge turn can run on another provider with no guardian action. Each switc
 
 Future diffs must respect:
 
-- Only a Concierge chat qualifies: the main chat or a topic chat. Ordinary chats, task chats, routines, summons, side chats, handoffs and subagents still fail closed.
+- Only the fixed Concierge chat qualifies. Ordinary chats, task chats, routines, summons, side chats, handoffs and subagents still fail closed.
 - The other provider must be signed in, have quota, need no reauthentication, and use a subscription. An API key or Rome credits never qualifies.
 - A generic rate limit, network or auth failure, or single-model limit never triggers failover.
 - The host records a visible switch notice independently of the agent's output.

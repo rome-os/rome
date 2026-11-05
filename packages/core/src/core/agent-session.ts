@@ -978,7 +978,7 @@ async function openSession(
       : undefined;
   // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. Only a Concierge chat also restores it over a pin, so its
-  // quota failover applies to background turns (docs/adrs/concierge-quota-failover.md).
+  // quota failover applies to background turns (docs/adrs/concierge-provider-failover.md).
   // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
   // Subagent keys carry a suffix, and app sessions use keys of their own.
   const chatId = webchatConversationOfKey(key.channelThreadKey);

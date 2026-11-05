@@ -2037,6 +2037,39 @@ describe("Concierge provider recovery", () => {
     expect(s.backendTurns).toHaveLength(1);
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
+  it("recovers a topic chat as the main chat, and keeps each chat's cooldown its own", async () => {
+    const { s } = await prepared({ delay: async () => {} });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(TOPIC_CHAT, "claude-sonnet");
+    s.onBackendTurn(() => {
+      void s.finish({
+        turnId: "ok",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId: TOPIC_CHAT,
+        text: "done",
+      });
+    });
+    await s.finish({
+      turnId: "failed",
+      agentName: CONCIERGE_AGENT_ID,
+      chatId: TOPIC_CHAT,
+      status: "error",
+      failure: failure("monthly spend limit"),
+      text: "done",
+    });
+    await s.settle();
+    expect(s.backendTurns.at(-1)).toMatchObject({ threadId: TOPIC_CHAT });
+    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "gpt-6-luna" });
+    // The topic chat left Sonnet; the main chat may still move to it.
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");
+    expect(
+      await s.service.switchForFailure(
+        CONCIERGE_CHAT,
+        failure("monthly spend limit", "openai"),
+        "quota",
+      ),
+    ).toMatchObject({ selectionId: "claude-sonnet" });
+  });
+
   it("ignores a task chat's temporary failure", async () => {
     const { s } = await prepared({ delay: async () => {} });
     await s.finish({
@@ -2048,6 +2081,9 @@ describe("Concierge provider recovery", () => {
     });
     expect(s.backendTurns).toHaveLength(0);
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("Concierge chats", () => {
   it("lists the main chat first, then the topic chats", async () => {
     const s = setup({ startEvents: false });
