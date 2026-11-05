@@ -420,6 +420,30 @@ describe("WhatsAppAdapter", () => {
         expect(recorded.map((batch) => batch.ids)).toEqual([["stub"]]);
       });
 
+      it("does not deliver inbound a live copy that comes after its history copy was recorded", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+        rs.useFakeTimers();
+        try {
+          const late = makeWAMessage({
+            key: { remoteJid: "111@s.whatsapp.net", id: "late", fromMe: false },
+          });
+          eventHandlers["messaging-history.set"]({ contacts: [], chats: [], messages: [late] });
+          rs.advanceTimersByTime(30_000);
+          await eventHandlers["messages.upsert"]({ messages: [late] });
+
+          expect(recorded.map((batch) => batch.ids)).toEqual([["late"]]);
+          expect(delivered).toEqual([]);
+        } finally {
+          rs.useRealTimers();
+        }
+      });
+
       it("records what it still holds when it stops", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);

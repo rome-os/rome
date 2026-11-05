@@ -53,6 +53,15 @@ const HISTORY_HOLD_MS = 30_000;
 /** How many ids of live messages an adapter keeps, to leave out of a history sync. */
 const HEARD_IDS_KEPT = 5000;
 
+/** Add `id` to `ids`, keeping the latest few thousand. */
+function remember(ids: Set<string>, id: string): void {
+  ids.add(id);
+  if (ids.size > HEARD_IDS_KEPT) {
+    const oldest = ids.values().next().value;
+    if (oldest !== undefined) ids.delete(oldest);
+  }
+}
+
 /** A new id for a message the adapter sends. */
 function romeMessageId(): string {
   return `${ROME_ID_PREFIX}${randomBytes(8).toString("hex").toUpperCase()}`;
@@ -121,6 +130,10 @@ export class WhatsAppAdapter {
   /** Ids of messages from others heard live, which a history sync may
    *  report again. */
   private readonly heardLive = new Set<string>();
+  /** Ids of messages from others recorded as history, whose live copy may
+   *  still come. The adapter hands each message over once, so it is not
+   *  delivered inbound again. */
+  private readonly recordedAsHistory = new Set<string>();
   private reconnectDelay = 1_000;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -424,6 +437,7 @@ export class WhatsAppAdapter {
       if (held.until > now) break;
       this.heldHistory.delete(id);
       if (this.heardLive.has(id)) continue;
+      remember(this.recordedAsHistory, id);
       const batch = due.get(held.self);
       if (batch) batch.push(held.message);
       else due.set(held.self, [held.message]);
@@ -437,6 +451,9 @@ export class WhatsAppAdapter {
     const deliverable: ChannelMessage[] = [];
     for (const waMsg of messages) {
       if (!waMsg.message || waMsg.key.fromMe) continue;
+      // A live copy that came after its history copy was recorded is the
+      // same message again.
+      if (waMsg.key.id && this.recordedAsHistory.has(waMsg.key.id)) continue;
       // A reaction is an emoji pinned to another message, not an inbound turn —
       // it is mirrored into the store, but the agent should not answer it.
       if (waMsg.message.reactionMessage) continue;
@@ -472,12 +489,7 @@ export class WhatsAppAdapter {
 
   /** Remember that message `id` was heard live, keeping the latest few thousand. */
   private rememberHeard(id: string | null | undefined): void {
-    if (!id) return;
-    this.heardLive.add(id);
-    if (this.heardLive.size > HEARD_IDS_KEPT) {
-      const oldest = this.heardLive.values().next().value;
-      if (oldest !== undefined) this.heardLive.delete(oldest);
-    }
+    if (id) remember(this.heardLive, id);
   }
 
   /** Hand `messages`, which nothing delivers inbound and Rome's account `self`
