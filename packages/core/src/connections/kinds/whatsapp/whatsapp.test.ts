@@ -516,6 +516,30 @@ describe("WhatsAppAdapter", () => {
         expect(recorded.map((batch) => batch.ids)).toEqual([["shared-phone", "own1"]]);
       });
 
+      it("hands over the account's display name with what the guardian said", async () => {
+        const names: (string | undefined)[] = [];
+        const { sink } = makeSink();
+        sink.recordHistory = (_messages, _self, selfName) => {
+          names.push(selfName);
+        };
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        const user = mockSock.user;
+        mockSock.user = { ...user, name: "Ouou" };
+        try {
+          await eventHandlers["messages.upsert"]({
+            messages: [
+              makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+            ],
+          });
+        } finally {
+          mockSock.user = user;
+        }
+
+        expect(names).toEqual(["Ouou"]);
+      });
+
       it("hands over every live message while nothing is delivered inbound", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);

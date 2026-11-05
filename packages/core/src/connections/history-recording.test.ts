@@ -128,11 +128,13 @@ describe("syncedFromWhatsApp", () => {
     reactsToId: null,
   };
 
-  it("names the guardian's own message by Rome's account, without the push name", () => {
-    expect(syncedFromWhatsApp({ ...base, fromMe: true, senderJid: null }, SELF)).toMatchObject({
+  it("names the guardian's own message by Rome's account and its display name, not the push name", () => {
+    expect(
+      syncedFromWhatsApp({ ...base, fromMe: true, senderJid: null }, SELF, "Ouou"),
+    ).toMatchObject({
       kind: "dm",
       address: "2000@s.whatsapp.net",
-      sender: { id: SELF },
+      sender: { id: SELF, name: "Ouou" },
     });
     expect(
       syncedFromWhatsApp({ ...base, fromMe: true, senderJid: null }, SELF)?.sender,

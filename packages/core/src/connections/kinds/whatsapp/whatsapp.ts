@@ -486,7 +486,7 @@ export class WhatsAppAdapter {
     );
     if (inputs.length === 0) return;
     try {
-      this.syncSink.recordHistory(inputs, self);
+      this.syncSink.recordHistory(inputs, self, this.sock?.user?.name ?? undefined);
     } catch (err) {
       log.error("failed to record whatsapp history", { error: errMsg(err) });
     }
