@@ -424,7 +424,9 @@ export class WhatsAppAdapter {
       if (held.until > now) break;
       this.heldHistory.delete(id);
       if (this.heardLive.has(id)) continue;
-      due.set(held.self, [...(due.get(held.self) ?? []), held.message]);
+      const batch = due.get(held.self);
+      if (batch) batch.push(held.message);
+      else due.set(held.self, [held.message]);
     }
     for (const [self, messages] of due) this.recordHistory(messages, self);
   }
