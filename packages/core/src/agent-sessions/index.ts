@@ -30,6 +30,16 @@ export { withTurnExecution, withTurnLinks } from "./turn-context.js";
 export { createSessionLog, openNamed } from "./rows/session-log.js";
 export type { SessionLog } from "./agent-session.js";
 
+// Reading turns and their traces back. Turns are Sessions', so every reader
+// outside reads them here.
+export {
+  createTurnReads,
+  type KeptTurns,
+  type TraceHead,
+  type TurnReads,
+  type TurnRef,
+} from "./rows/turn-reads.js";
+
 // What the wiring builds once and hands to the manager.
 export { SessionManager } from "./session-manager.js";
 export {

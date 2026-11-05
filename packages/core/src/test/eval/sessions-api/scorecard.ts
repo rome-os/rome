@@ -499,6 +499,132 @@ checks.push({
   detail: [...new Set(traceWriters)],
 });
 
+// --- Code tokens by line ------------------------------------------------------
+/** Each identifier or string piece of `file`'s code that `pattern` matches and
+ *  `accept` takes, keyed by "path:line". Comments are not tokens, so prose
+ *  never counts; SQL inside a template or string does. */
+function tokenHits(
+  file: string,
+  pattern: RegExp,
+  accept: (node: ts.Node) => boolean = () => true,
+): [string, string][] {
+  const sf = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
+  const hits: [string, string][] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isIdentifier(node) ||
+        ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)) &&
+      accept(node)
+    ) {
+      const text = node.getText(sf);
+      for (const match of text.matchAll(new RegExp(pattern.source, "g"))) {
+        const at = node.getStart(sf) + match.index!;
+        hits.push([`${rel(file)}:${sf.getLineAndCharacterOfPosition(at).line + 1}`, match[0]]);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return hits;
+}
+/** Hits grouped by line: one place per "path:line", with what it names. */
+function places(hits: [string, string][]): string[] {
+  const byLine = new Map<string, Set<string>>();
+  for (const [at, hit] of hits) byLine.set(at, (byLine.get(at) ?? new Set()).add(hit));
+  return [...byLine]
+    .sort(([a], [b]) => a.localeCompare(b, "en", { numeric: true }))
+    .map(([at, names]) => `${at}: ${[...names].join(", ")}`);
+}
+const productFiles = [...coreFiles, ...appFiles];
+const outsideSessions = productFiles.filter((file) => !file.startsWith(`${SESSIONS}/`));
+
+// --- C19 Code outside Sessions reads no turn or trace from storage ----------
+// A turn's trace lives in `rome_agent_messages` (role 'trace') and
+// `rome_agent_trace_blocks`. Only Sessions reads it; everything else asks
+// Sessions' public module. The repositories that still hold the readers are
+// left out, so a reader counts where it is called, not where it is defined.
+const TURN_STORES = [/^db\//, /^webchat\/[\w-]*repository\.ts$/];
+// Not reads of a turn: the health check's schema probe and the dev seed
+// script, which writes example traces.
+const NOT_TURN_READS = [/^api\/routes\/health\.ts$/, /^bin\//];
+const turnReaders = outsideSessions.filter(
+  (file) =>
+    !(
+      file.startsWith(`${SRC}/`) &&
+      [...TURN_STORES, ...NOT_TURN_READS].some((store) => store.test(relative(SRC, file)))
+    ),
+);
+// The repositories' trace readers. `getMessageContent` and
+// `getMessageContentForDisplay` merge a trace row with its blocks.
+const TRACE_READERS =
+  /^(getTraceContents|getTraceContentByTurn|getTraceContentsByTurns|getMessageContentForDisplay|getMessageContent)$/;
+const isCallee = (node: ts.Node) =>
+  ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
+// A trace row read straight from storage: SQL that names the role, or a
+// drizzle `eq(<table>.role, "trace")`.
+const isTraceRole = (node: ts.Node) =>
+  !(ts.isStringLiteral(node) && node.text === "trace") ||
+  (ts.isCallExpression(node.parent) &&
+    node.parent.arguments.length === 2 &&
+    node.parent.arguments[1] === node &&
+    /\.role$/.test(node.parent.arguments[0]!.getText()));
+const traceReads = places(
+  turnReaders.flatMap((file) => [
+    ...tokenHits(file, TRACE_READERS, isCallee),
+    ...tokenHits(file, /\b(rome_agent_trace_blocks|romeAgentTraceBlocks)\b/),
+    ...tokenHits(file, /\brole\s*=\s*'trace'|^["']trace["']$/, isTraceRole),
+  ]),
+);
+quantities.callerTraceReads = traceReads.length;
+checks.push({
+  id: "C19",
+  name: "Code outside Sessions reads no turn or trace from storage; it reads them through Sessions' public module",
+  measured: `${traceReads.length} reads outside Sessions`,
+  pass: traceReads.length === 0,
+  detail: traceReads,
+});
+
+// --- C20 The session keeps the whole turn itself ----------------------------
+// Every session writes the turn's prompt, answer and trace to its own tables.
+// Chats keeps its own copy of the prompt and answer, so no caller tells the
+// session to leave any of it out: no surface says what it keeps, and no run
+// option turns a part of the record off. The row log under `rows/` may still
+// name its writer's switches while storage is unchanged.
+const keepsMember = members("SessionSurface").includes("keeps") ? ["SessionSurface.keeps"] : [];
+// A field named `keeps`, passed, declared or read; a local of that name is not one.
+const isField = (node: ts.Node) =>
+  ts.isIdentifier(node) &&
+  (ts.isPropertyAssignment(node.parent) ||
+    ts.isShorthandPropertyAssignment(node.parent) ||
+    ts.isPropertySignature(node.parent) ||
+    ts.isPropertyAccessExpression(node.parent)) &&
+  node.parent.name === node;
+// The run options that turn a part of the record off, also as a `Pick` key.
+const SKIP_OPTIONS =
+  /^["']?(persistUserTranscript|persistAssistantTranscript|persistAnswer|persistTranscript|persistTrace)["']?$/;
+const skips = [
+  ...keepsMember,
+  ...places([
+    ...productFiles.flatMap((file) => tokenHits(file, /^SurfaceKeeps$/, ts.isIdentifier)),
+    ...outsideSessions.flatMap((file) => tokenHits(file, /^keeps$/, isField)),
+    ...productFiles
+      .filter((file) => !file.startsWith(`${ROWS}/`))
+      .flatMap((file) => tokenHits(file, SKIP_OPTIONS)),
+  ]),
+];
+quantities.skipInstructions = skips.length;
+checks.push({
+  id: "C20",
+  name: "The session keeps the whole turn itself: prompt, answer and trace go to its own tables for every session, and no caller tells it what to skip",
+  measured: `${skips.length} places tell the session what to skip`,
+  pass: skips.length === 0,
+  detail: skips,
+});
+
 // --- Quantities without a target -------------------------------------------
 quantities.moduleLines = MODULE.reduce((sum, file) => sum + read(file).split("\n").length, 0);
 const APP_KEY_PARSING =

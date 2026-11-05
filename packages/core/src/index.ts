@@ -166,7 +166,7 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./agent-sessions/index.js";
-import { createSessionLog } from "./agent-sessions/index.js";
+import { createSessionLog, createTurnReads } from "./agent-sessions/index.js";
 import { talkerChannelSurface } from "./connections/session-surface.js";
 import type { WakeDeps } from "./core/agent-runner.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
@@ -454,7 +454,7 @@ async function main() {
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.
     inChats: {
-      reads: { db, reads: chatsWired.reads, webchatRepo },
+      reads: { db, reads: chatsWired.reads, turns: createTurnReads(db, webchatRepo) },
       writes: {
         webchatRepo,
         chats: chatsWired.chats,
@@ -1990,6 +1990,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      turns: createTurnReads(db, webchatRepo),
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

@@ -1,4 +1,5 @@
 import { appChatReads } from "../apps/chat-reads.js";
+import { createTurnReads } from "../agent-sessions/index.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { chatAddresses, chatMessages, romeSessions } from "../db/schema.js";
 // What the account read asks the triage record for.
@@ -130,7 +131,11 @@ describe("the account reads over the triage record", () => {
     for (const line of transcript.lines.filter((line) => line.id !== "visitor")) {
       expect(line).toMatchObject({ role: "user", senderAccountId: null, senderName: "Automation" });
     }
-    const apps = appChatReads({ db: testDb.db, reads: model, webchatRepo: deps.webchatRepo });
+    const apps = appChatReads({
+      db: testDb.db,
+      reads: model,
+      turns: createTurnReads(testDb.db, deps.webchatRepo),
+    });
     const lines = await apps.transcript("automation-chat");
     for (const line of lines.filter((line) => line.key !== "visitor")) {
       expect(line).toMatchObject({ role: "user", senderId: null, senderName: "Automation" });

@@ -290,7 +290,7 @@ describe("ChatsWebChatRepository", () => {
     expect(await repo.getMessageCount("fork-1")).toBe(1);
   });
 
-  it("moves a promoted fork's lines into its new chat, linked to their turns", async () => {
+  it("copies a promoted fork's lines into its new chat, linked to their turns, and keeps its own", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
     await repo.addMessage("out-1", "fork-1", "assistant", text("Hello"), "turn-1");
@@ -298,7 +298,8 @@ describe("ChatsWebChatRepository", () => {
     await repo.promoteForkToChat("fork-1");
 
     expect(session("fork-1")?.chatId).not.toBeNull();
-    expect(ownRows("fork-1")).toHaveLength(0);
+    // The session keeps its copy of its turns; the chat reads its own.
+    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["user", "assistant"]);
     expect(
       (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
     ).toEqual([
@@ -335,6 +336,46 @@ describe("ChatsWebChatRepository", () => {
       ["trace-1", "trace", "turn-1"],
       ["out-1", "assistant", "turn-1"],
     ]);
+  });
+
+  it("keeps the session's own copy of a turn beside its trace while the chat keeps its own", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.promoteForkToChat("fork-1");
+    const prompt = {
+      id: "in-1",
+      sessionId: "fork-1",
+      turnId: "turn-1",
+      role: "user" as const,
+      content: text("Hi"),
+    };
+    const answer = {
+      id: "out-1",
+      sessionId: "fork-1",
+      turnId: "turn-1",
+      role: "assistant" as const,
+      content: text("Hello"),
+    };
+    await repo.appendTraceBlocks({
+      messageId: "trace-1",
+      sessionId: "fork-1",
+      turnId: "turn-1",
+      startSeq: 0,
+      blocks: [{ type: "text", content: "thinking" }],
+      // The caller wrote neither in the chat, so the log says both there too.
+      transcriptMessages: [prompt, answer],
+      sessionMessages: [prompt, answer],
+    });
+
+    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["user", "trace", "assistant"]);
+    // The chat shows each once.
+    expect(
+      (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
+    ).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["trace-1", "trace", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+    expect(await repo.getMessageCount("fork-1")).toBe(3);
   });
 
   it("leaves a fork whose promotion failed a fork, so promoting it again finishes", async () => {

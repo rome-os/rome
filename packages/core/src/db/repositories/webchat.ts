@@ -294,6 +294,10 @@ export interface TraceBatch {
   blocks: unknown[];
   trigger?: RomeAgentTraceTriggerMetadata;
   transcriptMessages?: RomeAgentTranscriptMessageInput[];
+  /** The turn's prompt and answer as the session keeps them beside its
+   *  trace. A session in no chat keeps its transcript in the same rows, so
+   *  only a repository that knows the session's chat writes them apart. */
+  sessionMessages?: RomeAgentTranscriptMessageInput[];
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
@@ -302,7 +306,7 @@ export type WebchatSessionNameChangedListener = (event: {
   name: string;
 }) => void;
 
-interface TraceReadOptions {
+export interface TraceReadOptions {
   /** Dashboard reads hide all traces in sessions whose last message is at or before this cutoff. */
   sessionActivityCutoff?: Date;
   /** Reads only these trace messages (stub and blocks). Other traces of the session stay unread. */

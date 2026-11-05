@@ -164,6 +164,7 @@ function turnEntry(webchatRepo: WebChatRepository | undefined, turn: LoggedTurn)
     threadContext: turn.replies,
     ...(turn.execution ? { actionContext: turn.execution } : {}),
     persistTranscript: true,
+    keepSessionMessages: true,
     persistUserTranscript:
       (conversation.recorderOwned || !keeps?.prompt) && !conversation.promptPersisted,
     persistAssistantTranscript: () =>
@@ -217,6 +218,7 @@ async function forkWriter(
       existingSessionId: fork.forkSessionId,
       threadContext: fork.replies,
       persistTranscript: true,
+      keepSessionMessages: true,
       trigger,
     });
     return writerOf(recorder, fork.turnId, "agent-session:fork");

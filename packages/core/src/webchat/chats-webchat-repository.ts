@@ -206,15 +206,8 @@ export class ChatsWebChatRepository extends WebChatRepository {
         if (!fromAgent) this.links.prompt(lineId, id, line.turnId, line.inputState);
         else if (line.turnId !== null) this.links.answer(lineId, id, line.turnId);
       }
-      this.db
-        .delete(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, id),
-            inArray(romeAgentMessages.role, ["user", "assistant"]),
-          ),
-        )
-        .run();
+      // The session's own rows stay, as its copy of its turns. A session in a
+      // chat reads its transcript from the chat, so they no longer show.
     });
   }
 
@@ -231,8 +224,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
       const standing = this.standingOf(message.sessionId);
       return standing ? [{ message, standing }] : [];
     });
-    if (inChat.length === 0) return super.writeTraceBatch(input, now);
-    const own = said.filter((message) => !inChat.some((line) => line.message === message));
+    // A session that stands in a chat keeps its own copy of the turn's prompt
+    // and answer beside its trace, apart from the chat's. One in no chat
+    // keeps them as its transcript, which the batch already carries.
+    const kept = this.standingOf(input.sessionId) ? (input.sessionMessages ?? []) : [];
+    if (inChat.length === 0 && kept.length === 0) return super.writeTraceBatch(input, now);
+    const own = [
+      ...said.filter((message) => !inChat.some((line) => line.message === message)),
+      ...kept,
+    ];
     // Prompt, trace, answer, at the times the base class gives them.
     const sayAll = (role: "user" | "assistant", at: Date) => {
       for (const { message, standing } of inChat) {
