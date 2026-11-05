@@ -21,7 +21,7 @@ describe("createConnectedAccounts", () => {
         },
       ],
       names: async (listed) =>
-        listed.map((account) => (account.id === "bot-1" ? "Rome bot" : null)),
+        listed.map((account) => (account.id === "bot-1" ? "Rome bot" : account.id)),
     });
 
     expect(await accounts.list()).toEqual([
@@ -33,7 +33,7 @@ describe("createConnectedAccounts", () => {
       },
       {
         account: { platform: "slack", id: "U1" },
-        name: null,
+        name: "U1",
         agent: "app:helper",
         connected: false,
       },

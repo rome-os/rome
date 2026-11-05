@@ -27,8 +27,9 @@ export interface ChatRef {
 }
 
 /**
- * A thread in a chat, named by the message it hangs off: `id` is that
- * message's {@link MessageRef.id}.
+ * A thread in a chat, named by a message in it: `id` is the
+ * {@link MessageRef.id} of the message it hangs off, or of any message said
+ * in it. A thread that does not exist yet is opened off that message.
  */
 export interface ThreadRef {
   readonly chat: ChatRef;
@@ -250,9 +251,9 @@ export function chatsOver(port: ChatsPort): Chats {
 export interface ConnectedAccount {
   /** The account, by its platform and the platform's own id. */
   readonly account: Account;
-  /** What the account is called, from its profile, or null where Rome knows
-   *  no name. */
-  readonly name: string | null;
+  /** What the account is called, from its profile, else its id: never
+   *  empty, so an app always has something to show. */
+  readonly name: string;
   /** The agent that answers as the account, or null for none. */
   readonly agent: string | null;
   /** Whether a connection reaches the account now. A disconnected account

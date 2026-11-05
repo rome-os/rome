@@ -7,6 +7,7 @@
 // is decided. Nothing hears through it until the Chats switch.
 
 import type { InboundEvent, MessagesSaid, SaidInboundEvent } from "@rome-os/app-runtime";
+import type { MessageRef, Place } from "@rome-os/app-runtime/chats";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents, MessageSaid } from "../chats/storage/events.js";
 import type { InboundRecording } from "../connections/inbound-recording.js";
@@ -99,6 +100,8 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
         if (!owed.get(event)?.has(hearer)) return;
         const recorded: SaidInboundEvent = {
           ...heard,
+          ...placed(event),
+          message: { ...heard.message, ref: refOf(event) },
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },
         };
         const key = handedKey(recorded.recorded);
@@ -169,4 +172,17 @@ async function speakerOf(
     speaker: { chat: place.chat, accountId: event.via.account.id, at },
   });
   return session.id;
+}
+
+/** The message as Chats recorded it, for a hook to quote or thread off. */
+function refOf(event: MessageSaid): MessageRef {
+  const { chat } = event.message.place;
+  return { chat: { platform: chat.platform, id: chat.id }, id: event.message.id };
+}
+
+/** Where the message was said, for a hook to answer into with `deps.chats`:
+ *  the chat, or the thread it was said in, named by the message itself. */
+function placed(event: MessageSaid): { place: Place } {
+  const ref = refOf(event);
+  return { place: event.message.place.threadId === undefined ? ref.chat : ref };
 }

@@ -8,9 +8,6 @@
 // main agent, recorded once the platform took it. Nothing here guesses a
 // destination: a place is a ref Chats handed out, and a direct message is
 // opened only by `dm`, through the channel's own direct messaging.
-//
-// Nothing wires this to apps yet: the Chats switch does, once chats are
-// named by Chats' ids.
 
 import { partsWithText } from "../chats/storage/message.js";
 import { type Account, type Channel, type ChatId, isSendRefused } from "@rome-os/app-runtime";

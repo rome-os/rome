@@ -156,6 +156,9 @@ describe("messagesSaid", () => {
     expect(event?.message.text).toBe("Hello");
     const line = lines()[0];
     expect(event?.recorded.messageId).toBe(String(line?.id));
+    const chat = { platform: "telegram", id: line?.chatId };
+    expect(event?.place).toEqual(chat);
+    expect(event?.message.ref).toEqual({ chat, id: line?.id });
     const session = testDb.db
       .select()
       .from(romeSessions)
@@ -164,6 +167,20 @@ describe("messagesSaid", () => {
     expect(session?.chatId).toBe(line?.chatId);
     expect(session?.accountId).toBe(BOT.id);
     expect(session?.threadId).toBeNull();
+  });
+
+  it("names a message said in a thread as the place to answer into", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    await telegram.deliver(message({ chatId: "-100200:7" as ChatId, parentChatId: GROUP }));
+    await settled();
+
+    const line = lines()[0];
+    expect(line?.threadId).not.toBeNull();
+    const chat = { platform: "telegram", id: line?.chatId };
+    expect(heard[0]?.place).toEqual({ chat, id: line?.id });
   });
 
   it("neither records nor hears a redelivery twice", async () => {

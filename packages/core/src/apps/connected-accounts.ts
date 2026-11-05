@@ -12,7 +12,7 @@ export interface ConnectedAccountsDeps {
   /** Every connected account, disconnected ones included. */
   rows: () => readonly ConnectedAccountRow[];
   /** What each account is called, from its profile, in the order given. */
-  names: (accounts: readonly Account[]) => Promise<ReadonlyArray<string | null>>;
+  names: (accounts: readonly Account[]) => Promise<readonly string[]>;
 }
 
 export function createConnectedAccounts(deps: ConnectedAccountsDeps): ConnectedAccounts {
@@ -23,7 +23,7 @@ export function createConnectedAccounts(deps: ConnectedAccountsDeps): ConnectedA
       const names = await deps.names(accounts);
       return rows.map((row, index) => ({
         account: accounts[index]!,
-        name: names[index] ?? null,
+        name: names[index] ?? accounts[index]!.id,
         agent: row.agent,
         connected: row.connectionId !== null,
       }));
