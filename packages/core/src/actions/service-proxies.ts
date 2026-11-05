@@ -323,6 +323,14 @@ export class ChannelsServiceProxy implements ChannelsService {
       }),
     );
   }
+
+  callTool(
+    channel: Account | string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    return callMain<unknown>("channels.tool", { channel, tool, args });
+  }
 }
 
 export class ChatSettingsControlProxy implements ChatSettingsControl {

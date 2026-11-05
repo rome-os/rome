@@ -1,0 +1,8 @@
+name: telegram_read_history
+type: system
+description: >-
+  Read the messages a Telegram bot kept of a chat, newest first: what Telegram delivered to the bot and what it said. Telegram itself gives a bot no history. Defaults to the chat this run was woken in. Page back with before.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

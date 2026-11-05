@@ -1,0 +1,8 @@
+name: telegram_react
+type: system
+description: >-
+  React to a Telegram message with one of the emoji Telegram allows as a reaction, as the bot this run was woken through. An empty emoji takes the reaction back.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

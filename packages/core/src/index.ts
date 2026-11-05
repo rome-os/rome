@@ -122,7 +122,11 @@ import { ConnectionPacing } from "./participation/reply-delivery/connection-paci
 import { ReplyStreams } from "./participation/reply-delivery/streams.js";
 import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
 import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
-import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
+import {
+  backingConnection,
+  createChannelsService,
+  emailConnection,
+} from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
   WechatUserReader,
@@ -1132,6 +1136,10 @@ async function main() {
       webchatRepo,
       // Catch-up reads what was said where the session stands from Chats.
       turnLinks: chatsWired.links,
+      connectionToolsGuide: (channel) =>
+        backingConnection(connectionRegistry, channel, channelOf)?.withTalker(
+          (talker) => talker.tools?.guide,
+        ) ?? null,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,

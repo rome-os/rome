@@ -243,7 +243,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           try {
             const opened = await this.replyStreams?.open({
               channel: thread.channel,
-              ...(lines?.prompt ? { replyTo: lines.prompt } : {}),
+              ...(lines?.prompt
+                ? { replyTo: lines.prompt }
+                : req.platformMessageId
+                  ? { replyToPlatformId: req.platformMessageId }
+                  : {}),
               // The transcript leaves the answer to the reply, so the reply
               // records it in the conversation the turn is recorded in.
               romeSessionId,

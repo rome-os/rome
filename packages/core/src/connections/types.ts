@@ -35,7 +35,22 @@ export interface TalkDirectory {
   }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
 }
 
+/**
+ * The tools a connection kind gives an agent woken through it. Each kind
+ * names its own tools and their arguments, as its platform reads: Discord
+ * reads a channel's messages before a message id, a Telegram bot reads the
+ * history it keeps itself. Nothing shares a shape across kinds. Tool names
+ * start with the kind's name, so an agent finds them by it.
+ */
+export interface ConnectionTools {
+  /** What an agent is told at a wake about the tools here, in its words. */
+  readonly guide: string;
+  /** Run tool `tool`. Rejects on a tool it does not have, or bad arguments. */
+  call(tool: string, args: Record<string, unknown>): Promise<unknown>;
+}
+
 export interface TalkFeatureMap {
+  tools: ConnectionTools;
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;

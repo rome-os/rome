@@ -192,6 +192,15 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       query,
+
+      async callTool(target, tool, args) {
+        const { channel } = resolve(target);
+        const backing = backingConnection(deps.registry, channel, deps.channelOf);
+        if (!backing) throw new Error(`No connection backs "${channel}"`);
+        const called = backing.withTalker((talker) => talker.tools?.call(tool, args));
+        if (!called) throw new Error(`The connection behind "${channel}" has no tool ${tool}`);
+        return called;
+      },
     },
     REMOVED_SERVICE_MEMBERS,
   );

@@ -1,0 +1,8 @@
+name: discord_read_messages
+type: system
+description: >-
+  Read a Discord channel's or thread's messages from Discord itself, newest first, up to 100 at a time. Defaults to the channel this run was woken in. Page back with before (a message id) or forward with after.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

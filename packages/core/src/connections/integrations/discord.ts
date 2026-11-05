@@ -19,6 +19,7 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
+import { discordTools } from "../kinds/discord/discord-tools.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
@@ -346,6 +347,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             activity,
             directory,
             replyDelivery: adapter.replyDelivery(),
+            tools: discordTools(adapter),
           };
           return {
             start(deliver, fault): void {

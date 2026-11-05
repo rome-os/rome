@@ -269,6 +269,20 @@ export function discordInboundText(
 }
 
 /** A guild channel as surfaced to callers resolving a "#name" → snowflake. */
+/** A message as Discord holds it, as `discord_read_messages` answers it. */
+export interface DiscordHistoryMessage {
+  id: string;
+  author: string;
+  authorId: string;
+  bot?: true;
+  /** Said by this bot. */
+  you?: true;
+  at: string;
+  text: string;
+  replyTo?: string;
+  attachments?: string[];
+}
+
 export interface GuildChannelInfo {
   id: string;
   name: string;
@@ -1548,6 +1562,47 @@ Use \`/channel agent clear\` to undo.`,
    *  its Discord CDN link, so the message needs no provider event. */
   async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
     return saveUrlAttachments({ ...message, channel: "discord" });
+  }
+
+  /**
+   * Up to `limit` messages of Discord channel or thread `channelId`, newest
+   * first, before message `before` (or the newest when absent), as Discord
+   * holds them. Needs the Read Message History permission there.
+   */
+  async readMessages(
+    channelId: string,
+    options: { limit: number; before?: string; after?: string },
+  ): Promise<DiscordHistoryMessage[]> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel?.isTextBased()) throw new Error(`Discord channel ${channelId} holds no messages`);
+    const page = await channel.messages.fetch({
+      limit: Math.min(Math.max(options.limit, 1), 100),
+      ...(options.before ? { before: options.before } : {}),
+      ...(options.after ? { after: options.after } : {}),
+    });
+    const botId = this.client.user?.id;
+    return [...page.values()].map((message) => ({
+      id: message.id,
+      author: message.member?.displayName ?? message.author.displayName ?? message.author.username,
+      authorId: message.author.id,
+      ...(message.author.bot ? { bot: true } : {}),
+      ...(botId && message.author.id === botId ? { you: true } : {}),
+      at: message.createdAt.toISOString(),
+      text: message.content,
+      ...(message.reference?.messageId ? { replyTo: message.reference.messageId } : {}),
+      ...(message.attachments.size > 0
+        ? { attachments: [...message.attachments.values()].map((each) => each.name ?? each.url) }
+        : {}),
+    }));
+  }
+
+  /** React to message `messageId` in channel `channelId` with `emoji`: a
+   *  Unicode emoji, or a server emoji as `name:id`. */
+  async react(channelId: string, messageId: string, emoji: string): Promise<void> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel?.isTextBased()) throw new Error(`Discord channel ${channelId} holds no messages`);
+    const message = await channel.messages.fetch(messageId);
+    await message.react(emoji);
   }
 
   async notifyTyping(threadId: string): Promise<void> {

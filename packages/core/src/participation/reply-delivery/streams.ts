@@ -23,6 +23,9 @@ export interface ReplyTarget {
   channel: string;
   /** The message the reply answers, by its id in Chats. */
   replyTo?: number;
+  /** The message the reply answers, by the platform's id, where Chats holds
+   *  no copy of it. */
+  replyToPlatformId?: string;
   /** The conversation the run's turn is recorded in. */
   romeSessionId: string;
   turnId: string;
@@ -83,6 +86,9 @@ export class ReplyStreams {
     const reply = await speakers.replies.stream(target.romeSessionId, channel, {
       turnId: target.turnId,
       ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
+      ...(target.replyToPlatformId === undefined
+        ? {}
+        : { replyToPlatformId: target.replyToPlatformId }),
       ...(target.agent === undefined ? {} : { agent: target.agent }),
       policy: this.deps.policy ?? DEFAULT_POLICY,
       clock: this.deps.clock,

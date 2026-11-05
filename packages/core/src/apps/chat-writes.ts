@@ -52,7 +52,7 @@ export interface AppChatWritesDeps {
   speakers: Pick<Speakers, "speakerOf">;
   /** What a speaker says, recorded and linked to its turn. */
   replies: Pick<SpeakerReplies, "send" | "agentOf">;
-  links: Pick<TurnLinks, "prompt" | "answer">;
+  links: Pick<TurnLinks, "prompt" | "answer" | "promptHeard">;
   /** The messages an app names by the platform's ids. */
   lines: Pick<SpeakerMessages, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
   adapters: Pick<ChatAdapters, "of" | "keyOf" | "accountOn">;
@@ -276,6 +276,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     async promoteMessageToUser(sessionId, platformMessageId) {
       const line = await deps.lines.recorded(sessionId, platformMessageId);
       if (line) deps.links.prompt(line.id, sessionId);
+      // A message heard and not recorded is the turn's prompt, not something
+      // to catch up on.
+      else deps.links.promptHeard(sessionId, platformMessageId);
     },
 
     async send(input) {

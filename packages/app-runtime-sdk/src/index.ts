@@ -1745,6 +1745,16 @@ export interface ChannelsService {
    * through `send` may not appear until that read expires.
    */
   query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  /**
+   * Run one of the tools the connection behind an account gives, such as
+   * `discord_read_messages`. Each connection kind names its own tools and
+   * arguments. Absent on a host that predates connection tools.
+   */
+  callTool?(
+    account: Account | string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */

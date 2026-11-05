@@ -12,6 +12,7 @@ import type { ChatEvents, MessageSaid } from "../chats/storage/events.js";
 import type { InboundRecording } from "../connections/inbound-recording.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { TurnLinks } from "./turn-links.js";
+import { plainText } from "../chats/storage/message.js";
 
 export interface MessagesSaidDeps {
   /** Where a message's chat is found, for its kind. */
@@ -22,7 +23,7 @@ export interface MessagesSaidDeps {
   recording: Pick<InboundRecording, "listen" | "heard">;
   events: ChatEvents;
   /** Holds a message out of every catch-up until its wake is decided. */
-  wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
+  wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided"> & Partial<Pick<TurnLinks, "heard">>;
 }
 
 /**
@@ -97,6 +98,17 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
         }
         // A hook that left while its session opened is owed nothing more.
         if (!owed.get(event)?.has(hearer)) return;
+        // Heard and not recorded: it waits in memory for the session to catch
+        // up on it, unless a turn takes it as its prompt.
+        if (event.onRecord === false) {
+          deps.wakes.heard?.(speaker, {
+            id: event.message.id,
+            platformMessageId: heard.message.messageId,
+            senderName: event.message.saidBy.name ?? null,
+            text: plainText(event.message.body),
+            at: event.message.at,
+          });
+        }
         const recorded: SaidInboundEvent = {
           ...heard,
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },

@@ -392,6 +392,9 @@ interface ManagerDeps {
    *  catch-up reads and marks. Absent, a channel session catches up on
    *  nothing. */
   turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+  /** What the connection behind a channel says about its tools, told to an
+   *  agent at each wake there, or null where it gives none. */
+  connectionToolsGuide?: (channel: string) => string | null;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
@@ -3429,6 +3432,10 @@ class AgentSessionImpl implements AgentSession {
           omittedNotificationCount: unseen.length - shown.length,
           repliedTo,
         });
+        const guide = this.deps.connectionToolsGuide?.(channel);
+        if (guide) {
+          userPrompt = `<connection_tools channel="${channel}" chat="${sink.threadContext?.threadId ?? ""}">\n${guide}\n</connection_tools>\n\n${userPrompt}`;
+        }
       }
       // Every turn, subagents included: the folder is where the work happens.
       const deviceFolderBlock = buildDeviceFolderBlock(tc);

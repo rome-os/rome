@@ -22,6 +22,10 @@ import { tokenPaste } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { addressIsConversationFeature } from "./talk-features.js";
+import { join } from "node:path";
+import { getProfileDir } from "../../paths.js";
+import { TelegramHistory } from "../kinds/telegram/telegram-history.js";
+import { telegramTools } from "../kinds/telegram/telegram-tools.js";
 
 /**
  * True iff `err` is a Telegram "credential refused" — a grammy `GrammyError`
@@ -104,6 +108,8 @@ export function telegramProfileFromSettings(
  */
 export interface TelegramDescriptorDeps {
   createBot?: CreateTelegramBot;
+  /** Where bot `botId` keeps its history. Absent, under the profile. */
+  historyDir?: (botId: string) => string;
   /** Injectable identity probe for the setup: validates the pasted token
    *  AND returns the bot's getMe identity in one call. Production hits the
    *  Telegram Bot API (honoring the setup's abort signal); tests inject a fake.
@@ -226,8 +232,15 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             );
           };
 
+          // A bot token starts with the bot's id, so the history follows the
+          // bot across reconnects.
+          const botId = token.token.split(":")[0] || "unknown";
+          const history = new TelegramHistory(
+            deps.historyDir?.(botId) ??
+              join(getProfileDir(), "connections", "telegram", botId, "history"),
+          );
           const adapter = new TelegramAdapter(
-            { botToken: token.token, onPollingError: routeFault },
+            { botToken: token.token, onPollingError: routeFault, history },
             createBot,
           );
 
@@ -239,6 +252,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             // id, so the address is already the conversation.
             directMessaging: addressIsConversationFeature(),
             replyDelivery: adapter.replyDelivery(),
+            tools: telegramTools(adapter, history),
           };
           return {
             start(deliver, fault): void {

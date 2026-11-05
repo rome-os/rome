@@ -8,7 +8,12 @@ import type { Channel, ChatId } from "@rome-os/app-runtime";
 import type { DeliveryPolicy } from "../connections/sending.js";
 import type { OutboundMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
-import type { ChatAdapters, Outbound, StreamedReply } from "../connections/chat-adapter.js";
+import {
+  messageKeyAt,
+  type ChatAdapters,
+  type Outbound,
+  type StreamedReply,
+} from "../connections/chat-adapter.js";
 import type { Clock } from "../lib/clock.js";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
@@ -173,6 +178,9 @@ export class SpeakerReplies {
     options: {
       turnId: string;
       replyTo?: number;
+      /** The message it answers by the platform's id, where Chats holds no
+       *  copy of it. */
+      replyToPlatformId?: string;
       /** The agent whose turn writes the reply, when it is not the one the
        *  session names, as an account's own agent is not. */
       agent?: string;
@@ -187,7 +195,12 @@ export class SpeakerReplies {
     const chat = this.deps.adapters.keyOf(speaker.place.chat);
     // A key names a message only in its own chat.
     const line = replyTo === undefined ? undefined : this.deps.messages.byIds([replyTo])[0];
-    const quoted = line?.place.chat.id === speaker.place.chat.id ? line.key : null;
+    const quoted =
+      line?.place.chat.id === speaker.place.chat.id
+        ? line.key
+        : options.replyToPlatformId === undefined
+          ? null
+          : messageKeyAt(chat, speaker.accountId, options.replyToPlatformId);
     const reply = adapter.stream?.(chat.externalId, speaker.place.threadId ?? null, {
       ...(quoted === null ? {} : { replyTo: quoted }),
       policy: options.policy,

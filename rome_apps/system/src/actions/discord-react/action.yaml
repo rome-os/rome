@@ -1,0 +1,8 @@
+name: discord_react
+type: system
+description: >-
+  React to a Discord message with an emoji, as the bot this run was woken through.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

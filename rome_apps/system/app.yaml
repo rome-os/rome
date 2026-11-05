@@ -31,6 +31,8 @@ actions:
   - actions/app-store-search
   - actions/create-routine
   - actions/delete-routine
+  - actions/discord-read-messages
+  - actions/discord-react
   - actions/conversation-settings-manage
   - actions/email-inbound
   - actions/execute-root-script
@@ -50,3 +52,5 @@ actions:
   - actions/show-app
   - actions/summon
   - actions/system-upgrade
+  - actions/telegram-read-history
+  - actions/telegram-react

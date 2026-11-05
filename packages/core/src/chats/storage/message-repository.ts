@@ -20,6 +20,7 @@ import {
 } from "./message.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import { placeIn, type ChatRef, type Place } from "./place.js";
+import { keepsCopies } from "../platform-copies.js";
 
 const log = createLogger("chat-messages");
 
@@ -133,6 +134,11 @@ export class MessageRepository {
       chat: chat.key,
       ...(quoted ? { replyTo: quoted } : {}),
     });
+    // A platform Chats keeps no copy of holds the message itself: the send
+    // answers the platform's key and nothing goes on record.
+    if (!keepsCopies(message.place.chat.platform)) {
+      return { id: null, key, recorded: false, at: new Date() };
+    }
     // The message is on record where the platform put it.
     const threadId = landedIn ? landedIn.threadId : (message.place.threadId ?? null);
     const at = new Date();

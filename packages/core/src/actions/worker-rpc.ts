@@ -78,6 +78,14 @@ const ChannelsQueryParams = z
   })
   .strict();
 
+const ChannelsToolParams = z
+  .object({
+    channel: AccountOrChannel,
+    tool: z.string().min(1),
+    args: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
 const ChatRefParams = z.object({
@@ -323,6 +331,12 @@ export class WorkerRpcServer {
             parseParams("approvals.sendCard", ApprovalCardParams, params),
           ),
         "channels.query": (params) => this.handleChannelsQuery(params),
+        "channels.tool": (params) => {
+          const { channel, tool, args } = parseParams("channels.tool", ChannelsToolParams, params);
+          const call = this.services.channelsService.callTool;
+          if (!call) throw new Error("This host gives no connection tools");
+          return call.call(this.services.channelsService, channel, tool, args);
+        },
         "agentNames.resolve": (params) => {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
           return this.services.agentNames.resolve(name);

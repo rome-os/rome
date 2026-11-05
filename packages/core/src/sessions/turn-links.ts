@@ -15,6 +15,7 @@ import { MessageRepository } from "../chats/storage/message-repository.js";
 import { romeSessions } from "../db/schema/system.js";
 import { messageHolder, type MessageHolder } from "../connections/chat-adapter.js";
 import type { SaidMessage } from "../chats/storage/message.js";
+import { CatchUpBuffer, type HeardMessage } from "./catch-up-buffer.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a message
  *  the turn caught up on. */
@@ -38,6 +39,9 @@ export class TurnLinks {
    * every wake in flight, since the decision died with the process.
    */
   private readonly undecided = new Map<number, number>();
+
+  /** What each session has not seen on a platform Chats keeps no copy of. */
+  private readonly buffer = new CatchUpBuffer();
 
   /** Chats' reads, which every message a session reads goes through. */
   private readonly messages: Pick<MessageRepository, "read" | "byIds">;
@@ -164,6 +168,11 @@ export class TurnLinks {
   /** Mark `messageIds` caught up on by turn `turnId` of session `sessionId`.
    *  A message the session already linked keeps its link. */
   seen(messageIds: readonly number[], sessionId: string, turnId: string): void {
+    // A message heard and not recorded is let go: nothing links to it.
+    this.buffer.seen(
+      messageIds.filter((id) => id < 0),
+      sessionId,
+    );
     // Only messages Chats holds: one gone since is nothing to link.
     const held = this.messages.byIds(messageIds).map((message) => message.id);
     if (held.length === 0) return;
@@ -212,6 +221,10 @@ export class TurnLinks {
    * seen on the way, with no turn. A copy of an undecided message waits with it.
    */
   unseen(sessionId: string): UnseenLine[] {
+    // Where Chats keeps no copy, the record holds nothing: what was heard
+    // waits in memory instead.
+    const heard = this.buffer.unseen(sessionId);
+    if (heard.length > 0) return heard;
     const speaker = this.speakerOf(sessionId);
     if (!speaker) return [];
     // A message said in the second the speaker started may have come before it, so
@@ -317,7 +330,22 @@ export class TurnLinks {
   wakeDecided(messageId: number): void {
     const deciding = this.undecided.get(messageId) ?? 0;
     if (deciding > 1) this.undecided.set(messageId, deciding - 1);
-    else this.undecided.delete(messageId);
+    else {
+      this.undecided.delete(messageId);
+      this.buffer.decided(messageId);
+    }
+  }
+
+  /** Message `message`, heard and not recorded, waits for session
+   *  `sessionId` to catch up on it, once its wake is decided. */
+  heard(sessionId: string, message: HeardMessage): void {
+    this.buffer.heard(sessionId, message);
+  }
+
+  /** Session `sessionId` takes the heard message the platform calls
+   *  `platformMessageId` as a turn's prompt, so it never catches up on it. */
+  promptHeard(sessionId: string, platformMessageId: string): void {
+    this.buffer.prompted(sessionId, platformMessageId);
   }
 }
 

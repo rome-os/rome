@@ -9,7 +9,9 @@
 import type { Channel, InboundEvent } from "@rome-os/app-runtime";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents } from "../chats/storage/events.js";
-import { messageToRome } from "../chats/storage/message.js";
+import { messageToRome, type RecordedMessage } from "../chats/storage/message.js";
+import { keepsCopies } from "../chats/platform-copies.js";
+import { InboundDedup } from "./inbound/inbound-dedup.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
 import { createLogger } from "../logger.js";
@@ -65,6 +67,13 @@ export function inboundRecording(
   /** The adapter's keys of each message being heard, by channel and recorded
    *  id. */
   const hearing = new Map<string, { chat: string; key: string }>();
+  /** What each of Rome's accounts already heard on a platform Chats keeps no
+   *  copy of, by channel, chat and the adapter's key. Kept in memory: a
+   *  redelivery after a restart wakes again. */
+  const heardOnce = new InboundDedup(10_000);
+  /** Ids for messages heard and not recorded, counted down from -1 so they
+   *  never name a message on record. */
+  let unrecorded = 0;
 
   /** The last recording queued in each place, by platform, chat and thread.
    *  Each of Rome's accounts in a place delivers its messages through its own
@@ -100,10 +109,26 @@ export function inboundRecording(
       ...(message.replyTo ? { replyTo: message.replyTo } : {}),
       at: message.saidAt,
     });
-    const recorded = deps.messages.record(said);
+    // On a platform Chats keeps no copy of, each of Rome's accounts hears a
+    // message once, and each wakes its own agent: there is no record to tell
+    // one account's hearing from another's.
+    const copied = keepsCopies(chat.ref.platform);
+    if (
+      !copied &&
+      heardOnce.checkAndRecord(`${via.channel}\0${message.chat.externalId}\0${message.key}`)
+    ) {
+      return null;
+    }
+    const recorded: RecordedMessage | null = copied
+      ? deps.messages.record(said)
+      : (() => {
+          const { replyTo: _quoted, ...rest } = said;
+          unrecorded -= 1;
+          return { ...rest, id: unrecorded };
+        })();
     // Heard already, through this account or another of Rome's: a message
-    // is heard once, so only the first account to hear it decides its wake.
-    // Waking each account that hears it is an open design question.
+    // on record is heard once, so only the first account to hear it decides
+    // its wake.
     if (recorded === null) return null;
     const hearingAs = `${via.channel}\0${recorded.id}`;
     hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
@@ -112,6 +137,7 @@ export function inboundRecording(
         type: "MessageSaid",
         message: recorded,
         via: { channel: via.channel, account: via.account },
+        ...(copied ? {} : { onRecord: false as const }),
       });
     } finally {
       hearing.delete(hearingAs);

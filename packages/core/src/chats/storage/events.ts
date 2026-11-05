@@ -24,6 +24,9 @@ export interface MessageSaid {
   readonly type: "MessageSaid";
   readonly message: RecordedMessage;
   readonly via: Via;
+  /** False for a message said on a platform Chats keeps no copy of: it was
+   *  heard, not recorded, and its id names it only in this process. */
+  readonly onRecord?: false;
 }
 
 export type ChatEvent = MessageSaid;

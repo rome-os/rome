@@ -1,5 +1,6 @@
 import { Bot, type Context, InputFile } from "grammy";
 import { telegramTransport } from "./reply-writes.js";
+import type { TelegramHistory } from "./telegram-history.js";
 import type { DeliveryTransport } from "../../sending.js";
 import { Marked, Renderer, type Token } from "marked";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
@@ -114,7 +115,12 @@ export class TelegramAdapter {
   private onPollingError?: (err: unknown) => void;
 
   constructor(
-    private config: { botToken: string; onPollingError?: (err: unknown) => void },
+    private config: {
+      botToken: string;
+      onPollingError?: (err: unknown) => void;
+      /** Where the bot keeps what it heard and said, for its history tool. */
+      history?: TelegramHistory;
+    },
     createBot: CreateTelegramBot = (botToken) => new Bot(botToken),
   ) {
     this.bot = createBot(config.botToken);
@@ -194,6 +200,17 @@ export class TelegramAdapter {
         chatId: msg.chatId,
         threadKind: msg.thread?.kind,
       });
+      this.config.history?.keep(msg.chatId, {
+        id: msg.messageId,
+        from: msg.senderDisplayName ?? msg.senderId,
+        fromId: msg.senderId,
+        at: msg.timestamp.toISOString(),
+        text: msg.text,
+        ...(msg.replyTo?.messageId ? { replyTo: msg.replyTo.messageId } : {}),
+        ...(msg.attachments.length > 0
+          ? { attachments: msg.attachments.map((each) => each.type) }
+          : {}),
+      });
 
       try {
         await this.handler!(msg);
@@ -232,7 +249,53 @@ export class TelegramAdapter {
 
   /** Streams replies through this adapter's bot, so its writes share its client. */
   replyDelivery(): DeliveryTransport {
-    return telegramTransport(this.bot.api);
+    const transport = telegramTransport(this.bot.api);
+    const history = this.config.history;
+    if (!history) return transport;
+    const { edit } = transport;
+    return {
+      ...transport,
+      create: async (chat, text, replyTo) => {
+        const receipt = await transport.create(chat, text, replyTo);
+        if (receipt.messageId) {
+          history.keep(receipt.chatId ?? chat, {
+            ...this.said(receipt.messageId, text),
+            ...(replyTo ? { replyTo } : {}),
+          });
+        }
+        return receipt;
+      },
+      ...(edit
+        ? {
+            edit: async (receipt, text) => {
+              await edit(receipt, text);
+              if (receipt.messageId) history.revise(receipt.chatId ?? "", receipt.messageId, text);
+            },
+          }
+        : {}),
+    };
+  }
+
+  /** What the bot said, as its history keeps it. */
+  private said(id: string, text: string) {
+    return {
+      id,
+      from: "you",
+      fromId: String(this.bot.botInfo?.id ?? ""),
+      at: new Date().toISOString(),
+      text,
+    };
+  }
+
+  /** React to message `messageId` in chat `chatId` with `emoji`, one of the
+   *  emoji Telegram allows as a reaction, or take the bot's reaction back
+   *  when `emoji` is empty. */
+  async react(chatId: string, messageId: string, emoji: string): Promise<void> {
+    await this.bot.api.setMessageReaction(
+      chatId,
+      Number(messageId),
+      emoji ? [{ type: "emoji", emoji: emoji as never }] : [],
+    );
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
@@ -293,6 +356,13 @@ export class TelegramAdapter {
       }
 
       log.info("message sent", { threadId });
+      if (messageId) {
+        this.config.history?.keep(threadId, {
+          ...this.said(messageId, text ?? ""),
+          ...(replyId === undefined ? {} : { replyTo: String(replyId) }),
+          ...(attachments.length > 0 ? { attachments: attachments.map((each) => each.type) } : {}),
+        });
+      }
       return { chatId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
