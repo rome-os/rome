@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { InputFile } from "grammy";
+import { TelegramHistory } from "./telegram-history.js";
 import { TelegramAdapter } from "./telegram.js";
 import { FakeTelegramApi } from "../../../test/kit/fake-telegram.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
@@ -99,6 +100,23 @@ describe("TelegramAdapter", () => {
         },
       ]);
       expect(captured[0]).not.toHaveProperty("replyTo");
+    });
+
+    it("wakes no agent on another bot's message, and keeps it in the bot's history", async () => {
+      await adapter.stop().catch(() => {});
+      const history = new TelegramHistory(join(sandboxHome, "history"));
+      adapter = new TelegramAdapter({ botToken: "test-token", history }, telegram.createBot);
+      const captured = await startCapturing();
+
+      await telegram.emitUpdate(
+        makeUpdate({
+          from: { id: 222, is_bot: true, first_name: "Other" },
+          chat: { id: -555, type: "group" },
+        }),
+      );
+
+      expect(captured).toEqual([]);
+      expect(history.read("-555", { limit: 10 }).map((m) => m.fromId)).toEqual(["222"]);
     });
 
     it("recognizes commands addressed to this bot in groups", async () => {

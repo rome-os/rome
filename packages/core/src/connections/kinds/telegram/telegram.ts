@@ -211,6 +211,16 @@ export class TelegramAdapter {
           ? { attachments: msg.attachments.map((each) => each.type) }
           : {}),
       });
+      // Another bot's message wakes no agent, so two bots never answer each
+      // other without end. The bot still keeps it, so its history tool reads
+      // it. Telegram delivers one only with Bot-to-Bot Communication Mode on.
+      if (rawMsg.from?.is_bot) {
+        log.debug("not waking on another bot's message", {
+          chatId: msg.chatId,
+          from: msg.senderId,
+        });
+        return;
+      }
 
       try {
         await this.handler!(msg);
