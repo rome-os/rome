@@ -524,15 +524,15 @@ export interface LifecycleThreadContext {
  *   a hook or an action that reads its caller back sees a `place` whose
  *   `connection` is the agent's name.
  *
- * `chatId` on a place or an execution names the conversation its turns are
- * recorded in, when the caller knows it.
+ * A caller is identity only. The conversation a run's turns are recorded in
+ * is its own field, `RunParams.romeSessionId`.
  */
 export type SessionCaller =
   | { kind: "chat"; chatId: string }
-  | { kind: "place"; connection: string; place: string; watcher?: boolean; chatId?: string }
+  | { kind: "place"; connection: string; place: string; watcher?: boolean }
   | { kind: "parent-turn"; parent: SessionCaller; childId: string }
   | { kind: "fork-point"; source: SessionCaller; forkSessionId: string }
-  | { kind: "execution"; id: string; chatId?: string };
+  | { kind: "execution"; id: string };
 
 export interface AgentTurnRef {
   sessionId: string;
@@ -1187,15 +1187,15 @@ export interface RunParams {
    * without it ignore them.
    */
   images?: string[];
-  /**
-   * Whatever hands the session this input. The agent and the caller find the
-   * session; a caller's `chatId` names the conversation its turns record in.
-   */
+  /** Whatever hands the session this input. The agent and the caller find the session. */
   caller?: SessionCaller;
   /** @deprecated Pass `caller`. */
   channelThreadKey?: string;
   threadContext?: ThreadContext;
-  /** @deprecated Pass the conversation as the caller's `chatId`. */
+  /**
+   * The conversation this run's turns are recorded in, when the caller knows
+   * it. A dashboard chat's caller names its own chat.
+   */
   romeSessionId?: string;
   /** Platform id of the inbound message that triggers this turn. */
   platformMessageId?: string;

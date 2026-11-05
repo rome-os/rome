@@ -87,34 +87,9 @@ export function callerConnection(caller: SessionCaller): string | undefined {
   }
 }
 
-/** The conversation a caller names for its turns, if any. */
-export function callerChatId(caller: SessionCaller): string | undefined {
-  switch (caller.kind) {
-    case "chat":
-      return caller.chatId;
-    case "place":
-    case "execution":
-      return caller.chatId;
-    case "parent-turn":
-    case "fork-point":
-      return undefined;
-  }
-}
-
-/** The caller with `chatId` as the conversation it names, where its kind can
- *  name one. A chat names itself already. */
-export function withChatId(caller: SessionCaller, chatId: string | undefined): SessionCaller {
-  if (!chatId) return caller;
-  return caller.kind === "place" || caller.kind === "execution" ? { ...caller, chatId } : caller;
-}
-
 /** The caller a stored key names, or a fresh run's when there is none. */
-export function callerOfRun(
-  agentName: string,
-  key: string | undefined,
-  chatId?: string,
-): SessionCaller {
-  return withChatId(key ? callerFromKey(key) : adhocCaller(agentName), chatId);
+export function callerOfRun(agentName: string, key: string | undefined): SessionCaller {
+  return key ? callerFromKey(key) : adhocCaller(agentName);
 }
 
 /** The chat a caller is when it is a dashboard chat's own session. */

@@ -5216,6 +5216,45 @@ describe("AgentRunner", () => {
       await expect(chats.getTraceContents("resumed-chat")).resolves.toEqual([]);
     });
 
+    it.each([
+      ["a resume by id", { sessionId: "resumed" }],
+      [
+        "a run that names its caller",
+        { caller: { kind: "place", connection: "inbox", place: "item-1" } },
+      ],
+    ] as const)("%s keeps its turn in the conversation it names", async (_name, how) => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const modelResolver = createModelResolver({
+        providers: [codexProvider([])],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+      const chats = new ChatsWebChatRepository(testDb.db);
+      await chats.createSession("named-chat", "Named chat");
+      const sessionId = await new SessionsRepository(testDb.db).create({
+        agentName: "test-main",
+        channelThreadKey: "test-main:run-1",
+        status: "active",
+      });
+
+      const manager = createTestSessionManager(managerDeps(modelResolver));
+      const runner = new AgentRunner(manager, agentLoader, chats);
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Continue",
+          romeSessionId: "named-chat",
+          ...("sessionId" in how ? { sessionId } : { caller: how.caller }),
+        }),
+      );
+      await manager.shutdown();
+
+      const trace = await chats.getTraceContents("named-chat");
+      expect(trace.length).toBeGreaterThan(0);
+    });
+
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
       const state = {
         codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
