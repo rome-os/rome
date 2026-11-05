@@ -1,8 +1,4 @@
 {
-  "typecheckErrors": 37,
-  "unitFailures": [
-    "../../rome_apps/inbox/src/actions/message-handler/index.test.ts",
-    "../../rome_apps/inbox/src/hooks/channel-message/channel-message.test.ts",
-    "src/api/routes/projects-files.test.ts"
-  ]
+  "typecheckErrors": 0,
+  "unitFailures": ["src/api/routes/projects-files.test.ts"]
 }
