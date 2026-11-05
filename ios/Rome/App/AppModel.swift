@@ -106,6 +106,7 @@ final class AppModel {
     let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
     /// Keeps the open instance on its latest release.
     let update = InstanceUpdater()
+    static let updateCheckHold: Duration = .seconds(1)
 
     /// The open instance's Web dashboard.
     var webURL: URL? {
@@ -303,13 +304,18 @@ final class AppModel {
 
     private func open(_ workspace: Workspace) async {
         self.workspace = workspace
-        phase = .ready
         // Its own task: the poll that reports the finish is cancelled when the
         // reopened workspace attaches, and would cancel the reopen with it.
         update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
         if let id = currentInstanceID {
             Task { await update.attach(backend: workspace.backend, instanceID: id) }
+            // Hold the loading state briefly for the check, so a Rome that is
+            // behind goes straight to the update page instead of showing Chat
+            // first. A slow check does not hold the app: the page covers Chat
+            // when the answer comes.
+            await update.waitForFirstAnswer(upTo: Self.updateCheckHold)
         }
+        phase = .ready
         await workspace.start()
     }
 

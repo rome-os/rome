@@ -27,7 +27,11 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Palette.bg.ignoresSafeArea()
-            if model.phase == .ready, let workspace = model.workspace {
+            // Nothing under the update page, so a page that arrives with the app
+            // never shows Chat through while it fades in.
+            if model.update.blocking {
+                Color.clear
+            } else if model.phase == .ready, let workspace = model.workspace {
                 MainShell(workspace: workspace)
                     .id(ObjectIdentifier(workspace))
                     .transition(.opacity)
