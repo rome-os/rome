@@ -78,7 +78,8 @@ describe("Settings connections request states", () => {
       return ok({
         connections: [
           {
-            id: "conn-email",
+            id: null,
+            state: null,
             connectionKind: "email",
             label: "Email",
             grants: { inbox: "unauthorized" },

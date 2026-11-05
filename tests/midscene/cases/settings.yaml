@@ -16,7 +16,8 @@ cases:
       - app.open:
           path: /settings/connections
       - aiAct: >-
-          Click the visible Telegram connection row once. Stop as soon as its connection-detail
+          Select the Connected tab, then click the visible Telegram connection row once.
+          Stop as soon as its connection-detail
           dialog is open; do not look for an "Open Telegram" button.
       - aiAssert: >-
           A Telegram connection detail dialog is open and shows its connected status and account
