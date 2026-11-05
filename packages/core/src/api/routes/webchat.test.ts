@@ -3595,6 +3595,40 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
+      const { sentTurns } = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      deps.concierge = {
+        switchIfExhausted: async () => null,
+        conciergeChat: async (id: string) =>
+          id === "topic-1" ? { id, name: "Calendar", main: false } : null,
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      await deps.webchatRepo.createSession("plain", "Plain");
+      const app = createWebchatRuntime(deps).routes;
+      for (const id of ["topic-1", "plain"]) {
+        const sent = await app.request(`/chat/sessions/${id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        });
+        expect(sent.status).toBe(200);
+        await drainTurn(app, sent);
+      }
+      expect(sentTurns[0]?.prompt).toBe(
+        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n\nhello',
+      );
+      expect(sentTurns[1]?.prompt).toBe("hello");
+    });
+
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
@@ -3603,6 +3637,7 @@ describe("Webchat API", () => {
           await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
           return null;
         },
+        conciergeChat: async () => null,
       } as never;
       await deps.webchatRepo.createSession(
         "concierge",
@@ -5448,6 +5483,58 @@ describe("Webchat API", () => {
 
       expect(deleted).toEqual([row.id]);
       expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
+    });
+
+    it("keeps the main Concierge chat, and retires a topic chat before archiving or deleting it", async () => {
+      const retired: [string, string][] = [];
+      deps.concierge = {
+        taskOfChat: async () => null,
+        retireChat: async (chatId: string, how: string) => void retired.push([chatId, how]),
+      } as never;
+      const topic = (id: string) =>
+        deps.webchatRepo.createSession(
+          id,
+          "Topic",
+          undefined,
+          undefined,
+          null,
+          undefined,
+          "core:concierge",
+        );
+      await deps.webchatRepo.createSession(
+        "concierge",
+        "Concierge",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      await topic("topic-1");
+      await topic("topic-2");
+      await deps.webchatRepo.createSession("plain-chat", "Plain");
+      const app = createWebchatRuntime(deps).routes;
+      const archive = (id: string, archived = true) =>
+        app.request(`/chat/sessions/${id}/archive`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived }),
+        });
+
+      expect((await archive("concierge")).status).toBe(409);
+      expect((await app.request("/chat/sessions/concierge", { method: "DELETE" })).status).toBe(
+        409,
+      );
+      expect(await deps.webchatRepo.getSession("concierge")).toMatchObject({ archivedAt: null });
+
+      expect((await archive("topic-1")).status).toBe(200);
+      expect((await archive("topic-1", false)).status).toBe(200);
+      expect((await app.request("/chat/sessions/topic-2", { method: "DELETE" })).status).toBe(200);
+      expect((await archive("plain-chat")).status).toBe(200);
+      expect(retired).toEqual([
+        ["topic-1", "archived"],
+        ["topic-2", "deleted"],
+      ]);
     });
 
     it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {

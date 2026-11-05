@@ -4,13 +4,15 @@
 //
 //   batch       a fixed window: a batch closes BATCH_WINDOW_MS after its
 //               first event, and is triaged in runs of at most 50 events
-//   important   goes to the Concierge after each batch, as one quiet turn; it
-//               tells the guardian now or stays silent
+//   important   goes to the Concierge after each batch, as one quiet turn in
+//               each Concierge chat the items report to; it tells the guardian
+//               now or stays silent
 //   breaker     a fixed cap, not a rule: past IMPORTANT_TURNS_PER_HOUR
-//               important turns in the last hour, a batch's important items
-//               skip the Concierge
+//               important turns in the last hour, counting each chat's turn,
+//               the rest of a batch's important items skip the Concierge
 //   digest      every item, important or not and told or not, goes to the
-//               Concierge at the guardian's digest times, important ones first
+//               Concierge at the guardian's digest times, in the main chat,
+//               grouped by the chat each item reports to, important ones first
 //   quiet hours important items wait until the guardian's quiet window ends,
 //               then arrive as one turn marked as held
 //
@@ -19,7 +21,7 @@
 // up to BATCH_ATTEMPTS times. An important turn that fails leaves its items owed
 // and is tried again RETRY_MS later.
 
-import type { ConciergeQuietHours } from "@rome/api-types/concierge";
+import type { ConciergeChatRef, ConciergeQuietHours } from "@rome/api-types/concierge";
 import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow-items.js";
 import { createLogger } from "../logger.js";
 import type { FollowEvent } from "./triage.js";
@@ -141,6 +143,8 @@ export interface ImportantDeliveryDeps {
   skip(items: ConciergeFollowItemRow[]): Promise<void>;
   /** Runs one important turn of the Concierge with the items; settles when it ends. */
   send(items: ConciergeFollowItemRow[], held: boolean): Promise<void>;
+  /** Which turn an item goes in: items of one group share a turn. One group when left out. */
+  groupOf?(item: ConciergeFollowItemRow): string;
 }
 
 /**
@@ -213,21 +217,28 @@ export class ImportantDelivery {
       return;
     }
     this.turns = this.turns.filter((start) => start > now - HOUR_MS);
-    if (this.turns.length >= IMPORTANT_TURNS_PER_HOUR) {
-      log.warn("important breaker open: items wait for the digest", {
-        items: owed.length,
-        turnsLastHour: this.turns.length,
-      });
-      await this.deps.skip(owed);
-      return;
+    const groups = new Map<string, ConciergeFollowItemRow[]>();
+    for (const item of owed) {
+      const key = this.deps.groupOf?.(item) ?? "";
+      groups.set(key, [...(groups.get(key) ?? []), item]);
     }
-    const items = owed.slice(0, MAX_IMPORTANT_LINES);
     const held = this.held;
     this.held = false;
-    this.turns.push(now);
-    await this.deps.send(items, held);
-    // More than one turn holds waits for the next run.
-    if (owed.length > items.length) this.again = true;
+    for (const group of groups.values()) {
+      if (this.turns.length >= IMPORTANT_TURNS_PER_HOUR) {
+        log.warn("important breaker open: items wait for the digest", {
+          items: group.length,
+          turnsLastHour: this.turns.length,
+        });
+        await this.deps.skip(group);
+        continue;
+      }
+      const items = group.slice(0, MAX_IMPORTANT_LINES);
+      this.turns.push(now);
+      await this.deps.send(items, held);
+      // More than one turn holds waits for the next run.
+      if (group.length > items.length) this.again = true;
+    }
   }
 }
 
@@ -294,12 +305,44 @@ export function renderImportantTurn(
 }
 
 /**
- * The quiet turn of a digest: every item since the last one. Important items
- * come first and are always listed, marked as such. A large digest shows a few lines
- * of the rest per source and kind and counts the others, so the conversation
- * is not flooded.
+ * The quiet turn of a digest: every item since the last one, grouped by the
+ * Concierge chat each reports to when `chatOf` is given. Within a group
+ * important items come first and are always listed, marked as such. A large
+ * group shows a few lines of the rest per source and kind and counts the
+ * others, so the conversation is not flooded.
  */
-export function renderDigestTurn(items: ConciergeFollowItemRow[], now: string): string {
+export function renderDigestTurn(
+  items: ConciergeFollowItemRow[],
+  now: string,
+  chatOf?: (item: ConciergeFollowItemRow) => ConciergeChatRef | undefined,
+): string {
+  const header = `<external_events untrusted="true" delivery="digest" count="${items.length}" now="${attr(now)}">`;
+  if (!chatOf) return [header, FENCE_NOTE, ...digestLines(items), "</external_events>"].join("\n");
+  const groups = new Map<
+    string,
+    { chat: ConciergeChatRef | undefined; items: ConciergeFollowItemRow[] }
+  >();
+  for (const item of items) {
+    const chat = chatOf(item);
+    const key = chat?.id ?? "";
+    const group = groups.get(key) ?? { chat, items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+  // The main chat's own items come first.
+  const ordered = [...groups.values()].sort(
+    (a, b) => Number(b.chat?.main ?? false) - Number(a.chat?.main ?? false),
+  );
+  const lines = ordered.flatMap(({ chat, items: group }) => [
+    `<chat${chat ? ` id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"` : ""}>`,
+    ...digestLines(group),
+    "</chat>",
+  ]);
+  return [header, FENCE_NOTE, ...lines, "</external_events>"].join("\n");
+}
+
+/** One group's digest lines: important first, then a bounded few per source and kind. */
+function digestLines(items: ConciergeFollowItemRow[]): string[] {
   const important = items.filter((item) => item.decision === "important");
   const rest = items.filter((item) => item.decision !== "important");
   const lines = important.map((item) => itemTag(item, true));
@@ -322,12 +365,7 @@ export function renderDigestTurn(items: ConciergeFollowItemRow[], now: string): 
       );
     }
   }
-  return [
-    `<external_events untrusted="true" delivery="digest" count="${items.length}" now="${attr(now)}">`,
-    FENCE_NOTE,
-    ...lines,
-    "</external_events>",
-  ].join("\n");
+  return lines;
 }
 
 /** A daily quiet window in the guardian's zone, `HH:mm` to `HH:mm`. It may wrap midnight. */

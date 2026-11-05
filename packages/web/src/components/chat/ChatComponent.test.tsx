@@ -21,10 +21,12 @@ rs.mock("@/components/logo", () => ({
 // mount the real Chat, because the draft composer lives inside it.
 const chatStub = rs.hoisted(() => ({ enabled: false }));
 
-function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatProps) {
+function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound, variant }: ChatProps) {
   return (
     <>
-      <div data-testid="session-chat">{mainAgentDisplayName}</div>
+      <div data-testid="session-chat" data-variant={variant ?? "default"}>
+        {mainAgentDisplayName}
+      </div>
       <button type="button" onClick={() => onSessionNotFound?.(sessionId ?? "")}>
         Missing session
       </button>
@@ -189,6 +191,14 @@ function renderChatComponent(
     if (url === "/api/settings") {
       return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
     }
+    if (url === "/api/concierge/chats") {
+      return Response.json({
+        chats: [
+          { id: "concierge", name: "Concierge", main: true, unread: 0 },
+          { id: "topic-1", name: "Calendar", main: false, unread: 0 },
+        ],
+      });
+    }
     if (url === "/api/concierge/session") {
       await homeData?.conciergeCreated;
       conciergeExists = true;
@@ -282,6 +292,31 @@ describe("ChatComponent draft file drops", () => {
     fireEvent.drop(container.firstElementChild as Element, { dataTransfer });
 
     expect(await screen.findByText("note.txt")).toBeTruthy();
+  });
+});
+
+describe("ChatComponent Concierge chats", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
+
+  it("shows a topic chat as a Concierge chat, and an ordinary chat as one of its own", async () => {
+    renderChatComponent(
+      { sessionId: "topic-1" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      "/chat/topic-1",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-chat").getAttribute("data-variant")).toBe("concierge"),
+    );
+    cleanup();
+    renderChatComponent(
+      { sessionId: "session-1" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      "/chat/session-1",
+    );
+    await act(async () => {});
+    expect(screen.getByTestId("session-chat").getAttribute("data-variant")).toBe("default");
   });
 });
 

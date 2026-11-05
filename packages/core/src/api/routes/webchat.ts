@@ -1,4 +1,5 @@
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
+import { conciergeChatLine, isConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -2483,6 +2484,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
+    // The main Concierge chat stays; a topic chat hands its follows and open
+    // tasks to it first (docs/domains/chats.md#topic-chat).
+    if (sessionId === CONCIERGE_CHAT_ID) {
+      return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
+    }
+    if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.peek({
@@ -2522,8 +2529,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (typeof body.archived !== "boolean") {
       return c.json({ error: "archived must be a boolean" }, 400);
     }
+    if (body.archived && sessionId === CONCIERGE_CHAT_ID) {
+      return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
+    }
     if (body.archived) {
       await deps.webchatRepo.archiveSession(sessionId);
+      if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
     } else {
       await deps.webchatRepo.unarchiveSession(sessionId);
     }
@@ -3444,9 +3455,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`
       : repliedPrompt;
-    const promptText = automated
+    const noticedPrompt = automated
       ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
       : contextPrompt;
+    // A Concierge turn opens with the chat it runs in, on each turn, so a
+    // rename reaches a running session (rome-os/rome#1739).
+    const conciergeChat = isConciergeChat(session)
+      ? await deps.concierge?.conciergeChat(sessionId)
+      : null;
+    const promptText = conciergeChat
+      ? `${conciergeChatLine(conciergeChat)}\n\n${noticedPrompt}`
+      : noticedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3490,7 +3509,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
-    if (sessionId === CONCIERGE_CHAT_ID) {
+    if (isConciergeChat(session)) {
       await deps.concierge?.switchIfExhausted(sessionId);
       // A background turn may also have moved the chat since this send read it.
       largeModelSelection =

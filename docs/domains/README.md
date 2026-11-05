@@ -63,6 +63,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
 - Disconnecting the last of Rome's accounts on a platform keeps every link on it.
+- The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and the digest goes to the main chat.
 - The grant names the account it reaches, by platform and the platform's own id.
 - At most one connection reaches an account across every kind of connection on its platform.
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, for every kind of connection, email, WhatsApp and the sign-ins such as GitHub included. The dashboard says so when the setup finishes.
@@ -103,4 +104,3 @@ Diffs still owed to the model, each a change of its own:
 - The channel record goes.
 - Email and WhatsApp accounts lose Rome's reach at disconnect like every other, and connecting again reaches the same connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
-- The guardian can start topic chats besides the main chat, and each follow and task names its Concierge chat. Today the Concierge has one chat.

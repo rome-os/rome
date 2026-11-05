@@ -15,6 +15,8 @@ export interface FollowItemInput {
   reason: string;
   line: string;
   url?: string | null;
+  /** The Concierge chat its follow reports to. Null or absent is the main chat. */
+  chatId?: string | null;
 }
 
 /**
@@ -41,6 +43,7 @@ export class ConciergeFollowItemsRepository {
           reason: item.reason,
           line: item.line,
           url: item.url ?? null,
+          chatId: item.chatId ?? null,
           createdAt: at,
         })),
       )
@@ -76,6 +79,14 @@ export class ConciergeFollowItemsRepository {
       .from(conciergeFollowItems)
       .where(isNull(conciergeFollowItems.digestedAt))
       .orderBy(asc(conciergeFollowItems.createdAt));
+  }
+
+  /** Moves the items of Concierge chat `from` to the main chat. */
+  async moveToMainChat(from: string): Promise<void> {
+    await this.db
+      .update(conciergeFollowItems)
+      .set({ chatId: null })
+      .where(eq(conciergeFollowItems.chatId, from));
   }
 
   /** Important items that went to the Concierge, or that the hourly cap skipped. */

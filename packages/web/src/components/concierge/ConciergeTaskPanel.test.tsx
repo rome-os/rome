@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
 import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
@@ -12,7 +12,7 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
-import { onConciergeJump } from "./concierge-jump";
+import { onConciergeJump, takeConciergeJump } from "./concierge-jump";
 import { ConciergeTaskPanel } from "./ConciergeTaskPanel";
 import { PENDING_TIMEOUT_MS, resetPending } from "./task-pending";
 
@@ -39,6 +39,7 @@ function row(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}): 
     completedAt: null,
     archivedAt: null,
     notSynced: false,
+    conciergeChat: { id: "concierge", name: "Concierge", main: true },
     ...extra,
   };
 }
@@ -51,6 +52,8 @@ const server = {
   turns: [] as Array<Record<string, unknown>>,
 };
 const posts: Array<Record<string, unknown>> = [];
+/** What a press on a topic chat's row posted to that chat. */
+const topicPosts: Array<Record<string, unknown>> = [];
 let postStatus = 200;
 
 function mockServer() {
@@ -75,6 +78,10 @@ function mockServer() {
     if (url.startsWith("/api/chat/sessions/concierge/messages")) {
       return json({ messages: server.messages, nextCursor: null });
     }
+    if (url === "/api/chat/sessions/topic-1/turns" && init?.method === "POST") {
+      topicPosts.push(JSON.parse(String(init.body)));
+      return json({ turnId: "turn-1", sessionId: "topic-1", startedAt: "" });
+    }
     if (url === "/api/chat/sessions/concierge/turns" && init?.method === "POST") {
       posts.push(JSON.parse(String(init.body)));
       return postStatus === 200
@@ -85,13 +92,19 @@ function mockServer() {
   }) as typeof fetch);
 }
 
+/** The route the panel left the guardian on. */
+function Where() {
+  return <output data-testid="where">{useLocation().pathname}</output>;
+}
+
 function renderPanel(props: { onNavigate?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
       <QueryClientProvider client={client}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat/concierge"]}>
           <ConciergeTaskPanel {...props} />
+          <Where />
         </MemoryRouter>
       </QueryClientProvider>
     </LiveEventsClientContext.Provider>,
@@ -330,6 +343,35 @@ describe("ConciergeTaskPanel", () => {
     off();
     expect(jumps).toEqual(["m-run", "m-next", "m-ask", "m-done"]);
     expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("names a topic chat's row by its chat, sends its buttons there, and opens it to jump", async () => {
+    const topic = { id: "topic-1", name: "Calendar", main: false };
+    server.recent = [
+      row("doing", {
+        title: "Agenda",
+        chat: { id: "c1", name: "c" },
+        sourceMessageId: "m-agenda",
+        summary: "Reading",
+        conciergeChat: topic,
+      }),
+    ];
+    mockServer();
+    topicPosts.length = 0;
+    const jumps: string[] = [];
+    const off = onConciergeJump((messageId) => jumps.push(messageId));
+    const user = userEvent.setup();
+    renderPanel();
+    expect(await screen.findByText("Calendar · Reading")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(topicPosts).toHaveLength(1));
+    expect(posts).toEqual([]);
+    await user.click(screen.getByText("Agenda"));
+    off();
+    // The message is in the topic chat: the panel opens it, which then shows the message.
+    expect(jumps).toEqual([]);
+    expect(screen.getByTestId("where").textContent).toBe("/chat/topic-1");
+    expect(takeConciergeJump("topic-1")).toBe("m-agenda");
   });
 
   it("closes the mobile sheet before it asks for the jump", async () => {

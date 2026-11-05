@@ -15,8 +15,31 @@ export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 /** The panel actions. Each one sends the Concierge a message, and never writes the row. */
 export type ConciergeTaskAction = "stop" | "archive" | "done";
 
-/** The Concierge's chat has a fixed id, so the dashboard opens it at `/chat/concierge`. */
+/** The guardian's main Concierge chat has a fixed id, so the dashboard opens it at `/chat/concierge`. */
 export const CONCIERGE_CHAT_ID = "concierge";
+
+/** The Concierge chat something reports to, as a list shows it. */
+export interface ConciergeChatRef {
+  id: string;
+  name: string;
+  main: boolean;
+}
+
+/** A Concierge chat: the main chat, or a topic chat its owner started. */
+export interface ConciergeChatDto extends ConciergeChatRef {
+  /** Agent messages since the guardian last read the chat, at most the server's cap. */
+  unread: number;
+}
+
+/** `GET /api/concierge/chats`: the main chat first, then the topic chats, oldest first. */
+export interface ConciergeChatsResponse {
+  chats: ConciergeChatDto[];
+}
+
+/** `POST /api/concierge/chats`. */
+export interface ConciergeChatStartRequest {
+  name: string;
+}
 
 /** How many days of finished rows `GET /concierge/tasks` returns by default. */
 export const CONCIERGE_DONE_DAYS = 7;
@@ -35,6 +58,8 @@ export interface ConciergeTaskDto {
   rank: number | null;
   /** The linked task chat, with its current name, or null when the row has none. */
   chat: { id: string; name: string } | null;
+  /** The Concierge chat the row came from; its results and the panel's buttons go there. */
+  conciergeChat: ConciergeChatRef;
   /**
    * The Concierge chat message this row points back to, or null when the row has
    * none or the message is gone. An id only: the text lives in the chat.
@@ -149,6 +174,8 @@ export interface ConciergeFollowDto {
   options: Record<string, string | boolean | string[]>;
   /** The guardian's own words on what matters, read when an event is judged. */
   preference: string | null;
+  /** The Concierge chat its alerts go to. */
+  chat: ConciergeChatRef;
 }
 
 /**
@@ -206,4 +233,9 @@ export interface ConciergeFollowChange {
   options?: Record<string, unknown>;
   /** Null clears it. */
   preference?: string | null;
+  /**
+   * The Concierge chat its alerts go to. Left out, a new follow reports to the
+   * chat that asked, and one that exists keeps its chat.
+   */
+  chatId?: string;
 }

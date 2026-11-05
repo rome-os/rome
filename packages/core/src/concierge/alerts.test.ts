@@ -44,6 +44,7 @@ const item = (over: Partial<ConciergeFollowItemRow> = {}): ConciergeFollowItemRo
   createdAt: new Date(START),
   offeredAt: null,
   digestedAt: null,
+  chatId: null,
   ...over,
 });
 
@@ -143,6 +144,7 @@ describe("ImportantDelivery", () => {
         sent.push({ items: items.map((i) => i.id), held });
         owed = owed.filter((o) => !items.includes(o));
       },
+      groupOf: (i) => i.chatId ?? "",
     });
     return {
       delivery,
@@ -160,6 +162,31 @@ describe("ImportantDelivery", () => {
     s.owe(a!, b!);
     await s.delivery.deliver();
     expect(s.sent).toEqual([{ items: [a!.id, b!.id], held: false }]);
+  });
+
+  it("sends one turn per Concierge chat the items report to", async () => {
+    const s = setup();
+    const [a, b, c] = [item(), item({ chatId: "topic-1" }), item()];
+    s.owe(a!, b!, c!);
+    await s.delivery.deliver();
+    expect(s.sent).toEqual([
+      { items: [a!.id, c!.id], held: false },
+      { items: [b!.id], held: false },
+    ]);
+  });
+
+  it("counts each chat's turn against the hourly cap", async () => {
+    const s = setup();
+    for (let i = 0; i < IMPORTANT_TURNS_PER_HOUR - 1; i++) {
+      s.owe(item());
+      await s.delivery.deliver();
+    }
+    // One turn left: the main chat's items take it, the topic chat's wait for the digest.
+    const [main, topic] = [item(), item({ chatId: "topic-1" })];
+    s.owe(main!, topic!);
+    await s.delivery.deliver();
+    expect(s.sent.at(-1)).toEqual({ items: [main!.id], held: false });
+    expect(s.skipped).toEqual([topic!.id]);
   });
 
   it("keeps a batch's important items from the Concierge past 12 turns in an hour", async () => {
@@ -278,6 +305,26 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     expect(turn.indexOf("bob asked you")).toBeLessThan(turn.indexOf('kind="new_mail"'));
     expect(turn).toMatch(/important="true"[^>]*>bob asked you about the release</);
     expect(turn.match(/important="true"/g)).toHaveLength(1);
+  });
+
+  it("groups a digest by the Concierge chat each item reports to, the main chat first", () => {
+    const chats = {
+      "": { id: "concierge", name: "Concierge", main: true },
+      "topic-1": { id: "topic-1", name: "Cal <x>", main: false },
+    } as const;
+    const turn = renderDigestTurn(
+      [
+        item({ decision: "digest", chatId: "topic-1", line: "standup moved" }),
+        item({ decision: "digest", line: "mail from bob" }),
+      ],
+      NOW,
+      (i) => chats[(i.chatId ?? "") as keyof typeof chats],
+    );
+    expect(turn).toContain('<chat id="concierge" name="Concierge" main="true">');
+    expect(turn).toContain('<chat id="topic-1" name="Cal &lt;x&gt;" main="false">');
+    expect(turn.indexOf("mail from bob")).toBeLessThan(turn.indexOf("standup moved"));
+    expect(turn.indexOf('name="Cal')).toBeLessThan(turn.indexOf("standup moved"));
+    expect(turn).toContain('count="2"');
   });
 
   it("shows a small digest whole, and a large one as a few lines per kind plus counts", () => {

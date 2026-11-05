@@ -271,3 +271,78 @@ describe("/concierge/connectors", () => {
     expect((await app().request("/concierge/connectors", guardian)).status).toBe(404);
   });
 });
+
+describe("/concierge/chats", () => {
+  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
+  let testDb: TestDb;
+  let webchatRepo: WebChatRepository;
+  let enabled: boolean;
+  const started: string[] = [];
+
+  const app = () => {
+    const concierge = {
+      isEnabled: async () => enabled,
+      listChats: async () => [
+        { id: "concierge", name: "Concierge", main: true },
+        { id: "topic-1", name: "Calendar", main: false },
+      ],
+      startTopicChat: async (name: string) => {
+        started.push(name);
+        return { id: "topic-2", name: name.trim(), main: false };
+      },
+    } as unknown as ConciergeService;
+    return new Hono().route("/", conciergeRoutes({ concierge, db: testDb.db, webchatRepo }));
+  };
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
+    enabled = true;
+    started.length = 0;
+  });
+  afterEach(() => testDb.close());
+
+  it("lists the Concierge chats, each with its unread count", async () => {
+    await webchatRepo.createSession("concierge", "Concierge");
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+    await webchatRepo.createSession("topic-1", "Calendar");
+    rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
+    await webchatRepo.addBackendMessage("topic-1", "turn-1", [{ type: "text", content: "Hi." }]);
+    rs.useRealTimers();
+    await expect((await app().request("/concierge/chats", guardian)).json()).resolves.toEqual({
+      chats: [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 1 },
+      ],
+    });
+  });
+
+  it("starts a topic chat by name, and refuses one with no name", async () => {
+    const post = (body: unknown) =>
+      app().request("/concierge/chats", {
+        method: "POST",
+        headers: { ...guardian.headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const made = await post({ name: " Trips " });
+    expect(made.status).toBe(201);
+    await expect(made.json()).resolves.toEqual({
+      id: "topic-2",
+      name: "Trips",
+      main: false,
+      unread: 0,
+    });
+    expect((await post({ name: "  " })).status).toBe(400);
+    expect(started).toEqual([" Trips "]);
+  });
+
+  it("answers only the guardian, and 404s while Concierge is off", async () => {
+    expect((await app().request("/concierge/chats")).status).toBe(401);
+    expect((await app().request("/concierge/chats", { method: "POST", body: "{}" })).status).toBe(
+      401,
+    );
+    enabled = false;
+    expect((await app().request("/concierge/chats", guardian)).status).toBe(404);
+  });
+});

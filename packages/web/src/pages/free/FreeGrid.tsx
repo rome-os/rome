@@ -41,7 +41,7 @@ import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { cn } from "@/lib/utils";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
-import { useConciergeChatId } from "@/hooks/use-concierge";
+import { useConciergeChatId, useConciergeChats } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import { useToolTrace } from "./tool-trace";
 import { getWidgetFullHref } from "./widget-links";
@@ -360,7 +360,10 @@ export function FreeGrid() {
   useDocumentTitle(sessionName);
   const setPinned = usePinSession();
   const conciergeChatId = useConciergeChatId();
-  const isConcierge = chatSessionId === conciergeChatId;
+  const conciergeChats = useConciergeChats();
+  const isConcierge =
+    chatSessionId !== undefined &&
+    (chatSessionId === conciergeChatId || conciergeChats.some((chat) => chat.id === chatSessionId));
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
   // desktop navbar: drop the session, refresh the sidebar list, land on a fresh

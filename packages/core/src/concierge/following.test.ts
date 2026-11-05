@@ -179,6 +179,15 @@ function setup(
     triage?: Record<string, "important" | "digest" | "ignore">;
   } = {},
 ) {
+  /** The Concierge chats that exist and are not archived; "calendar" is a topic chat. */
+  const liveChats = new Map([
+    ["concierge", { id: "concierge", name: "Concierge", main: true }],
+    ["calendar", { id: "calendar", name: "Calendar", main: false }],
+  ]);
+  /** The chat whose turn calls the follow actions. */
+  const calling = { chat: null as string | null };
+  /** The chat each Concierge turn ran in, in order. */
+  const turnChats: string[] = [];
   const routines = new Map<string, Routine>();
   const active = new Set<string>();
   const settings = new Map<string, unknown>();
@@ -327,15 +336,20 @@ function setup(
     connections: async () => connectionViews(),
     items,
     agentRunner,
+    callingChat: () => calling.chat,
   };
   const service = {
     isEnabled: async () => true,
     findChatId: async () => "concierge",
+    conciergeChat: async (id: string) => liveChats.get(id) ?? null,
+    deliveryChat: async (id: string | null | undefined) =>
+      id && liveChats.has(id) ? id : "concierge",
     runSystemTurn: async (
-      _chatId: string,
+      chatId: string,
       prompt: string,
       turnOptions?: { inputLabel?: string },
     ) => {
+      turnChats.push(chatId);
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
       return !turnFails.on;
@@ -357,6 +371,9 @@ function setup(
     prompts,
     omitted,
     items,
+    liveChats,
+    calling,
+    turnChats,
     following: () => following!,
     stop: () => {
       stop();
@@ -426,6 +443,7 @@ describe("following_list", () => {
         ],
         options: { scope: "about_me", ignorePeople: [] },
         preference: null,
+        chat: { id: "concierge", name: "Concierge", main: true },
       },
     ]);
   });
@@ -1104,5 +1122,138 @@ describe("watchProvidersOf", () => {
       ["linear", "Linear"],
       ["telegram_user", "Telegram (Composio)"],
     ]);
+  });
+});
+
+describe("follows in several Concierge chats", () => {
+  afterEach(() => {
+    rs.useRealTimers();
+  });
+
+  const fire = (s: ReturnType<typeof setup>, id: string, target = "acme/widgets") =>
+    s.action("core:concierge_follow_event").execute(
+      {
+        source: "github",
+        target,
+        eventName: "provider:event:github.pull_request",
+        __triggerPayload: { keep: true, id },
+      },
+      {} as never,
+    );
+
+  const chatOf = async (s: ReturnType<typeof setup>, target: string) => {
+    const list = await s.following().list();
+    const watch = list.connectors.find((c) => c.service === "github")?.capabilities.watch;
+    return watch?.follows?.find((f) => f.target === target)?.chat;
+  };
+
+  it("reports a new follow to the chat that asked, and the main chat when none did", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    await s.following().follow({ source: "github", target: "acme/other" });
+    expect(await chatOf(s, "acme/widgets")).toEqual({
+      id: "calendar",
+      name: "Calendar",
+      main: false,
+    });
+    expect(await chatOf(s, "acme/other")).toEqual({
+      id: "concierge",
+      name: "Concierge",
+      main: true,
+    });
+    s.stop();
+  });
+
+  it("keeps a follow's chat when another chat follows it again, and says where it reports", async () => {
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s
+      .action("core:concierge_follow")
+      .execute({ source: "github", target: "acme/widgets" }, {} as never);
+    s.calling.chat = "concierge";
+    const again = await s
+      .action("core:concierge_follow")
+      .execute({ source: "github", target: "acme/widgets" }, {} as never);
+    expect(again).toMatchObject({
+      status: "ok",
+      data: { chat: { id: "calendar" }, note: expect.stringContaining('chatId "concierge"') },
+    });
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "calendar" });
+    s.stop();
+  });
+
+  it("moves a follow's alerts to another chat with chatId, and refuses a chat that is not a Concierge chat", async () => {
+    const s = setup();
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const moved = await s
+      .action("core:concierge_following_configure")
+      .execute({ source: "github", target: "acme/widgets", chatId: "calendar" }, {} as never);
+    expect(moved.status).toBe("ok");
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "calendar" });
+    const refused = await s
+      .action("core:concierge_following_configure")
+      .execute({ source: "github", target: "acme/widgets", chatId: "task-1" }, {} as never);
+    expect(refused).toMatchObject({ status: "error" });
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "calendar" });
+    s.stop();
+  });
+
+  it("tells each chat its own follows' important items, one turn per chat, and an archived chat's to the main chat", async () => {
+    rs.useFakeTimers();
+    const s = setup();
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    await s.following().follow({ source: "github", target: "acme/other" });
+    await fire(s, "e1", "acme/widgets");
+    await fire(s, "e2", "acme/other");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats.sort()).toEqual(["calendar", "concierge"]);
+    const calendarTurn = s.turns[s.turnChats.indexOf("calendar")];
+    expect(calendarTurn).toContain("line for e1");
+    expect(calendarTurn).not.toContain("line for e2");
+    // Archived: what still reports to it goes to the main chat.
+    s.liveChats.delete("calendar");
+    s.turnChats.length = 0;
+    await fire(s, "e3", "acme/widgets");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats).toEqual(["concierge"]);
+    s.stop();
+  });
+
+  it("digests every chat's items in the main chat, grouped by chat", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e1: "digest", e2: "digest" } });
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = null;
+    await s.following().follow({ source: "github", target: "acme/other" });
+    await fire(s, "e1", "acme/widgets");
+    await fire(s, "e2", "acme/other");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    s.turnChats.length = 0;
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.turnChats).toEqual(["concierge"]);
+    const digest = s.turns.at(-1) ?? "";
+    expect(digest).toContain('<chat id="calendar" name="Calendar" main="false">');
+    expect(digest).toContain('<chat id="concierge" name="Concierge" main="true">');
+    expect(digest.indexOf("line for e2")).toBeLessThan(digest.indexOf('name="Calendar"'));
+    s.stop();
+  });
+
+  it("moves a retired chat's follows and owed items to the main chat", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e1: "digest" } });
+    s.calling.chat = "calendar";
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await fire(s, "e1", "acme/widgets");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect((await s.items.owedToDigest()).map((i) => i.chatId)).toEqual(["calendar"]);
+    expect(await s.following().moveToMainChat("calendar")).toBe(1);
+    expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "concierge", main: true });
+    expect((await s.items.owedToDigest()).map((i) => i.chatId)).toEqual([null]);
+    s.stop();
   });
 });

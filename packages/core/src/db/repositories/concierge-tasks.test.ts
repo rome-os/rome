@@ -157,6 +157,81 @@ describe("ConciergeTasksRepository", () => {
       const [row] = await repo.upsertMany([{ title: "A" }]);
       expect(await sourceOf(row.id)).toBeNull();
     });
+    it("looks the message up in the row's own Concierge chat", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const inTopic = await say("topic-1");
+      const [row] = await repo.upsertMany([
+        { title: "A", chatId: "topic-1", sourceMessageId: inTopic },
+      ]);
+      expect(await sourceOf(row.id)).toBe(inTopic);
+      // The same message named for a row of the main chat is not its source.
+      const [other] = await repo.upsertMany([{ title: "B", sourceMessageId: inTopic }]);
+      expect(await sourceOf(other.id)).toBeNull();
+    });
+  });
+
+  describe("Concierge chat of a row", () => {
+    it("is the main chat unless the row names another, and the main chat once that chat is gone", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [main, topic] = await repo.upsertMany([
+        { title: "A", chatId: "concierge" },
+        { title: "B", chatId: "topic-1" },
+      ]);
+      // The main chat is stored as no chat.
+      expect(main.chatId).toBeNull();
+      expect((await repo.getWithChat(main.id))?.conciergeChat).toEqual({
+        id: "concierge",
+        name: "Concierge",
+        main: true,
+      });
+      expect((await repo.getWithChat(topic.id))?.conciergeChat).toEqual({
+        id: "topic-1",
+        name: "Calendar",
+        main: false,
+      });
+      await chats.deleteSession("topic-1");
+      expect((await repo.getWithChat(topic.id))?.conciergeChat.main).toBe(true);
+    });
+
+    it("moves only the unfinished rows of a chat to the main chat, and announces each", async () => {
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [open, done] = await repo.upsertMany([
+        { title: "A", chatId: "topic-1", state: "doing" },
+        { title: "B", chatId: "topic-1", state: "done" },
+      ]);
+      const announced: string[] = [];
+      repo.onChange(({ row }) => announced.push(row.id));
+      expect(await repo.moveToMainChat("topic-1")).toBe(1);
+      expect((await repo.get(open.id))?.chatId).toBeNull();
+      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
+      expect(announced).toEqual([open.id]);
+    });
   });
 
   it("finds rows whose chat was active after the row was written", async () => {

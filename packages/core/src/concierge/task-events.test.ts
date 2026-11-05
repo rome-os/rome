@@ -23,9 +23,15 @@ function setup() {
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     isEnabled: async () => true,
-    render: async (tasks: DirtyTask[]) => tasks.map((task) => task.taskId).join(","),
-    deliver: async (prompt, options) => {
-      flushes.push({ ids: prompt.split(","), quiet: options.quiet, at: Date.now() });
+    render: async (tasks: DirtyTask[]) => [
+      {
+        chatId: null,
+        prompt: tasks.map((task) => task.taskId).join(","),
+        quiet: tasks.every((task) => task.quiet),
+      },
+    ],
+    deliver: async ({ prompt, quiet }) => {
+      flushes.push({ ids: prompt.split(","), quiet, at: Date.now() });
       if (holdTurns) await new Promise<void>((resolve) => (endTurn = resolve));
     },
     giveUp: (taskId) => gaveUp.push(taskId),
@@ -183,8 +189,8 @@ describe("TaskEventCoalescer", () => {
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
       isEnabled: async () => false,
-      render: async () => "x",
-      deliver: async (prompt) => {
+      render: async () => [{ chatId: null, prompt: "x", quiet: false }],
+      deliver: async ({ prompt }) => {
         delivered.push(prompt);
       },
       giveUp: () => {},
@@ -193,5 +199,36 @@ describe("TaskEventCoalescer", () => {
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(delivered).toEqual([]);
     expect(coalescer.pending).toEqual([]);
+  });
+
+  it("delivers one turn per Concierge chat the rows came from, in one flush", async () => {
+    const delivered: Array<{ chatId: string | null; prompt: string; quiet: boolean }> = [];
+    const coalescer = new TaskEventCoalescer({
+      now: () => Date.now(),
+      isEnabled: async () => true,
+      // Rows "a" and "b" came from a topic chat, "c" from the main chat.
+      render: async (tasks) => {
+        const topic = tasks.filter((task) => task.taskId !== "c");
+        const main = tasks.filter((task) => task.taskId === "c");
+        return [
+          ...(topic.length
+            ? [{ chatId: "topic-1", prompt: topic.map((t) => t.taskId).join(","), quiet: false }]
+            : []),
+          ...(main.length ? [{ chatId: null, prompt: "c", quiet: true }] : []),
+        ];
+      },
+      deliver: async (delivery) => {
+        delivered.push(delivery);
+      },
+      giveUp: () => {},
+    });
+    coalescer.mark(urgent("a"));
+    coalescer.mark(urgent("b"));
+    coalescer.mark(quiet("c"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(delivered).toEqual([
+      { chatId: "topic-1", prompt: "a,b", quiet: false },
+      { chatId: null, prompt: "c", quiet: true },
+    ]);
   });
 });

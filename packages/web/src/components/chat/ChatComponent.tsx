@@ -14,7 +14,12 @@ import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
-import { CONCIERGE_CHAT_ID, ensureConciergeChat, useConciergeChat } from "@/hooks/use-concierge";
+import {
+  CONCIERGE_CHAT_ID,
+  ensureConciergeChat,
+  useConciergeChat,
+  useConciergeChats,
+} from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
 
@@ -66,7 +71,9 @@ export function ChatComponent({
 
   const { data: settings } = useSettings();
   const concierge = useConciergeChat();
-  const isConcierge = sessionId === CONCIERGE_CHAT_ID;
+  const conciergeChats = useConciergeChats();
+  const isConcierge =
+    sessionId === CONCIERGE_CHAT_ID || conciergeChats.some((chat) => chat.id === sessionId);
   const coarsePointer = useCoarsePointer();
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
@@ -238,7 +245,7 @@ export function ChatComponent({
     [navigate],
   );
 
-  // The Concierge chat's id is fixed, so its messages load alongside the request
+  // The main Concierge chat's id is fixed, so its messages load alongside the request
   // that creates it. The first load of a new instance can reach the server
   // first and 404; the chat waits for the creation and asks again.
   const queryClient = useQueryClient();
@@ -257,7 +264,9 @@ export function ChatComponent({
   );
 
   // `/chat/concierge` opened directly: the setting decides whether the chat
-  // exists for this instance, so wait for it before choosing a layout.
+  // exists for this instance, so wait for it before choosing a layout. A
+  // topic chat takes the Concierge layout once the Concierge chat list, which
+  // the sidebar has usually loaded already, names it.
   if (isConcierge && concierge.settingsLoading) return null;
 
   return (

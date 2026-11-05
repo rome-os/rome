@@ -68,7 +68,6 @@ import {
   type ModelResolutionErrorPayload,
   type ModelResolver,
 } from "./model-resolver.js";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { isConciergeAgent } from "../concierge/service.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
 import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
@@ -978,14 +977,14 @@ async function openSession(
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
   // The conversation's stored selection restores a webchat chat's chosen model
-  // on cold resume. Only Concierge also restores it over a pin, so its quota
-  // failover applies to background turns (docs/adrs/concierge-quota-failover.md).
+  // on cold resume. Only a Concierge chat also restores it over a pin, so its
+  // quota failover applies to background turns (docs/adrs/concierge-quota-failover.md).
   // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
   // Subagent keys carry a suffix, and app sessions use keys of their own.
   const chatId = webchatConversationOfKey(key.channelThreadKey);
   const persistedSelection =
     init.resumeSessionId &&
-    (!sessionPin || (chatId === CONCIERGE_CHAT_ID && isConciergeAgent(key.agentName))) &&
+    (!sessionPin || isConciergeAgent(key.agentName)) &&
     !init.selectionId &&
     chatId
       ? resolveWebchatLargeModelSelection(

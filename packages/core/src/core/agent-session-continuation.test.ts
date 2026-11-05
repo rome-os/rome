@@ -340,12 +340,13 @@ describe("continuation notice through AgentSessionManager", () => {
   });
 
   it.each([
-    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai"],
-    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic"],
-    [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai"],
-    [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic"],
-  ] as const)("cold background resume concierge=%s %s to %s", async (concierge, from, to, source, target) => {
-    const chatId = concierge ? "concierge" : CHAT;
+    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "concierge"],
+    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", "concierge"],
+    // A topic chat is a Concierge chat like the main one.
+    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "topic-1"],
+    [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", CHAT],
+    [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", CHAT],
+  ] as const)("cold background resume concierge=%s %s to %s (%s to %s) in %s", async (concierge, from, to, source, target, chatId) => {
     const agentName = concierge ? "core:concierge" : AGENT;
     if (concierge) {
       await writeFile(

@@ -97,7 +97,7 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
-import { onConciergeJump } from "@/components/concierge/concierge-jump";
+import { onConciergeJump, takeConciergeJump } from "@/components/concierge/concierge-jump";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -667,6 +667,14 @@ export function Chat({
     if (!concierge) return;
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
   }, [concierge, showSourceMessage]);
+  // The panel sent the guardian here from another Concierge chat: once this
+  // chat's history shows, the message it pointed to comes into view.
+  const hasMessages = displayMessages.length > 0;
+  useEffect(() => {
+    if (!concierge || !mainSessionId || !scrollerEl || !hasMessages) return;
+    const messageId = takeConciergeJump(mainSessionId);
+    if (messageId) void showSourceMessage(messageId);
+  }, [concierge, mainSessionId, scrollerEl, hasMessages, showSourceMessage]);
 
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),

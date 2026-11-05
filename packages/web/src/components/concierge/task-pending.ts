@@ -29,6 +29,8 @@ export interface PendingAction {
   baseUpdatedAt: number;
   /** The id of the message the press sent, which names the turn that takes it in. */
   inputId: string;
+  /** The Concierge chat the press went to: the one the row came from. */
+  chatId: string;
 }
 
 let pending: ReadonlyMap<string, PendingAction> = new Map();
@@ -55,6 +57,7 @@ export function beginPending(
   action: ConciergeTaskAction,
   baseUpdatedAt: number,
   inputId: string,
+  chatId: string,
   now = Date.now(),
 ): void {
   commit(
@@ -64,6 +67,7 @@ export function beginPending(
       startedAt: now,
       baseUpdatedAt,
       inputId,
+      chatId,
     }),
   );
 }

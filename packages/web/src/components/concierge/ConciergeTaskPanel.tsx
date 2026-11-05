@@ -1,7 +1,7 @@
 import { Archive, Check, ChevronDown, ListChecks, MessageSquare, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { ConciergeTaskAction, ConciergeTaskDto } from "@rome/api-types/concierge";
 import {
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/list-row";
 import { cn } from "@/lib/utils";
 import { checkPresses } from "./check-presses";
-import { requestConciergeJump } from "./concierge-jump";
+import { deferConciergeJump, requestConciergeJump } from "./concierge-jump";
 import { doneMessage, pressText, sendTaskAction } from "./send-task-action";
 import { StopGlyph } from "./StopGlyph";
 import { TaskGlyph } from "./TaskGlyph";
@@ -54,6 +54,8 @@ function TaskRow({
   onNavigate?: () => void;
 }) {
   const { t, i18n } = useTranslation("chat");
+  const location = useLocation();
+  const navigate = useNavigate();
   const action = rowAction(task);
   const finished = task.state === "done" || task.state === "dropped";
   const detail =
@@ -65,7 +67,14 @@ function TaskRow({
     ? pending.phase === "pending"
       ? t(`concierge.tasks.pending.${pending.action}`)
       : t(`concierge.tasks.${pending.phase}`)
-    : [detail, task.notSynced ? t("concierge.tasks.notSynced") : null].filter(Boolean).join(" · ");
+    : [
+        // A row from a topic chat names it, since its results and buttons go there.
+        task.conciergeChat.main ? null : task.conciergeChat.name,
+        detail,
+        task.notSynced ? t("concierge.tasks.notSynced") : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
   const press = (kind: ConciergeTaskAction) => {
@@ -83,6 +92,12 @@ function TaskRow({
       return;
     }
     onNavigate?.();
+    // A row from another Concierge chat opens that chat, which then shows the message.
+    if (location.pathname !== `/chat/${task.conciergeChat.id}`) {
+      deferConciergeJump(task.conciergeChat.id, task.sourceMessageId);
+      navigate(`/chat/${task.conciergeChat.id}`);
+      return;
+    }
     requestConciergeJump(task.sourceMessageId);
   };
   const label = retry ? t("concierge.tasks.retry") : action ? t(`concierge.tasks.${action}`) : "";

@@ -48,7 +48,7 @@ import {
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import { ConciergeEntry } from "./ConciergeEntry";
+import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
@@ -368,7 +368,7 @@ export function RecentChats({
   // while it was in flight. Per mount, since events stop while unmounted; the
   // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // The Concierge chat has its own entry above the list.
+  // The Concierge chats have their own entries above the list.
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
@@ -1161,7 +1161,7 @@ export function RecentChats({
             <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
           </Link>
           {conciergeChatId ? (
-            <ConciergeEntry chatId={conciergeChatId} active={activeSessionId === conciergeChatId} />
+            <ConciergeChats mainChatId={conciergeChatId} activeSessionId={activeSessionId} />
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">

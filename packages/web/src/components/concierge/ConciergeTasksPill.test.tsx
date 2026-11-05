@@ -35,6 +35,7 @@ const row = (
   completedAt: null,
   archivedAt: null,
   notSynced: false,
+  conciergeChat: { id: "concierge", name: "Concierge", main: true },
   ...extra,
 });
 
