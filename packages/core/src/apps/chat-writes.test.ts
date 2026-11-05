@@ -118,7 +118,7 @@ describe("appChatWrites", () => {
       speakers,
       replies: new SpeakerReplies({
         speakers,
-        adapters: { of: adapterOf, keyOf },
+        adapters: { of: adapterOf },
         messages,
         links,
       }),

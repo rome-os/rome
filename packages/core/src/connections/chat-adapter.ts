@@ -10,7 +10,6 @@ import type {
   Account,
   Attachment,
   OutgoingAttachment,
-  StreamAgentEvent,
   Channel,
   ChannelMessage,
   ChatId,
@@ -22,12 +21,8 @@ import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { ChatKind } from "../chats/storage/chat.js";
-import type { ChannelSend } from "../chats/connected-accounts/connected-account.js";
 import { CONVERSATION_BUFFER_DEFAULTS } from "../participation/conversation-buffer.js";
 import type { ChatAddresses } from "./chat-addresses.js";
-import { ReplyDelivery, type ReplyOutcome } from "../participation/reply-delivery/reply.js";
-import type { DeliveryPolicy } from "./sending.js";
-import type { Clock } from "../lib/clock.js";
 import {
   chatKey,
   directMessageOn,
@@ -125,19 +120,6 @@ export interface ChatAdapter {
    * sends nothing. No retry.
    */
   send(chatKey: string, threadId: ChatId | null, out: Outbound): Promise<Sent>;
-  /**
-   * Open a reply in the chat keyed `chatKey` that is written as the agent's
-   * run goes, or null where the channel cannot stream. It is sent as the
-   * platform allows, maybe in several messages, and settles to each message
-   * the user was shown, or may have been, in order: none when nothing showed.
-   * `replyTo` is the adapter's key of the message it answers, and one the
-   * account has no platform id for throws `SendRefused`.
-   */
-  stream?(
-    chatKey: string,
-    threadId: ChatId | null,
-    out: { readonly replyTo?: string; readonly policy: DeliveryPolicy; readonly clock: Clock },
-  ): StreamedReply | null;
 }
 
 /**
@@ -149,26 +131,6 @@ export interface ChatAdapter {
 export interface Sent {
   readonly key: string;
   readonly threadId: ChatId | null;
-}
-
-/** A reply {@link ChatAdapter.stream} is writing. */
-export interface StreamedReply {
-  accept(event: StreamAgentEvent): void;
-  /** Stop writing at once. */
-  stop(): void;
-  /** Finish the reply, or stop it when the run was stopped, and answer each
-   *  message the user was shown, in order. */
-  settle(stopped: boolean): Promise<{
-    readonly outcome: ReplyOutcome;
-    readonly shown: readonly ShownMessage[];
-  }>;
-}
-
-/** One message of a streamed reply the platform shows: its text, and where
- *  it landed as {@link Sent} names it. A long reply is several of them, each
- *  a message of its own that can be quoted by its own key. */
-export interface ShownMessage extends Sent {
-  readonly text: string;
 }
 
 export interface ChannelAdapterDeps {
@@ -551,47 +513,6 @@ export function channelAdapter(
       return {
         key: sentMessageKey(ref, own.id, receipt.messageId || undefined),
         threadId: landedIn(ref, address, threadId, receipt.chatId),
-      };
-    },
-
-    stream(chat, threadId, out) {
-      const replies = (channel.send as ChannelSend | undefined)?.replies;
-      if (!replies) return null;
-      const own = account();
-      const ref = chatKey(own.platform, chat as ChatId);
-      const replyTo = quotable(ref, own.id, out.replyTo);
-      const address = addressIn(ref, threadId);
-      const delivery = new ReplyDelivery({
-        transport: replies.transport,
-        pacer: replies.pacer,
-        policy: out.policy,
-        conversation: address,
-        ...(replyTo ? { replyTo } : {}),
-        clock: out.clock,
-      });
-      return {
-        accept: (event) => delivery.accept(event),
-        stop: () => void delivery.stop(),
-        async settle(stopped) {
-          const outcome = await (stopped ? delivery.stop() : delivery.finish());
-          // Every part showed or may have: a create whose result is unknown
-          // most likely landed, and nothing sends it again. Each part is a
-          // message of its own on the platform, so it is one in Chats too,
-          // keyed by its own id; one whose create is unknown has no id and
-          // takes one of Rome's. A part whose receipt names no chat went where
-          // the parts before it went, as the delivery sends each after the last.
-          let lastLanded = threadId;
-          const shown = outcome.parts.map((part) => {
-            if (part.receipt?.chatId)
-              lastLanded = landedIn(ref, address, threadId, part.receipt.chatId);
-            return {
-              text: part.source,
-              key: sentMessageKey(ref, own.id, part.receipt?.messageId || undefined),
-              threadId: lastLanded,
-            };
-          });
-          return { outcome, shown };
-        },
       };
     },
   };

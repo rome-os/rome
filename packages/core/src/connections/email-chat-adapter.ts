@@ -123,7 +123,6 @@ export function emailChatAdapter(
     settled: () => base.settled(),
     start: (deliver, fault) => base.start(deliver, fault),
     stop: () => base.stop(),
-    stream: (chat, threadId, out) => base.stream?.(chat, threadId, out) ?? null,
 
     threadAddress(key) {
       return (started.get(key) ?? addresses.addressOf(account(), key) ?? key) as ChatId;

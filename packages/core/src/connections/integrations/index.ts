@@ -1,6 +1,5 @@
 // Built-in connection integrations. `registerBuiltinConnections` is the boot-time entry point.
 
-import { feishuStreamingStyle } from "../../participation/reply-delivery/streaming-switch.js";
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
@@ -124,7 +123,6 @@ export function registerBuiltinConnections(
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
-      replyStreamingStyle: feishuStreamingStyle(deps.settingsRepo),
     }),
   );
   registry.register(
