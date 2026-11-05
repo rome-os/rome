@@ -13,7 +13,7 @@ import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 import {
   sessionSurfaceOf,
-  surfaceKeepsTurn,
+  surfaceKeepsLines,
   type SurfaceDeps,
 } from "../connections/session-surface.js";
 import {
@@ -551,17 +551,17 @@ export class AgentRunner {
     const chatId = explicitSessionId ? undefined : caller && callerChatId(caller);
     const threadContext = await this.withChatId(params.threadContext);
     const persistTranscript = params.persistTranscript ?? true;
+    const chatKeepsLines = params.persistTrace === undefined && surfaceKeepsLines(threadContext);
     const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, threadContext, {
       ...(params.contextSuffix ? { about: params.contextSuffix } : {}),
       keeps: {
         // A run that names a conversation it does not reply into keeps its
         // own record there, and the session's log stays out of it.
-        turn:
-          params.persistTrace === undefined
-            ? surfaceKeepsTurn(threadContext)
-            : !params.persistTrace,
-        prompt: !persistTranscript,
-        answer: !persistTranscript || !(params.persistAnswer ?? true),
+        turn: params.persistTrace === false,
+        // Unless the run asks for its trace, the dashboard chat writes the
+        // turn's lines itself, as it shows them.
+        prompt: !persistTranscript || chatKeepsLines,
+        answer: !persistTranscript || !(params.persistAnswer ?? true) || chatKeepsLines,
       },
     });
     const options = {

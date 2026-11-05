@@ -327,8 +327,9 @@ describe("AgentRunner", () => {
 
   it.each([
     ["saves", true, ["trace"]],
-    ["leaves", undefined, []],
-  ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
+    ["saves", undefined, ["trace"]],
+    ["leaves", false, []],
+  ])("%s a webchat turn's trace unless the caller asks not to, without transcript rows", async (_label, persistTrace, roles) => {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {

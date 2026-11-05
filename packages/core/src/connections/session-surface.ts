@@ -70,9 +70,9 @@ export function sessionSurfaceOf(
   };
 }
 
-/** Whether the surface at `replies` keeps a turn's whole trace itself. The
- *  dashboard chat's route writes its own as it streams; anywhere else the
- *  session's log keeps it. */
-export function surfaceKeepsTurn(replies?: ThreadContext): boolean {
+/** Whether the surface at `replies` writes the turn's prompt and answer
+ *  itself. The dashboard chat's route writes its own lines as it streams;
+ *  the session's log keeps the trace either way. */
+export function surfaceKeepsLines(replies?: ThreadContext): boolean {
   return replies?.channel === WEBCHAT_CHANNEL;
 }

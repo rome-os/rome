@@ -16,7 +16,6 @@ import { createLogger } from "../../logger.js";
 import { logInboundMessage } from "../../telemetry.js";
 import { getGuardianProfileFile } from "../../profile-memory.js";
 import { toTraceEvent, toWebchatSessionResponse, type TraceableEvent } from "../helpers.js";
-import { AgentTraceRecorder } from "../../agent-sessions/index.js";
 import {
   buildTraceSnapshot,
   createSegmentBuilder,
@@ -694,8 +693,13 @@ interface ActiveWebchatStream {
   // rather than every historical frame. Map preserves insertion order, so
   // the replay matches the order the segments were first opened.
   events: Map<string, WebchatSseEvent>;
+  /** The turn's trace as it streams, for a download before the log has it. */
   traceEvents: (TraceableEvent & { agent?: string })[];
-  traceRecorder: AgentTraceRecorder;
+  /** Events no session turn produced (an approval's own call, a turn that
+   *  failed to start), which the chat keeps in its own record. A session's
+   *  turn is kept by the session's log. */
+  ownEvents: (TraceableEvent & { agent?: string })[];
+  ownEventsKept: number;
   /**
    * Accumulated deltas of the in-flight assistant text block, plus the index
    * of that block within the turn. The server states stream facts only:
@@ -706,8 +710,6 @@ interface ActiveWebchatStream {
    */
   assistantText: string;
   assistantBlockIx: number;
-  persistedTraceEventCount: number;
-  tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
   subscribers: Map<string, StreamSubscriber>;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
@@ -1791,7 +1793,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     cards: true,
     replies: threadContext,
     wake: true,
-    keeps: { turn: true },
+    // The route writes the chat's own lines; the session's log keeps the trace.
+    keeps: { prompt: true, answer: true },
     about,
   });
 
@@ -1803,45 +1806,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       "",
       readGuardianProfile() ?? "Guardian profile unavailable.",
     ].join("\n");
-
-  const persistTrace = async (stream: ActiveWebchatStream): Promise<void> => {
-    if (stream.tracePersistPromise) {
-      await stream.tracePersistPromise;
-      return;
-    }
-
-    const persist = async () => {
-      while (stream.persistedTraceEventCount < stream.traceEvents.length) {
-        // Append-only: serialize and write only the tail that arrived since
-        // the last successful persist. A full-array rewrite is O(N²) over a
-        // turn and blocks the event loop for tens of milliseconds per event
-        // once traces reach megabytes — long enough to stall every
-        // concurrent HTTP request in this process.
-        const startSeq = stream.persistedTraceEventCount;
-        const persistedCount = stream.traceEvents.length;
-        try {
-          // Transactional: on failure nothing lands, persistedTraceEventCount
-          // stays put, and the next call retries the same tail.
-          await stream.traceRecorder.recordBatch(
-            stream.traceEvents.slice(startSeq, persistedCount),
-            startSeq,
-          );
-          stream.persistedTraceEventCount = persistedCount;
-        } catch (err) {
-          log.error("failed to persist webchat trace", {
-            sessionId: stream.sessionId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return;
-        }
-      }
-    };
-
-    stream.tracePersistPromise = persist().finally(() => {
-      stream.tracePersistPromise = null;
-    });
-    await stream.tracePersistPromise;
-  };
 
   // Append a frame to one subscriber's serialized write chain. A failed write
   // drops the subscriber; frames already chained behind it become no-ops via
@@ -1900,24 +1864,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
-  // Show an AgentEvent live and persist it into the stream's trace.
+  // Keep what the chat itself said on the stream, in its own record.
+  const keepOwnEvents = async (stream: ActiveWebchatStream): Promise<void> => {
+    const from = stream.ownEventsKept;
+    const upTo = stream.ownEvents.length;
+    if (from === upTo) return;
+    try {
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `trace-message:${stream.sessionId}:${stream.turnId}`,
+        sessionId: stream.sessionId,
+        turnId: stream.turnId,
+        startSeq: from,
+        blocks: stream.ownEvents.slice(from, upTo).map((message) => toTraceEvent(message)),
+        transcriptMessages: [],
+      });
+      stream.ownEventsKept = upTo;
+    } catch (err) {
+      log.error("chat's own trace not kept", {
+        sessionId: stream.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // Show an AgentEvent live. The session's log keeps the turn's trace.
   const emitTraceEvent = (
     stream: ActiveWebchatStream,
     msg: TraceableEvent & { agent?: string },
   ): void => {
     emitLiveTraceEvent(stream, msg);
-    // Incrementally persist so trace blocks survive a mid-turn crash (e.g.
-    // CDP connection closed, long-running tool errors). persistTrace is
-    // idempotent + serialized via tracePersistPromise and writes only the
-    // new tail since persistedTraceEventCount, so frequent calls are safe.
-    // Fire-and-forget — the runOnStream tail still calls safePersistTrace
-    // as the final flush.
-    void persistTrace(stream).catch((err) => {
-      log.error("incremental trace persist failed", {
-        sessionId: stream.sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
   };
 
   const finishStream = (stream: ActiveWebchatStream): void => {
@@ -1959,17 +1934,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       finished: false,
       events: new Map(),
       traceEvents: [],
-      traceRecorder: new AgentTraceRecorder({
-        webchatRepo: deps.webchatRepo,
-        agentName,
-        turnId,
-        existingSessionId: sessionId,
-        traceMessageId: randomUUID(),
-      }),
+      ownEvents: [],
+      ownEventsKept: 0,
       assistantText: "",
       assistantBlockIx: 0,
-      persistedTraceEventCount: 0,
-      tracePersistPromise: null,
       segmentBuilder,
       subscribers: new Map(),
       cleanupTimer: null,
@@ -2013,19 +1981,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
-  // Swallow persistTrace failures so terminal SSE events still emit; without
-  // this, a persistence error leaves SSE subscribers waiting for a done event.
-  const safePersistTrace = async (stream: ActiveWebchatStream, label: string): Promise<void> => {
-    try {
-      await persistTrace(stream);
-    } catch (err) {
-      log.error(`${label} trace persist threw unexpectedly`, {
-        sessionId: stream.sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
   /**
    * Persist + emit terminal events for a stream task. Centralizes the
    * try/catch/finally shape used by both /chat/send and enqueueSessionTask
@@ -2038,10 +1993,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   ): Promise<void> => {
     try {
       const done = await task();
-      await safePersistTrace(stream, label);
+      await keepOwnEvents(stream);
       emitToStream(stream, "done", done ?? { success: true }, "terminal");
     } catch (err) {
-      await safePersistTrace(stream, label);
+      await keepOwnEvents(stream);
       const modelError = toModelResolutionErrorPayload(err);
       log.error(`${label} failed`, {
         sessionId: stream.sessionId,
@@ -3639,6 +3594,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           ];
           for (const message of failedTurn) {
             stream.traceEvents.push(message);
+            // No session took this turn, so the chat keeps it.
+            stream.ownEvents.push(message);
             emitTraceEvent(stream, message);
           }
           return { success: false, ...modelError };
@@ -3825,8 +3782,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               emitTraceEvent(stream, msg);
               if (msg.type === "subagent_result") {
                 const parentRef = { sessionId, turnId, toolUseId: msg.toolUseId };
+                // The log kept the result before the session handed it on.
                 if (deps.activeSubagentRegistry.getLinkByParent(parentRef)) {
-                  await safePersistTrace(stream, "subagent result");
                   deps.activeSubagentRegistry.clearByParent(parentRef);
                 }
               }
@@ -4158,6 +4115,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
     let recordedCardWrites: Promise<void> = Promise.resolve();
+    let inSessionTurn = false;
     const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
       const recorded = options?.recorded === true;
       if (recorded && msg.type === "turn_start") {
@@ -4190,6 +4148,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         emitLiveTraceEvent(stream, msg);
       } else {
         stream.traceEvents.push(msg);
+        // A session's turn, from its turn_start to its turn_end, is kept by
+        // the session's log. What the task says around it is the chat's own.
+        if (msg.type === "turn_start") inSessionTurn = true;
+        if (!inSessionTurn) stream.ownEvents.push(msg);
+        if (msg.type === "turn_end") inSessionTurn = false;
         emitTraceEvent(stream, msg);
         if (msg.type === "result") replyText = msg.content;
       }
@@ -4259,7 +4222,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     activeStreams,
     async flushAll(): Promise<void> {
       const allStreams = [...activeStreams.values()].flat();
-      await Promise.all(allStreams.map((stream) => persistTrace(stream)));
+      await Promise.all(allStreams.map((stream) => keepOwnEvents(stream)));
       for (const stream of allStreams) {
         if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
       }

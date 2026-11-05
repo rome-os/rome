@@ -47,7 +47,3 @@ export {
 } from "./agent-turn-stream-registry.js";
 export { createSubagentExecutionService } from "./subagent-execution.js";
 export type { SessionToolContext } from "./session-tools.js";
-
-// Not yet behind the API: the dashboard chat writes its own trace as it
-// streams (its surface keeps the whole turn), through the log's recorder.
-export { AgentTraceRecorder } from "./rows/agent-trace-recorder.js";

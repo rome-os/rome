@@ -240,7 +240,9 @@ export interface LoggedFork {
 
 /** Writes one turn's events, as they arrive. */
 export interface TurnLogWriter {
-  write(event: StreamAgentEvent): Promise<void>;
+  /** Settles once the event is kept; returns nothing for an event the log
+   *  does not keep, so a delta never waits on it. */
+  write(event: StreamAgentEvent): Promise<void> | void;
   /** Keeps the input of a turn Rome started, under its label. */
   input?(label: string, prompt: string): Promise<void>;
 }
@@ -2904,7 +2906,8 @@ class AgentSessionImpl implements AgentSession {
   ): AsyncIterable<StreamAgentEvent> {
     for await (const event of events) {
       if (writer) {
-        await writer.write(event);
+        const kept = writer.write(event);
+        if (kept) await kept;
         // The turn's input, under its label, right after it starts.
         if (event.type === "turn_start" && turn.label) {
           await writer.input?.(turn.label, turn.prompt);

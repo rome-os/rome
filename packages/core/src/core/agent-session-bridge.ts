@@ -31,7 +31,7 @@ import {
 import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { sessionSurfaceOf, surfaceKeepsTurn } from "../connections/session-surface.js";
+import { sessionSurfaceOf, surfaceKeepsLines } from "../connections/session-surface.js";
 import { callerChatId, callerKey, type SessionCaller } from "./session-caller.js";
 import { rememberedChatModel } from "./chat-model-selection.js";
 import { openNamed } from "../agent-sessions/index.js";
@@ -159,8 +159,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const stands = romeSessionId ? !!this.runLineDeps?.lines.stands(romeSessionId) : false;
         const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, thread, {
           keeps: {
-            turn: surfaceKeepsTurn(thread),
-            answer: () => !!reply || stands,
+            prompt: surfaceKeepsLines(thread),
+            answer: () => !!reply || stands || surfaceKeepsLines(thread),
           },
           ...(req.init?.contextSuffix ? { about: req.init.contextSuffix } : {}),
         });

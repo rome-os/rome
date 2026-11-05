@@ -34,6 +34,9 @@ import type {
   SessionSurface,
 } from "../../agent-sessions/agent-session.js";
 import { NoForkPointError } from "../../agent-sessions/agent-session.js";
+import { createSessionLog } from "../../agent-sessions/rows/session-log.js";
+import type { SessionLog } from "../../agent-sessions/agent-session.js";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
 import { guardianAuth, webchatProjects } from "../../db/schema.js";
@@ -97,6 +100,7 @@ describe("Webchat API", () => {
     testDb = createTestDb();
     deps = await buildTestDeps(testDb.db);
     storedSessions = deps.sessionManager;
+    fakeLog = createSessionLog(deps.webchatRepo);
     baseline = await seedBaseline(testDb.db);
   });
 
@@ -6558,7 +6562,9 @@ function fakeSessionManager(
         surface: SessionSurface,
         options?: SessionOpenOptions,
       ) =>
-        withSubmitInput(
+        logged(
+          surface,
+          caller,
           await open(
             { agentName, channelThreadKey: caller },
             {
@@ -6597,6 +6603,44 @@ function fakeSessionManager(
 
 /** The rows behind the fake managers' `find`. */
 let storedSessions: TestDeps["sessionManager"] | undefined;
+/** The log a fake session keeps its turns in, as a real session does. */
+let fakeLog: SessionLog | undefined;
+
+/** A fake session whose turns pass through the session log, as a real one's
+ *  do: the dashboard chat no longer keeps a trace of its own. */
+function logged(surface: SessionSurface, caller: string, fake: FakeSession): AgentSession {
+  const sendTurn = fake.sendTurn.bind(fake);
+  fake.sendTurn = (input: AgentTurnInput, options?: unknown) => {
+    const handle = sendTurn(input, options as never);
+    const entry = fakeLog?.turn?.({
+      agentName: fake.key.agentName,
+      sessionId: fake.sessionId,
+      caller,
+      turnId: handle.turnId,
+      prompt: input.prompt,
+      replies: surface.replies,
+      served: surface.replies?.romeSessionId
+        ? { origin: "named", id: surface.replies.romeSessionId }
+        : undefined,
+      child: false,
+      keeps: surface.keeps,
+    });
+    const writer = entry?.writer;
+    if (!writer) return handle;
+    const events = handle.events as AsyncIterable<StreamAgentEvent>;
+    return {
+      ...handle,
+      events: (async function* () {
+        for await (const event of events) {
+          const kept = writer.write(event);
+          if (kept) await kept;
+          yield event;
+        }
+      })(),
+    } as typeof handle;
+  };
+  return withSubmitInput(fake);
+}
 
 function withSubmitInput(fake: FakeSession): AgentSession {
   return Object.assign(fake, {

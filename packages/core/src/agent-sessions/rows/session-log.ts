@@ -1,3 +1,4 @@
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import { channelChatId } from "../../db/session-kind.js";
 import { createLogger } from "../../logger.js";
@@ -64,8 +65,41 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
 }
 
 function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string): TurnLogWriter {
+  const record = (event: StreamAgentEvent) =>
+    recordAgentTraceBestEffort(recorder, event, log, { turnId, source });
+  // Text streamed since the last complete text block. A turn that ends before
+  // that block completes, an interrupt mid-answer, keeps what was streamed as
+  // its final text, so the trace shows what the guardian saw.
+  let streamed = "";
+  let streamedBlockId: string | undefined;
+  const keep = async (event: StreamAgentEvent) => {
+    if (event.type === "text") {
+      streamed = "";
+      streamedBlockId = undefined;
+    } else if (event.type === "turn_end" && streamed) {
+      await record({
+        type: "text",
+        content: streamed,
+        turnPhase: "final",
+        ...(streamedBlockId ? { blockId: streamedBlockId } : {}),
+        ...(event.agent ? { agent: event.agent } : {}),
+      } as StreamAgentEvent);
+      streamed = "";
+      streamedBlockId = undefined;
+    }
+    await record(event);
+  };
   return {
-    write: (event) => recordAgentTraceBestEffort(recorder, event, log, { turnId, source }),
+    write: (event) => {
+      if (event.type === "text_delta") {
+        streamed += event.content;
+        if (event.blockId) streamedBlockId = event.blockId;
+        return;
+      }
+      // Deltas and input statuses never reach the trace.
+      if (event.type.endsWith("_delta") || event.type === "input_status") return;
+      return keep(event);
+    },
     input: (label, prompt) =>
       recorder.recordSystemInput(label, prompt).catch((error: unknown) =>
         log.warn("system input not recorded", {

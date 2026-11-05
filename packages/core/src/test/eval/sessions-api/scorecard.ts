@@ -481,6 +481,24 @@ checks.push({
   detail: [...new Set(internalImports)],
 });
 
+// --- C18 No caller writes a session turn's trace -----------------------------
+// The session's log keeps every turn. A caller keeps only what no session
+// said (an approval's own call, a turn that failed to start), and no surface
+// keeps a turn's whole trace by default.
+const TRACE_WRITERS =
+  /\b(AgentTraceRecorder|recordAgentTraceBestEffort|recordBatch)\b|\bturn:\s*true\b/g;
+const traceWriters = coreFiles
+  .filter((file) => !file.startsWith(`${SESSIONS}/`))
+  .flatMap((file) => (code(file).match(TRACE_WRITERS) ?? []).map((hit) => `${rel(file)}: ${hit}`));
+quantities.callerTraceWriters = traceWriters.length;
+checks.push({
+  id: "C18",
+  name: "No caller writes a session turn's trace: only the session's log does",
+  measured: `${traceWriters.length} writers outside Sessions`,
+  pass: traceWriters.length === 0,
+  detail: [...new Set(traceWriters)],
+});
+
 // --- Quantities without a target -------------------------------------------
 quantities.moduleLines = MODULE.reduce((sum, file) => sum + read(file).split("\n").length, 0);
 const APP_KEY_PARSING =

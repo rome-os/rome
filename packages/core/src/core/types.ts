@@ -10,8 +10,9 @@ export type { ForkRunMode, ForkSourceCheckpoint, ThreadContext } from "@rome-os/
 export interface RunParams extends SdkRunParams {
   /** Internal continuations should not be treated as guardian-authored turns. */
   initiatedBy?: "user" | "system";
-  /** Whether the runner saves the turn's trace. Defaults to every channel but
-   *  webchat, whose chat route saves the trace of the turns it runs. */
+  /** Whether the session's log keeps the turn's trace. Defaults to true. On
+   *  the dashboard chat, a run that leaves it unset keeps only the trace,
+   *  since the chat writes the turn's lines itself. */
   persistTrace?: boolean;
   /** Whether a saved trace also writes the turn's user and assistant
    *  transcript rows. Defaults to true. A caller whose channel keeps its own
