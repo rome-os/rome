@@ -104,4 +104,36 @@ describe("normalizeOutlook", () => {
     });
     expect(await normalizeOutlook({}, ctx(read))).toEqual({ keep: false, reason: "no message id" });
   });
+
+  it("reads the sender when Outlook gives no from, and the body when it gives no preview", async () => {
+    const failing = async () => {
+      throw new Error("Outlook answered 503");
+    };
+    const senderOnly = await normalizeOutlook(
+      {
+        id: "AAMk4",
+        outlook_message: { id: "AAMk4", sender: { emailAddress: { address: "Bo@Fabrikam.com" } } },
+      },
+      ctx(failing),
+    );
+    expect(senderOnly).toMatchObject({ keep: true, event: { actor: "bo@fabrikam.com" } });
+    const bodyOnly = await normalizeOutlook(
+      {
+        id: "AAMk5",
+        outlook_message: {
+          id: "AAMk5",
+          body: {
+            contentType: "html",
+            content: `<html><style>p{color:red}</style><p>Can we meet &amp; talk?</p>${"<p>more</p>".repeat(200)}</html>`,
+          },
+        },
+      },
+      ctx(failing),
+    );
+    expect(bodyOnly.keep && bodyOnly.event.excerpt?.startsWith("Can we meet & talk? more")).toBe(
+      true,
+    );
+    expect(bodyOnly.keep && bodyOnly.event.excerpt).not.toContain("<");
+    expect(bodyOnly.keep && bodyOnly.event.excerpt?.length).toBe(501);
+  });
 });

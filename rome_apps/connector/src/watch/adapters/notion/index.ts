@@ -79,7 +79,7 @@ export const notionAdapter = composioAdapter({
   ],
   async account(env, service) {
     const me = await notionReads(env, service).notionMe();
-    return me.email ?? me.name ?? me.id;
+    return me.email ?? me.name ?? me.id ?? me.workspace ?? me.botId ?? "";
   },
   normalize: (env, { type, payload, kinds, service }) =>
     normalizeNotion(type, payload, {

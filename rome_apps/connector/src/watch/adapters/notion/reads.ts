@@ -5,12 +5,36 @@
 import { identityOf, record, required, text } from "../../shared/composio.js";
 import type { ComposioToolkit, Json, WatchEnv } from "../../types.js";
 
-/** The connected Notion user, who owns Rome's integration in their workspace. */
+/**
+ * The connected Notion user, who owns Rome's integration in their workspace.
+ * An integration the workspace owns names no user, so `id` is unknown then:
+ * events still flow, but none is the guardian's by authorship.
+ */
 export interface NotionMe {
-  id: string;
+  id?: string;
   email?: string;
   name?: string;
   workspace?: string;
+  /** The integration's own bot id, which names the account when no user does. */
+  botId?: string;
+}
+
+/** Who `/users/me` says is connected: the bot's owning user, or none when the workspace owns it. */
+export function notionIdentity(me: Json): NotionMe {
+  const bot = record(me.bot);
+  const owner = record(record(bot.owner).user);
+  const id = text(owner.id) ?? (text(me.type) === "person" ? text(me.id) : undefined);
+  const email = text(record(owner.person).email)?.toLowerCase();
+  const name = text(owner.name);
+  const workspace = text(bot.workspace_name);
+  const botId = text(me.type) === "bot" ? text(me.id) : undefined;
+  return {
+    ...(id ? { id } : {}),
+    ...(email ? { email } : {}),
+    ...(name ? { name } : {}),
+    ...(workspace ? { workspace } : {}),
+    ...(botId ? { botId } : {}),
+  };
 }
 
 export interface NotionReads {
@@ -36,19 +60,10 @@ export function notionReads(env: WatchEnv, service: ComposioToolkit): NotionRead
     // The person who connected Notion: the owner of Rome's integration in their workspace.
     notionMe: () =>
       identityOf(env, service, async () => {
-        const me = await read("users/me");
-        const owner = record(record(record(me.bot).owner).user);
-        const id = text(owner.id) ?? (text(me.type) === "person" ? text(me.id) : undefined);
-        return {
-          id: required(service, id),
-          ...(text(record(owner.person).email)
-            ? { email: text(record(owner.person).email)?.toLowerCase() }
-            : {}),
-          ...(text(owner.name) ? { name: text(owner.name) } : {}),
-          ...(text(record(me.bot).workspace_name)
-            ? { workspace: text(record(me.bot).workspace_name) }
-            : {}),
-        };
+        const me = notionIdentity(await read("users/me"));
+        // Nothing at all to name the account by is a failure to say.
+        required(service, me.id ?? me.workspace ?? me.botId);
+        return me;
       }),
     notionComment: (id) => read(`comments/${encodeURIComponent(id)}`),
     async notionComments(blockId) {

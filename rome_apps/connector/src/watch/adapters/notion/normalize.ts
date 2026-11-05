@@ -48,16 +48,19 @@ export async function normalizeNotion(
   if (!ctx.kinds.has(kind)) return drop(KIND_OFF);
 
   const me = (await ctx.reads.notionMe()).id;
+  // With no user known, as for a workspace's own integration, nothing is the guardian's.
+  const isMe = (id: string | undefined) => me !== undefined && id === me;
+  const owner = me ?? "workspace";
   const authors = list(payload.authors);
   // An edit by the guardian with others is not theirs alone.
-  const byYou = authors.length > 0 && authors.every((a) => str(a.id) === me);
+  const byYou = authors.length > 0 && authors.every((a) => isMe(str(a.id)));
   const bot = authors.length > 0 && authors.every((a) => str(a.type) !== "person");
   const comment = kind === "comment_or_mention" ? await commentOf(payload, ctx) : undefined;
   const pageId =
     str(payload.page_id) ?? str(obj(payload.data).page_id) ?? str(obj(comment?.parent).page_id);
   const page = pageId ? await ctx.reads.notionPage(pageId) : {};
   if (page.in_trash === true || page.archived === true) return drop("trash");
-  const yourPage = str(obj(page.created_by).id) === me;
+  const yourPage = isMe(str(obj(page.created_by).id));
   const shared = {
     subject: titleOf(page),
     url: str(page.url),
@@ -66,8 +69,8 @@ export async function normalizeNotion(
   const facts = [yourPage && "your-page", bot && "bot"];
 
   if (comment) {
-    const mentioned = list(comment.rich_text).some(
-      (part) => str(obj(obj(part.mention).user).id) === me,
+    const mentioned = list(comment.rich_text).some((part) =>
+      isMe(str(obj(obj(part.mention).user).id)),
     );
     const discussion = str(comment.discussion_id);
     const commentId = str(comment.id);
@@ -79,10 +82,10 @@ export async function normalizeNotion(
             (c) => str(c.discussion_id) === discussion && str(c.id) !== commentId,
           )
         : [];
-    const replyToYou = thread.some((c) => str(obj(c.created_by).id) === me);
+    const replyToYou = thread.some((c) => isMe(str(obj(c.created_by).id)));
     const addressedTo: AddressedTo =
       mentioned || replyToYou ? "direct" : yourPage ? "copy" : "other";
-    return keep("notion", `${me}:${eventId}`, kind, {
+    return keep("notion", `${owner}:${eventId}`, kind, {
       ...shared,
       text: plain(comment.rich_text),
       addressedTo,
@@ -95,7 +98,7 @@ export async function normalizeNotion(
       ],
     });
   }
-  return keep("notion", `${me}:${eventId}`, kind, {
+  return keep("notion", `${owner}:${eventId}`, kind, {
     ...shared,
     addressedTo: yourPage ? "direct" : "other",
     labels: [

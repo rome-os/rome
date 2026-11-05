@@ -70,7 +70,7 @@ describe("normalizeCalendar", () => {
       { calendar_id: "primary", event_id: "evt1", event_type: "deleted" },
       all,
     );
-    expect(deleted).toMatchObject({ keep: true, event: { labels: ["canceled", "no-guests"] } });
+    expect(deleted).toMatchObject({ keep: true, event: { labels: ["canceled"] } });
     const cancelled = normalizeCalendar(
       SYNC,
       synced({ event_type: "updated", status: "cancelled" }),
@@ -283,6 +283,15 @@ describe("withCancelledEvent", () => {
     expect(await withCancelledEvent(SYNC, tombstone, async () => ({ status: "cancelled" }))).toBe(
       tombstone,
     );
+    // Google answered with the id alone, so who attended stays unknown, not "no guests".
+    const bare = await withCancelledEvent(SYNC, tombstone, async () => ({
+      id: "evt3",
+      status: "cancelled",
+    }));
+    expect(normalizeCalendar(SYNC, bare, all)).toMatchObject({
+      keep: true,
+      event: { labels: ["canceled"] },
+    });
   });
 
   it("reads nothing for a cancellation that has its title, or for any other change", async () => {
@@ -296,6 +305,40 @@ describe("withCancelledEvent", () => {
     const updated = { ...tombstone, event_type: "updated" };
     expect(await withCancelledEvent(SYNC, updated, counted)).toBe(updated);
     expect(reads).toBe(0);
+  });
+});
+
+describe("normalizeCalendar, each reply its own event", () => {
+  const all = { address: "me@example.com", kinds: new Set(["rsvp_changes"]) };
+  const RSVP = "googlecalendar_attendee_response_changed_trigger";
+  const reply = (deliveryId: string, before: string, response: string) => ({
+    attendee_email: "ana@x.io",
+    calendar_id: "primary",
+    event_id: "evt1",
+    previous_response_status: before,
+    response_status: response,
+    _deliveryId: deliveryId,
+  });
+  const idOf = (payload: Record<string, unknown>) => {
+    const result = normalizeCalendar(RSVP, payload, all);
+    return result.keep ? result.event.id : undefined;
+  };
+
+  it("keeps two declines of one meeting apart, and a republished one the same", () => {
+    const ids = [
+      idOf(reply("msg_1", "needsAction", "accepted")),
+      idOf(reply("msg_2", "accepted", "declined")),
+      idOf(reply("msg_3", "declined", "accepted")),
+      idOf(reply("msg_4", "accepted", "declined")),
+    ];
+    expect(new Set(ids).size).toBe(4);
+    expect(ids[1]).not.toBe(ids[3]);
+    expect(idOf(reply("msg_4", "accepted", "declined"))).toBe(ids[3]);
+  });
+
+  it("falls back to the reply itself when no delivery id came with it", () => {
+    const { _deliveryId: _, ...bare } = reply("msg_1", "accepted", "declined");
+    expect(idOf(bare)).toBe("googlecalendar:me@example.com:evt1:rsvp:ana@x.io:accepted:declined");
   });
 });
 

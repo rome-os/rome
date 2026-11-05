@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
-import { NOTION_WATCHABLE } from "./index.js";
+import type { WatchEnv } from "../../types.js";
+import { NOTION_WATCHABLE, notionAdapter } from "./index.js";
 import { normalizeNotion, titleOf } from "./normalize.js";
+import { notionIdentity } from "./reads.js";
 
 // Webhook payloads as Composio's Notion docs list them (ids and authors only:
 // docs.composio.dev/toolkits/notion), and the comment and page objects as
@@ -198,5 +200,59 @@ describe("normalizeNotion with several authors", () => {
     expect(none.keep && none.event.byYou).toBe(false);
     const mine = await edit([{ id: ME, type: "person" }]);
     expect(mine.keep && mine.event.byYou).toBe(true);
+  });
+});
+
+describe("a Notion integration the workspace owns", () => {
+  // `/users/me` for a workspace-owned integration names no user.
+  const workspaceBot = {
+    object: "user",
+    id: "bot-9",
+    type: "bot",
+    bot: { owner: { type: "workspace", workspace: true }, workspace_name: "Acme" },
+  };
+
+  it("leaves the guardian's id unknown instead of failing", () => {
+    expect(notionIdentity(workspaceBot)).toEqual({ workspace: "Acme", botId: "bot-9" });
+  });
+
+  it("still lets events through, none of them the guardian's by authorship", async () => {
+    const unknown = ctx();
+    unknown.reads.notionMe = async () => notionIdentity(workspaceBot);
+    const result = await normalizeNotion(
+      "notion_page_content_updated",
+      {
+        authors: [{ id: "user-ana", type: "person" }],
+        event_id: "ev-8",
+        page_id: "page-1",
+        data: {},
+      },
+      // A page with no creator, so an unknown id would match it if compared loosely.
+      { ...unknown, reads: { ...unknown.reads, notionPage: async () => page({ created_by: {} }) } },
+    );
+    expect(result).toMatchObject({
+      keep: true,
+      event: {
+        id: "notion:workspace:ev-8",
+        byYou: false,
+        addressedTo: "other",
+        labels: ["edited"],
+      },
+    });
+  });
+
+  it("gives the sources list an account to show", async () => {
+    const env = {
+      app: {},
+      relayDepositUrl: async () => "https://relay.example/h/mbox",
+      composio: {
+        signedIn: async () => true,
+        accounts: async () => [{ toolkit: "notion", status: "ACTIVE" }],
+        accountId: async () => "ca_ws",
+        read: async () => workspaceBot,
+        ensureTriggers: async () => ({ ok: true as const, subscription: "active" }),
+      },
+    } as unknown as WatchEnv;
+    expect(await notionAdapter.account(env)).toBe("Acme");
   });
 });

@@ -161,9 +161,18 @@ export function normalizeCalendar(type: string, payload: Json, ctx: CalendarCont
     subject: str(payload.summary),
     addressedTo,
   };
+  // Google keeps only the id of a deleted event, so a cancellation with no
+  // attendees does not say there were none.
+  const attendeesKnown =
+    attendees.length > 0 ||
+    !(
+      type === SYNC &&
+      (str(payload.event_type)?.toLowerCase() === "deleted" ||
+        str(payload.status)?.toLowerCase() === "cancelled")
+    );
   const shared = [
     organizedByYou && "organizer",
-    guests.length === 0 && "no-guests",
+    attendeesKnown && guests.length === 0 && "no-guests",
     str(payload.recurring_event_id) && "recurring",
     (str(payload.hangout_link) || Object.keys(obj(payload.conference_data)).length > 0) && "online",
     mine?.response === "needsAction" && "needs-reply",
@@ -234,7 +243,13 @@ export function normalizeCalendar(type: string, payload: Json, ctx: CalendarCont
       const response = str(payload.response_status)?.toLowerCase();
       const name = str(payload.attendee_name) ?? who;
       const before = str(payload.previous_response_status)?.toLowerCase();
-      return event("rsvp_changes", `rsvp:${who ?? ""}:${before ?? ""}:${response ?? ""}`, {
+      // The payload has no time, so the same reply given twice looks alike.
+      // Its delivery id keeps each occurrence apart and a republish one.
+      const delivery = str(payload._deliveryId);
+      const occurrence = delivery
+        ? `rsvp:${delivery}`
+        : `rsvp:${who ?? ""}:${before ?? ""}:${response ?? ""}`;
+      return event("rsvp_changes", occurrence, {
         actor: name,
         subject: str(payload.event_summary),
         url: str(payload.event_html_link),
