@@ -164,8 +164,16 @@ describe("messagesSaid", () => {
     expect(session?.chatId).toBe(line?.chatId);
     expect(session?.accountId).toBe(BOT.id);
     expect(session?.threadId).toBeNull();
-    // It stands in its chat from the first, so it carries no legacy address.
-    expect(session).toMatchObject({
+    // It stands in its chat from the first, so it carries no legacy address,
+    // nor gets one from a later message that names its chat.
+    await telegram.deliver(message({ messageId: "tg-2", text: "Again" }));
+    await settled();
+    const after = testDb.db
+      .select()
+      .from(romeSessions)
+      .where(eq(romeSessions.id, event?.recorded.chatRecordId ?? ""))
+      .get();
+    expect(after).toMatchObject({
       sourceChannel: null,
       sourceThreadId: null,
       sourceThreadName: null,
