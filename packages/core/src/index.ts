@@ -621,8 +621,7 @@ async function main() {
     messages: chatsWired.messages,
   });
   const appChatsForApps = chatsOver(appChatsPort);
-  // Rome's accounts as an app lists them. `accountNames` is built further
-  // down; a list runs after boot.
+  // Rome's accounts as an app lists them, each named by its profile.
   const appConnectedAccounts = createConnectedAccounts({
     rows: () => connectedAccounts.all(),
   });
