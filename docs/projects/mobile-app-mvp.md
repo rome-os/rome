@@ -34,6 +34,12 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 
 Result: [`mobile-app-mvp-feel-1.md`](mobile-app-mvp-feel-1.md). Review round 1 fixes: `f661266a`, `2c003182`, `6fe4f10c`, `5122af04`, `2e8a8b3f`.
 
+## Instance always on the latest version
+
+Decision (user, 2026-11-04): the app always requires the instance's latest release; the instance's API stays backward compatible, so the app's and the instance's versions never need to match.
+
+- [ ] Block the app with a full-screen "Update your Rome" page while the instance is not on the latest release, with one "Update now" action; track the upgrade until the new version answers
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
@@ -53,5 +59,5 @@ Result: [`mobile-app-mvp-feel-1.md`](mobile-app-mvp-feel-1.md). Review round 1 f
 | Name | Session | Task | Status |
 | --- | --- | --- | --- |
 | iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: reinstalled 8d9450e2 (round 1 feel fixes) from a clean export. Mac Catalyst unit tests passed on it (39 tests in 10 suites), `devicectl` install and launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
-| ios-feel-fixes | local_a0f3f229-481e-440c-9bde-fb0f72bddd0a | Feel fixes, round 1 | working |
+| ios-feel-fixes | local_a0f3f229-481e-440c-9bde-fb0f72bddd0a | Feel fixes, round 1; then instance forced update | round 1 done; forced update working |
 | make-english-the-ios-app | local_066dd861-f965-4eff-89db-ee9aa13d5d0c | English default, zh-Hans translation | done, merged, archived; worktree and branch removed |
