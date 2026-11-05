@@ -191,6 +191,22 @@ describe("ComposioConnectionSection", () => {
     );
   });
 
+  it("shows no project row when the account has a single project", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/apps/connector/projects"
+        ? Response.json({
+            fixed: false,
+            items: [{ id: "pr_only", name: "Only", selected: true, isDefault: true }],
+          })
+        : Response.json({ webhookRegistered: true, relayConfigured: true }),
+    );
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Project")).toBeNull());
+    expect(screen.queryByRole("combobox", { name: "Composio project" })).toBeNull();
+  });
+
   it("Disconnect posts to the composio logout endpoint and refreshes", async () => {
     const fetchMock = rs
       .spyOn(globalThis, "fetch")

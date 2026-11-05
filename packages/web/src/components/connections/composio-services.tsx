@@ -388,7 +388,8 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
 }
 
 /**
- * The Composio project this Rome uses, and the others of the account. Each
+ * The Composio project this Rome uses, and the others of the account, shown
+ * only when the account has more than one. Each
  * Rome uses one project, so two Romes on one account each pick their own to
  * both receive events. Switching moves event delivery to the picked project;
  * connections stay with the project they were made in.
@@ -417,7 +418,8 @@ export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => 
     onError: (err) => onFlash(err.message),
   });
   const items = projects.data?.fixed ? [] : (projects.data?.items ?? []);
-  if (items.length === 0) return null;
+  // Most accounts have one project, so there is nothing to pick and no row.
+  if (items.length < 2) return null;
   const selected = items.find((p) => p.selected);
   return (
     <div className="flex flex-col gap-1 rounded-8 border border-border px-4 py-3">
