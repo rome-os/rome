@@ -313,8 +313,11 @@ const SESSION_SIDE = [
 ];
 // The stored rows themselves: the sessions repository, the row reader, and
 // what they keep (a turn's checkpoint).
+// The caller is an opaque string its owning context mints (C7), so minting
+// one through the codec (`callerKey`) is the owner's job, not a bypass.
+// Parsing a caller back, or reading what the session stored, is.
 const BYPASS_SESSION =
-  /\b(findReusableSession|findResumableSessionById|findActiveByChannelThreadKey|findByChannelThreadKey|getTurnCheckpoint|sessionsRepo|SessionsRepository|SessionManager|callerKey|callerFromKey|callerOfRun|persistThreadKey)\b/g;
+  /\b(findReusableSession|findResumableSessionById|findActiveByChannelThreadKey|findByChannelThreadKey|getTurnCheckpoint|sessionsRepo|SessionsRepository|SessionManager|callerFromKey|callerOfRun|persistThreadKey)\b/g;
 // The wiring builds the repositories and hands them to the session.
 const WIRING = ["index.ts"];
 const consumerBypasses = coreFiles
@@ -324,7 +327,7 @@ const consumerBypasses = coreFiles
 quantities.consumerBypasses = consumerBypasses.length;
 checks.push({
   id: "C11",
-  name: "Routes, Concierge, capabilities and other users of sessions read no session row and spell no stored caller; they ask the manager",
+  name: "Routes, Concierge, capabilities and other users of sessions read no session row and parse no caller; they mint it and ask the manager",
   measured: `${consumerBypasses.length} bypasses`,
   pass: consumerBypasses.length === 0,
   detail: [...new Set(consumerBypasses)],
