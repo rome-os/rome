@@ -347,8 +347,7 @@ export const chatsPortProxy: ChatsPort = {
   group: (query) => callMain("chats.group", query),
 };
 
-/** Worker-side proxy for the main process's connected accounts. History is
- *  read as the channels service reads it. */
+/** Worker-side proxy for the main process's connected accounts. */
 export function connectedAccountsProxy(): ConnectedAccounts {
   return { list: () => callMain<ConnectedAccount[]>("connectedAccounts.list", {}) };
 }
