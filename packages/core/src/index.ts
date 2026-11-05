@@ -270,6 +270,7 @@ import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
+import { whatsAppSendTag } from "./connections/integrations/whatsapp.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -1517,6 +1518,7 @@ async function main() {
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,
+    whatsAppSendTag: await whatsAppSendTag(settingsRepo),
     chatSettings,
     chatStop,
     peopleRepo,

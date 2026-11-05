@@ -17,7 +17,11 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Credential, RuntimeKit, SecretRecord, StreamFault } from "../types.js";
-import { createWhatsAppDescriptor } from "./whatsapp.js";
+import {
+  createWhatsAppDescriptor,
+  WHATSAPP_SEND_TAG_SETTING_KEY,
+  whatsAppSendTag,
+} from "./whatsapp.js";
 import { createWhatsAppAuthState } from "./whatsapp-auth-state.js";
 
 function flush(): Promise<void> {
@@ -89,6 +93,7 @@ function makeDeps(fake: FakeWhatsAppAdapter) {
   const deps = {
     syncSink: sync,
     onGuardianConnected: (jid: string) => mapped.push(jid),
+    sendTag: "0000ABCD",
     createAdapter: (authProvider: WhatsAppAuthProvider) => {
       fake.authProvider = authProvider;
       return fake as unknown as WhatsAppAdapter;
@@ -308,6 +313,7 @@ describe("whatsapp inbound delivery", () => {
         async upsertMessages() {},
       },
       onGuardianConnected: () => {},
+      sendTag: "0000ABCD",
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }).capabilities.talker!.build(sessionCred(), runtimeKit());
     return { talker, handlers };
@@ -382,5 +388,37 @@ describe("whatsapp inbound delivery", () => {
     } satisfies ChannelMessage;
 
     await expect(talker.inboundMedia?.materialize(message)).resolves.toBe(message.attachments);
+  });
+});
+
+describe("whatsAppSendTag", () => {
+  function memorySettings(initial: Record<string, unknown> = {}) {
+    const values = new Map(Object.entries(initial));
+    return {
+      values,
+      async get<T>(key: string) {
+        return (values.get(key) ?? null) as T | null;
+      },
+      async set(key: string, value: unknown) {
+        values.set(key, value);
+      },
+    };
+  }
+
+  it("mints a tag once and keeps it, so it holds across restarts", async () => {
+    const settings = memorySettings();
+    const first = await whatsAppSendTag(settings);
+
+    expect(first).toMatch(/^[0-9A-F]{8}$/);
+    expect(await whatsAppSendTag(settings)).toBe(first);
+    expect(settings.values.get(WHATSAPP_SEND_TAG_SETTING_KEY)).toBe(first);
+  });
+
+  it("replaces a kept value that is not a tag", async () => {
+    const settings = memorySettings({ [WHATSAPP_SEND_TAG_SETTING_KEY]: "nope" });
+    const tag = await whatsAppSendTag(settings);
+
+    expect(tag).toMatch(/^[0-9A-F]{8}$/);
+    expect(settings.values.get(WHATSAPP_SEND_TAG_SETTING_KEY)).toBe(tag);
   });
 });

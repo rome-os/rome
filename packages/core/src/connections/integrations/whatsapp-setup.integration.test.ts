@@ -68,6 +68,7 @@ function harness() {
         insertMessages: async () => {},
       } as never,
       onGuardianConnected: () => {},
+      sendTag: "0000ABCD",
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }),
   );

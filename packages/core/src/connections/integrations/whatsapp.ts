@@ -27,7 +27,13 @@
 
 import { z } from "zod";
 import type { TalkFeatures } from "../types.js";
-import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../kinds/whatsapp/whatsapp.js";
+import type { SettingsRepository } from "../../db/repositories/settings.js";
+import {
+  isSendTag,
+  newSendTag,
+  WhatsAppAdapter,
+  type WhatsAppAuthProvider,
+} from "../kinds/whatsapp/whatsapp.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
@@ -56,6 +62,8 @@ export interface WhatsAppDescriptorDeps {
   /** Auto-map the guardian onto their own WhatsApp identity on connect. Called
    *  with the canonical self JID the adapter derives on `connection: "open"`. */
   onGuardianConnected: (selfJid: string) => void;
+  /** This Rome's WhatsApp send tag, from `whatsAppSendTag`. */
+  sendTag: string;
   /** Injectable socket factory (tests). Defaults to the real WhatsAppAdapter. */
   createAdapter?: (authProvider: WhatsAppAuthProvider) => WhatsAppAdapter;
   /** Injectable transient pairing-socket factory for the setup (tests).
@@ -64,6 +72,23 @@ export interface WhatsAppDescriptorDeps {
   /** Injectable QR renderer (content → `data:` image URL); production uses the
    *  `qrcode` package. */
   makeQrDataUrl?: (content: string) => Promise<string>;
+}
+
+/** The `settings` key that holds this Rome's WhatsApp send tag. */
+export const WHATSAPP_SEND_TAG_SETTING_KEY = "whatsappSendTag";
+
+/**
+ * This Rome's WhatsApp send tag (`newSendTag`), minted and kept in `settings`
+ * the first time it is asked for, so it holds across restarts and relinks.
+ */
+export async function whatsAppSendTag(
+  settings: Pick<SettingsRepository, "get" | "set">,
+): Promise<string> {
+  const kept = await settings.get(WHATSAPP_SEND_TAG_SETTING_KEY);
+  if (isSendTag(kept)) return kept;
+  const tag = newSendTag();
+  await settings.set(WHATSAPP_SEND_TAG_SETTING_KEY, tag);
+  return tag;
 }
 
 /** The `session` material shape (two BufferJSON strings). */
@@ -291,7 +316,8 @@ function asSessionMaterial(material: SecretRecord): WhatsAppAuthMaterial | null 
  */
 export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): ConnectionDescriptor {
   const createAdapter =
-    deps.createAdapter ?? ((authProvider) => new WhatsAppAdapter({ authProvider }));
+    deps.createAdapter ??
+    ((authProvider) => new WhatsAppAdapter({ authProvider, sendTag: deps.sendTag }));
   const openPairing =
     deps.openPairing ?? (() => openWhatsAppPairingSocket(createAdapter, deps.syncSink));
 

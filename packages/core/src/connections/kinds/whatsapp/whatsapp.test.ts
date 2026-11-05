@@ -74,7 +74,9 @@ rs.mock("@whiskeysockets/baileys", () => {
 // Helpers
 
 /** The options of a message the adapter sends: an id it minted. */
-const ROME_SEND = expect.objectContaining({ messageId: expect.stringMatching(/^3EB0524F4D45/) });
+const ROME_SEND = expect.objectContaining({
+  messageId: expect.stringMatching(/^3EB0[0-9A-F]{24}$/),
+});
 
 function makeWAMessage(overrides: Record<string, unknown> = {}) {
   return {
@@ -553,6 +555,31 @@ describe("WhatsAppAdapter", () => {
           [otherRome],
         ]);
         mockSendMessage.mockReset();
+      });
+
+      it("keeps what another Rome linked to the same account sent, which carries another tag", async () => {
+        adapter = new WhatsAppAdapter({ authStatePath: "/tmp/auth", sendTag: "0000ABCD" });
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        const fromMe = (id: string) =>
+          makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe: true } });
+        const mine = "3EB00000ABCD0123456789ABCDEF";
+        const otherRome = "3EB01111AAAA0123456789ABCDEF";
+
+        await eventHandlers["messages.upsert"]({ messages: [fromMe(mine), fromMe(otherRome)] });
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [fromMe(mine), fromMe(`${otherRome.slice(0, -1)}0`)],
+        });
+        await adapter.stop();
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([
+          [otherRome],
+          [`${otherRome.slice(0, -1)}0`],
+        ]);
       });
 
       it("leaves out the guardian's edits, deletions, pins and poll votes, which act on a message", async () => {

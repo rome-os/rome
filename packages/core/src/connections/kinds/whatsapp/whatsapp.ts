@@ -38,13 +38,27 @@ import {
 } from "../../outbound/send-refusals.js";
 
 /**
- * How every message id the adapter mints starts: the "3EB0" WhatsApp Web's own
- * ids start with, then "ROME" in hex. WhatsApp echoes back each message Rome
- * sends, and its history sync reports them again after a relink, so this is
- * how an echo is told from a message the guardian sent. A WhatsApp Web id
+ * How every message id the adapter mints starts, before its send tag: the
+ * "3EB0" WhatsApp Web's own ids start with.
+ */
+const WEB_ID_PREFIX = "3EB0";
+
+/**
+ * A new send tag: 8 hex digits that every message id this Rome mints carries
+ * after `WEB_ID_PREFIX`. WhatsApp echoes back each message Rome sends, and its
+ * history sync reports them again after a relink, so this is how an echo is
+ * told from a message the guardian sent. The tag is this Rome's own, so a
+ * second Rome linked to the same account is told apart too. A WhatsApp Web id
  * carries it by chance once in 2^32.
  */
-const ROME_ID_PREFIX = "3EB0524F4D45";
+export function newSendTag(): string {
+  return randomBytes(4).toString("hex").toUpperCase();
+}
+
+/** Whether `tag` is a send tag `newSendTag` could have minted. */
+export function isSendTag(tag: unknown): tag is string {
+  return typeof tag === "string" && /^[0-9A-F]{8}$/.test(tag);
+}
 
 /** How long a history sync's message from someone else waits for its live
  *  copy before it is recorded as history. */
@@ -62,16 +76,6 @@ function remember(ids: Set<string>, id: string): void {
   }
 }
 
-/** A new id for a message the adapter sends. */
-function romeMessageId(): string {
-  return `${ROME_ID_PREFIX}${randomBytes(8).toString("hex").toUpperCase()}`;
-}
-
-/** Whether `message` is one Rome sent through this account. Another account's
- *  Rome mints the same prefix, so only this account's own messages count. */
-export function isRomeSend(message: WAMessage): boolean {
-  return message.key.fromMe === true && (message.key.id?.startsWith(ROME_ID_PREFIX) ?? false);
-}
 const log = createLogger("whatsapp");
 
 const MAX_RECONNECT_DELAY_MS = 60_000;
@@ -145,6 +149,8 @@ export class WhatsAppAdapter {
   private socketGeneration = 0;
 
   private readonly authProvider: WhatsAppAuthProvider;
+  /** How every message id this adapter mints starts. */
+  private readonly sendPrefix: string;
 
   /**
    * Two auth-state sources:
@@ -154,11 +160,18 @@ export class WhatsAppAdapter {
    *   - `{ authProvider }` — an injected provider. Each socket
    *     generation calls it for `{ state, saveCreds }`; the descriptor threads a
    *     custom in-memory state whose `saveCreds` is `kit.persist` write-through.
+   *
+   * `sendTag` is this Rome's send tag (`newSendTag`). It must outlive the
+   * process, or a history sync after a restart reports Rome's sends as the
+   * guardian's. Left out, the adapter mints one of its own.
    */
   constructor(
-    private config: { authStatePath: string } | { authProvider: WhatsAppAuthProvider },
+    private config: ({ authStatePath: string } | { authProvider: WhatsAppAuthProvider }) & {
+      sendTag?: string;
+    },
     private readonly socketFactory: WhatsAppSocketFactory = makeWASocket,
   ) {
+    this.sendPrefix = `${WEB_ID_PREFIX}${config.sendTag ?? newSendTag()}`;
     this.authProvider =
       "authProvider" in config
         ? config.authProvider
@@ -500,7 +513,7 @@ export class WhatsAppAdapter {
     // Chats records what Rome sends when it sends it. An edit or a deletion
     // answers a message rather than being one, as a reaction does.
     const inputs = this.syncInputs(
-      messages.filter((message) => !isRomeSend(message) && !answersAMessage(message)),
+      messages.filter((message) => !this.sentHere(message) && !answersAMessage(message)),
     );
     if (inputs.length === 0) return [];
     try {
@@ -509,6 +522,17 @@ export class WhatsAppAdapter {
       log.error("failed to record whatsapp history", { error: errMsg(err) });
       return [];
     }
+  }
+
+  /** A new id for a message the adapter sends. */
+  private newMessageId(): string {
+    return `${this.sendPrefix}${randomBytes(8).toString("hex").toUpperCase()}`;
+  }
+
+  /** Whether `message` is one this Rome sent through this account. Another
+   *  Rome's sends carry another tag, and another account's are not `fromMe`. */
+  private sentHere(message: WAMessage): boolean {
+    return message.key.fromMe === true && (message.key.id?.startsWith(this.sendPrefix) ?? false);
   }
 
   async stop(): Promise<void> {
@@ -595,7 +619,7 @@ export class WhatsAppAdapter {
     const jid = this.canonicalJid(threadId);
     const sock = this.sock;
     const sendOne = (jid: string, content: Parameters<typeof sock.sendMessage>[1]) =>
-      sock.sendMessage(jid, content, { messageId: romeMessageId() });
+      sock.sendMessage(jid, content, { messageId: this.newMessageId() });
 
     try {
       let messageId: string | undefined;
