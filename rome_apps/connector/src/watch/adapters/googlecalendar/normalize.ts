@@ -57,6 +57,43 @@ export function whenOf(start: string | undefined, end: string | undefined): stri
   return `${day} ${time}${until}${tz}`;
 }
 
+const SYNC = "googlecalendar_google_calendar_event_sync_trigger";
+
+/**
+ * A cancellation that names only its id, filled in from the event itself:
+ * Google still returns a cancelled event, usually with its title and time.
+ * The read is optional. When it fails or finds nothing to show, the bare
+ * cancellation goes on as it came, and nothing is retried.
+ */
+export async function withCancelledEvent(
+  type: string,
+  payload: Json,
+  read: (eventId: string) => Promise<Json>,
+): Promise<Json> {
+  const eventId = str(payload.event_id);
+  const canceled =
+    str(payload.event_type)?.toLowerCase() === "deleted" ||
+    str(payload.status)?.toLowerCase() === "cancelled";
+  if (type !== SYNC || !canceled || !eventId || str(payload.summary)) return payload;
+  const found = await read(eventId).catch(() => undefined);
+  if (!found) return payload;
+  const summary = str(found.summary);
+  const start = str(obj(found.start).dateTime) ?? str(obj(found.start).date);
+  if (!summary && !start) return payload;
+  const end = str(obj(found.end).dateTime) ?? str(obj(found.end).date);
+  const fill = (key: string, value: unknown) =>
+    payload[key] === undefined && value !== undefined ? { [key]: value } : {};
+  return {
+    ...payload,
+    ...fill("summary", summary),
+    ...fill("start_time", start),
+    ...fill("end_time", end),
+    ...fill("html_link", str(found.htmlLink)),
+    ...fill("organizer_email", str(obj(found.organizer).email)),
+    ...fill("attendees", Array.isArray(found.attendees) ? found.attendees : undefined),
+  };
+}
+
 /** Sentences joined into one excerpt, each ending in its own stop. */
 export const sentences = (...parts: (string | undefined)[]) =>
   parts
@@ -103,7 +140,14 @@ export function normalizeCalendar(type: string, payload: Json, ctx: CalendarCont
   const organizer = str(payload.organizer_email)?.toLowerCase();
   const organizedByYou =
     (organizer !== undefined ? organizer === me : false) || mine?.organizer === true;
-  const guests = attendees.filter((a) => !a.resource && a !== mine && a.email !== me);
+  // An organizer who is not the guardian is another person at the meeting,
+  // whether or not Google lists them among the attendees.
+  const guests = [
+    ...attendees.filter((a) => !a.resource && a !== mine && a.email !== me),
+    ...(organizer !== undefined && organizer !== me && !attendees.some((a) => a.email === organizer)
+      ? [{ email: organizer }]
+      : []),
+  ];
   const addressedTo: AddressedTo =
     organizedByYou || (mine !== undefined && !mine.optional)
       ? "direct"
@@ -177,9 +221,10 @@ export function normalizeCalendar(type: string, payload: Json, ctx: CalendarCont
             where,
             str(payload.description),
           ),
-          // Only the organizer or the creator changes an event, so either one
-          // being the guardian means the guardian did it.
-          byYou: organizedByYou || createdByYou,
+          // Only a new event names who did it: its creator. A change or a
+          // cancellation names no editor, and a guest may edit too, so it is
+          // not said to be the guardian's. Ownership stays in the labels.
+          byYou: created && createdByYou,
           labels: [what, ...shared],
         },
       );

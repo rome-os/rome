@@ -90,6 +90,10 @@ describe("normalizeOutlook", () => {
     );
     expect(supplied.keep && supplied.event.subject).toBe("From the trigger");
     await expect(normalizeOutlook({ id: "AAMk3" }, ctx(failing))).rejects.toThrow("503");
+    // An object that names only the id has nothing to show, so the failure stands.
+    await expect(
+      normalizeOutlook({ id: "AAMk3", outlook_message: { id: "AAMk3" } }, ctx(failing)),
+    ).rejects.toThrow("503");
   });
 
   it("drops only a kind the follow has off or a payload with no id", async () => {

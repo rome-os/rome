@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { CALENDAR_WATCHABLE } from "./index.js";
-import { normalizeCalendar, whenOf } from "./normalize.js";
+import { normalizeCalendar, whenOf, withCancelledEvent } from "./normalize.js";
 
 // Payloads shaped as Composio's googlecalendar trigger docs list them
 // (docs.composio.dev/toolkits/googlecalendar), with Google's attendee objects.
@@ -189,6 +189,113 @@ describe("normalizeCalendar", () => {
     expect(normalizeCalendar("googlecalendar_event_created_trigger", synced(), all).keep).toBe(
       false,
     );
+  });
+});
+
+describe("normalizeCalendar, who did it and who attends", () => {
+  const address = "me@example.com";
+  const all = { address, kinds: new Set(CALENDAR_WATCHABLE.kinds.map((k) => k.kind)) };
+  const SYNC = "googlecalendar_google_calendar_event_sync_trigger";
+  const base = {
+    calendar_id: "primary",
+    event_id: "evt2",
+    summary: "1:1",
+    start_time: "2026-11-05T15:00:00+08:00",
+    updated_at: "2026-11-04T12:00:00Z",
+  };
+
+  it("does not say the guardian changed their own meeting, since a guest may have", () => {
+    const edited = normalizeCalendar(
+      SYNC,
+      {
+        ...base,
+        event_type: "updated",
+        organizer_email: address,
+        creator_email: address,
+        attendees: [
+          { email: address, self: true, organizer: true, responseStatus: "accepted" },
+          { email: "ana@x.io", responseStatus: "accepted" },
+        ],
+      },
+      all,
+    );
+    expect(edited).toMatchObject({
+      keep: true,
+      event: { byYou: false, addressedTo: "direct", labels: ["updated", "organizer"] },
+    });
+  });
+
+  it("counts an organizer from outside as a guest", () => {
+    const invite = normalizeCalendar(
+      SYNC,
+      {
+        ...base,
+        event_type: "created",
+        organizer_email: "ana@x.io",
+        creator_email: "ana@x.io",
+        attendees: [{ email: address, self: true, responseStatus: "needsAction" }],
+      },
+      all,
+    );
+    expect(invite.keep && invite.event.labels).toEqual(["invite", "needs-reply"]);
+  });
+});
+
+describe("withCancelledEvent", () => {
+  const address = "me@example.com";
+  const all = { address, kinds: new Set(CALENDAR_WATCHABLE.kinds.map((k) => k.kind)) };
+  const SYNC = "googlecalendar_google_calendar_event_sync_trigger";
+  const tombstone = { calendar_id: "primary", event_id: "evt3", event_type: "deleted" };
+  // A cancelled event as Google's events.get still returns it.
+  const cancelled = {
+    id: "evt3",
+    status: "cancelled",
+    summary: "Design review",
+    start: { dateTime: "2026-11-05T15:00:00+08:00" },
+    end: { dateTime: "2026-11-05T16:00:00+08:00" },
+    htmlLink: "https://www.google.com/calendar/event?eid=ZXZ0Mw",
+    organizer: { email: "ana@x.io" },
+  };
+
+  it("reads a bare cancellation's event, so it shows its title, time and link", async () => {
+    const asked: string[] = [];
+    const filled = await withCancelledEvent(SYNC, tombstone, async (id) => {
+      asked.push(id);
+      return cancelled;
+    });
+    expect(asked).toEqual(["evt3"]);
+    expect(normalizeCalendar(SYNC, filled, all)).toMatchObject({
+      keep: true,
+      event: {
+        subject: "Design review",
+        url: "https://www.google.com/calendar/event?eid=ZXZ0Mw",
+        excerpt: "2026-11-05 15:00–16:00 (+08:00).",
+        labels: ["canceled"],
+      },
+    });
+  });
+
+  it("keeps the bare cancellation when the read fails or finds nothing to show", async () => {
+    const failing = async () => {
+      throw new Error("Google Calendar answered 410");
+    };
+    expect(await withCancelledEvent(SYNC, tombstone, failing)).toBe(tombstone);
+    expect(await withCancelledEvent(SYNC, tombstone, async () => ({ status: "cancelled" }))).toBe(
+      tombstone,
+    );
+  });
+
+  it("reads nothing for a cancellation that has its title, or for any other change", async () => {
+    let reads = 0;
+    const counted = async () => {
+      reads += 1;
+      return cancelled;
+    };
+    const titled = { ...tombstone, summary: "1:1" };
+    expect(await withCancelledEvent(SYNC, titled, counted)).toBe(titled);
+    const updated = { ...tombstone, event_type: "updated" };
+    expect(await withCancelledEvent(SYNC, updated, counted)).toBe(updated);
+    expect(reads).toBe(0);
   });
 });
 

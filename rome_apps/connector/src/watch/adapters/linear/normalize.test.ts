@@ -188,3 +188,42 @@ describe("mentionsViewer", () => {
     expect(mentionsViewer("email mia@x.io", viewer)).toBe(false);
   });
 });
+
+describe("normalizeLinear when a read fails", () => {
+  it("throws when whose issue a comment is on cannot be read, rather than saying it is no one's", async () => {
+    const failing = {
+      kinds: ALL,
+      reads: {
+        linearViewer: async () => viewer,
+        linearIssue: async (): Promise<LinearIssuePeople> => {
+          throw new Error("Linear answered 502");
+        },
+      },
+    };
+    const comment = { id: "c-9", body: "Done", issueId: "iss-1", issue: { id: "iss-1" } };
+    await expect(normalizeLinear(COMMENT, hook(comment), failing)).rejects.toThrow("502");
+  });
+});
+
+describe("normalizeLinear with assignments alone on", () => {
+  it("keeps an unknown change to an issue assigned to the guardian, without claiming a new assignment", async () => {
+    const result = await normalizeLinear(UPDATED, hook(issue()), ctx(new Set(["assigned_to_you"])));
+    expect(result).toMatchObject({
+      keep: true,
+      event: {
+        id: "linear:u-me:issue:iss-1:updated:2026-11-04T10:00:00.000Z",
+        kind: "assigned_to_you",
+        addressedTo: "direct",
+        labels: ["issue", "updated", "assigned-to-you", "team:eng", "urgent"],
+      },
+    });
+    expect(result.keep && result.event.labels).not.toContain("assigned");
+    expect(
+      await normalizeLinear(
+        UPDATED,
+        hook(issue({ assigneeId: "u-bo" })),
+        ctx(new Set(["assigned_to_you"])),
+      ),
+    ).toMatchObject({ keep: false });
+  });
+});

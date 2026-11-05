@@ -9,7 +9,7 @@ import {
   text,
 } from "../../shared/composio.js";
 import type { ComposioTriggerSpec, Watchable } from "../../types.js";
-import { normalizeCalendar } from "./normalize.js";
+import { normalizeCalendar, withCancelledEvent } from "./normalize.js";
 
 export const CALENDAR_STARTING_SOON: ComposioTriggerSpec = {
   toolkit: "googlecalendar",
@@ -80,6 +80,14 @@ export const calendarAdapter = composioAdapter({
       });
       return required(service, text(data.id)?.toLowerCase());
     }),
-  normalize: (_env, { type, payload, account, kinds }) =>
-    normalizeCalendar(type, payload, { address: account, kinds }),
+  normalize: async (env, { type, payload, account, kinds, service }) =>
+    normalizeCalendar(
+      type,
+      await withCancelledEvent(type, payload, (eventId) =>
+        env.composio.read(service, {
+          endpoint: `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+        }),
+      ),
+      { address: account, kinds },
+    ),
 });

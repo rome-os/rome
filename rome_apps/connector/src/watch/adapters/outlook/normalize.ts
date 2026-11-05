@@ -27,10 +27,17 @@ export async function normalizeOutlook(payload: Json, ctx: OutlookContext): Prom
   const id = str(payload.id);
   if (!id) return drop("no message id");
   const supplied = obj(payload.outlook_message ?? payload.message);
-  // A failed read keeps what the trigger supplied; with nothing, the error
-  // reaches the follower, so the mail is tried again rather than lost.
+  // A failed read keeps what the trigger supplied when it says something: a
+  // sender, a subject or a body. Otherwise the error reaches the follower, so
+  // the mail is tried again rather than shown as nothing.
+  const showable =
+    str(obj(obj(supplied.from).emailAddress).address) !== undefined ||
+    str(obj(obj(supplied.sender).emailAddress).address) !== undefined ||
+    str(supplied.subject) !== undefined ||
+    str(supplied.bodyPreview) !== undefined ||
+    str(obj(supplied.body).content) !== undefined;
   const message = await ctx.reads.outlookMessage(id).catch((error: unknown) => {
-    if (Object.keys(supplied).length > 0) return supplied;
+    if (showable) return supplied;
     throw error;
   });
   const me = ctx.address.toLowerCase();

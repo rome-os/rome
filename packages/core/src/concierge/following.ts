@@ -35,6 +35,7 @@ import {
   ImportantDelivery,
   parseQuietHours,
   quietWindowEnd,
+  guardianNow,
   renderDigestTurn,
   renderImportantTurn,
 } from "./alerts.js";
@@ -453,9 +454,10 @@ export function startConciergeFollowing(
       // The Concierge decides whether to tell each item now. Either way every
       // item also goes into the next digest.
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
+      const at = guardianNow(now(), await resolveGuardianTimezone(deps.settings));
       const ran =
         chatId !== null &&
-        (await service.runSystemTurn(chatId, renderImportantTurn(items, held), {
+        (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at), {
           quiet: true,
           inputLabel: `Following · important (${items.length})`,
         }));
@@ -564,10 +566,11 @@ export function startConciergeFollowing(
     const owed = await deps.items.owedToDigest();
     if (owed.length === 0) return { items: 0 };
     const chatId = await service.findChatId();
+    const at = guardianNow(now(), await resolveGuardianTimezone(deps.settings));
     const ran =
       chatId !== null &&
       (await outsideAction(() =>
-        service.runSystemTurn(chatId, renderDigestTurn(owed), {
+        service.runSystemTurn(chatId, renderDigestTurn(owed, at), {
           quiet: true,
           inputLabel: `Following · digest (${owed.length})`,
         }),

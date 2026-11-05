@@ -208,6 +208,7 @@ function setup(
   };
   let following: ConciergeFollowing | null = null;
   let nextId = 0;
+  const failedReads = new Set<string>();
   const deps: ConciergeFollowingDeps = {
     routines: {
       create: async (data) => {
@@ -283,7 +284,13 @@ function setup(
           kind?: string;
           actor?: string;
           byYou?: boolean;
+          failOnce?: boolean;
         };
+        // A read the connector needed fails the first time it is tried.
+        if (payload.failOnce && payload.id && !failedReads.has(payload.id)) {
+          failedReads.add(payload.id);
+          throw new Error("Outlook answered 503");
+        }
         return payload.keep
           ? {
               status: "ok",
@@ -749,6 +756,29 @@ describe("the follow pipeline", () => {
       {} as never,
     );
 
+  it("lets a failed read reach the routine, and delivers the event its retry reads", async () => {
+    rs.useFakeTimers();
+    const s = setup();
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const run = () =>
+      s.action("core:concierge_follow_event").execute(
+        {
+          source: "github",
+          target: "acme/widgets",
+          eventName: "provider:event:github.pull_request",
+          __triggerPayload: { keep: true, id: "e1", failOnce: true },
+        },
+        {} as never,
+      );
+    // The failure is thrown, not answered, so the routine engine retries the run.
+    await expect(run()).rejects.toThrow("503");
+    expect(await run()).toEqual({ status: "ok", data: { queued: "review_requested" } });
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.triaged).toEqual([["e1"]]);
+    expect(s.turns[0]).toContain("line for e1");
+    s.stop();
+  });
+
   it("batches for five minutes, triages, tells important items and stores digest ones", async () => {
     rs.useFakeTimers();
     const s = setup({ triage: { e2: "digest", e3: "ignore" } });
@@ -765,6 +795,8 @@ describe("the follow pipeline", () => {
     // The Concierge gets only the triaged line of the important item.
     expect(s.turns).toHaveLength(1);
     expect(s.turns[0]).toContain('delivery="important"');
+    // The Concierge is told the guardian's time, not left to read the clock's UTC.
+    expect(s.turns[0]).toMatch(/ now="\w{3} \d\d\/\d\d\/\d{4} \d\d:\d\d \([^)]+\)">/);
     expect(s.turns[0]).toContain("line for e1");
     expect(s.turns[0]).not.toContain("e2");
     expect(await s.items.owedToConcierge()).toEqual([]);

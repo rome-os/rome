@@ -7,7 +7,7 @@ description: |
   meeting's time and the guardian's reply to it, a failed payment's amount).
   When an event names only ids (an Outlook message, a Notion comment), it
   reads what it needs through the connected account, and fails when that
-  read fails, so the follower can try again. It does not decide whether the
+  read fails, so the routine running the follower retries it. It does not decide whether the
   event matters; it drops only spam, trash and events of a kind the follow
   has off. Changes nothing.
 entry: ./index.ts

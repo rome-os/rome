@@ -8,14 +8,20 @@ import type { Json, Normalized } from "../../types.js";
 
 /** Currencies Stripe counts in whole units, not hundredths. */
 const ZERO_DECIMAL = new Set(
-  "bif clp djf gnf jpy kmf krw mga pyg rwf ugx vnd vuv xaf xof xpf".split(" "),
+  "bif clp djf gnf jpy kmf krw mga pyg rwf vnd vuv xaf xof xpf".split(" "),
 );
+/** Currencies Stripe counts in thousandths. */
+const THREE_DECIMAL = new Set("bhd jod kwd omr tnd".split(" "));
 
 /** An amount in a currency's own units, such as `49.00 USD`. */
 export function amountOf(amount: unknown, currency: unknown): string | undefined {
   if (typeof amount !== "number" || typeof currency !== "string") return undefined;
   const code = currency.toLowerCase();
-  const value = ZERO_DECIMAL.has(code) ? String(amount) : (amount / 100).toFixed(2);
+  const value = ZERO_DECIMAL.has(code)
+    ? String(amount)
+    : THREE_DECIMAL.has(code)
+      ? (amount / 1000).toFixed(3)
+      : (amount / 100).toFixed(2);
   return `${value} ${code.toUpperCase()}`;
 }
 
@@ -124,12 +130,22 @@ export function normalizeStripe(
       });
     }
     case "stripe_customer_subscription_deleted": {
-      const item = obj(
-        (Array.isArray(obj(object.items).data) ? (obj(object.items).data as unknown[]) : [])[0],
-      );
+      const items = Array.isArray(obj(object.items).data)
+        ? (obj(object.items).data as unknown[])
+        : [];
+      const item = obj(items[0]);
       const price = obj(item.price);
-      const amount = amountOf(price.unit_amount, price.currency);
-      const every = str(obj(price.recurring).interval);
+      const recurring = obj(price.recurring);
+      const count = (value: unknown) => (typeof value === "number" ? value : 1);
+      // One unit of one price, billed every interval, reads as one amount.
+      // Several units, items or intervals do not, so the amount is left out.
+      const simple =
+        items.length <= 1 &&
+        count(item.quantity) <= 1 &&
+        count(object.quantity) <= 1 &&
+        count(recurring.interval_count) <= 1;
+      const amount = simple ? amountOf(price.unit_amount, price.currency) : undefined;
+      const every = str(recurring.interval);
       const why = obj(object.cancellation_details);
       return keep("stripe", `${prefix}:canceled`, kind, {
         ...base,

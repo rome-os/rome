@@ -206,6 +206,41 @@ describe("amountOf", () => {
   it("counts hundredths, except in currencies counted in whole units", () => {
     expect(amountOf(4900, "usd")).toBe("49.00 USD");
     expect(amountOf(500, "JPY")).toBe("500 JPY");
+    expect(amountOf(12345, "kwd")).toBe("12.345 KWD");
+    for (const code of ["bhd", "jod", "omr", "tnd"]) {
+      expect(amountOf(1000, code)).toBe(`1.000 ${code.toUpperCase()}`);
+    }
+    // Stripe counts UGX in hundredths.
+    expect(amountOf(500000, "ugx")).toBe("5000.00 UGX");
     expect(amountOf(undefined, "usd")).toBeUndefined();
+  });
+});
+
+describe("normalizeStripe, a canceled subscription's amount", () => {
+  const ended = (subscription: Record<string, unknown>) =>
+    normalizeStripe(
+      "stripe_customer_subscription_deleted",
+      event({ id: "sub_2", object: "subscription", customer: "cus_2", ...subscription }),
+      ctx,
+    );
+  const item = (extra: Record<string, unknown> = {}, recurring: Record<string, unknown> = {}) => ({
+    price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month", ...recurring } },
+    ...extra,
+  });
+
+  it("gives the amount of one unit of one price billed every interval", () => {
+    const one = ended({ items: { data: [item({ quantity: 1 })] } });
+    expect(one.keep && one.event.subject).toBe("A subscription of 29.00 USD a month ended");
+  });
+
+  it("leaves the amount out for several units, several items, or several intervals", () => {
+    for (const items of [
+      [item({ quantity: 3 })],
+      [item(), item()],
+      [item({}, { interval_count: 3 })],
+    ]) {
+      const result = ended({ items: { data: items } });
+      expect(result.keep && result.event.subject).toBe("A subscription ended");
+    }
   });
 });

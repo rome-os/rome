@@ -49,7 +49,8 @@ export async function normalizeNotion(
 
   const me = (await ctx.reads.notionMe()).id;
   const authors = list(payload.authors);
-  const byYou = authors.some((a) => str(a.id) === me);
+  // An edit by the guardian with others is not theirs alone.
+  const byYou = authors.length > 0 && authors.every((a) => str(a.id) === me);
   const bot = authors.length > 0 && authors.every((a) => str(a.type) !== "person");
   const comment = kind === "comment_or_mention" ? await commentOf(payload, ctx) : undefined;
   const pageId =
@@ -74,7 +75,7 @@ export async function normalizeNotion(
     // A reply to the guardian is a comment in a discussion they wrote in.
     const thread =
       discussion && block
-        ? (await ctx.reads.notionComments(block).catch(() => [])).filter(
+        ? (await ctx.reads.notionComments(block)).filter(
             (c) => str(c.discussion_id) === discussion && str(c.id) !== commentId,
           )
         : [];

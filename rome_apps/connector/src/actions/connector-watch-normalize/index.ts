@@ -22,18 +22,15 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     schema: inputSchema,
     execute: async ({ source, eventName, payload, account, kinds }) => {
       const adapter = adapterOf(source);
-      try {
-        const data = await adapter?.normalize(liveWatchEnv(deps), {
-          eventName,
-          payload,
-          account,
-          kinds,
-        });
-        if (data) return { status: "ok", data };
-      } catch (error) {
-        // A read the event needed failed: the follower tries it again.
-        return { status: "error", error: error instanceof Error ? error.message : String(error) };
-      }
+      // A read the event needed may fail. It throws on, so the routine that
+      // runs the follower retries the event; an answer of error is final.
+      const data = await adapter?.normalize(liveWatchEnv(deps), {
+        eventName,
+        payload,
+        account,
+        kinds,
+      });
+      if (data) return { status: "ok", data };
       return { status: "error", error: `Rome cannot read ${eventName} for "${source}".` };
     },
   });

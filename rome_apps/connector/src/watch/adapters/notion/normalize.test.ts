@@ -168,3 +168,35 @@ describe("titleOf", () => {
     expect(titleOf({ properties: {} })).toBeUndefined();
   });
 });
+
+describe("normalizeNotion when a read fails", () => {
+  it("throws when the discussion cannot be read, rather than saying it replies to no one", async () => {
+    const failing = ctx();
+    failing.reads.notionComments = async () => {
+      throw new Error("Notion answered 502");
+    };
+    await expect(normalizeNotion("notion_comment_created", commentEvent, failing)).rejects.toThrow(
+      "502",
+    );
+  });
+});
+
+describe("normalizeNotion with several authors", () => {
+  it("says the guardian did it only when every author is the guardian", async () => {
+    const edit = (authors: { id: string; type: string }[]) =>
+      normalizeNotion(
+        "notion_page_content_updated",
+        { authors, event_id: "ev-7", page_id: "page-1", data: {} },
+        ctx(),
+      );
+    const mixed = await edit([
+      { id: ME, type: "person" },
+      { id: "user-ana", type: "person" },
+    ]);
+    expect(mixed.keep && mixed.event.byYou).toBe(false);
+    const none = await edit([]);
+    expect(none.keep && none.event.byYou).toBe(false);
+    const mine = await edit([{ id: ME, type: "person" }]);
+    expect(mine.keep && mine.event.byYou).toBe(true);
+  });
+});

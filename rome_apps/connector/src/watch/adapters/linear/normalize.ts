@@ -74,7 +74,7 @@ export async function normalizeLinear(
     // The comment names its issue but not always who the issue belongs to.
     let people = issuePeople(issue);
     if (!people.assigneeId && !people.creatorId && issueId) {
-      people = await ctx.reads.linearIssue(issueId).catch(() => people);
+      people = await ctx.reads.linearIssue(issueId);
     }
     const onYours = issueAddressed(people, me);
     return keep("linear", `${me}:comment:${id}`, "comment_or_mention", {
@@ -166,6 +166,20 @@ export async function normalizeLinear(
         text: str(state.name) ? `Status ${str(state.name)}.` : undefined,
         addressedTo: issueAddressed(people, me),
         labels: ["issue", "updated", ...facts],
+      });
+    }
+    // With assignments alone on, an unknown change to an issue assigned to the
+    // guardian is kept as theirs, without saying they were just assigned.
+    if (
+      !("updatedFrom" in payload) &&
+      people.assigneeId === me &&
+      ctx.kinds.has("assigned_to_you")
+    ) {
+      return keep("linear", `${me}:issue:${id}:updated:${at}`, "assigned_to_you", {
+        ...shared,
+        text: str(state.name) ? `Status ${str(state.name)}.` : undefined,
+        addressedTo: "direct",
+        labels: ["issue", "updated", "assigned-to-you", ...facts],
       });
     }
     return drop(
