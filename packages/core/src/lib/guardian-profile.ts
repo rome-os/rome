@@ -191,7 +191,6 @@ async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promis
     displayName: guardianName,
     bondLevel: "guardian",
     profilePath: GUARDIAN_PROFILE_PATH,
-    approved: true,
     createdAt: new Date(),
   });
   return id;

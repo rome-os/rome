@@ -1,15 +1,14 @@
 import { z } from "zod";
 // The approval record's closed value sets.
 //
-// `type` selects a lifecycle, not a subject. Each of the three has one creator:
-// the action engine writes `action_execution`, and the inbox app writes
-// `outgoing_message` and `person_mapping`. Leaving the column a bare string
-// invited callers — and fixtures — to invent kinds nothing downstream knows how
-// to resolve.
+// `type` selects a lifecycle, not a subject. The action engine writes
+// `action_execution`, and the inbox app writes `outgoing_message`. Leaving the
+// column a bare string invited callers — and fixtures — to invent kinds nothing
+// downstream knows how to resolve.
 //
-// `person_mapping` is the lifecycle for approving a link (docs/concepts/
-// people.md#link). It keeps its name because it is a persisted column value: a
-// rename would strand every stored row.
+// `person_mapping` stays in the published set so apps compiled against it keep
+// building, but nothing creates one any more: only the guardian links an
+// account to a person (docs/domains/people.md#link).
 
 // Defined in @rome-os/app-runtime — the SDK apps compile against, and therefore
 // the only place that can constrain the two lifecycles apps create. Re-exported
@@ -30,41 +29,3 @@ export const APPROVAL_EXECUTION_STATES = [
   "succeeded",
   "failed",
 ] as const;
-
-const PAIRING_CHANNELS = ["telegram", "discord", "feishu", "slack_bot"] as const;
-export const PAIRING_HISTORY_PAGE_SIZE = 100;
-
-/** A pairing request Rome stored before it stopped asking senders to pair
- *  (docs/domains/people.md#stranger). Read only to show them as history. */
-const pairingPayloadSchema = z.object({
-  action: z.literal("channel_pairing"),
-  channel: z.enum(PAIRING_CHANNELS),
-  connectionId: z.string().min(1),
-  channelUserId: z.string().min(1),
-  displayName: z.string(),
-  username: z.string().optional(),
-  expiresAt: z.number().int(),
-  failedAttempts: z.number().int().nonnegative(),
-  lastGuidanceAt: z.number().int(),
-  /** The direct chat the request came from, where the outcome is sent. */
-  chatId: z.string().optional(),
-  /** The same chat, as requests stored before the chat rename name it.
-   *  `pairingPayload` reads it into `chatId`. */
-  conversationId: z.string().optional(),
-  resolution: z
-    .enum(["web", "verification_code", "rejected", "expired", "account_linked", "superseded"])
-    .optional(),
-});
-export type PairingPayload = z.infer<typeof pairingPayloadSchema>;
-
-export function pairingPayload(approval: {
-  type: string;
-  payload?: unknown;
-}): PairingPayload | null {
-  if (approval.type !== "person_mapping") return null;
-  const parsed = pairingPayloadSchema.safeParse(approval.payload);
-  if (!parsed.success) return null;
-  const { conversationId, ...payload } = parsed.data;
-  const chatId = payload.chatId ?? conversationId;
-  return chatId === undefined ? payload : { ...payload, chatId };
-}

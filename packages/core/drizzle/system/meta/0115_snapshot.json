@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "04011839-ce5c-4014-851a-c72a5b3cc5b2",
-  "prevId": "9610a765-8e93-4763-9162-86712101f9cc",
+  "id": "9610a765-8e93-4763-9162-86712101f9cc",
+  "prevId": "3f94b7ad-f12a-4af5-8f22-37b8e448d6bc",
   "tables": {
     "account_profiles": {
       "name": "account_profiles",
@@ -2294,14 +2294,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "approved": {
-          "name": "approved",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "default": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -3249,14 +3241,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "keep_trigger_payload": {
-          "name": "keep_trigger_payload",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
         },
         "created_at": {
           "name": "created_at",

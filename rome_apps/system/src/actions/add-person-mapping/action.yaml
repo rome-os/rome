@@ -1,7 +1,0 @@
-name: add_person_mapping
-type: system
-description: Add a new person mapping that links a display name to a channel user ID
-complexity: simple
-speed: fast
-reliability: high
-sideEffects: write

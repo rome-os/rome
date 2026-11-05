@@ -35,7 +35,6 @@ export interface MessageHandlerPersonOverride {
   }[];
   bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
   profilePath?: string;
-  approved: boolean;
   createdAt: Date;
 }
 

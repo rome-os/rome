@@ -49,6 +49,7 @@ import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
+  collapseToolsOnMount,
   loadLayoutForSession,
   placeWidgetsIfSessionActive,
   setActiveSession,
@@ -252,6 +253,10 @@ export function FreeGrid() {
     }
     updatePlacementLinks(links);
   }, [workspaceContextRegistry]);
+
+  useEffect(() => {
+    collapseToolsOnMount();
+  }, []);
 
   const suppressProjectsRef = useRef(false);
   useEffect(() => {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9610a765-8e93-4763-9162-86712101f9cc",
+  "id": "3f94b7ad-f12a-4af5-8f22-37b8e448d6bc",
   "prevId": "83d9aca6-7273-4f53-8bce-98542532965a",
   "tables": {
     "account_profiles": {
@@ -1075,115 +1075,6 @@
             "key"
           ],
           "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "concierge_follow_items": {
-      "name": "concierge_follow_items",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "line": {
-          "name": "line",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "offered_at": {
-          "name": "offered_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "digested_at": {
-          "name": "digested_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_concierge_follow_items_event": {
-          "name": "idx_concierge_follow_items_event",
-          "columns": [
-            "event_id"
-          ],
-          "isUnique": true
-        },
-        "idx_concierge_follow_items_digest": {
-          "name": "idx_concierge_follow_items_digest",
-          "columns": [
-            "digested_at"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -2293,14 +2184,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "approved": {
-          "name": "approved",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

@@ -640,7 +640,6 @@ describe("LinkedInStoreRepository", () => {
         await people.create({
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
-          approved: true,
           links: [{ platform: "linkedin", id: ada.participantId }],
         });
 
@@ -671,7 +670,6 @@ describe("LinkedInStoreRepository", () => {
         await people.create({
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
-          approved: true,
           links: [{ platform: "linkedin", id: ada.participantId }],
         });
 
@@ -681,7 +679,6 @@ describe("LinkedInStoreRepository", () => {
           people.create({
             displayName: "Ada Lovelace",
             bondLevel: "acquaintance",
-            approved: true,
             links: [{ platform: "linkedin", id: ada.participantId }],
           }),
         ).rejects.toThrow(/already belongs to person/);
@@ -694,7 +691,6 @@ describe("LinkedInStoreRepository", () => {
         await people.create({
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
-          approved: true,
           links: [{ platform: "linkedin", id: ada.participantId }],
         });
         await people.createWithId("ada-byron", {
