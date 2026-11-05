@@ -10,7 +10,6 @@ import {
   proveIdentity,
   type ProveIdentityResult,
 } from "../../lib/instance-identity.js";
-import { ensureRelayMailbox } from "../../lib/rome-cloud-relay.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { RELAY_SETTING_KEY } from "../../relay/settings.js";
 import { createLogger } from "../../logger.js";
@@ -69,7 +68,6 @@ interface TokenResponse {
 
 export interface InstanceEnrollSeams {
   proveIdentity?: typeof proveIdentity;
-  ensureRelayMailbox?: typeof ensureRelayMailbox;
   fetchImpl?: typeof fetch;
 }
 
@@ -127,6 +125,7 @@ async function checkExistingEnrollment(
       return { ok: false, status: 503, error: "identity_unreachable" };
     case "clock_skew":
     case "signer_unavailable":
+    case "audience_mismatch":
     case "upgrade_required":
       return { ok: false, status: 503, error: auth.status };
   }
@@ -223,35 +222,15 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
         return c.redirect(errorRedirect("malformed"));
       }
 
-      await persistInstanceToken(deps.settingsRepo, token);
-      void deps.provisionNodeCaller?.();
-      log.info("instance enrolled via in-app OAuth", { instanceId });
-      void (seams.ensureRelayMailbox ?? ensureRelayMailbox)({
-        settingsRepo: deps.settingsRepo,
-        appCatalog: deps.appCatalog,
-        relayDrainer: deps.relayDrainer,
-      })
-        .then((result) => {
-          switch (result.status) {
-            case "provisioned":
-              log.info("relay mailbox provisioned after instance enrollment", {
-                mailboxId: result.mailboxId,
-              });
-              break;
-            case "not_enrolled":
-            case "unconfigured":
-            case "unreachable":
-            case "rejected":
-            case "error":
-              log.warn("relay mailbox not provisioned after instance enrollment", result);
-              break;
-          }
-        })
-        .catch((err) => {
-          log.warn("relay mailbox provisioning after instance enrollment threw", {
-            error: err instanceof Error ? err.message : String(err),
-          });
+      const linked = await persistInstanceToken(deps.settingsRepo, token);
+      if (linked?.status === "key_conflict") return c.redirect(errorRedirect("key_conflict"));
+      if (linked && linked.status !== "ok") {
+        log.warn("instance enrolled but the signer key is not registered yet", {
+          status: linked.status,
         });
+      }
+      void deps.provisionAfterLink?.();
+      log.info("instance enrolled via in-app OAuth", { instanceId });
       return c.redirect(enrolledRedirect());
     } catch (err) {
       log.warn("token exchange errored", {

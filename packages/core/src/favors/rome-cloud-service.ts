@@ -62,8 +62,7 @@ export class RomeCloudFavorService implements FavorService {
     return { origin, token };
   }
 
-  private async headers(options?: { json?: boolean }): Promise<Headers> {
-    const { token } = await this.access();
+  private headers(token: string, options?: { json?: boolean }): Headers {
     const headers = new Headers({
       Authorization: `Bearer ${token}`,
       "Cache-Control": "no-store",
@@ -120,10 +119,10 @@ export class RomeCloudFavorService implements FavorService {
   }
 
   private async json<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const { origin } = await this.access();
+    const { origin, token } = await this.access();
     const response = await this.fetchImpl(new URL(path, origin), {
       ...init,
-      headers: await this.headers({
+      headers: this.headers(token, {
         json: init.body !== undefined,
       }),
       cache: "no-store",

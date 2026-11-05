@@ -13,8 +13,9 @@ export async function withRomeCloudReadAuth(
   url: URL,
   headers: Record<string, string>,
 ): Promise<Record<string, string>> {
-  const token = await cloudBearer();
   const cloudOrigin = getRomeCloudOrigin();
-  if (!token || !cloudOrigin || url.origin !== cloudOrigin) return headers;
+  if (!cloudOrigin || url.origin !== cloudOrigin) return headers;
+  const token = await cloudBearer();
+  if (!token) return headers;
   return { ...headers, authorization: `Bearer ${token}` };
 }

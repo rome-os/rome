@@ -1,7 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   cloudBearer,
@@ -12,10 +8,13 @@ import {
   INSTANCE_TOKEN_SETTING_KEY,
   instanceCredentialId,
   isInstanceLinked,
+  onInstanceLinked,
   persistInstanceToken,
+  recheckInstanceIdentity,
   seedInstanceTokenFromEnv,
   syncInstanceIdentity,
 } from "./instance-identity.js";
+import { startFakeSigner } from "../test/fake-signer.js";
 
 const TOKEN = "romeinst_abc123def456";
 const ORIGIN = "https://rome-cloud.example";
@@ -36,20 +35,10 @@ function memoryStore(initial: Record<string, unknown> = {}) {
   };
 }
 
-// A signer on a real unix socket: each token is a distinct JWT-shaped string.
-let signer: Server | undefined;
-let directory = "";
-let issued = 0;
-async function startSigner() {
-  directory = await mkdtemp(join(tmpdir(), "rome-identity-signer-"));
-  const socketPath = join(directory, "signer.sock");
-  signer = createServer((req, res) => {
-    res.setHeader("content-type", "application/json");
-    if (req.url === "/v1/health") res.end(JSON.stringify({ ok: true, jkt: "jkt-1" }));
-    else res.end(JSON.stringify({ token: `eyJ${++issued}.e30.sig` }));
-  });
-  await new Promise<void>((resolve) => signer!.listen(socketPath, resolve));
-  rs.stubEnv("ROME_SIGNER_SOCKET", socketPath);
+let signer: Awaited<ReturnType<typeof startFakeSigner>> | undefined;
+async function startSigner(aud = ORIGIN) {
+  signer = await startFakeSigner({ aud });
+  rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
 }
 
 type Handler = (init: RequestInit) => Response;
@@ -101,10 +90,8 @@ afterEach(async () => {
   rs.restoreAllMocks();
   globalThis.fetch = realFetch;
   rs.unstubAllEnvs();
-  signer?.close();
+  await signer?.close();
   signer = undefined;
-  if (directory) await rm(directory, { recursive: true, force: true });
-  directory = "";
 });
 
 describe("legacy mode (no signer socket)", () => {
@@ -143,22 +130,43 @@ describe("legacy mode (no signer socket)", () => {
 });
 
 describe("signer mode", () => {
-  beforeEach(startSigner);
+  beforeEach(() => startSigner());
 
-  it("sends a fresh signer token for every call once linked", async () => {
+  it("reuses one signer token until shortly before it expires", async () => {
     await hydrateInstanceToken(memoryStore({ [INSTANCE_KEY_SETTING_KEY]: "jkt-1" }));
     const first = await cloudBearer();
     const second = await cloudBearer();
     expect(first).toMatch(/^eyJ/);
-    expect(second).toMatch(/^eyJ/);
-    expect(second).not.toBe(first);
+    expect(second).toBe(first);
+    expect(signer!.state.issued).toBe(1);
     expect(instanceCredentialId()).toBe("jkt-1");
   });
 
-  it("has no bearer before the key is registered, even with a token on hand", async () => {
-    await hydrateInstanceToken(memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN }));
-    expect(await cloudBearer()).toBeNull();
-    expect(isInstanceLinked()).toBe(false);
+  it("asks the signer again when the token is within 15 seconds of its expiry", async () => {
+    signer!.state.lifetimeSeconds = 10;
+    await hydrateInstanceToken(memoryStore({ [INSTANCE_KEY_SETTING_KEY]: "jkt-1" }));
+    const first = await cloudBearer();
+    const second = await cloudBearer();
+    expect(second).not.toBe(first);
+    expect(signer!.state.issued).toBe(2);
+  });
+
+  it("shares one signer request between concurrent callers", async () => {
+    await hydrateInstanceToken(memoryStore({ [INSTANCE_KEY_SETTING_KEY]: "jkt-1" }));
+    const tokens = await Promise.all([cloudBearer(), cloudBearer(), cloudBearer(), cloudBearer()]);
+    expect(new Set(tokens).size).toBe(1);
+    expect(signer!.state.issued).toBe(1);
+  });
+
+  it("drops the cached token when Rome Cloud rejects a signer token", async () => {
+    const store = memoryStore({ [INSTANCE_KEY_SETTING_KEY]: "jkt-1" });
+    await hydrateInstanceToken(store);
+    const before = await cloudBearer();
+    const { fetchImpl } = cloud({ "/api/instance/whoami": whoami(401, { error: "clock_skew" }) });
+    captureRecheck();
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(isInstanceLinked()).toBe(true);
+    expect(await cloudBearer()).not.toBe(before);
   });
 
   it("does not seed the env token into settings", async () => {
@@ -286,7 +294,7 @@ describe("signer mode", () => {
       [INSTANCE_KEY_SETTING_KEY]: "jkt-1",
     });
     await hydrateInstanceToken(store);
-    rs.stubEnv("ROME_SIGNER_SOCKET", join(directory, "missing.sock"));
+    rs.stubEnv("ROME_SIGNER_SOCKET", "/nonexistent/signer.sock");
     const recheck = captureRecheck();
     const { fetchImpl, calls } = cloud({ "/api/instance/whoami": whoami(200, IDENTITY) });
     expect(await syncInstanceIdentity(store, { fetch: fetchImpl })).toEqual({
@@ -298,7 +306,7 @@ describe("signer mode", () => {
     expect(getIdentityIssue()?.message).toBe("Signing service is not running.");
 
     expect(recheck.delay()).toBe(30_000);
-    rs.stubEnv("ROME_SIGNER_SOCKET", join(directory, "signer.sock"));
+    rs.stubEnv("ROME_SIGNER_SOCKET", signer!.socketPath);
     globalThis.fetch = fetchImpl;
     recheck.run();
     await rs.waitFor(() => expect(getIdentityIssue()).toBeNull());
@@ -337,5 +345,168 @@ describe("signer mode", () => {
       status: "clock_skew",
     });
     expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+  });
+});
+
+describe("signer mode before the key is registered", () => {
+  beforeEach(() => startSigner());
+
+  const unauthorized = whoami(401, { error: "invalid_instance_token" });
+
+  it("keeps working with the instance token, then switches to signer tokens once linked", async () => {
+    const store = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN });
+    await hydrateInstanceToken(store);
+    expect(await cloudBearer()).toBe(TOKEN);
+    expect(isInstanceLinked()).toBe(false);
+
+    let known = false;
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": () => (known ? Response.json(IDENTITY) : unauthorized({})),
+      "/api/instance/key": () => {
+        known = true;
+        return Response.json({ instanceId: "inst-1" });
+      },
+    });
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(await cloudBearer()).toMatch(/^eyJ/);
+  });
+
+  it("offers the hosted env token the same way", async () => {
+    rs.stubEnv("ROME_INSTANCE_TOKEN", TOKEN);
+    expect(await cloudBearer()).toBe(TOKEN);
+  });
+
+  it("stops offering an instance token that registration found unusable", async () => {
+    rs.stubEnv("ROME_INSTANCE_TOKEN", "romeinst_retired_env");
+    const store = memoryStore();
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": unauthorized,
+      "/api/instance/key": whoami(409, { error: "already_bound" }),
+    });
+    expect(await cloudBearer()).toBe("romeinst_retired_env");
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(await cloudBearer()).toBeNull();
+  });
+
+  it("retries an unreachable registration in 30 seconds and links then", async () => {
+    const store = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN });
+    await hydrateInstanceToken(store);
+    const recheck = captureRecheck();
+    const linked = rs.fn();
+    onInstanceLinked(linked);
+    let reachable = false;
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": () => (reachable ? Response.json(IDENTITY) : unauthorized({})),
+      "/api/instance/key": () => {
+        if (!reachable) throw new Error("network down");
+        return Response.json({ instanceId: "inst-1" });
+      },
+    });
+    expect(await syncInstanceIdentity(store, { fetch: fetchImpl })).toEqual({
+      status: "unreachable",
+    });
+    expect(recheck.delay()).toBe(30_000);
+    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+    expect(isInstanceLinked()).toBe(false);
+    expect(linked).not.toHaveBeenCalled();
+
+    reachable = true;
+    globalThis.fetch = fetchImpl;
+    recheck.run();
+    await rs.waitFor(() => expect(isInstanceLinked()).toBe(true));
+    expect(linked).toHaveBeenCalledTimes(1);
+    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+  });
+
+  it("retries when Rome Cloud is unreachable at the first check", async () => {
+    await hydrateInstanceToken(memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN }));
+    const recheck = captureRecheck();
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": () => {
+        throw new Error("network down");
+      },
+    });
+    const result = await syncInstanceIdentity(memoryStore(), { fetch: fetchImpl });
+    expect(result.status).toBe("unreachable");
+    expect(recheck.delay()).toBe(30_000);
+  });
+
+  it("does not retry an unreachable check when there is no instance token to register", async () => {
+    await hydrateInstanceToken(memoryStore());
+    const recheck = captureRecheck();
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": () => {
+        throw new Error("network down");
+      },
+    });
+    await syncInstanceIdentity(memoryStore(), { fetch: fetchImpl });
+    expect(recheck.delay()).toBeUndefined();
+  });
+
+  it("reports the registration result to the sign-in that minted the token", async () => {
+    const store = memoryStore();
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": unauthorized,
+      "/api/instance/key": whoami(409, { error: "already_bound" }),
+    });
+    globalThis.fetch = fetchImpl;
+    expect(await persistInstanceToken(store, TOKEN)).toEqual({ status: "key_conflict" });
+    expect(isInstanceLinked()).toBe(false);
+  });
+
+  it("only runs link listeners for background rechecks, not for the boot check", async () => {
+    const linked = rs.fn();
+    onInstanceLinked(linked);
+    const store = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN });
+    await hydrateInstanceToken(store);
+    let known = false;
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": () => (known ? Response.json(IDENTITY) : unauthorized({})),
+      "/api/instance/key": () => {
+        known = true;
+        return Response.json({ instanceId: "inst-1" });
+      },
+    });
+    await syncInstanceIdentity(store, { bootVersion: "1.0.0", fetch: fetchImpl });
+    expect(isInstanceLinked()).toBe(true);
+    expect(linked).not.toHaveBeenCalled();
+
+    const other = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN });
+    await hydrateInstanceToken(other);
+    known = false;
+    globalThis.fetch = fetchImpl;
+    await recheckInstanceIdentity(other);
+    expect(linked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("signer audience", () => {
+  it("does not register, unlink or clear anything when the signer serves another Rome Cloud", async () => {
+    await startSigner("https://other-cloud.example");
+    const store = memoryStore({
+      [INSTANCE_TOKEN_SETTING_KEY]: TOKEN,
+      [INSTANCE_KEY_SETTING_KEY]: "jkt-1",
+    });
+    await hydrateInstanceToken(store);
+    const recheck = captureRecheck();
+    const { fetchImpl, calls } = cloud({ "/api/instance/whoami": whoami(401) });
+
+    expect(await syncInstanceIdentity(store, { fetch: fetchImpl })).toEqual({
+      status: "audience_mismatch",
+    });
+    expect(calls).toHaveLength(0);
+    expect(isInstanceLinked()).toBe(true);
+    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+    expect(store.data.get(INSTANCE_KEY_SETTING_KEY)).toBe("jkt-1");
+    expect(getIdentityIssue()?.message).toBe(
+      "The signing service is configured for a different Rome Cloud address.",
+    );
+    expect(recheck.delay()).toBe(30_000);
+
+    // The signer is corrected; the next check clears the issue.
+    signer!.state.aud = ORIGIN;
+    globalThis.fetch = (async () => Response.json(IDENTITY)) as typeof fetch;
+    recheck.run();
+    await rs.waitFor(() => expect(getIdentityIssue()).toBeNull());
   });
 });

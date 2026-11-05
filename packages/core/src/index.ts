@@ -17,7 +17,7 @@ import {
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
   proveIdentity,
-  signerMode,
+  onInstanceLinked,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
@@ -1973,13 +1973,15 @@ async function main() {
     }
   };
 
+  // Bound once the favor runner exists, below.
+  let provisionAfterLink = async (): Promise<void> => {};
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
-      provisionNodeCaller,
+      provisionAfterLink: () => provisionAfterLink(),
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       nodeDevices,
       channelsService,
@@ -2067,6 +2069,27 @@ async function main() {
   await routineEngine.start();
 
   favorDispatchRunner.start();
+
+  // Everything that needs a linked instance: the node caller, the self-provisioned
+  // relay mailbox (re-minted with a full-TTL drain key each time), and the first
+  // favor sync. Run after the boot identity check, after a sign-in links, and
+  // when a background check links an instance that was not linked. Each step is
+  // idempotent and handles a missing credential, so one failing never stops the next.
+  provisionAfterLink = async () => {
+    const steps = [
+      provisionNodeCaller,
+      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
+      () => favorDispatchRunner.runOnce(),
+    ];
+    for (const step of steps) {
+      await step().catch((err) => {
+        log.warn("provisioning after link failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  };
+  const unsubscribeInstanceLinked = onInstanceLinked(() => void provisionAfterLink());
 
   // Rome reserves 3:00–3:30am local for upgrades; the probe runs at the start
   // of that window. There is no bespoke scheduler — the routine cron *is* the
@@ -2178,9 +2201,9 @@ async function main() {
   void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // Signer mode links the instance during this check, so provisioning waits for it.
+      await provisionAfterLink();
       if (identity.status !== "ok") return;
-      // Signer mode links the instance during this check, which is when the caller can use the signer.
-      if (signerMode()) void provisionNodeCaller();
       if (!(await getGuardianAuthState(db)).exists) return;
       await connectEmailWithoutClick("boot");
     })
@@ -2205,14 +2228,6 @@ async function main() {
     access: romeCloudAccess,
   });
   usageReporter.start();
-
-  // Self-provision the webhook-relay mailbox using the durable instance token
-  //: present it to Rome Cloud, store the returned credential, and point
-  // the live drainer at it. Fire-and-forget and idempotent — it re-mints a
-  // full-TTL drain key on every boot, and no-ops when the instance is not
-  // enrolled (leaving any manually-pasted relay setting untouched).
-  void provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer });
-  void provisionNodeCaller();
 
   process.on("unhandledRejection", (reason) => {
     const shutdownLog = createLogger("shutdown");
@@ -2284,6 +2299,7 @@ async function main() {
 
     unsubscribeCodexAccountChanged();
     unsubscribeInstanceTokenChanged();
+    unsubscribeInstanceLinked();
     romeCreditsPayer.close();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");

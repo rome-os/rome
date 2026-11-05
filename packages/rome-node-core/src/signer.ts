@@ -48,10 +48,15 @@ export async function requestSignerToken(socketPath: string): Promise<string> {
   return body.token;
 }
 
-/** Returns the thumbprint of the signer's key. */
-export async function signerHealth(socketPath: string): Promise<{ jkt: string }> {
+/** Returns the thumbprint of the signer's key and the Rome Cloud origin it issues tokens for. */
+export async function signerHealth(socketPath: string): Promise<{ jkt: string; aud: string }> {
   const body = await signerCall(socketPath, "GET", "/v1/health");
-  if (!isRecord(body) || body.ok !== true || typeof body.jkt !== "string")
+  if (
+    !isRecord(body) ||
+    body.ok !== true ||
+    typeof body.jkt !== "string" ||
+    typeof body.aud !== "string"
+  )
     throw new SignerError("signer_unavailable");
-  return { jkt: body.jkt };
+  return { jkt: body.jkt, aud: body.aud };
 }

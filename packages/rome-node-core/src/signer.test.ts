@@ -34,11 +34,14 @@ describe("signer client", () => {
     expect(await requestSignerToken(socketPath)).toBe("eyJ2.e30.sig");
   });
 
-  it("reads the key thumbprint from /v1/health", async () => {
+  it("reads the key thumbprint and audience from /v1/health", async () => {
     const socketPath = await fakeSigner((_req, res) =>
-      res.end(JSON.stringify({ ok: true, jkt: "abc" })),
+      res.end(JSON.stringify({ ok: true, jkt: "abc", aud: "https://cloud.example" })),
     );
-    expect(await signerHealth(socketPath)).toEqual({ jkt: "abc" });
+    expect(await signerHealth(socketPath)).toEqual({
+      jkt: "abc",
+      aud: "https://cloud.example",
+    });
   });
 
   it("reports an unreachable signer, a rate limit, and a malformed token", async () => {

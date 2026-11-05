@@ -4,7 +4,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { startSigner } from "./signer.js";
+import { normalizeAudience, startSigner } from "./signer.js";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -42,6 +42,21 @@ function call(socketPath: string, method: string, path: string) {
 
 const decode = (part: string) => JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 
+describe("normalizeAudience", () => {
+  it.each([
+    ["https://romeos.cc", "https://romeos.cc"],
+    ["https://romeos.cc/", "https://romeos.cc"],
+    ["https://romeos.cc/some/path?x=1", "https://romeos.cc"],
+    ["http://localhost:3000/", "http://localhost:3000"],
+  ])("reduces %s to its origin", (value, origin) => {
+    expect(normalizeAudience(value)).toBe(origin);
+  });
+
+  it.each(["romeos.cc", "ftp://romeos.cc", ""])("rejects %j", (value) => {
+    expect(() => normalizeAudience(value)).toThrow();
+  });
+});
+
 describe("signer", () => {
   it("issues a token that satisfies the Rome Cloud contract", async () => {
     const { socketPath, jkt } = await start();
@@ -75,11 +90,11 @@ describe("signer", () => {
     ).toBe(true);
   });
 
-  it("serves health with the key thumbprint and only the two endpoints", async () => {
+  it("serves health with the key thumbprint and audience, and only the two endpoints", async () => {
     const { socketPath, jkt } = await start();
     expect(await call(socketPath, "GET", "/v1/health")).toEqual({
       status: 200,
-      body: { ok: true, jkt },
+      body: { ok: true, jkt, aud: "https://cloud.example" },
     });
     expect((await call(socketPath, "GET", "/v1/token")).status).toBe(404);
     expect((await call(socketPath, "POST", "/v1/sign")).status).toBe(404);

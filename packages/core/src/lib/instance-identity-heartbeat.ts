@@ -2,7 +2,7 @@ import {
   clearInstanceToken,
   isInstanceLinked,
   signerMode,
-  syncInstanceIdentity,
+  recheckInstanceIdentity,
   type InstanceTokenStore,
   type ProveIdentityResult,
 } from "./instance-identity.js";
@@ -41,7 +41,7 @@ export async function runInstanceIdentityHeartbeatTick(
 
   let result: ProveIdentityResult;
   try {
-    result = await (deps.prove ?? (() => syncInstanceIdentity(deps.store)))();
+    result = await (deps.prove ?? (() => recheckInstanceIdentity(deps.store)))();
   } catch (err) {
     log.warn("instance identity heartbeat failed", {
       error: err instanceof Error ? err.message : String(err),

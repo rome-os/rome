@@ -42,6 +42,14 @@ function loadPrivateKey(keyDir: string): KeyObject {
   return privateKey;
 }
 
+/** Reduces a configured Rome Cloud address to its origin, or throws when it is not an http(s) URL. */
+export function normalizeAudience(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "https:" && url.protocol !== "http:")
+    throw new Error("The audience must be an http(s) origin.");
+  return url.origin;
+}
+
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
 /** Starts the signer. It issues 60-second ES256 tokens and signs nothing else. */
@@ -89,7 +97,7 @@ export async function startSigner(
       if (token) reply(200, { token });
       else reply(429, { error: "rate_limited" });
     } else if (req.method === "GET" && req.url === "/v1/health") {
-      reply(200, { ok: true, jkt });
+      reply(200, { ok: true, jkt, aud: options.audience });
     } else {
       reply(404, { error: "not_found" });
     }

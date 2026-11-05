@@ -1,10 +1,16 @@
-import { startSigner } from "./signer.js";
+import { normalizeAudience, startSigner } from "./signer.js";
 
-const audience = process.env.SIGNER_AUDIENCE;
 const keyDir = process.env.SIGNER_KEY_DIR;
 const socketPath = process.env.SIGNER_SOCKET;
-if (!audience || !keyDir || !socketPath) {
+if (!process.env.SIGNER_AUDIENCE || !keyDir || !socketPath) {
   process.stderr.write("SIGNER_AUDIENCE, SIGNER_KEY_DIR and SIGNER_SOCKET are required.\n");
+  process.exit(1);
+}
+let audience: string;
+try {
+  audience = normalizeAudience(process.env.SIGNER_AUDIENCE);
+} catch {
+  process.stderr.write("SIGNER_AUDIENCE must be an http(s) origin such as https://romeos.cc.\n");
   process.exit(1);
 }
 

@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { instanceEnrollRoutes } from "./instance-enroll.js";
 import { getInstanceToken, setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { startFakeSigner } from "../../test/fake-signer.js";
 import type { ApiDeps } from "../deps.js";
 
 const TOKEN = "romeinst_test_token";
@@ -145,13 +146,12 @@ describe("GET /instance/enroll/callback", () => {
     }
   });
 
-  it("provisions relay and CLI credentials after enrollment without waiting for CLI setup", async () => {
+  it("starts provisioning after enrollment without waiting for it", async () => {
     const store = memoryStore();
     let tokenSeenByProvision: string | null = null;
-    let tokenSeenByNode: string | null = null;
     const deps = depsWithStore(store, {
-      provisionNodeCaller: () => {
-        tokenSeenByNode = getInstanceToken();
+      provisionAfterLink: () => {
+        tokenSeenByProvision = getInstanceToken();
         return new Promise<void>(() => {});
       },
     });
@@ -169,10 +169,6 @@ describe("GET /instance/enroll/callback", () => {
           headers: { "content-type": "application/json" },
         });
       },
-      ensureRelayMailbox: async () => {
-        tokenSeenByProvision = getInstanceToken();
-        return { status: "provisioned", mailboxId: "MBOX" };
-      },
     });
 
     const start = await app.request("/instance/enroll/start", { method: "POST" });
@@ -188,6 +184,34 @@ describe("GET /instance/enroll/callback", () => {
     expect(store.data.get("instanceToken")).toBe(TOKEN);
     expect(getInstanceToken()).toBe(TOKEN);
     expect(tokenSeenByProvision).toBe(TOKEN);
-    expect(tokenSeenByNode).toBe(TOKEN);
+  });
+
+  it("reports a registration conflict instead of success, and does not provision", async () => {
+    const signer = await startFakeSigner({ aud: "https://rome-cloud.example" });
+    rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: URL | string) =>
+      new URL(String(input)).pathname === "/api/instance/key"
+        ? Response.json({ error: "already_bound" }, { status: 409 })
+        : Response.json({ error: "invalid_instance_token" }, { status: 401 })) as typeof fetch;
+    const provisionAfterLink = rs.fn(async () => {});
+    try {
+      const app = mount(depsWithStore(memoryStore(), { provisionAfterLink }), {
+        fetchImpl: async () =>
+          Response.json({ instanceToken: TOKEN, instanceId: "inst_new" }, { status: 200 }),
+      });
+      const start = await app.request("/instance/enroll/start", { method: "POST" });
+      const { authorizeUrl } = (await start.json()) as { authorizeUrl: string };
+      const state = new URL(authorizeUrl).searchParams.get("state");
+      const callback = await app.request(
+        `/instance/enroll/callback?state=${encodeURIComponent(state ?? "")}&code=code_123`,
+      );
+      expect(callback.headers.get("location")).toBe("/connect?enroll=error&reason=key_conflict");
+      expect(provisionAfterLink).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = realFetch;
+      rs.unstubAllEnvs();
+      await signer.close();
+    }
   });
 });

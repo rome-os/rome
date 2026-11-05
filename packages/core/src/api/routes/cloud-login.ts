@@ -419,8 +419,14 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         if (!isValidInstanceToken(typeof instanceToken === "string" ? instanceToken : null)) {
           return c.redirect(errorRedirect("malformed"));
         }
-        await persistInstanceToken(deps.settingsRepo, instanceToken as string);
-        void deps.provisionNodeCaller?.();
+        const linked = await persistInstanceToken(deps.settingsRepo, instanceToken as string);
+        if (linked?.status === "key_conflict") return c.redirect(errorRedirect("key_conflict"));
+        if (linked && linked.status !== "ok") {
+          log.warn("cloud login enrolled but the signer key is not registered yet", {
+            status: linked.status,
+          });
+        }
+        void deps.provisionAfterLink?.();
         log.info("cloud login enrolled instance", { accountId });
       }
 

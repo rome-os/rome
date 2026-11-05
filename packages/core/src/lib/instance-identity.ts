@@ -72,17 +72,68 @@ export function instanceCredentialId(): string | null {
   return signerMode() ? cachedKeyId : getInstanceToken();
 }
 
+// A signer token lives 60 seconds. One is reused until 15 seconds before it
+// expires, and concurrent callers share one signer request. The generation
+// stops a request that was in flight when the cache was cleared from refilling it.
+const BEARER_REFRESH_MARGIN_MS = 15_000;
+let bearerCache: { token: string; reuseUntil: number } | null = null;
+let bearerInFlight: Promise<string> | null = null;
+let bearerGeneration = 0;
+
+function clearBearerCache(): void {
+  bearerCache = null;
+  bearerInFlight = null;
+  bearerGeneration++;
+}
+
+function tokenExpiryMs(token: string): number {
+  try {
+    const { exp } = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString());
+    return typeof exp === "number" ? exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function signerBearer(socket: string): Promise<string> {
+  if (bearerCache && Date.now() < bearerCache.reuseUntil) return Promise.resolve(bearerCache.token);
+  if (bearerInFlight) return bearerInFlight;
+  const generation = bearerGeneration;
+  const request: Promise<string> = requestSignerToken(socket)
+    .then((token) => {
+      if (generation === bearerGeneration) {
+        bearerCache = { token, reuseUntil: tokenExpiryMs(token) - BEARER_REFRESH_MARGIN_MS };
+      }
+      return token;
+    })
+    .finally(() => {
+      if (bearerInFlight === request) bearerInFlight = null;
+    });
+  bearerInFlight = request;
+  return request;
+}
+
+// The instance token a signer-mode instance can still offer before its key is
+// registered. A token that registration found unusable is not offered again.
+let rejectedInstanceToken: string | null = null;
+function unregisteredInstanceToken(): string | null {
+  const token = getInstanceToken() ?? envInstanceToken();
+  return token !== rejectedInstanceToken ? token : null;
+}
+
 /**
- * The bearer for a Rome Cloud call, or null when the instance is not linked.
- * Signer mode returns a fresh 60-second token for each call, so never cache
- * it. A signer that cannot be reached also returns null.
+ * The bearer for a Rome Cloud call, or null when there is none to offer.
+ * Legacy mode returns the instance token. Signer mode returns a signer token,
+ * reused until shortly before it expires, once the key is registered; until
+ * then it returns the instance token if one is still usable, so an upgrade has
+ * no outage. A signer that cannot be reached returns null.
  */
 export async function cloudBearer(): Promise<string | null> {
   const socket = signerSocketPath();
   if (!socket) return getInstanceToken();
-  if (cachedKeyId === null) return null;
+  if (cachedKeyId === null) return unregisteredInstanceToken();
   try {
-    return await requestSignerToken(socket);
+    return await signerBearer(socket);
   } catch (err) {
     log.warn("signer token unavailable", {
       error: err instanceof Error ? err.message : String(err),
@@ -115,6 +166,7 @@ export function setInstanceTokenInMemory(token: string | null): void {
 
 async function setKeyId(store: InstanceTokenStore, keyId: string | null): Promise<void> {
   if (cachedKeyId === keyId) return;
+  clearBearerCache();
   if (keyId) await store.set(INSTANCE_KEY_SETTING_KEY, keyId);
   else await store.delete(INSTANCE_KEY_SETTING_KEY);
   cachedKeyId = keyId;
@@ -132,6 +184,8 @@ export function onInstanceTokenChanged(listener: () => void): () => void {
 export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<void> {
   const keyId = await store.get<string>(INSTANCE_KEY_SETTING_KEY);
   cachedKeyId = typeof keyId === "string" ? keyId : null;
+  clearBearerCache();
+  rejectedInstanceToken = null;
   const stored = await store.get<string>(INSTANCE_TOKEN_SETTING_KEY);
   setInstanceTokenInMemory(stored ?? null);
 }
@@ -161,13 +215,14 @@ export async function seedInstanceTokenFromEnv(store: InstanceTokenStore): Promi
 // Persist a freshly-minted token (from the in-app OAuth enroll flow) and refresh
 // the cache so it takes effect without a restart. In signer mode the token is
 // only a one-time proof: it registers the signer key right away and is deleted.
+// Returns the registration result in signer mode, null in legacy mode.
 export async function persistInstanceToken(
   store: InstanceTokenStore,
   token: string,
-): Promise<void> {
+): Promise<ProveIdentityResult | null> {
   await store.set(INSTANCE_TOKEN_SETTING_KEY, token);
   setInstanceTokenInMemory(token);
-  if (signerMode()) await syncInstanceIdentity(store);
+  return signerMode() ? syncInstanceIdentity(store) : null;
 }
 
 // Fail closed on a token Rome Cloud has rejected (revoked/unknown): drop it from
@@ -206,11 +261,12 @@ export interface InstanceIdentity {
 // `unconfigured` are local preconditions (not enrolled / no Rome Cloud origin);
 // `unreachable` is a transient network failure — the only non-terminal miss.
 //
-// Four more states are faults the guardian can fix, and none of them is
+// Five more states are faults the guardian can fix, and none of them is
 // terminal: `key_conflict` (the instance registered a different signer key, so
 // it needs a new sign-in), `clock_skew` (the host clock is off by more than two
-// minutes), `signer_unavailable` (the signer does not answer) and
-// `upgrade_required` (Rome Cloud retired the instance token in favor of a
+// minutes), `signer_unavailable` (the signer does not answer),
+// `audience_mismatch` (the signer issues tokens for another Rome Cloud address)
+// and `upgrade_required` (Rome Cloud retired the instance token in favor of a
 // signer key this deployment does not have).
 export type ProveIdentityResult =
   | { status: "ok"; identity: InstanceIdentity }
@@ -225,12 +281,14 @@ export type IdentityIssue =
   | "key_conflict"
   | "clock_skew"
   | "signer_unavailable"
+  | "audience_mismatch"
   | "upgrade_required";
 
 const IDENTITY_ISSUE_MESSAGES: Record<IdentityIssue, string> = {
   key_conflict: "This instance's credential was registered elsewhere. Sign in again.",
   clock_skew: "System clock is off.",
   signer_unavailable: "Signing service is not running.",
+  audience_mismatch: "The signing service is configured for a different Rome Cloud address.",
   upgrade_required: "Update your compose file to add the signer service.",
 };
 
@@ -289,6 +347,7 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
     return { status: "unreachable" };
   }
 
+  if (socket && (response.status === 401 || response.status === 403)) clearBearerCache();
   if (response.status === 401)
     return (await isClockSkew(response)) ? { status: "clock_skew" } : { status: "unknown" };
   if (response.status === 403) return { status: "revoked" };
@@ -344,43 +403,98 @@ async function registerInstanceKey(
     return err instanceof SignerError ? "signer_unavailable" : "unreachable";
   }
   if (response.ok) return "registered";
-  if (response.status === 401) return (await isClockSkew(response)) ? "clock_skew" : "unknown";
-  if (response.status === 403) return "revoked";
-  if (response.status === 409) return "key_conflict";
+  if (response.status === 401 || response.status === 403) clearBearerCache();
+  if (response.status === 401 && (await isClockSkew(response))) return "clock_skew";
+  if (response.status === 401 || response.status === 403 || response.status === 409) {
+    rejectedInstanceToken = instanceToken;
+    return response.status === 401
+      ? "unknown"
+      : response.status === 403
+        ? "revoked"
+        : "key_conflict";
+  }
   log.warn("instance key registration failed", { status: response.status });
   return "unreachable";
 }
 
 const IDENTITY_RETRY_MS = 30_000;
 let identityRetry: ReturnType<typeof setTimeout> | undefined;
+const linkedListeners = new Set<() => void>();
+
+// The signer must issue tokens for the Rome Cloud this instance talks to.
+// Otherwise Cloud answers 401, which must not be mistaken for an unknown instance.
+async function audienceMatches(socket: string): Promise<boolean> {
+  const origin = getRomeCloudOrigin();
+  return origin === null || (await signerHealth(socket)).aud === origin;
+}
 
 // The identity check every trigger runs (boot, heartbeat, right after sign-in).
 // Legacy mode is `proveIdentity` plus the state it reports. Signer mode also
 // links the instance: a 200 with a signer token means Cloud holds the key; a
 // 401 with an instance token on hand registers the key; a 401 without one means
 // sign in. Faults the guardian must fix keep every credential and recheck every
-// 30 seconds. Never rejects.
+// 30 seconds, and so does an unreachable Rome Cloud while an instance token still
+// waits to be registered. Never rejects.
 export async function syncInstanceIdentity(
   store: InstanceTokenStore,
   opts: ProveIdentityOptions = {},
 ): Promise<ProveIdentityResult> {
   const socket = signerSocketPath();
-  let result = await proveIdentity(opts);
-  if (socket) {
-    try {
-      result = await linkSignerKey(store, socket, opts, result);
-    } catch (err) {
-      if (!(err instanceof SignerError)) throw err;
-      result = { status: "signer_unavailable" };
+  let result: ProveIdentityResult;
+  try {
+    if (socket && !(await audienceMatches(socket))) {
+      result = { status: "audience_mismatch" };
+    } else {
+      result = await proveIdentity(opts);
+      if (socket) result = await linkSignerKey(store, socket, opts, result);
     }
+  } catch (err) {
+    if (!(err instanceof SignerError)) throw err;
+    result = { status: "signer_unavailable" };
   }
   identityIssue = Object.hasOwn(IDENTITY_ISSUE_MESSAGES, result.status)
     ? (result.status as IdentityIssue)
     : null;
   clearTimeout(identityRetry);
-  if (result.status === "clock_skew" || result.status === "signer_unavailable") {
-    identityRetry = setTimeout(() => void syncInstanceIdentity(store), IDENTITY_RETRY_MS);
+  const waitingToRegister =
+    result.status === "unreachable" &&
+    socket !== null &&
+    cachedKeyId === null &&
+    (getInstanceToken() ?? envInstanceToken()) !== null;
+  if (
+    waitingToRegister ||
+    result.status === "clock_skew" ||
+    result.status === "signer_unavailable" ||
+    result.status === "audience_mismatch"
+  ) {
+    identityRetry = setTimeout(() => void recheckInstanceIdentity(store), IDENTITY_RETRY_MS);
     identityRetry.unref?.();
+  }
+  return result;
+}
+
+/** Subscribe to a background identity check that links an instance that was not linked. */
+export function onInstanceLinked(listener: () => void): () => void {
+  linkedListeners.add(listener);
+  return () => linkedListeners.delete(listener);
+}
+
+/** The check the heartbeat and the 30-second retry run. Tells `onInstanceLinked` listeners when it links. */
+export async function recheckInstanceIdentity(
+  store: InstanceTokenStore,
+): Promise<ProveIdentityResult> {
+  const wasLinked = isInstanceLinked();
+  const result = await syncInstanceIdentity(store);
+  if (!wasLinked && isInstanceLinked()) {
+    for (const listener of linkedListeners) {
+      try {
+        listener();
+      } catch (err) {
+        log.warn("instance linked listener failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
   return result;
 }
@@ -451,6 +565,7 @@ export async function logInstanceIdentityAtBoot(
       case "key_conflict":
       case "clock_skew":
       case "signer_unavailable":
+      case "audience_mismatch":
       case "upgrade_required":
         log.warn("instance identity needs attention", { reason: result.status });
         break;
