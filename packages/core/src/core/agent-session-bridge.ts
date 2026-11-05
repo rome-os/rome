@@ -140,11 +140,13 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // A run that opens a session by its caller always names one.
         const opener = caller ?? adhocCaller(req.key.agentName);
         const callerId = callerKey(opener);
-        // The conversation the turn is kept in where it replies. A resume by
-        // id keeps the conversation its session recorded, so the caller it
-        // names picks none, as in the runner.
+        // The conversation the run names. A resume by id keeps the
+        // conversation its session recorded, so the caller it names picks
+        // none, as in the runner.
+        const named = caller && !req.sessionId ? callerChatId(caller) : undefined;
+        // The conversation the turn is kept in where it replies.
         const romeSessionId =
-          (caller && !req.sessionId ? callerChatId(caller) : undefined) ??
+          named ??
           thread?.romeSessionId ??
           (thread ? channelChatId(thread.channel, thread.threadId) : undefined);
         const stands = romeSessionId ? !!this.runLineDeps?.lines.stands(romeSessionId) : false;
@@ -227,11 +229,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const workerWatch = interruptTurnOnWorkerDisconnect(rpc, session, handle, turnLogFields);
         try {
           this.runLineDeps?.replies?.runs(handle.turnId, req.key.agentName);
-          if (romeSessionId) {
+          // Chats wrote the prompt of a run that names its conversation.
+          if (named) {
             await linkPromptToTurn(
               { webchatRepo: this.webchatRepo, runLineDeps: this.runLineDeps },
               {
-                romeSessionId,
+                romeSessionId: named,
                 turnId: handle.turnId,
                 lines,
                 platformMessageId: req.platformMessageId,
