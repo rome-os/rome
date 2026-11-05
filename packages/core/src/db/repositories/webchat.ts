@@ -1128,6 +1128,17 @@ export class WebChatRepository {
 
     const id = channelChatId(input.channel, input.threadId);
     const now = new Date();
+    // A row a message starts stands in its chat from the first, starting
+    // where `ensureChannelChat` would place a session standing nowhere yet.
+    const { speaker } = input;
+    const thread = parent ? input.threadId : null;
+    const startSecond = speaker
+      ? firstPlacementSecond(
+          this.db,
+          { chatId: speaker.chat.id, threadId: thread, accountId: speaker.accountId },
+          speaker.at,
+        )
+      : null;
     await this.db
       .insert(romeSessions)
       .values({
@@ -1143,12 +1154,27 @@ export class WebChatRepository {
             ? null
             : input.agentName,
         type: "channel",
-        sourceChannel: input.channel,
-        sourceThreadId: input.threadId,
-        sourceThreadName: input.threadName ?? null,
-        sourceThreadType: input.threadType ?? null,
+        // One opened with no speaker stands nowhere yet, and the legacy
+        // chats backfill places it later, by these source columns.
+        ...(speaker && startSecond !== null
+          ? {
+              chatId: speaker.chat.id,
+              chatPlatform: speaker.chat.platform,
+              threadId: thread,
+              accountId: speaker.accountId,
+            }
+          : {
+              sourceChannel: input.channel,
+              sourceThreadId: input.threadId,
+              sourceThreadName: input.threadName ?? null,
+              sourceThreadType: input.threadType ?? null,
+            }),
         parentSessionId: parent?.id ?? null,
-        createdAt: now,
+        // As `placedCreatedAt` starts one: a second before it was placed.
+        createdAt:
+          startSecond !== null && now.getTime() >= startSecond * 1000
+            ? new Date((startSecond - 1) * 1000)
+            : now,
         activityAt: now,
         lastSeenActivityAt: null,
       })

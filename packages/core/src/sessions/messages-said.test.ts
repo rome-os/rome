@@ -164,6 +164,13 @@ describe("messagesSaid", () => {
     expect(session?.chatId).toBe(line?.chatId);
     expect(session?.accountId).toBe(BOT.id);
     expect(session?.threadId).toBeNull();
+    // It stands in its chat from the first, so it carries no legacy address.
+    expect(session).toMatchObject({
+      sourceChannel: null,
+      sourceThreadId: null,
+      sourceThreadName: null,
+      sourceThreadType: null,
+    });
   });
 
   it("neither records nor hears a redelivery twice", async () => {
