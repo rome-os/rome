@@ -1,6 +1,6 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
 import { recordsToOf } from "../test/session-compat.js";
-import { callerFromKey } from "./session-caller.js";
+import { callerFromKey, withChatId } from "./session-caller.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -191,9 +191,7 @@ describe("AgentSessionBridge conversation", () => {
         },
       });
 
-      await rs.waitFor(() =>
-        expect(sent).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]),
-      );
+      await rs.waitFor(() => expect(sent).toHaveLength(1));
       await rs.waitFor(async () => {
         const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
         expect(roles).toContain("user");
@@ -614,13 +612,19 @@ describe("AgentSessionBridge reply streaming", () => {
     const recording = platform();
     const { written, edits } = recording;
     const transport = own ?? recording.transport;
+    // A caller that names the conversation opens a session that serves it.
+    const caller = withChatId(
+      callerFromKey("telegram:chat-1"),
+      named ? "conversation-1" : undefined,
+    );
     const session = {
-      key: { agentName: "main", caller: callerFromKey("telegram:chat-1") },
-      caller: callerFromKey("telegram:chat-1"),
+      key: { agentName: "main", caller },
+      caller,
       recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
         return recordsToOf(this, options);
       },
       sessionId: "session-1",
+      ...(named ? { conversation: { origin: "named" as const, id: "conversation-1" } } : {}),
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = { open: async () => session } as unknown as AgentSessionManager;
@@ -678,7 +682,6 @@ describe("AgentSessionBridge reply streaming", () => {
         platformMessageId: "msg-1",
         streamReply,
         init: {
-          ...(named ? { romeSessionId: "conversation-1" } : {}),
           threadContext: {
             channel: "telegram",
             connectionId: "c",

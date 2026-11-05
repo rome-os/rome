@@ -10,7 +10,11 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/help
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
-import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
+import {
+  createTestSessionManager,
+  type TestSessionManager,
+  withKeys,
+} from "../test/session-compat.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
@@ -113,7 +117,7 @@ describe("TestSessionManager working dirs", () => {
       { workingDir: parentDir },
     );
     const childManager = (parent as unknown as { childManager: TestSessionManager }).childManager;
-    const child = await childManager.acquire(
+    const child = await withKeys(childManager).acquire(
       { agentName: AGENT, channelThreadKey: "webchat:working-dir:subagent:1" },
       { workingDir: childDir },
     );
@@ -194,7 +198,7 @@ describe("TestSessionManager working dirs", () => {
     const projectDir = join(directory, "moved-away");
     await mkdir(projectDir);
     await webchatRepo.createSession("conv-1", "Conversation");
-    const key = { agentName: AGENT, channelThreadKey: "webchat:conv-1" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:conv-1" };
     const original = await manager.acquire(key, {
       workingDir: projectDir,
       romeSessionId: "conv-1",
@@ -212,7 +216,7 @@ describe("TestSessionManager working dirs", () => {
 
   it("runs a reuse or resume that names no conversation in the one the row recorded", async () => {
     await webchatRepo.createSession("stored", "Stored");
-    const key = { agentName: AGENT, channelThreadKey: "webchat:stored" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:stored" };
     const original = await manager.acquire(key, { romeSessionId: "stored" });
     const sessionId = original.sessionId;
     await original.close("idle");
@@ -272,7 +276,7 @@ describe("TestSessionManager working dirs", () => {
   });
 
   it("records the conversation on a reused row that had none", async () => {
-    const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:legacy" };
     const original = await manager.acquire(key);
     await original.close("idle");
     expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBeNull();
@@ -284,7 +288,7 @@ describe("TestSessionManager working dirs", () => {
   });
 
   it("keeps a reused row's conversation when the caller names another", async () => {
-    const key = { agentName: AGENT, channelThreadKey: "webchat:kept" };
+    const key = { agentName: AGENT, channelThreadKey: "telegram:kept-row" };
     const original = await manager.acquire(key, { romeSessionId: "kept" });
     await original.close("idle");
 

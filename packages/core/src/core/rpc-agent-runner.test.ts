@@ -147,7 +147,7 @@ describe("RpcAgentRunner turn stream routing", () => {
 
     expect(requests[0]).toMatchObject({
       sessionId: "session-123",
-      key: { agentName: "a", channelThreadKey: "telegram:t-1" },
+      key: { agentName: "a", caller: { kind: "place", connection: "telegram", place: "t-1" } },
     });
   });
 

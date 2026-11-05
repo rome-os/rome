@@ -2174,10 +2174,8 @@ describe("Webchat API", () => {
     expect(sendRes.status).toBe(200);
     expect(acquiredInit?.reasoningEffort).toBe("xhigh");
     expect(sentTurn?.reasoningEffort).toBe("xhigh");
-    expect(sentOptions).toMatchObject({
-      romeSessionId: session.id,
-      romeSessionType: "webchat",
-    });
+    // The chat caller names the conversation, so the options carry no id.
+    expect(sentOptions).not.toHaveProperty("romeSessionId");
   });
 
   describe("device folder", () => {
@@ -4932,7 +4930,8 @@ describe("Webchat API", () => {
         },
       });
       expect(acquireSource).toHaveBeenCalledWith(
-        { agentName: "main", channelThreadKey: `webchat:${SESSION_ID}` },
+        "main",
+        { kind: "chat", chatId: SESSION_ID },
         expect.objectContaining({
           workingDir: join(projectsRoot, "default"),
           selectionId: undefined,

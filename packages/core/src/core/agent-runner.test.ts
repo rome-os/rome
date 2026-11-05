@@ -62,6 +62,7 @@ import {
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
+  type SendTurnOptions,
   subagentToolName,
 } from "./agent-session.js";
 import {
@@ -634,10 +635,12 @@ describe("AgentRunner", () => {
         sessionId: "agent-session",
         conversation: recorded && { origin: "recorded" as const, ...recorded },
         status: "idle" as const,
-        sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
+        sendTurn: rs.fn((input: { prompt: string }, options?: SendTurnOptions) => {
+          // Where the session records the turn, as the runner hands it over.
+          const recorded = session.recordsTo(options);
           turns.push({
-            romeSessionId: options?.romeSessionId,
-            romeSessionType: options?.romeSessionType,
+            romeSessionId: recorded.romeSessionId,
+            romeSessionType: recorded.romeSessionType,
           });
           return {
             turnId: "resumed-turn",
