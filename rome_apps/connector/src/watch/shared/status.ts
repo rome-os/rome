@@ -56,7 +56,7 @@ export const NO_RELAY_REASON =
   "This Rome has no relay mailbox, so outside events cannot reach it. Connect it to Rome Cloud, or fix Relay health in Settings.";
 
 export const COMPOSIO_WEBHOOK_ELSEWHERE_REASON =
-  "Events for this Composio project go to another Rome. Pick a separate project for this Rome under Composio in Settings → Connections, or choose Set up again under Event delivery to take them back.";
+  "Events for this Composio project go to another Rome. Create a separate project for this Rome in Composio, then pick it under Composio in Settings → Connections. Or choose Set up again under Event delivery to take them back.";
 
 export const COMPOSIO_TRIGGER_MISSING_REASON =
   "Composio is not sending these events: their trigger is missing or turned off there. Ask me to follow it again to fix it.";

@@ -108,7 +108,7 @@
         "title": "Project",
         "label": "Composio project",
         "default": "{{name}} (default)",
-        "switched": "Services connected in the previous project need connecting again here."
+        "switched": "Connect your services again in this project, then ask the Concierge to follow them again."
       }
     },
     "loadFailedFallback": "Failed to load connections.",

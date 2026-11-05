@@ -108,7 +108,7 @@
         "title": "项目",
         "label": "Composio 项目",
         "default": "{{name}}（默认）",
-        "switched": "在之前项目中连接的服务，需要在这里重新连接。"
+        "switched": "请在这个项目里重新连接服务，然后让 Concierge 重新关注它们。"
       }
     },
     "loadFailedFallback": "加载连接失败。",

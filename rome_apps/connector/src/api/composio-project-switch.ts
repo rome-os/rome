@@ -6,7 +6,7 @@ import { ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
 
 /** What the guardian reads after switching: connections stay with the project they were made in. */
 export const PROJECT_SWITCH_NOTE =
-  "Services connected in the previous project need connecting again here.";
+  "Connect your services again in this project, then ask the Concierge to follow them again.";
 
 type SwitchClient = Pick<
   ComposioClient,
