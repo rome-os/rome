@@ -202,7 +202,11 @@ final class AppModel {
         }
     }
 
-    private func connect(to instance: CloudInstance) async {
+    /// `keepUpdate`: reaching the instance an upgrade waits on, which keeps the
+    /// update page up. Any other connect starts over, so a page left from the
+    /// last instance never covers this one.
+    private func connect(to instance: CloudInstance, keepUpdate: Bool = false) async {
+        if !keepUpdate { update.reset() }
         phase = .connecting(host: instance.host)
         do {
             let session = try await cloud.session(for: instance)
@@ -237,12 +241,13 @@ final class AppModel {
         guard let list = try? await cloud.listInstances() else { return }
         instances = list
         if let instance = list.first(where: { $0.id == id }), instance.isRunning {
-            await connect(to: instance)
+            await connect(to: instance, keepUpdate: true)
         }
     }
 
     func switchInstance(to instance: CloudInstance) async {
         guard instance.id != currentInstanceID else { return }
+        update.reset()
         workspace?.stop()
         workspace = nil
         await connect(to: instance)
