@@ -72,21 +72,20 @@ export async function pinDefaultProject(deps: PinDeps): Promise<PinnedProject> {
 }
 
 /**
- * The pinned project, pinning one first when there is none, or when the pin
- * belongs to another Composio organization than the signed-in one: the
- * project that holds this Rome's stored webhook endpoint, so a Rome that
- * already uses a project stays on it, and otherwise the default. The pin
- * outlives signing out, so signing in again keeps the same project. Null for
- * a project key.
+ * Finds and pins this Rome's project: the one that holds its stored webhook
+ * endpoint, so a Rome that already uses a project stays on it, and otherwise
+ * the default. Most Romes use the default project, so it is asked first over
+ * HTTP; the project list, read through the CLI, is needed only when the
+ * endpoint is elsewhere. `listed` is a project list the caller already has.
  */
-export async function ensurePinnedProject(deps: PinDeps): Promise<PinnedProject | null> {
-  if (!deps.apiKey.startsWith("uak_")) return null;
-  const pinned = await readPinnedProject(deps.store);
-  const orgId = await deps.orgId();
-  if (pinned && (!orgId || pinned.orgId === orgId)) return pinned;
+async function discoverProject(deps: PinDeps, listed?: CliProject[]): Promise<PinnedProject> {
   const endpointId = await deps.store.get("webhookEndpointId");
-  if (endpointId && orgId) {
-    for (const project of await deps.listProjects()) {
+  if (!endpointId || (await deps.clientFor(null).webhookSubscriptionExists(endpointId))) {
+    return pinDefaultProject(deps);
+  }
+  const orgId = await deps.orgId();
+  if (orgId) {
+    for (const project of listed ?? (await deps.listProjects())) {
       const client = deps.clientFor({ orgId, projectId: project.id });
       if (await client.webhookSubscriptionExists(endpointId)) {
         return pinProject(deps.store, { orgId, projectId: project.id, projectName: project.name });
@@ -94,6 +93,34 @@ export async function ensurePinnedProject(deps: PinDeps): Promise<PinnedProject 
     }
   }
   return pinDefaultProject(deps);
+}
+
+/**
+ * The pinned project, pinning one first (`discoverProject`) when there is
+ * none, or when the pin belongs to another Composio organization than the
+ * signed-in one. The pin outlives signing out, so signing in again keeps the
+ * same project. Null for a project key.
+ */
+export async function ensurePinnedProject(deps: PinDeps): Promise<PinnedProject | null> {
+  if (!deps.apiKey.startsWith("uak_")) return null;
+  const pinned = await readPinnedProject(deps.store);
+  const orgId = await deps.orgId();
+  if (pinned && (!orgId || pinned.orgId === orgId)) return pinned;
+  return discoverProject(deps);
+}
+
+/**
+ * Pins again when the account's project list no longer has the pinned
+ * project, because it was deleted on Composio's side. A pin the list holds,
+ * or no pin, stays as it is.
+ */
+export async function recoverMissingPin(
+  deps: PinDeps,
+  projects: CliProject[],
+): Promise<PinnedProject | null> {
+  const pinned = await readPinnedProject(deps.store);
+  if (!pinned || projects.some((p) => p.id === pinned.projectId)) return pinned;
+  return discoverProject(deps, projects);
 }
 
 /** The live dependencies: this app's settings, the CLI session and project list, and Composio. */
@@ -111,9 +138,9 @@ export function livePinDeps(db: AppDbContext, apiKey: string): PinDeps & { store
 let pinning: Promise<PinnedProject | null> | null = null;
 
 /**
- * The project a client for `apiKey` should address. When pinning fails
- * (Composio or the CLI unreachable), it answers null, so the client uses the
- * default project as before, and the next call tries again.
+ * The project a client for `apiKey` should address: null for a project key,
+ * and also null when a user key's project could not be found (Composio or the
+ * CLI unreachable), which callers refuse on; the next call tries again.
  */
 export async function pinnedProjectFor(
   db: AppDbContext,

@@ -432,8 +432,9 @@ describe("connector API Composio project pin", () => {
   it("leaves the webhook alone at a login whose project discovery fails, and sets it up at the next", async () => {
     stored.set("webhookEndpointId", "ws_1");
     stored.set("webhookSecret", "whsec_1");
-    mocks.listCliProjects.mockRejectedValueOnce(new Error("composio dev projects list failed"));
-    mocks.client.webhookSubscriptionExists.mockResolvedValue(true);
+    mocks.client.webhookSubscriptionExists
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValue(true);
     const login = () =>
       createApiHandler(context()).handle(
         request("login/complete", "POST", { cliKey: "cli_test_session" }),
@@ -481,5 +482,60 @@ describe("connector API Composio project pin", () => {
     const response = await createApiHandler(context()).handle(request("projects"));
 
     await expect(response.json()).resolves.toEqual({ fixed: true, items: [] });
+  });
+
+  it("re-pins when the pinned project was deleted, and lists the new pin as selected", async () => {
+    stored.set("composioProject", pinned("pr_deleted"));
+
+    const response = await createApiHandler(context()).handle(request("projects"));
+
+    const body = (await response.json()) as { items: { id: string; selected: boolean }[] };
+    expect(body.items.find((p) => p.selected)?.id).toBe("pr_default");
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_default");
+  });
+
+  describe("while the project cannot be confirmed", () => {
+    beforeEach(() => {
+      mocks.client.defaultProject.mockRejectedValue(new Error("fetch failed"));
+    });
+
+    it("refuses to list connections, and touches no account", async () => {
+      const response = await createApiHandler(context()).handle(request("connectors"));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "composio_project_unconfirmed",
+        message: "Couldn't confirm this Rome's Composio project; try again.",
+      });
+      expect(mocks.client.listConnectedAccounts).not.toHaveBeenCalled();
+    });
+
+    it("refuses to start a connection instead of carrying on", async () => {
+      const response = await createApiHandler(context()).handle(
+        request("connectors", "POST", { provider: "gmail" }),
+      );
+
+      expect(response.status).toBe(503);
+      expect(mocks.client.ensureConnection).not.toHaveBeenCalled();
+    });
+
+    it("answers unknown for where the webhook goes", async () => {
+      const response = await createApiHandler(context()).handle(request("webhook/target"));
+
+      await expect(response.json()).resolves.toEqual({ target: "unknown" });
+    });
+  });
+
+  it("surfaces an unconfirmed project from webhook setup when a connection starts", async () => {
+    mocks.ensureWebhookRegistered.mockRejectedValue(
+      new composioClientModule.ComposioProjectUnconfirmedError(),
+    );
+
+    const response = await createApiHandler(context()).handle(
+      request("connectors", "POST", { provider: "gmail" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.client.ensureConnection).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
 
-import { ensurePinnedProject, type PinDeps, readPinnedProject } from "./composio-project.js";
+import {
+  ensurePinnedProject,
+  type PinDeps,
+  readPinnedProject,
+  recoverMissingPin,
+} from "./composio-project.js";
 
 /** The pin's dependencies over fakes: an in-memory store, two projects, and which one holds an endpoint. */
 function deps(
@@ -28,8 +33,9 @@ function deps(
         projectName: "Default",
         orgId: "org-uuid",
       }),
+      // With no project named, the key reaches its default project.
       webhookSubscriptionExists: async (id) =>
-        project?.projectId === over.endpointIn && id === over.storedEndpoint,
+        (project?.projectId ?? "pr_default") === over.endpointIn && id === over.storedEndpoint,
     }),
   };
   return { value, store, listProjects };
@@ -91,5 +97,37 @@ describe("ensurePinnedProject", () => {
     await expect(ensurePinnedProject(d.value)).rejects.toThrow("projects list failed");
     expect(d.store.has("composioProject")).toBe(false);
     await expect(ensurePinnedProject(d.value)).resolves.toMatchObject({ projectId: "pr_used" });
+  });
+
+  it("pins the default over HTTP, without the CLI, when the default project holds the endpoint", async () => {
+    const d = deps({ storedEndpoint: "ws_1", endpointIn: "pr_default" });
+    await expect(ensurePinnedProject(d.value)).resolves.toMatchObject({ projectId: "pr_default" });
+    expect(d.listProjects).not.toHaveBeenCalled();
+  });
+});
+
+describe("recoverMissingPin", () => {
+  const pin = (projectId: string) =>
+    JSON.stringify({ orgId: "ok_org", projectId, projectName: projectId });
+
+  it("pins again when the list no longer has the pinned project", async () => {
+    const d = deps({ storedEndpoint: "ws_1", endpointIn: "pr_used" });
+    d.store.set("composioProject", pin("pr_deleted"));
+    const listed = [
+      { id: "pr_default", name: "Default" },
+      { id: "pr_used", name: "Used" },
+    ];
+    await expect(recoverMissingPin(d.value, listed)).resolves.toMatchObject({
+      projectId: "pr_used",
+    });
+    expect(d.listProjects).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pin the list still has", async () => {
+    const d = deps();
+    d.store.set("composioProject", pin("pr_used"));
+    await expect(
+      recoverMissingPin(d.value, [{ id: "pr_used", name: "Used" }]),
+    ).resolves.toMatchObject({ projectId: "pr_used" });
   });
 });

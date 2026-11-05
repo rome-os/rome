@@ -1,5 +1,6 @@
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { describe, expect, it, rs } from "@rstest/core";
+import { ComposioProjectUnconfirmedError } from "../api/composio-client.js";
 import * as sharedModule from "../shared.js" with { rstest: "importActual" };
 
 // Composio is the external system here; fake the connector client so the
@@ -131,5 +132,16 @@ describe("connector_tool_execute result mapping", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/connector_proxy/);
     expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("connector_tool_execute while the Composio project is unconfirmed", () => {
+  it("refuses, so no tool runs in another project's account", async () => {
+    // No client is built, so no account is looked up and no tool runs.
+    loadConnectorClient.mockReset();
+    loadConnectorClient.mockRejectedValue(new ComposioProjectUnconfirmedError());
+    await expect(run({ toolkit: "gmail", slug: "GMAIL_SEND_EMAIL", args: {} })).rejects.toThrow(
+      "Couldn't confirm this Rome's Composio project; try again.",
+    );
   });
 });

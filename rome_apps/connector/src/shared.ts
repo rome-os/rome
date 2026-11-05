@@ -2,6 +2,7 @@ import { type AppDbContext, SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
 
 import {
   ComposioClient,
+  ComposioProjectUnconfirmedError,
   isComposioAuthenticationError,
   isComposioNotFoundError,
 } from "./api/composio-client.js";
@@ -246,14 +247,19 @@ export function githubViaRomeHint(): string {
  * Build a ComposioClient from the live CLI session key
  * (`~/.composio/user_data.json`) — the single source of truth for the Composio
  * credential, addressing this Rome's pinned project (`composio-project.ts`).
- * Returns null when the CLI isn't logged in so callers can surface a
+ * Throws `ComposioProjectUnconfirmedError` while a user key's project cannot
+ * be confirmed. Returns null when the CLI isn't logged in so callers can surface a
  * "log in to Composio first" message instead of throwing on a missing
  * credential.
  */
 export async function loadConnectorClient(db: AppDbContext): Promise<ComposioClient | null> {
   const apiKey = await readSessionApiKey();
   if (!apiKey) return null;
-  return new ComposioClient({ apiKey, project: await pinnedProjectFor(db, apiKey) });
+  const project = await pinnedProjectFor(db, apiKey);
+  // An unpinned user key would act in whatever project Composio picks by
+  // default: another mailbox, another account. Refuse until the pin is known.
+  if (apiKey.startsWith("uak_") && !project) throw new ComposioProjectUnconfirmedError();
+  return new ComposioClient({ apiKey, project });
 }
 
 /**

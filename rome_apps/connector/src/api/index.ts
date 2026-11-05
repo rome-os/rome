@@ -10,6 +10,7 @@ import {
   livePinDeps,
   type PinnedProject,
   readPinnedProject,
+  recoverMissingPin,
 } from "./composio-project.js";
 import { switchProject } from "./composio-project-switch.js";
 import {
@@ -194,6 +195,10 @@ class ComposioApiHandler implements RomeAppApiHandler {
       // The relay drops terminal 4xx responses. Webhook processing failures must
       // stay retryable even when an upstream lookup rejects Rome's credential.
       if (path !== "webhook" && isComposioAuthenticationError(err)) return authenticationError();
+      // Retryable: the next request tries to confirm the project again.
+      if (err instanceof ComposioProjectUnconfirmedError) {
+        return jsonError(503, "composio_project_unconfirmed", err.message);
+      }
       this.ctx.log.error("composio api error", {
         method,
         path,
@@ -421,7 +426,11 @@ class ComposioApiHandler implements RomeAppApiHandler {
    * slate. Idempotent — safe to call when nothing is stored.
    */
   private async handleLogout(): Promise<Response> {
-    const client = await this.loadClient();
+    // Signing out works with the project unconfirmed; only the remote cleanup is skipped.
+    const client = await this.loadClient().catch((err: unknown) => {
+      if (err instanceof ComposioProjectUnconfirmedError) return null;
+      throw err;
+    });
     const endpointId = await this.settings.get("webhookEndpointId");
     if (client && endpointId) {
       try {
@@ -470,8 +479,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
 
   /** Where the Composio project's webhook delivers, apart from `status` because it asks Composio. */
   private async handleWebhookTarget(): Promise<Response> {
+    // An unconfirmed project reads as `unknown`, which flags nothing.
     const target = await composioWebhookTarget({
-      client: await this.loadClient(),
+      client: await this.loadClient().catch(() => null),
       settings: this.ctx.repositories.settings,
     });
     return Response.json({ target });
@@ -487,14 +497,17 @@ class ComposioApiHandler implements RomeAppApiHandler {
     if (!apiKey) return jsonError(409, "no_api_key", "Log in to Composio first");
     if (!apiKey.startsWith("uak_")) return Response.json({ fixed: true, items: [] });
     const deps = livePinDeps(this.ctx.db, apiKey);
-    const [projects, pinned, fallback] = await Promise.all([
+    const [projects, fallback] = await Promise.all([
       deps.listProjects(),
-      ensurePinnedProject(deps).catch(() => readPinnedProject(deps.store)),
       deps
         .clientFor(null)
         .defaultProject()
         .catch(() => null),
     ]);
+    // A pinned project the list no longer has was deleted on Composio's side.
+    const pinned = await ensurePinnedProject(deps)
+      .then(() => recoverMissingPin(deps, projects))
+      .catch(() => readPinnedProject(deps.store));
     return Response.json({
       fixed: false,
       items: projects.map((project) => ({
@@ -586,7 +599,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
     try {
       await this.ensureWebhookRegistered(client);
     } catch (err) {
-      if (isComposioAuthenticationError(err)) throw err;
+      if (isComposioAuthenticationError(err) || err instanceof ComposioProjectUnconfirmedError) {
+        throw err;
+      }
       // A webhook is required to receive trigger events, but not to complete an
       // OAuth connection or use Composio tools. Keep the recovery attempt here
       // while allowing the connection flow to proceed; feed creation remains

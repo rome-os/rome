@@ -419,9 +419,10 @@ export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => 
     onError: (err) => onFlash(err.message),
   });
   const items = projects.data?.fixed ? [] : (projects.data?.items ?? []);
-  // Most accounts have one project, so there is nothing to pick and no row.
-  if (items.length < 2) return null;
   const selected = items.find((p) => p.selected);
+  // Most accounts have one project, so there is nothing to pick and no row,
+  // unless none of them is this Rome's: then the guardian picks one.
+  if (items.length === 0 || (items.length < 2 && selected)) return null;
   return (
     <div className="flex flex-col gap-1 rounded-8 border border-border px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">

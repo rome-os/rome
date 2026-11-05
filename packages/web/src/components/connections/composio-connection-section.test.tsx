@@ -212,6 +212,20 @@ describe("ComposioConnectionSection", () => {
     expect(screen.queryByRole("combobox", { name: "Composio project" })).toBeNull();
   });
 
+  it("shows the project row for a single project when it is not this Rome's", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/apps/connector/projects"
+        ? Response.json({
+            fixed: false,
+            items: [{ id: "pr_only", name: "Only", selected: false, isDefault: true }],
+          })
+        : Response.json({ webhookRegistered: true, relayConfigured: true }),
+    );
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+
+    expect(await screen.findByRole("combobox", { name: "Composio project" })).toBeTruthy();
+  });
+
   it("Disconnect posts to the composio logout endpoint and refreshes", async () => {
     const fetchMock = rs
       .spyOn(globalThis, "fetch")

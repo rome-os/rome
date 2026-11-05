@@ -6,6 +6,7 @@ import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { composioWebhookTarget, ensureComposioWebhookRegistered } from "../api/composio-webhook.js";
 import { resolveRelayDepositUrl } from "../api/relay-webhook.js";
 import { SettingsStore } from "../api/settings-store.js";
+import { readSessionApiKey } from "../api/composio-login.js";
 import { loadConnectorClient, ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
 import { armsWatch } from "./shared/composio.js";
 import type { ComposioEnv, ComposioToolkit, WatchEnv } from "./types.js";
@@ -25,7 +26,7 @@ async function connectedAccount(
 
 function composioEnv(deps: AppActionRuntimeDeps): ComposioEnv {
   return {
-    signedIn: async () => (await loadConnectorClient(deps.appContext.db)) !== null,
+    signedIn: async () => (await readSessionApiKey()) !== null,
     accounts: async () => {
       const client = await loadConnectorClient(deps.appContext.db);
       if (!client) return [];
