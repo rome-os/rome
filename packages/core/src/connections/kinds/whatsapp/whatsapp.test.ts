@@ -444,6 +444,32 @@ describe("WhatsAppAdapter", () => {
         }
       });
 
+      it("delivers inbound a live copy whose history copy could not be read", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+        rs.useFakeTimers();
+        try {
+          const key = { remoteJid: "111@s.whatsapp.net", id: "unread", fromMe: false };
+          eventHandlers["messaging-history.set"]({
+            contacts: [],
+            chats: [],
+            messages: [{ ...makeWAMessage({ key }), message: null }],
+          });
+          rs.advanceTimersByTime(30_000);
+          await eventHandlers["messages.upsert"]({ messages: [makeWAMessage({ key })] });
+
+          expect(recorded).toEqual([]);
+          expect(delivered).toEqual(["unread"]);
+        } finally {
+          rs.useRealTimers();
+        }
+      });
+
       it("records what it still holds when it stops", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);

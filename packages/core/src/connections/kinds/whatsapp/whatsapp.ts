@@ -437,12 +437,13 @@ export class WhatsAppAdapter {
       if (held.until > now) break;
       this.heldHistory.delete(id);
       if (this.heardLive.has(id)) continue;
-      remember(this.recordedAsHistory, id);
       const batch = due.get(held.self);
       if (batch) batch.push(held.message);
       else due.set(held.self, [held.message]);
     }
-    for (const [self, messages] of due) this.recordHistory(messages, self);
+    for (const [self, messages] of due) {
+      for (const id of this.recordHistory(messages, self)) remember(this.recordedAsHistory, id);
+    }
   }
 
   /** Hand what someone else said in `messages` to the inbound handler. */
@@ -493,19 +494,21 @@ export class WhatsAppAdapter {
   }
 
   /** Hand `messages`, which nothing delivers inbound and Rome's account `self`
-   *  heard, to Chats as history. */
-  private recordHistory(messages: WAMessage[], self = this.selfPnJid()): void {
-    if (!this.syncSink?.recordHistory || !self || messages.length === 0) return;
+   *  heard, to Chats as history, and answer the ids of those handed over. */
+  private recordHistory(messages: WAMessage[], self = this.selfPnJid()): string[] {
+    if (!this.syncSink?.recordHistory || !self || messages.length === 0) return [];
     // Chats records what Rome sends when it sends it. An edit or a deletion
     // answers a message rather than being one, as a reaction does.
     const inputs = this.syncInputs(
       messages.filter((message) => !isRomeSend(message) && !answersAMessage(message)),
     );
-    if (inputs.length === 0) return;
+    if (inputs.length === 0) return [];
     try {
       this.syncSink.recordHistory(inputs, self, this.sock?.user?.name ?? undefined);
+      return inputs.map((input) => input.id);
     } catch (err) {
       log.error("failed to record whatsapp history", { error: errMsg(err) });
+      return [];
     }
   }
 
