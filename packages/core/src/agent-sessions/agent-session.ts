@@ -71,7 +71,10 @@ import {
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { isConciergeAgent } from "../concierge/service.js";
 import { resolveAgentModelRequest } from "../core/agent-model-selection.js";
-import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "../core/model-selector.js";
+import {
+  resolveWebchatLargeModelSelection,
+  type ModelSelectionId,
+} from "../core/model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "../core/types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
@@ -125,7 +128,11 @@ import { detachSessionTools, type SessionToolsProvider } from "./session-tools.j
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
-import { currentMessageSection, replyContextLine, replyContextSection } from "../core/reply-context.js";
+import {
+  currentMessageSection,
+  replyContextLine,
+  replyContextSection,
+} from "../core/reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
   forkSessionKey,
