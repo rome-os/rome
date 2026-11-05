@@ -184,7 +184,9 @@ export function startConciergeEvents(
           await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
             30_000,
           );
+          // The wait may have ended Concierge or the subscription that paid for this turn.
           if (!(await service.isEnabled())) return;
+          if (!failoverReason(failure, service.deps.aiToolState.get())) return;
           next = await recover(failure, reason, true);
         } else {
           const moved = await service.switchForFailure(chatId, failure, reason);

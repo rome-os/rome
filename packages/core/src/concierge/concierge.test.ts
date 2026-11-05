@@ -1699,6 +1699,42 @@ describe("Concierge provider recovery", () => {
       to: "openai",
     });
   });
+  it("keeps a Codex pick that Rome credits pay for, and still moves on a Codex reauth", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
+    await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");
+    s.service.deps.webchatRepo = s.storedChats;
+    const raw = {
+      claude: { loggedIn: true, quotaExhausted: false },
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    };
+    raw.codex = { ...raw.codex, loggedIn: false };
+    s.deps.aiToolState.get = () => raw;
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
+    Object.assign(raw.codex, { needsReauth: true });
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({ reason: "login" });
+  });
+  it("drops a pending retry when the failed subscription stops paying during the wait", async () => {
+    let release!: () => void;
+    const delay = rs.fn(
+      (_ms: number) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { s } = await prepared({ delay });
+    const raw = {
+      claude: { loggedIn: true, quotaExhausted: false },
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    };
+    s.deps.aiToolState.get = () => raw;
+    await finish(s, failure("Selected model is busy: API Error: 503", "openai"));
+    expect(delay).toHaveBeenCalledTimes(1);
+    raw.codex = { ...raw.codex, loggedIn: false };
+    release();
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(0);
+  });
   it("drops a pending retry when Concierge is turned off during the wait", async () => {
     let release!: () => void;
     const delay = rs.fn(

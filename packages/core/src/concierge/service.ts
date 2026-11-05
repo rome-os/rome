@@ -217,7 +217,8 @@ export class ConciergeService {
       return null;
     reason ??= source.quotaExhausted
       ? "quota"
-      : source.loggedIn === false || source.needsReauth
+      : // Rome credits pay for Codex while its login is out, so that alone is no failure.
+        (from === "anthropic" && source.loggedIn === false) || source.needsReauth
         ? "login"
         : undefined;
     if (!reason) return null;

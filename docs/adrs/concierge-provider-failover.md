@@ -32,6 +32,6 @@ Future diffs must respect:
 
 - Ordinary chats, task chats, routines, summons, side chats, handoffs and subagents still fail closed.
 - Every automatic move records its reason independently of the agent speaking. A retry alone records no switch notice.
-- A same-provider move keeps the thread. A cross-provider move loses the thread, not Rome's transcript, and carries a continuation notice.
+- A same-provider move or retry keeps the thread once a turn on it has succeeded. A thread whose first turn failed is not on record yet, so its recovery starts a new thread and reads the chat's stored messages. A cross-provider move loses the thread, not Rome's transcript, and carries a continuation notice.
 - Avoiding repeated work relies on the recovery prompt. It requires history and task-list reads, verification, and a guardian question before an unconfirmed side effect repeats.
 - This exception and an explicit guardian selection are the only inputs that move an existing session to another model.
