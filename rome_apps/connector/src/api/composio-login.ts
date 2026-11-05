@@ -347,3 +347,55 @@ export async function readSessionApiKey(): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * The organization of the CLI session (`org_id`, "ok_…"), which a user key
+ * sends as `x-org-id` beside a project id. Null when not logged in.
+ */
+export async function readSessionOrgId(): Promise<string | null> {
+  const raw = await readSessionFile();
+  if (raw === null) return null;
+  try {
+    const data = JSON.parse(raw) as { org_id?: unknown };
+    return typeof data.org_id === "string" && data.org_id.trim() ? data.org_id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One developer project of the signed-in Composio account. */
+export interface CliProject {
+  id: string;
+  name: string;
+}
+
+/** Reads the project list out of `composio dev projects list`, tolerating a banner around the JSON. */
+export function parseCliProjects(stdout: string): CliProject[] {
+  const start = stdout.indexOf("[");
+  const end = stdout.lastIndexOf("]");
+  if (start < 0 || end < start) {
+    throw new Error(`Could not read the Composio project list: ${stdout.trim() || "(empty)"}`);
+  }
+  const rows = JSON.parse(stdout.slice(start, end + 1)) as unknown;
+  if (!Array.isArray(rows)) throw new Error("The Composio project list is not a list");
+  return rows.flatMap((row) => {
+    const { id, name } = (row ?? {}) as { id?: unknown; name?: unknown };
+    return typeof id === "string" && id ? [{ id, name: typeof name === "string" ? name : id }] : [];
+  });
+}
+
+/** The account's developer projects, as `composio dev projects list` gives them. */
+export async function listCliProjects(): Promise<CliProject[]> {
+  let result: RunResult;
+  try {
+    result = await runComposio(["dev", "projects", "list"], { timeoutMs: 15_000 });
+  } catch (err) {
+    throw spawnError(err);
+  }
+  if (result.code !== 0) {
+    throw new Error(
+      `composio dev projects list failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`}`,
+    );
+  }
+  return parseCliProjects(result.stdout);
+}

@@ -709,14 +709,36 @@ export function startConciergeFollowing(
       options[option.key] = optionValue(option, follow.options[option.key]);
     }
     const kinds = source.kinds.map((k) => ({ kind: k.kind, on: follow.kinds.includes(k.kind) }));
+    // A kind on whose subscription at the source is missing gets no events, whatever the source's status.
+    const undelivered = source.kinds.filter(
+      (k) => follow.kinds.includes(k.kind) && source.undelivered?.kinds.includes(k.kind),
+    );
+    const ready = source.status === "ready" && undelivered.length === 0;
     return {
       target: follow.target,
-      state: source.status !== "ready" ? "unavailable" : kinds.some((k) => k.on) ? "active" : "off",
+      state: !ready ? "unavailable" : kinds.some((k) => k.on) ? "active" : "off",
+      ...(source.status === "ready" && undelivered.length > 0 && source.undelivered
+        ? {
+            reason: `${undelivered.map((k) => k.label).join(", ")}: ${source.undelivered.reason}`,
+          }
+        : {}),
       kinds,
       options,
       preference: follow.preference,
     };
   };
+
+  /** The source as it is once these kinds were just subscribed: none of them is undelivered. */
+  const withArmed = (source: WatchSource, kinds: string[]): WatchSource =>
+    source.undelivered
+      ? {
+          ...source,
+          undelivered: {
+            ...source.undelivered,
+            kinds: source.undelivered.kinds.filter((k) => !kinds.includes(k)),
+          },
+        }
+      : source;
 
   /** Applies a change to a follow record, checked against its source. */
   const applyChange = (
@@ -861,7 +883,7 @@ export function startConciergeFollowing(
         follows: [...stored.follows.filter((f) => f !== existing), next],
       });
       if (!existing) await syncDigest();
-      return toDto(source, next);
+      return toDto(withArmed(source, next.kinds), next);
     },
 
     async configure(change) {
@@ -882,7 +904,7 @@ export function startConciergeFollowing(
         ...stored,
         follows: stored.follows.map((f) => (f === existing ? next : f)),
       });
-      return toDto(source, next);
+      return toDto(withArmed(source, source.status === "ready" ? added : []), next);
     },
 
     async unfollow(sourceName, rawTarget) {

@@ -98,8 +98,15 @@
         "ready": "正常",
         "notReady": "需要设置",
         "unavailable": "此实例不可用",
+        "elsewhere": "正推送到另一个 Rome",
         "setUp": "重新设置",
         "done": "事件推送已设置。"
+      },
+      "project": {
+        "title": "项目",
+        "label": "Composio 项目",
+        "default": "{{name}}（默认）",
+        "switched": "请在这个项目里重新连接服务，然后让 Concierge 重新关注它们。"
       }
     },
     "loadFailedFallback": "加载连接失败。",

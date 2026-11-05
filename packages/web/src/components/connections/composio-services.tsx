@@ -6,17 +6,29 @@ import { toast } from "sonner";
 import { ComposioServiceBadge } from "@/components/brand-icons/composio-glyphs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@rome-os/ui/spinner";
 import {
   COMPOSIO_ACCOUNTS_QUERY_KEY,
   COMPOSIO_CATALOG_QUERY_KEY,
+  COMPOSIO_PROJECTS_QUERY_KEY,
   COMPOSIO_STATUS_QUERY_KEY,
+  COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
   composioServiceRows,
   disconnectComposioService,
   fetchComposioAccounts,
   fetchComposioCatalog,
+  fetchComposioProjects,
   fetchComposioWebhookStatus,
+  fetchComposioWebhookTarget,
   registerComposioWebhook,
+  selectComposioProject,
   startComposioConnect,
   type ComposioCatalogEntry,
   type ComposioServiceRow,
@@ -316,7 +328,9 @@ export function ComposioServiceDialog({
 /**
  * Whether connected services can deliver events (new email, new issue) to
  * Rome's routines. Signing in and connecting a service register the webhook
- * on their own; Set up again is the manual repair.
+ * on their own; Set up again is the manual repair. A Composio project has one
+ * webhook, so when another Rome on the same project registered last, events go
+ * there and the row says so.
  */
 export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => void }) {
   const { t } = useTranslation("settings");
@@ -325,17 +339,28 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
     queryKey: COMPOSIO_STATUS_QUERY_KEY,
     queryFn: fetchComposioWebhookStatus,
   });
+  const target = useQuery({
+    queryKey: COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
+    queryFn: fetchComposioWebhookTarget,
+  });
   const register = useMutation({
     mutationFn: registerComposioWebhook,
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: COMPOSIO_STATUS_QUERY_KEY });
+      await client.invalidateQueries({ queryKey: COMPOSIO_WEBHOOK_TARGET_QUERY_KEY });
       toast(t("connections.composioServices.webhook.done"));
     },
     onError: (err) => onFlash(err.message),
   });
   if (!status.data) return null;
   const { relayConfigured, webhookRegistered } = status.data;
-  const state = !relayConfigured ? "unavailable" : webhookRegistered ? "ready" : "notReady";
+  const state = !relayConfigured
+    ? "unavailable"
+    : target.data === "elsewhere"
+      ? "elsewhere"
+      : webhookRegistered
+        ? "ready"
+        : "notReady";
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -357,6 +382,76 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
         >
           {t("connections.composioServices.webhook.setUp")}
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The Composio project this Rome uses, and the others of the account, shown
+ * only when the account has more than one. Each
+ * Rome uses one project, so two Romes on one account each pick their own to
+ * both receive events. Switching moves event delivery to the picked project;
+ * connections stay with the project they were made in.
+ */
+export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => void }) {
+  const { t } = useTranslation("settings");
+  const client = useQueryClient();
+  const [switched, setSwitched] = useState(false);
+  const projects = useQuery({
+    queryKey: COMPOSIO_PROJECTS_QUERY_KEY,
+    queryFn: fetchComposioProjects,
+  });
+  const select = useMutation({
+    mutationFn: selectComposioProject,
+    onSuccess: async (result) => {
+      setSwitched(true);
+      if (result.webhookError) onFlash(result.webhookError);
+      await Promise.all(
+        [
+          COMPOSIO_PROJECTS_QUERY_KEY,
+          COMPOSIO_STATUS_QUERY_KEY,
+          COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
+          COMPOSIO_ACCOUNTS_QUERY_KEY,
+        ].map((queryKey) => client.invalidateQueries({ queryKey })),
+      );
+    },
+    onError: (err) => onFlash(err.message),
+  });
+  const items = projects.data?.fixed ? [] : (projects.data?.items ?? []);
+  const selected = items.find((p) => p.selected);
+  // Most accounts have one project, so there is nothing to pick and no row,
+  // unless none of them is this Rome's: then the guardian picks one.
+  if (items.length === 0 || (items.length < 2 && selected)) return null;
+  return (
+    <div className="flex flex-col gap-1 rounded-8 border border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-ui">{t("connections.composioServices.project.title")}</span>
+        <Select
+          value={selected?.id}
+          disabled={select.isPending}
+          onValueChange={(id) => {
+            if (id !== selected?.id) select.mutate(id);
+          }}
+        >
+          <SelectTrigger size="sm" aria-label={t("connections.composioServices.project.label")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.isDefault
+                  ? t("connections.composioServices.project.default", { name: project.name })
+                  : project.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {switched ? (
+        <p className="text-aux text-muted-foreground">
+          {t("connections.composioServices.project.switched")}
+        </p>
       ) : null}
     </div>
   );

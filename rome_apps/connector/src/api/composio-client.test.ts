@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   AliasConflictError,
   ComposioClient,
+  ComposioProjectUnconfirmedError,
   disconnectManagedToolkit,
   isAliasConflict,
   isComposioAuthenticationError,
@@ -28,7 +29,10 @@ describe("Composio credential rejection", () => {
         { status: 401 },
       ),
     );
-    const client = new ComposioClient({ apiKey: "uak_test" });
+    const client = new ComposioClient({
+      apiKey: "uak_test",
+      project: { orgId: "ok_org", projectId: "pr_pinned" },
+    });
 
     const error = await client
       .setWebhookUrl("https://relay.example/h/mailbox")
@@ -37,8 +41,122 @@ describe("Composio credential rejection", () => {
     expect(isComposioAuthenticationError(error)).toBe(true);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       "https://backend.composio.dev/api/v3.1/webhook_subscriptions",
+      {
+        method: "GET",
+        headers: {
+          "x-user-api-key": "uak_test",
+          "x-org-id": "ok_org",
+          "x-project-id": "pr_pinned",
+        },
+      },
+    );
+  });
+
+  it("reads the project's webhook URL from the list, without writing", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ items: [{ id: "ws_1", webhook_url: "https://relay.example/h/a" }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ items: [] }))
+      .mockResolvedValueOnce(Response.json({ items: [{ id: "ws_1" }] }));
+    const client = new ComposioClient({ apiKey: "uak_test" });
+
+    await expect(client.getWebhookUrl()).resolves.toBe("https://relay.example/h/a");
+    await expect(client.getWebhookUrl()).resolves.toBeNull();
+    await expect(client.getWebhookUrl()).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    for (const call of fetch.mock.calls) expect(call[1]).toMatchObject({ method: "GET" });
+  });
+
+  it("sends the pinned project's headers with a user key, and none with a project key", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json({ items: [] }));
+    const project = { orgId: "ok_org", projectId: "pr_pinned" };
+
+    await new ComposioClient({ apiKey: "uak_test", project }).getWebhookUrl();
+    await new ComposioClient({ apiKey: "ak_test", project }).getWebhookUrl();
+    await new ComposioClient({ apiKey: "uak_test" }).getWebhookUrl();
+
+    expect(fetch.mock.calls.map((call) => call[1]?.headers)).toEqual([
+      { "x-user-api-key": "uak_test", "x-org-id": "ok_org", "x-project-id": "pr_pinned" },
+      { "x-api-key": "ak_test" },
+      { "x-user-api-key": "uak_test" },
+    ]);
+  });
+
+  it("refuses a webhook write for a user key with no confirmed project, and writes once it has one", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ items: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "ws_1", secret: "whsec_1" }));
+
+    const unscoped = await new ComposioClient({ apiKey: "uak_test" })
+      .setWebhookUrl("https://relay.example/h/mailbox")
+      .catch((err: unknown) => err);
+    expect(unscoped).toBeInstanceOf(ComposioProjectUnconfirmedError);
+    expect((unscoped as Error).message).toBe(
+      "Couldn't confirm this Rome's Composio project; try again.",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+
+    const pinned = new ComposioClient({
+      apiKey: "uak_test",
+      project: { orgId: "ok_org", projectId: "pr_pinned" },
+    });
+    await expect(pinned.setWebhookUrl("https://relay.example/h/mailbox")).resolves.toEqual({
+      id: "ws_1",
+      secret: "whsec_1",
+    });
+  });
+
+  it("reads the key's default project from session info, without the project headers", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        project: {
+          nano_id: "pr_default",
+          name: "Default",
+          org_id: "org-uuid",
+          webhook_secret: "x",
+        },
+      }),
+    );
+    const client = new ComposioClient({
+      apiKey: "uak_test",
+      project: { orgId: "ok_org", projectId: "pr_pinned" },
+    });
+
+    await expect(client.defaultProject()).resolves.toEqual({
+      projectId: "pr_default",
+      projectName: "Default",
+      orgId: "org-uuid",
+    });
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(
+      "https://backend.composio.dev/api/v3/auth/session/info",
       { method: "GET", headers: { "x-user-api-key": "uak_test" } },
     );
+  });
+
+  it("leaves a disabled trigger out of the active ones", async () => {
+    const client = new ComposioClient({ apiKey: "uak_test" });
+    const row = (id: string, disabled_at: string | null) => ({
+      id,
+      trigger_name: "SOME_TRIGGER",
+      connected_account_id: "ca_1",
+      trigger_config: {},
+      updated_at: "2026-11-04T00:00:00Z",
+      disabled_at,
+    });
+    const listActive = rs.fn().mockResolvedValue({
+      items: [row("ti_on", null), row("ti_off", "2026-11-04T01:00:00Z")],
+      next_cursor: null,
+    });
+    (client as unknown as { rest: { triggerInstances: { listActive: unknown } } }).rest = {
+      triggerInstances: { listActive },
+    };
+    const active = await client.listActiveTriggers();
+    expect(active.map((t) => t.triggerInstanceId)).toEqual(["ti_on"]);
   });
 
   it.each([401, 403, 500])("preserves webhook write status %i", async (status) => {

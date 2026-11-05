@@ -98,8 +98,15 @@
         "ready": "Ready",
         "notReady": "Needs setup",
         "unavailable": "Unavailable on this instance",
+        "elsewhere": "Going to another Rome",
         "setUp": "Set up again",
         "done": "Event delivery is set up."
+      },
+      "project": {
+        "title": "Project",
+        "label": "Composio project",
+        "default": "{{name}} (default)",
+        "switched": "Connect your services again in this project, then ask the Concierge to follow them again."
       }
     },
     "loadFailedFallback": "Failed to load connections.",
