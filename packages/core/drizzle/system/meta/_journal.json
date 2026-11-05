@@ -792,6 +792,13 @@
       "when": 1794000006000,
       "tag": "0113_dashboard_chat_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1794000007000,
+      "tag": "0114_remove_dead_person_mapping",
+      "breakpoints": true
     }
   ]
 }

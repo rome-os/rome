@@ -89,7 +89,6 @@ export const persons = sqliteTable("persons", {
     enum: ["guardian", "inner-circle", "acquaintance", "other"],
   }).notNull(),
   profilePath: text("profile_path"),
-  approved: integer("approved", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 

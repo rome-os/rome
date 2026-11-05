@@ -1,5 +1,3 @@
-import { pairingPayload } from "@rome/api-types/approvals";
-import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
 import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -893,12 +891,10 @@ export default function ActivityPage({
           onValueChange={setStatusFilter}
         />
 
-        <ApprovalHistoryButton />
-
         {/* Content */}
         {approvalsQuery.isError && (
           <Alert variant="destructive">
-            <AlertDescription>{t("pairing.loadFailed")}</AlertDescription>
+            <AlertDescription>{t("approvals.loadFailed")}</AlertDescription>
           </Alert>
         )}
         {loading || approvalsQuery.isLoading ? (
@@ -927,15 +923,11 @@ export default function ActivityPage({
                   }}
                 >
                   {item.kind === "approval" ? (
-                    pairingPayload(item.data) ? (
-                      <PairingApproval approval={item.data} />
-                    ) : (
-                      <ApprovalCard
-                        approval={item.data}
-                        onAction={handleAction}
-                        onRetry={handleRetry}
-                      />
-                    )
+                    <ApprovalCard
+                      approval={item.data}
+                      onAction={handleAction}
+                      onRetry={handleRetry}
+                    />
                   ) : item.kind === "webhook_invocation" ? (
                     <WebhookInvocationCard invocation={item.data} />
                   ) : (

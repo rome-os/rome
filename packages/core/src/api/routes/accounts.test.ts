@@ -65,7 +65,6 @@ describe("Accounts API", () => {
     waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "whatsapp", id: LINKED_JID }],
     });
 
@@ -180,7 +179,6 @@ describe("Accounts API", () => {
     const linkedSilent = await deps.peopleRepo.create({
       displayName: "Quiet Link",
       bondLevel: "other",
-      approved: true,
       links: [{ platform: "signal", id: "sig-quiet" }],
     });
     const account = find(await fetchPage(), "signal:sig-quiet")!;

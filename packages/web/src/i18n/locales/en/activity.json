@@ -155,17 +155,8 @@
       "dumpAriaLabel": "Download raw trace JSON"
     }
   },
-  "pairing": {
-    "account": "Pairing request for {{account}}",
-    "validity": "Valid for {{duration}}",
+  "approvals": {
     "resolveFailed": "Could not resolve approval. Refresh and check its status.",
-    "loadFailed": "Could not load approvals",
-    "loading": "Loading…",
-    "approved": "Approved",
-    "rejected": "Rejected",
-    "expired": "Expired",
-    "requested": "Requested {{time}}",
-    "resolved": "Resolved by {{actor}} · {{time}}",
-    "loadHistory": "Load earlier pairing requests"
+    "loadFailed": "Could not load approvals"
   }
 }

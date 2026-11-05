@@ -52,7 +52,6 @@ describe("LinkedIn message addressing", () => {
     await people.create({
       displayName: "Ada Lovelace",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "linkedin", id: "ACoAAAda0001" }],
     });
 
