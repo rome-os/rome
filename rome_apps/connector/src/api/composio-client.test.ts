@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   AliasConflictError,
   ComposioClient,
+  ComposioProjectUnconfirmedError,
   disconnectManagedToolkit,
   isAliasConflict,
   isComposioAuthenticationError,
@@ -28,7 +29,10 @@ describe("Composio credential rejection", () => {
         { status: 401 },
       ),
     );
-    const client = new ComposioClient({ apiKey: "uak_test" });
+    const client = new ComposioClient({
+      apiKey: "uak_test",
+      project: { orgId: "ok_org", projectId: "pr_pinned" },
+    });
 
     const error = await client
       .setWebhookUrl("https://relay.example/h/mailbox")
@@ -37,7 +41,14 @@ describe("Composio credential rejection", () => {
     expect(isComposioAuthenticationError(error)).toBe(true);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       "https://backend.composio.dev/api/v3.1/webhook_subscriptions",
-      { method: "GET", headers: { "x-user-api-key": "uak_test" } },
+      {
+        method: "GET",
+        headers: {
+          "x-user-api-key": "uak_test",
+          "x-org-id": "ok_org",
+          "x-project-id": "pr_pinned",
+        },
+      },
     );
   });
 
@@ -73,6 +84,31 @@ describe("Composio credential rejection", () => {
       { "x-api-key": "ak_test" },
       { "x-user-api-key": "uak_test" },
     ]);
+  });
+
+  it("refuses a webhook write for a user key with no confirmed project, and writes once it has one", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ items: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "ws_1", secret: "whsec_1" }));
+
+    const unscoped = await new ComposioClient({ apiKey: "uak_test" })
+      .setWebhookUrl("https://relay.example/h/mailbox")
+      .catch((err: unknown) => err);
+    expect(unscoped).toBeInstanceOf(ComposioProjectUnconfirmedError);
+    expect((unscoped as Error).message).toBe(
+      "Couldn't confirm this Rome's Composio project; try again.",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+
+    const pinned = new ComposioClient({
+      apiKey: "uak_test",
+      project: { orgId: "ok_org", projectId: "pr_pinned" },
+    });
+    await expect(pinned.setWebhookUrl("https://relay.example/h/mailbox")).resolves.toEqual({
+      id: "ws_1",
+      secret: "whsec_1",
+    });
   });
 
   it("reads the key's default project from session info, without the project headers", async () => {

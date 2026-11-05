@@ -92,6 +92,12 @@ describe("connector authentication recovery", () => {
     mocks.completeCliLogin.mockResolvedValue("uak_new");
     mocks.settings.get.mockResolvedValue(null);
     mocks.client.ping.mockResolvedValue({ ok: true });
+    mocks.readSessionOrgId.mockResolvedValue("ok_org");
+    mocks.client.defaultProject.mockResolvedValue({
+      projectId: "pr_default",
+      projectName: "Default",
+      orgId: "org-uuid",
+    });
   });
 
   it("keeps status local and treats hasKey only as credential presence", async () => {
@@ -421,6 +427,27 @@ describe("connector API Composio project pin", () => {
     );
 
     expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_second");
+  });
+
+  it("leaves the webhook alone at a login whose project discovery fails, and sets it up at the next", async () => {
+    stored.set("webhookEndpointId", "ws_1");
+    stored.set("webhookSecret", "whsec_1");
+    mocks.listCliProjects.mockRejectedValueOnce(new Error("composio dev projects list failed"));
+    mocks.client.webhookSubscriptionExists.mockResolvedValue(true);
+    const login = () =>
+      createApiHandler(context()).handle(
+        request("login/complete", "POST", { cliKey: "cli_test_session" }),
+      );
+
+    const first = await login();
+    expect(first.status).toBe(200);
+    expect(stored.has("composioProject")).toBe(false);
+    expect(stored.get("webhookSecret")).toBe("whsec_1");
+    expect(mocks.ensureWebhookRegistered).not.toHaveBeenCalled();
+
+    await login();
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_default");
+    expect(mocks.ensureWebhookRegistered).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the pin across logout, so signing in again stays on the same project", async () => {

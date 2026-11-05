@@ -1,6 +1,7 @@
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import {
   ComposioClient,
+  ComposioProjectUnconfirmedError,
   isComposioAuthenticationError,
   isComposioNotFoundError,
 } from "./composio-client.js";
@@ -334,7 +335,13 @@ class ComposioApiHandler implements RomeAppApiHandler {
       if (ping.status === 401) return authenticationError();
       return jsonError(502, "composio_unavailable", ping.message);
     }
-    const client = new ComposioClient({ apiKey, project: await this.pinAtLogin(apiKey) });
+    const project = await this.pinAtLogin(apiKey);
+    // Without a confirmed project, a user key would read and write the webhook
+    // of Composio's default project: the stored endpoint could look foreign
+    // and be dropped, and a new one written there. Leave both for the next
+    // attempt; the login itself stands.
+    if (apiKey.startsWith("uak_") && !project) return Response.json({ ok: true });
+    const client = new ComposioClient({ apiKey, project });
 
     // A new Composio project cannot use signing material from the previous one.
     // Drop it before upserting so a failed recovery never leaves the dashboard
@@ -451,7 +458,11 @@ class ComposioApiHandler implements RomeAppApiHandler {
     if (isComposioAuthenticationError(err)) return authenticationError();
     const message = err instanceof Error ? err.message : String(err);
     return jsonError(
-      err instanceof RelayWebhookUnavailableError ? 409 : 502,
+      err instanceof RelayWebhookUnavailableError
+        ? 409
+        : err instanceof ComposioProjectUnconfirmedError
+          ? 503
+          : 502,
       "webhook_registration_failed",
       message,
     );

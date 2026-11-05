@@ -93,6 +93,18 @@ class ComposioHttpError extends Error {
   }
 }
 
+/**
+ * A user key with no pinned project would write the webhook into whatever
+ * project Composio picks by default. Until the pin is known, writes refuse;
+ * the next attempt, once the project is confirmed, goes through.
+ */
+export class ComposioProjectUnconfirmedError extends Error {
+  constructor() {
+    super("Couldn't confirm this Rome's Composio project; try again.");
+    this.name = "ComposioProjectUnconfirmedError";
+  }
+}
+
 /** Recognizes credential rejection from both the SDK and direct Composio requests. */
 export function isComposioAuthenticationError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "status" in error && error.status === 401;
@@ -492,9 +504,12 @@ export class ComposioClient {
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly headers: Record<string, string>;
+  /** A user key with no project named: reads go to the default project, webhook writes refuse. */
+  private readonly unscoped: boolean;
 
   constructor(opts: ComposioClientOptions) {
     this.apiKey = opts.apiKey;
+    this.unscoped = opts.apiKey.startsWith("uak_") && !opts.project;
     this.baseURL = opts.baseURL ?? DEFAULT_BASE_URL;
     this.headers = requestHeadersFor(opts.apiKey, opts.project);
     this.rest = new ComposioRestClient({
@@ -941,6 +956,7 @@ export class ComposioClient {
    * on the same API key — is repointed, never dropped.
    */
   async setWebhookUrl(webhookUrl: string): Promise<WebhookEndpointResult> {
+    if (this.unscoped) throw new ComposioProjectUnconfirmedError();
     const existing = await this.listWebhookEndpointIds();
     return existing.length === 0
       ? this.writeWebhookEndpoint("POST", webhookUrl)

@@ -25,12 +25,20 @@ describe("switchProject", () => {
       listActiveTriggers: async () =>
         project.projectId === "pr_old"
           ? [trigger("MAIL_NEW", { label: "INBOX" }), trigger("CHAT_NEW"), trigger("ISSUE_NEW")]
-          : [trigger("ISSUE_NEW")],
+          : [
+              // Armed for this Rome's issue account already; mail only for another account.
+              { ...trigger("ISSUE_NEW"), connectedAccountIds: ["ca_issue"] },
+              { ...trigger("MAIL_NEW", { label: "INBOX" }), connectedAccountIds: ["ca_other"] },
+            ],
       getTriggerType: async (slug) =>
         ({ slug, toolkit: { slug: slug.split("_")[0]!.toLowerCase() } }) as never,
-      // Only mail is connected in the new project.
+      // Mail and issues are connected in the new project; chat is not.
       findActiveConnectedAccount: async (_user, toolkit) =>
-        toolkit === "mail" ? { kind: "ok", id: "ca_new" } : { kind: "none" },
+        toolkit === "mail"
+          ? { kind: "ok", id: "ca_new" }
+          : toolkit === "issue"
+            ? { kind: "ok", id: "ca_issue" }
+            : { kind: "none" },
       createTrigger: async (_user, slug, opts) => {
         created.push({ slug, account: opts.connectedAccountId });
         return { triggerInstanceId: "ti_created" };

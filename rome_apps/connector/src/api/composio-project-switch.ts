@@ -2,7 +2,7 @@ import type { ComposioClient } from "./composio-client.js";
 import type { CliProject } from "./composio-login.js";
 import { type PinnedProject, pinProject, readPinnedProject } from "./composio-project.js";
 import type { SettingsStore } from "./settings-store.js";
-import { subscribeTriggerFeed } from "../shared.js";
+import { ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
 
 /** What the guardian reads after switching: connections stay with the project they were made in. */
 export const PROJECT_SWITCH_NOTE =
@@ -35,6 +35,16 @@ export interface SwitchResult {
   /** Why the webhook could not be pointed here, when it could not. */
   webhookError?: string;
   note: string;
+}
+
+/** The account this Rome connects in the project for the trigger's service, or null when there is none. */
+async function destinationAccount(
+  client: SwitchClient,
+  slug: string,
+): Promise<{ toolkit: string; id: string } | null> {
+  const toolkit = (await client.getTriggerType(slug)).toolkit.slug.toLowerCase();
+  const resolved = await client.findActiveConnectedAccount(ROME_USER_ID, toolkit);
+  return resolved.kind === "ok" ? { toolkit, id: resolved.id } : null;
 }
 
 const sameConfig = (a: Record<string, unknown>, b: Record<string, unknown>) =>
@@ -83,15 +93,24 @@ export async function switchProject(deps: SwitchDeps, projectId: string): Promis
   if (previous?.projectId !== pinned.projectId) {
     const already = await next.listActiveTriggers().catch(() => []);
     for (const trigger of before) {
+      // Armed already only when it fires for the account this Rome connects in the new project.
+      const account = await destinationAccount(next, trigger.triggerName).catch(() => null);
+      if (!account) {
+        notRearmed += 1;
+        continue;
+      }
       const armed = already.some(
         (t) =>
           t.triggerName.toUpperCase() === trigger.triggerName.toUpperCase() &&
+          t.connectedAccountIds.includes(account.id) &&
           sameConfig(t.triggerConfig, trigger.triggerConfig),
       );
       if (armed) continue;
       const result = await subscribeTriggerFeed(next as ComposioClient, {
         slug: trigger.triggerName,
         config: trigger.triggerConfig,
+        expectedToolkit: account.toolkit,
+        connectedAccountId: account.id,
       }).catch(() => ({ ok: false as const }));
       if (result.ok) rearmed += 1;
       else notRearmed += 1;

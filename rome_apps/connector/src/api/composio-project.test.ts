@@ -84,4 +84,12 @@ describe("ensurePinnedProject", () => {
       projectName: "Used",
     });
   });
+
+  it("pins nothing while discovery fails, then pins the project that holds the endpoint", async () => {
+    const d = deps({ storedEndpoint: "ws_1", endpointIn: "pr_used" });
+    d.listProjects.mockRejectedValueOnce(new Error("composio dev projects list failed"));
+    await expect(ensurePinnedProject(d.value)).rejects.toThrow("projects list failed");
+    expect(d.store.has("composioProject")).toBe(false);
+    await expect(ensurePinnedProject(d.value)).resolves.toMatchObject({ projectId: "pr_used" });
+  });
 });
