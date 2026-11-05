@@ -550,19 +550,8 @@ export class AgentRunner {
     const chatId =
       params.romeSessionId ?? (explicitSessionId || !caller ? undefined : chatOfCaller(caller));
     const threadContext = await this.withChatId(params.threadContext);
-    const persistTranscript = params.persistTranscript ?? true;
-    const chatKeepsLines = params.persistTrace === undefined && surfaceKeepsLines(threadContext);
     const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, threadContext, {
       ...(params.contextSuffix ? { about: params.contextSuffix } : {}),
-      keeps: {
-        // A run that names a conversation it does not reply into keeps its
-        // own record there, and the session's log stays out of it.
-        turn: params.persistTrace === false,
-        // Unless the run asks for its trace, the dashboard chat writes the
-        // turn's lines itself, as it shows them.
-        prompt: !persistTranscript || chatKeepsLines,
-        answer: !persistTranscript || !(params.persistAnswer ?? true) || chatKeepsLines,
-      },
     });
     const options = { workingDir: params.workingDir };
     let session;
@@ -636,7 +625,28 @@ export class AgentRunner {
       );
     }
 
+    // Chats keeps its own copy of the answer in the chat the run replies
+    // into, unless the caller puts it on record as it says it, or the
+    // dashboard chat writes it as it shows it. The session keeps its own.
+    const chatAnswer =
+      romeSessionId && (params.chatAnswer ?? true) && !surfaceKeepsLines(threadContext)
+        ? romeSessionId
+        : undefined;
     for await (const msg of handle.events) {
+      if (chatAnswer && msg.type === "result" && msg.content.trim() && this.webchatRepo) {
+        // The session already kept the answer, so a failed copy into the
+        // chat is logged and the turn goes on to its end.
+        await this.webchatRepo
+          .recordAnswerInChat(chatAnswer, handle.turnId, msg.content)
+          .catch((err) => {
+            log.warn("could not copy an answer into its chat", {
+              agent: agentName,
+              chatId: chatAnswer,
+              turnId: handle.turnId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+      }
       yield msg;
     }
 

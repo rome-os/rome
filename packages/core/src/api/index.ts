@@ -82,7 +82,7 @@ import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
-import { SessionQueryRepository } from "../db/repositories/session-query.js";
+import { SessionQueryRepository } from "../agent-sessions/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";

@@ -30,6 +30,7 @@ import {
 import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { parseTimeZone } from "../../lib/timezone.js";
+import type { TurnReads } from "../../agent-sessions/index.js";
 import type { ApiDeps } from "../deps.js";
 
 const PROJECT_DASHBOARD_DAYS = 14;
@@ -43,11 +44,11 @@ type ProjectsRouteDeps = {
   // production callsite passes the full ApiDeps; when absent, dashboard
   // dates fall back to UTC.
   settingsRepo?: Pick<NonNullable<ApiDeps["settingsRepo"]>, "get">;
+  /** What the turns used, read from Sessions. */
+  turns: Pick<TurnReads, "usageTotals">;
   webchatRepo: Pick<
     ApiDeps["webchatRepo"],
     | "getMessagesBatch"
-    | "getProjectUsageTotals"
-    | "getUsageTotals"
     | "archiveProjectsByPathPrefix"
     | "deleteArchivedProjectsByPathPrefix"
     | "deleteSessionsByProjectPathPrefix"
@@ -71,9 +72,7 @@ type ProjectSession = Awaited<
   ReturnType<NonNullable<ProjectsRouteDeps["webchatRepo"]>["listSessionsByProjectPath"]>
 >["sessions"][number];
 
-type ProjectUsageTotals = Awaited<
-  ReturnType<NonNullable<ProjectsRouteDeps["webchatRepo"]>["getProjectUsageTotals"]>
->;
+type ProjectUsageTotals = Awaited<ReturnType<ProjectsRouteDeps["turns"]["usageTotals"]>>;
 
 interface PreparedProjectFolderDelete {
   archivedProjectPaths: string[];
@@ -584,7 +583,7 @@ async function buildProjectDashboardChats(
 }
 
 async function buildProjectUsageStats(
-  webchatRepo: ProjectsRouteDeps["webchatRepo"],
+  turns: ProjectsRouteDeps["turns"],
   projectPath: string,
   timeZone?: string,
   now = new Date(),
@@ -611,10 +610,10 @@ async function buildProjectUsageStats(
     },
     timeZone,
   );
-  const totals = await webchatRepo.getProjectUsageTotals(projectPath, {
-    dayRanges: createUsageDayRanges(usage, timeZone),
-    monthStart,
-  });
+  const totals = await turns.usageTotals(
+    { dayRanges: createUsageDayRanges(usage, timeZone), monthStart },
+    projectPath,
+  );
 
   applyUsageTotals(usage, totals);
 
@@ -641,7 +640,7 @@ async function buildAllProjectsChatPage(
 }
 
 async function buildAllProjectsUsageStats(
-  webchatRepo: ProjectsRouteDeps["webchatRepo"],
+  turns: ProjectsRouteDeps["turns"],
   timeZone?: string,
   now = new Date(),
 ) {
@@ -656,7 +655,7 @@ async function buildAllProjectsUsageStats(
     },
     timeZone,
   );
-  const totals = await webchatRepo.getUsageTotals({
+  const totals = await turns.usageTotals({
     dayRanges: createUsageDayRanges(usage, timeZone),
     monthStart,
   });
@@ -667,7 +666,7 @@ async function buildAllProjectsUsageStats(
 }
 
 async function buildAllProjectsDashboard(
-  webchatRepo: ProjectsRouteDeps["webchatRepo"],
+  { turns, webchatRepo }: Pick<ProjectsRouteDeps, "turns" | "webchatRepo">,
   rootDir: string,
   options: { cursor?: string; limit: number },
   timeZone?: string,
@@ -676,7 +675,7 @@ async function buildAllProjectsDashboard(
   const [availableProjectPaths, chatPage, usageStats] = await Promise.all([
     listAvailableProjectPaths(webchatRepo, rootDir),
     buildAllProjectsChatPage(webchatRepo, options),
-    buildAllProjectsUsageStats(webchatRepo, timeZone, now),
+    buildAllProjectsUsageStats(turns, timeZone, now),
   ]);
 
   return {
@@ -768,7 +767,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
       const { cursor, limit } = getChatPageParams(c.req.query.bind(c.req));
       return c.json(
         await buildAllProjectsDashboard(
-          webchatRepo,
+          { turns: deps.turns, webchatRepo },
           projectsRoot,
           { cursor, limit },
           await getProjectDashboardTimeZone(deps.settingsRepo),
@@ -804,7 +803,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     const [chats, usageStats] = await Promise.all([
       buildProjectDashboardChats(webchatRepo, sessionPage.sessions),
       buildProjectUsageStats(
-        webchatRepo,
+        deps.turns,
         projectPath.relativePath,
         await getProjectDashboardTimeZone(deps.settingsRepo),
       ),

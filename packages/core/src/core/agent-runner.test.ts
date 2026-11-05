@@ -16,9 +16,9 @@ import {
   createActionEngineRepos,
 } from "../test/helpers.js";
 import { context, SpanStatusCode } from "@opentelemetry/api";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
+import { romeAgentMessages, romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { RecordedConversation } from "../agent-sessions/rows/session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "../agent-sessions/active-subagent-registry.js";
@@ -124,6 +124,15 @@ async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<Age
 
 describe("AgentRunner", () => {
   let testDb: TestDb;
+  /** The roles of the rows session `id` keeps itself, in the order written. */
+  const ownRoles = (id: string) =>
+    testDb.db
+      .select({ role: romeAgentMessages.role })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.sessionId, id))
+      .orderBy(sql`rowid`)
+      .all()
+      .map((row) => row.role);
   let agentLoader: AgentLoader;
   let artifactIdentity: ArtifactIdentityContext;
   let sessionManager: SessionManager;
@@ -326,11 +335,7 @@ describe("AgentRunner", () => {
     );
   });
 
-  it.each([
-    ["saves", true, ["trace"]],
-    ["saves", undefined, ["trace"]],
-    ["leaves", false, []],
-  ])("%s a webchat turn's trace unless the caller asks not to, without transcript rows", async (_label, persistTrace, roles) => {
+  it("keeps a dashboard chat turn's whole turn in the session and writes no copy in the chat", async () => {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
@@ -352,22 +357,23 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:chat-trace",
         prompt: "continue",
         threadContext: { channel: "webchat", threadId: "chat-trace", romeSessionId: "chat-trace" },
-        persistTrace,
-        persistTranscript: false,
       }),
     );
 
+    // The dashboard chat writes its own copy as it shows it.
     const messages = await webchatRepo.getMessages("chat-trace");
-    expect(messages.map((message) => message.role)).toEqual(roles);
+    expect(messages.map((message) => message.role)).toEqual(["trace"]);
+    // The session keeps the whole turn.
+    expect(ownRoles("chat-trace")).toEqual(["user", "trace", "assistant"]);
     await manager.shutdown();
   });
 
   it.each([
     ["writes", undefined, true],
     ["leaves out", false, false],
-  ])("%s a turn's answer in its transcript as the caller asks, and keeps its trace", async (_label, persistAnswer, answered) => {
+  ])("%s Chats' copy of the answer in the chat the run replies into, as the caller asks", async (_label, chatAnswer, answered) => {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
-    await webchatRepo.createSession("chat-answer", "Webchat chat");
+    await webchatRepo.createSession("chat-answer", "Chat");
     const provider: ModelProvider = {
       id: "anthropic",
       displayName: "Claude",
@@ -384,21 +390,60 @@ describe("AgentRunner", () => {
     await collectMessages(
       runner.run({
         agentName: "test-main",
-        channelThreadKey: "webchat:chat-answer",
+        channelThreadKey: "telegram:chat-answer",
         prompt: "continue",
+        // A messaging surface: no route writes the chat's copy of the answer.
         threadContext: {
-          channel: "webchat",
+          channel: "telegram",
           threadId: "chat-answer",
           romeSessionId: "chat-answer",
         },
-        persistTrace: true,
-        persistAnswer,
+        ...(chatAnswer === undefined ? {} : { chatAnswer }),
       }),
     );
 
     const roles = (await webchatRepo.getMessages("chat-answer")).map((message) => message.role);
     expect(roles).toContain("trace");
     expect(roles.includes("assistant")).toBe(answered);
+    // The session keeps its own copy either way.
+    expect(ownRoles("chat-answer")).toContain("assistant");
+    await manager.shutdown();
+  });
+
+  it("finishes a turn whose answer could not be copied into its chat", async () => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-copy-fails", "Chat");
+    rs.spyOn(webchatRepo, "recordAnswerInChat").mockRejectedValue(new Error("chat store down"));
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Done." };
+      }),
+    };
+    const manager = createTestSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    const messages = await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "telegram:chat-copy-fails",
+        prompt: "continue",
+        threadContext: {
+          channel: "telegram",
+          threadId: "chat-copy-fails",
+          romeSessionId: "chat-copy-fails",
+        },
+      }),
+    );
+
+    expect(messages.map((message) => message.type)).toEqual(
+      expect.arrayContaining(["result", "turn_end"]),
+    );
+    expect(ownRoles("chat-copy-fails")).toContain("assistant");
     await manager.shutdown();
   });
 
@@ -475,7 +520,6 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         prompt,
         romeSessionId: "system-input",
-        persistTranscript: false,
         ...(inputLabel ? { inputLabel } : {}),
       }),
     );
@@ -489,9 +533,8 @@ describe("AgentRunner", () => {
     expect(inputs).toEqual(
       inputLabel ? [{ type: "system_input", label: inputLabel, content: prompt }] : [],
     );
-    // It is the turn's input in the trace, not a line of the conversation.
-    const roles = (await webchatRepo.getMessages("system-input")).map((m) => m.role);
-    expect(roles.filter((role) => role === "user" || role === "assistant")).toEqual([]);
+    // The session keeps the turn's prompt as its own, once.
+    expect(ownRoles("system-input").filter((role) => role === "user")).toEqual(["user"]);
     await manager.shutdown();
   });
 

@@ -1,6 +1,7 @@
 // What an app reads of the chats Rome's sessions stand in, over Chats'
 // tables. Vocabulary: docs/domains/chats.md.
 
+import { createTurnReads } from "../agent-sessions/index.js";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import type { ChatReads } from "@rome-os/app-runtime/chats";
@@ -31,7 +32,7 @@ describe("appChatReads", () => {
     reads = appChatReads({
       db: testDb.db,
       reads: new ChatReadModel(testDb.db),
-      webchatRepo: repo,
+      turns: createTurnReads(testDb.db, repo),
     });
   });
 

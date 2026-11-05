@@ -38,11 +38,6 @@ export interface AgentTraceRecorderInput {
    * other writer owns their session.
    */
   persistTranscript?: boolean;
-  /** Inbound conversation messages are already persisted before dispatch. */
-  persistUserTranscript?: boolean;
-  /** A reply the host streams records its own assistant row, as the text it
-   *  showed, so the turn's answer is not recorded twice. */
-  persistAssistantTranscript?: boolean | (() => boolean);
   /**
    * Explicit trigger metadata stamped on the trace message row. When absent,
    * falls back to the ambient action context.
@@ -92,8 +87,6 @@ const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set(
  * caller named wins. Otherwise a recorded subagent or fork conversation is
  * used, and the id is derived as before for anything else. `existing` is true
  * for a named or recorded conversation, which needs no creating.
- * `promptPersisted` is true only for a named one, whose caller owns the prompt.
- * `recorderOwned` is true for a recorded one, which only the recorder writes.
  *
  * A turn under a thread stays with that thread's conversation, as before. Its
  * reply is delivered and recorded there under the turn's id, so the trace has
@@ -105,8 +98,6 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   existing: boolean;
-  promptPersisted: boolean;
-  recorderOwned: boolean;
 } {
   const conversation = input.sessionConversation;
   // The opener's named conversation wins over the one this turn's caller names.
@@ -124,8 +115,6 @@ export function resolveTurnConversation(input: TurnConversationInput): {
     }),
     romeSessionType: recorded?.type ?? resolveRomeSessionType(input),
     existing: Boolean(named ?? recorded),
-    promptPersisted: Boolean(named),
-    recorderOwned: Boolean(recorded),
   };
 }
 
@@ -264,34 +253,28 @@ export class AgentTraceRecorder {
   ): RomeAgentTranscriptMessageInput[] {
     if (!this.shouldPersistTranscript()) return [];
     const rows: RomeAgentTranscriptMessageInput[] = [];
-    if (this.input.persistUserTranscript ?? true) {
-      for (const msg of messages) {
-        if (msg.type !== "turn_start") continue;
-        if (this.persistedUserTurnIds.has(msg.turnId)) continue;
-        rows.push({
-          id: transcriptMessageId(sessionId, msg.turnId, "user"),
-          sessionId,
-          role: "user",
-          content: textMessageContent(msg.userPrompt),
-          turnId: msg.turnId,
-        });
-      }
+    for (const msg of messages) {
+      if (msg.type !== "turn_start") continue;
+      if (this.persistedUserTurnIds.has(msg.turnId)) continue;
+      rows.push({
+        id: transcriptMessageId(sessionId, msg.turnId, "user"),
+        sessionId,
+        role: "user",
+        content: textMessageContent(msg.userPrompt),
+        turnId: msg.turnId,
+      });
     }
-
-    const persistAnswer = this.input.persistAssistantTranscript;
-    if (typeof persistAnswer === "function" ? persistAnswer() : (persistAnswer ?? true)) {
-      for (const msg of messages) {
-        if (msg.type !== "result") continue;
-        if (!msg.content.trim()) continue;
-        if (this.persistedAssistantTurnIds.has(this.input.turnId)) continue;
-        rows.push({
-          id: transcriptMessageId(sessionId, this.input.turnId, "assistant"),
-          sessionId,
-          role: "assistant",
-          content: textMessageContent(msg.content),
-          turnId: this.input.turnId,
-        });
-      }
+    for (const msg of messages) {
+      if (msg.type !== "result") continue;
+      if (!msg.content.trim()) continue;
+      if (this.persistedAssistantTurnIds.has(this.input.turnId)) continue;
+      rows.push({
+        id: transcriptMessageId(sessionId, this.input.turnId, "assistant"),
+        sessionId,
+        role: "assistant",
+        content: textMessageContent(msg.content),
+        turnId: this.input.turnId,
+      });
     }
     return rows;
   }

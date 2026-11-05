@@ -19,6 +19,7 @@ import type {
 import { projectsFilesRoutes } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
+import { createTurnReads } from "../../agent-sessions/index.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { readArchivePaths } from "../../test/file-browser.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
@@ -38,6 +39,7 @@ type RouteDeps = Parameters<typeof projectsFilesRoutes>[0];
 // module scope so `buildApp` can default to them.
 let webchatRepo: WebChatRepository;
 let settingsRepo: SettingsRepository;
+let testDb: TestDb;
 
 const ENV_KEYS = [
   "ROME_PROJECTS_ROOT",
@@ -46,8 +48,15 @@ const ENV_KEYS = [
   "RG_SPY_FILE",
 ] as const;
 
-function buildApp(deps: RouteDeps = { settingsRepo, webchatRepo }) {
-  return new Hono().route("/", projectsFilesRoutes(deps));
+function buildApp(
+  deps: Omit<RouteDeps, "turns"> & Partial<Pick<RouteDeps, "turns">> = {
+    settingsRepo,
+    webchatRepo,
+  },
+) {
+  // What the turns used is read through Sessions, over the suite's store.
+  const turns = deps.turns ?? createTurnReads(testDb.db, webchatRepo);
+  return new Hono().route("/", projectsFilesRoutes({ ...deps, turns }));
 }
 
 function textMessage(content: string): string {
@@ -109,7 +118,6 @@ describe("Projects files API", () => {
   let projectsRoot: string;
   let rgSpyFile: string;
   let savedEnv: Record<string, string | undefined>;
-  let testDb: TestDb;
 
   beforeEach(() => {
     savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -563,12 +571,6 @@ describe("Projects files API", () => {
       // response must keep the day window computed at request start.
       const midQueryClockSkewRepo: RouteDeps["webchatRepo"] = {
         getMessagesBatch: (sessionIds) => webchatRepo.getMessagesBatch(sessionIds),
-        getProjectUsageTotals: (projectPath, options) =>
-          webchatRepo.getProjectUsageTotals(projectPath, options),
-        getUsageTotals: (options) => {
-          rs.setSystemTime(new Date("2026-05-02T00:00:01.000Z"));
-          return webchatRepo.getUsageTotals(options);
-        },
         archiveProjectsByPathPrefix: (projectPath, options) =>
           webchatRepo.archiveProjectsByPathPrefix(projectPath, options),
         deleteArchivedProjectsByPathPrefix: (projectPath) =>
@@ -588,9 +590,16 @@ describe("Projects files API", () => {
           webchatRepo.unarchiveProjectsByPaths(projectPaths, options),
       };
 
+      const turns = createTurnReads(testDb.db, webchatRepo);
       const res = await buildApp({
         settingsRepo,
         webchatRepo: midQueryClockSkewRepo,
+        turns: {
+          usageTotals: (options, projectPath) => {
+            rs.setSystemTime(new Date("2026-05-02T00:00:01.000Z"));
+            return turns.usageTotals(options, projectPath);
+          },
+        },
       }).request("/projects/dashboard?path=projects");
 
       expect(res.status).toBe(200);
@@ -1606,9 +1615,6 @@ describe("Projects files API", () => {
       let failCleanup = true;
       const failingCleanupRepo: RouteDeps["webchatRepo"] = {
         getMessagesBatch: (sessionIds) => webchatRepo.getMessagesBatch(sessionIds),
-        getProjectUsageTotals: (projectPath, options) =>
-          webchatRepo.getProjectUsageTotals(projectPath, options),
-        getUsageTotals: (options) => webchatRepo.getUsageTotals(options),
         archiveProjectsByPathPrefix: (projectPath, options) =>
           webchatRepo.archiveProjectsByPathPrefix(projectPath, options),
         deleteArchivedProjectsByPathPrefix: (projectPath) =>

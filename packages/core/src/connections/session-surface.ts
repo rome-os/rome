@@ -1,4 +1,4 @@
-import type { SessionSurface, SurfaceKeeps } from "../agent-sessions/index.js";
+import type { SessionSurface } from "../agent-sessions/index.js";
 import { isGuardianFacingChannel } from "../core/guardian-channel.js";
 import { callerConnection, type SessionCaller } from "../core/session-caller.js";
 import type { ThreadContext } from "../core/types.js";
@@ -51,7 +51,7 @@ export function sessionSurfaceOf(
   deps: SurfaceDeps,
   caller: SessionCaller | undefined,
   replies: ThreadContext | undefined,
-  extra: { keeps?: SurfaceKeeps; about?: string } = {},
+  extra: { about?: string } = {},
 ): SessionSurface {
   // An opener without a reply address falls back to the channel the caller names.
   const channel = replies?.channel ?? (caller ? callerConnection(caller) : undefined);
@@ -65,7 +65,6 @@ export function sessionSurfaceOf(
     cards,
     ...(replies ? { replies } : {}),
     ...(wake ? { wake: true } : {}),
-    ...(extra.keeps ? { keeps: extra.keeps } : {}),
     ...(extra.about ? { about: extra.about } : {}),
   };
 }

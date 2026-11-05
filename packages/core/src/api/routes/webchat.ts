@@ -807,6 +807,8 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
+  // Turns and their traces are Sessions'; the route reads them there.
+  const turns = deps.turns;
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
@@ -1080,7 +1082,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         visited.add(key);
         return true;
       });
-    const rows = await deps.webchatRepo.getTraceContentsByTurns(refs, { sessionActivityCutoff });
+    const rows = await turns.tracesOf(refs, { sessionActivityCutoff });
     const rowsByTurn = new Map(rows.map((row) => [`${row.sessionId}:${row.turnId}`, row]));
     const children = await Promise.all(
       refs.map(async (ref): Promise<DescendantUsage> => {
@@ -1198,7 +1200,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionActivityCutoff = sessionTraceCutoff();
     // Only the trace rows in `messages` are read, so a page of a long session
     // never loads the blocks of the turns outside it.
-    const traceContents = await deps.webchatRepo.getTraceContents(sessionId, {
+    const traceContents = await turns.traces(sessionId, {
       sessionActivityCutoff,
       messageIds: messages.filter((m) => m.role === "trace").map((m) => m.id),
     });
@@ -1223,7 +1225,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         .filter((subagent) => subagent.status !== "running")
         .map((subagent) => ({ sessionId: subagent.sessionId, turnId: subagent.turnId })),
     );
-    const childTraces = await deps.webchatRepo.getTraceContentsByTurns(childRefs, {
+    const childTraces = await turns.tracesOf(childRefs, {
       sessionActivityCutoff,
     });
     const childSummaries = new Map<string, TraceSnapshot["summary"]>();
@@ -1312,7 +1314,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const addSession = async (sid: string, turnFilter: Set<string>): Promise<void> => {
       const rows = await deps.webchatRepo.getMessages(sid);
-      const traceContents = await deps.webchatRepo.getTraceContents(sid);
+      const traceContents = await turns.traces(sid);
       const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
       for (const row of rows) {
         // Only the chosen turns are kept; rows with no turnId are skipped.
@@ -1433,7 +1435,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     try {
-      const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
+      const traceRow = await turns.trace(input.session.id, input.turnId);
       const turnStatus = traceRow
         ? parseStoredTraceEvents(traceRow.content)
             .filter(
@@ -1576,8 +1578,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       await deps.webchatRepo.promoteForkToChat(forkSessionId);
     }
     void (async () => {
-      while (!(await iterator.next()).done) {
-        // AgentRunner persists every fork message; this caller only has to drain.
+      // The session keeps the fork's turn. A fork that became a chat while
+      // its first turn ran gets Chats' copy of the answer here, as any caller
+      // of a chat puts on record what it said.
+      // A failed copy is logged, and the drain goes on, so the fork's turn
+      // still finishes and cleans up.
+      try {
+        for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
+          const event = next.value;
+          if (input.continuable && event.type === "result" && event.content.trim()) {
+            await deps.webchatRepo
+              .recordAnswerInChat(forkSessionId, forkTurnId, event.content)
+              .catch((err) => {
+                log.warn("could not copy a branch's answer into its chat", {
+                  forkSessionId,
+                  turnId: forkTurnId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
+        }
+      } finally {
+        await iterator.return?.(undefined);
       }
     })().catch((err) => {
       log.warn("turn fork failed", {
@@ -1795,8 +1817,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     cards: true,
     replies: threadContext,
     wake: true,
-    // The route writes the chat's own lines; the session's log keeps the trace.
-    keeps: { prompt: true, answer: true },
     about,
   });
 
@@ -2052,7 +2072,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/sessions/messages/:id/content", async (c) => {
     const messageId = c.req.param("id");
     const sessionActivityCutoff = sessionTraceCutoff();
-    const row = await deps.webchatRepo.getMessageContentForDisplay(messageId, {
+    const row = await turns.traceById(messageId, {
       sessionActivityCutoff,
     });
     if (row === null) return c.json({ error: "Message not found" }, 404);
@@ -2070,7 +2090,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const sessionActivityCutoff = sessionTraceCutoff();
-    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
+    const row = await turns.trace(sessionId, turnId, {
       sessionActivityCutoff,
     });
     if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
@@ -2088,7 +2108,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const sessionActivityCutoff = sessionTraceCutoff();
-    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
+    const row = await turns.trace(sessionId, turnId, {
       sessionActivityCutoff,
     });
     if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
@@ -2732,7 +2752,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/messages/:id/content", async (c) => {
     const messageId = c.req.param("id");
     const sessionActivityCutoff = sessionTraceCutoff();
-    const row = await deps.webchatRepo.getMessageContentForDisplay(messageId, {
+    const row = await turns.traceById(messageId, {
       sessionActivityCutoff,
     });
     if (row === null) return c.json({ error: "Message not found" }, 404);
@@ -2755,7 +2775,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if ("response" in lookup) return lookup.response;
     let content: string | null = null;
     const sessionActivityCutoff = sessionTraceCutoff();
-    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
+    const row = await turns.trace(sessionId, turnId, {
       sessionActivityCutoff,
     });
     if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
@@ -3283,6 +3303,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.type === "webchat" && session.archivedAt) {
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
+
+    // A branch from before branches were born chats has no chat of its own.
+    // It becomes one before it continues, as a new branch does, so its answer
+    // is said once, in its chat, beside the session's own copy.
+    if (session.type === "fork") await deps.webchatRepo.promoteForkToChat(session.id);
 
     // A branch is visible in the sidebar from its 201, but its provider thread
     // only exists once persistForkThread lands at first-answer completion.

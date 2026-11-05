@@ -167,7 +167,7 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./agent-sessions/index.js";
-import { createSessionLog } from "./agent-sessions/index.js";
+import { createSessionLog, createTurnReads } from "./agent-sessions/index.js";
 import { talkerChannelSurface } from "./connections/session-surface.js";
 import type { WakeDeps } from "./core/agent-runner.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
@@ -435,9 +435,10 @@ async function main() {
     links: chatsWired.links,
   });
   await webchatRepo.recoverInterruptedInputs();
+  const sessionLog = createSessionLog(webchatRepo);
   // Only turns within a day of the newest one, so the stopped process's turns
   // end however long Rome was down, and traces older crashes left open stay.
-  const endedTurns = await webchatRepo.endInterruptedTurns(24 * 60 * 60 * 1000);
+  const endedTurns = (await sessionLog.endInterrupted?.(24 * 60 * 60 * 1000)) ?? 0;
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
@@ -455,7 +456,7 @@ async function main() {
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.
     inChats: {
-      reads: { db, reads: chatsWired.reads, webchatRepo },
+      reads: { db, reads: chatsWired.reads, turns: createTurnReads(db, webchatRepo) },
       writes: {
         webchatRepo,
         chats: chatsWired.chats,
@@ -1052,7 +1053,6 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
-  const sessionLog = createSessionLog(webchatRepo);
   const subagentExecutionService = createSubagentExecutionService({
     log: sessionLog,
     activeRegistry: activeSubagentRegistry,
@@ -1993,6 +1993,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      turns: createTurnReads(db, webchatRepo),
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

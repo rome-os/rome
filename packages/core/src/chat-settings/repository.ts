@@ -10,7 +10,8 @@ import { placeIn, type ChatKey, type ChatRef } from "../chats/storage/place.js";
 import { startChannelChat } from "../connections/channel-chat.js";
 import { addressOf, type ChatAdapters, kindNamedBy } from "../connections/chat-adapter.js";
 import type { ChatAddresses } from "../connections/chat-addresses.js";
-import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema/system.js";
+import { turnRowsOf } from "../agent-sessions/index.js";
+import { chatMessages, chats, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { firstPlacementSecond, placedCreatedAt } from "../db/speaker-placement.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -333,7 +334,7 @@ export class ChatSettingsRepository {
         WHERE s.id = ${sessionId} AND (
           EXISTS (SELECT 1 FROM ${chatMessages} m
             WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id)
-          OR EXISTS (SELECT 1 FROM ${romeAgentMessages} r WHERE r.session_id = s.id))
+          OR EXISTS (SELECT 1 FROM ${turnRowsOf(sql`(s.id)`)} r))
       `).length > 0
     );
   }

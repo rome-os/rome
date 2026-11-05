@@ -1,4 +1,5 @@
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import type { TurnReads } from "../agent-sessions/index.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -120,6 +121,8 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
+  /** Sessions' turns and their traces, read back. */
+  turns: TurnReads;
   /** Where a send into a place is said and put on record in Chats. */
   recording: SendRecording;
   /** The chats Rome takes part in, by their adapter's keys. */

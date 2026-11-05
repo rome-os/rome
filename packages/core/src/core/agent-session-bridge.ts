@@ -28,7 +28,7 @@ import {
 import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { sessionSurfaceOf, surfaceKeepsLines } from "../connections/session-surface.js";
+import { sessionSurfaceOf } from "../connections/session-surface.js";
 import { adhocCaller, callerKey, chatOfCaller, type SessionCaller } from "./session-caller.js";
 import { openNamed } from "../agent-sessions/index.js";
 import type { ThreadContext } from "./types.js";
@@ -156,15 +156,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           named ??
           thread?.romeSessionId ??
           (thread ? channelChatId(thread.channel, thread.threadId) : undefined);
-        const stands = romeSessionId ? !!this.runLineDeps?.lines.stands(romeSessionId) : false;
         const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, thread, {
-          keeps: {
-            prompt: surfaceKeepsLines(thread),
-            // Where the session stands in a chat, the caller records the
-            // answer as it sends it, so the log writing it too would say it
-            // twice, or say one that never went out.
-            answer: stands || surfaceKeepsLines(thread),
-          },
           ...(req.init?.contextSuffix ? { about: req.init.contextSuffix } : {}),
         });
         const acquireStartedAt = Date.now();

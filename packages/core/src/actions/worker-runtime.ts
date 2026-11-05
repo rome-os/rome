@@ -68,6 +68,7 @@ import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
 import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
 import type { Trigger } from "../routines/types.js";
 import { legacyChatIdChannelsService, legacyChatIdSettings } from "../apps/legacy-chat-id.js";
+import { createTurnReads } from "../agent-sessions/index.js";
 
 const log = createLogger("action-worker");
 
@@ -149,7 +150,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     // no channels: a speaker sends through main's, which records nothing, so
     // the send goes on record once, here.
     inChats: {
-      reads: { db, reads: chatsWired.reads, webchatRepo },
+      reads: { db, reads: chatsWired.reads, turns: createTurnReads(db, webchatRepo) },
       writes: {
         webchatRepo,
         chats: chatsWired.chats,

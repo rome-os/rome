@@ -20,7 +20,6 @@ export {
   type SessionOpenOptions,
   type SessionResetRule,
   type SessionSurface,
-  type SurfaceKeeps,
   type TurnBriefing,
   type TurnInitiator,
 } from "./agent-session.js";
@@ -29,6 +28,31 @@ export { withTurnExecution, withTurnLinks } from "./turn-context.js";
 // The log sessions keep their turns in, over today's rows.
 export { createSessionLog, openNamed } from "./rows/session-log.js";
 export type { SessionLog } from "./agent-session.js";
+
+// Reading turns and their traces back. Turns are Sessions', so every reader
+// outside reads them here.
+export {
+  createKeptTurnReads,
+  createTurnReads,
+  type KeptTurns,
+  type TraceHead,
+  type TurnReads,
+  type TurnRef,
+} from "./rows/turn-reads.js";
+// Chats joins a session's rows into its own transcript queries.
+export {
+  keptInputOf,
+  type KeptTurnMessage,
+  keptTurnMessagesOf,
+  turnRowsOf,
+} from "./rows/turn-rows.js";
+// The Sessions explorer's read model of runs.
+export {
+  type RawSessionRunAggregate,
+  type RawSessionStats,
+  SessionQueryRepository,
+  type SessionQueryStorageScope,
+} from "./rows/session-query.js";
 
 // What the wiring builds once and hands to the manager.
 export { SessionManager } from "./session-manager.js";

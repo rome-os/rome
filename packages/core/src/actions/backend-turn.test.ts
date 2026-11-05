@@ -50,7 +50,8 @@ describe("backend turn delivery", () => {
       prompt: "⏰ Time's up: check deployment",
     });
 
-    expect(agentRunner.calls[0]).toMatchObject({ persistTrace: true, persistTranscript: false });
+    // The dashboard chat writes its own copy of the answer, so the run asks nothing of it.
+    expect(agentRunner.calls[0]).not.toHaveProperty("chatAnswer");
     expect(emitted).toEqual([
       { type: "turn_start", recorded: true },
       { type: "result", recorded: true },
@@ -416,9 +417,7 @@ describe("backend turn delivery", () => {
 
       await runner.runAndDeliver(params).catch(() => {});
 
-      expect(agentRunner.calls[0]).toMatchObject({ persistAnswer: false });
-      expect(agentRunner.calls[0]).not.toHaveProperty("persistTrace", false);
-      expect(agentRunner.calls[0]).not.toHaveProperty("persistTranscript", false);
+      expect(agentRunner.calls[0]).toMatchObject({ chatAnswer: false });
     });
 
     it("sends nothing, and says which session, when the session stands in no chat", async () => {

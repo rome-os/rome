@@ -145,22 +145,9 @@ export interface SessionSurface {
   replies?: ThreadContext;
   /** A `defer` wake-up can come back here. Absent, the agent gets no `defer`. */
   wake?: boolean;
-  /** What the surface keeps of each turn itself, which the session's log
-   *  leaves out. Absent, the log keeps the whole turn. */
-  keeps?: SurfaceKeeps;
   /** Told to the agent about who is on the other side, appended to its system
    *  prompt at the first open. */
   about?: string;
-}
-
-export interface SurfaceKeeps {
-  /** The prompt, which the surface wrote before the turn. */
-  prompt?: boolean;
-  /** The answer, which the surface records as it delivers it. Asked when the
-   *  answer arrives, since the surface can decide during the turn. */
-  answer?: boolean | (() => boolean);
-  /** The whole turn, trace included. */
-  turn?: boolean;
 }
 
 /** What a caller chooses when it opens a session. */
@@ -213,14 +200,12 @@ export interface LoggedTurn {
   served?: SessionConversation;
   /** The session is a child of another session's turn. */
   child: boolean;
-  /** What the surface keeps of the turn itself. */
-  keeps?: SurfaceKeeps;
 }
 
 /** Where the log keeps a turn, and the writer that keeps it. */
 export interface TurnLogEntry {
   conversation: TurnConversation;
-  /** Absent when the surface keeps the whole turn itself. */
+  /** Absent when the log has nowhere to keep the turn. */
   writer?: TurnLogWriter;
 }
 
@@ -273,6 +258,9 @@ export interface SessionLog {
     parentAgentName: string;
     parentTurnId: string;
   }): Promise<void>;
+  /** Ends the turns a stopped process left running, within `windowMs` of the
+   *  newest one. Returns how many it ended. */
+  endInterrupted?(windowMs: number): Promise<number>;
 }
 
 /** When a reset is due, decided by the caller from the context's age. */
@@ -2961,8 +2949,7 @@ class AgentSessionImpl implements AgentSession {
 
   /**
    * The turn's events, each kept in the session's log before it is handed on.
-   * What the surface keeps itself is left out, and a write that fails never
-   * fails the turn.
+   * A write that fails never fails the turn.
    */
   private async *logged(
     writer: TurnLogWriter | undefined,
@@ -3369,7 +3356,6 @@ class AgentSessionImpl implements AgentSession {
       execution,
       served: this.conversation,
       child: this.isSubagent,
-      keeps: surface.keeps,
     });
     // Without a log the turn is kept nowhere, under the session's own id.
     const recorded: TurnConversation = entry?.conversation ?? {
