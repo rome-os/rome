@@ -87,6 +87,14 @@ enum SnapshotRunner {
             model.dynamicTypeOverride = .xxLarge
             await capture("19-chat-xxl", style: styleName, in: directory, wait: 2) { model.openDemo() }
             model.dynamicTypeOverride = nil
+            await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
+                model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
+            }
+            await capture("22-update-failed", style: styleName, in: directory, wait: 1) {
+                model.update.debugShow(.failed(.timedOut(target: DemoBackend.releasedVersion)))
+            }
+            model.update.reset()
             model.debugSetPhase(.signedOut)
             try? await Task.sleep(for: .seconds(0.6))
         }
