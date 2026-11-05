@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.11.1](https://github.com/rome-os/rome/compare/app-runtime-v0.11.0...app-runtime-v0.11.1) (2026-11-05)
+
+
+### Features
+
+* stop streaming replies to external platforms ([#1729](https://github.com/rome-os/rome/issues/1729)) ([ddc8d64](https://github.com/rome-os/rome/commit/ddc8d645de1315569671922f9162e17da717ff9b))
+
 ## [0.11.0](https://github.com/rome-os/rome/compare/app-runtime-v0.10.0...app-runtime-v0.11.0) (2026-11-05)
 
 
