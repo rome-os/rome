@@ -233,14 +233,14 @@ checks.push({
 });
 
 // --- C7 The caller is a typed union of the five kinds ----------------------
-const callerFile = join(SRC, "core/session-caller.ts");
-const callerKinds = existsSync(callerFile)
-  ? [
-      ...(read(callerFile).match(/export type SessionCaller\s*=([\s\S]*?);\n/)?.[1] ?? "").matchAll(
-        /kind:\s*"([^"]+)"/g,
-      ),
-    ].map((match) => match[1]!)
-  : [];
+// The union lives in the codec or, once apps share it, in the SDK.
+const SDK_INDEX = join(REPO, "packages/app-runtime-sdk/src/index.ts");
+const callerKinds = [join(SRC, "core/session-caller.ts"), SDK_INDEX]
+  .filter((file) => existsSync(file))
+  .map((file) => read(file).match(/export type SessionCaller\s*=([\s\S]*?);\n/)?.[1])
+  .filter((union): union is string => !!union)
+  .flatMap((union) => [...union.matchAll(/kind:\s*"([^"]+)"/g)].map((match) => match[1]!))
+  .filter((kind, index, all) => all.indexOf(kind) === index);
 const EXPECTED_KINDS = ["chat", "place", "parent-turn", "fork-point", "execution"];
 const kindsMatch =
   callerKinds.length === EXPECTED_KINDS.length &&
@@ -291,6 +291,78 @@ checks.push({
     `${openOptions}: ${members(openOptions ?? "").join(", ")}`,
     `${turnOptions}: ${members(turnOptions ?? "").join(", ")}`,
   ],
+});
+
+// --- C11 Code that uses sessions reaches them only through the API ----------
+// The session's own files, its codec, the repositories, the runners that carry
+// an app's run to the session, and the action context that carries a turn's
+// caller between hops may spell the stored caller. Everything else (routes,
+// Concierge, capabilities, connections, routines, wiring) asks the manager.
+const SESSION_SIDE = [
+  /^core\//,
+  /^db\//,
+  /^actions\/(context|engine|call-action|ipc|approval-handler)\.ts$/,
+  /^apps\/context\.ts$/,
+  /^connections\/app-connections\.ts$/,
+];
+// The stored rows themselves: the sessions repository, the row reader, and
+// what they keep (a turn's checkpoint).
+const BYPASS_SESSION =
+  /\b(findReusableSession|findResumableSessionById|findActiveByChannelThreadKey|findByChannelThreadKey|getTurnCheckpoint|sessionsRepo|SessionsRepository|SessionManager|callerKey|callerFromKey|callerOfRun|persistThreadKey)\b/g;
+// The wiring builds the repositories and hands them to the session.
+const WIRING = ["index.ts"];
+const consumerBypasses = coreFiles
+  .filter((file) => !SESSION_SIDE.some((pattern) => pattern.test(relative(SRC, file))))
+  .filter((file) => !WIRING.includes(relative(SRC, file)))
+  .flatMap((file) => (code(file).match(BYPASS_SESSION) ?? []).map((hit) => `${rel(file)}: ${hit}`));
+quantities.consumerBypasses = consumerBypasses.length;
+checks.push({
+  id: "C11",
+  name: "Routes, Concierge, capabilities and other users of sessions read no session row and spell no stored caller; they ask the manager",
+  measured: `${consumerBypasses.length} bypasses`,
+  pass: consumerBypasses.length === 0,
+  detail: [...new Set(consumerBypasses)],
+});
+
+// --- C12 Apps name a session by its typed caller ----------------------------
+const APP_STORED_CALLER = /(\bchannelThreadKey\b|`sentinel:|["'`]webchat:)/g;
+const appStoredCaller = appFiles.flatMap((file) =>
+  (code(file).match(APP_STORED_CALLER) ?? []).map((hit) => `${rel(file)}: ${hit}`),
+);
+quantities.appStoredCaller = appStoredCaller.length;
+checks.push({
+  id: "C12",
+  name: "Apps neither read nor build the stored caller string; they pass and read the typed caller",
+  measured: `${appStoredCaller.length} uses`,
+  pass: appStoredCaller.length === 0,
+  detail: [...new Set(appStoredCaller)],
+});
+
+// --- C13 The SDK hands apps the typed caller --------------------------------
+const SDK_CARRIERS = [
+  "AgentTurnRef",
+  "TurnMiddlewareSession",
+  "RunParams",
+  "ForkRunParams",
+  "CurrentActionContext",
+];
+const sdkSource = ts.createSourceFile(SDK_INDEX, read(SDK_INDEX), ts.ScriptTarget.Latest, true);
+const sdkMembers = new Map<string, string[]>();
+sdkSource.forEachChild((node) => {
+  if (ts.isInterfaceDeclaration(node)) {
+    sdkMembers.set(
+      node.name.text,
+      node.members.flatMap((member) => (member.name ? [member.name.getText(sdkSource)] : [])),
+    );
+  }
+});
+const sdkExportsCaller = /export type SessionCaller\b/.test(read(SDK_INDEX));
+const missingCaller = SDK_CARRIERS.filter((name) => !sdkMembers.get(name)?.includes("caller"));
+checks.push({
+  id: "C13",
+  name: "The SDK exports the typed caller and every turn, run, fork and action context it hands apps carries it",
+  measured: `exports SessionCaller: ${sdkExportsCaller}; missing on: ${missingCaller.join(", ") || "none"}`,
+  pass: sdkExportsCaller && missingCaller.length === 0,
 });
 
 // --- Quantities without a target -------------------------------------------

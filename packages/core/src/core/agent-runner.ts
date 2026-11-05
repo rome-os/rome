@@ -18,7 +18,7 @@ import {
 import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { callerFromKey, callerKey, callerOfRun } from "./session-caller.js";
+import { callerFromKey, callerKey, callerOfRun, type SessionCaller } from "./session-caller.js";
 import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
 import { resetWhenDue, type ResolveConnectionReset } from "./connection-reset.js";
 
@@ -524,6 +524,7 @@ export class AgentRunner {
 
     log.info("agent run started", {
       agent: params.agentName,
+      caller: explicitSessionId ? undefined : params.caller,
       channelThreadKey: explicitSessionId ? undefined : params.channelThreadKey,
       sessionId: params.sessionId,
       promptPreview: params.prompt.slice(0, 200),
@@ -544,7 +545,9 @@ export class AgentRunner {
       );
     } else {
       // A run that names no conversation gets a caller of its own.
-      const caller = callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId);
+      const caller =
+        params.caller ??
+        callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId);
       // A wake by a message on a connection applies the place's reset setting.
       if (params.platformMessageId) {
         await resetWhenDue(
@@ -661,10 +664,10 @@ export class AgentRunner {
   }
 
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
-    const source = this.agentSessionManager.live(
-      params.agentName,
-      callerFromKey(params.channelThreadKey),
-    );
+    const caller =
+      params.caller ?? (params.channelThreadKey ? callerFromKey(params.channelThreadKey) : null);
+    if (!caller) throw new Error("Cannot fork agent session without the source session's caller");
+    const source = this.agentSessionManager.live(params.agentName, caller);
     if (!source) {
       throw new Error("Cannot fork agent session because the source session is not live");
     }
@@ -675,7 +678,7 @@ export class AgentRunner {
     log.info("forked agent run started", {
       agent: params.agentName,
       sourceSessionId: params.sourceSessionId,
-      channelThreadKey: params.channelThreadKey,
+      caller,
       mode: params.mode ?? "isolated",
       promptPreview: params.prompt.slice(0, 200),
     });
@@ -697,11 +700,16 @@ export class AgentRunner {
         mode: params.mode,
         sourceCheckpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
-        persistThreadKey: params.persistThreadKey,
+        continueAs: params.continueAs,
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
+          recorder = await this.createForkTraceRecorder(
+            params,
+            caller,
+            message,
+            source.conversation?.id,
+          );
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -750,6 +758,7 @@ export class AgentRunner {
    */
   private async createForkTraceRecorder(
     params: ForkRunParams,
+    caller: SessionCaller,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
     sourceChatId?: string,
   ): Promise<AgentTraceRecorder | null> {
@@ -785,7 +794,7 @@ export class AgentRunner {
       return new AgentTraceRecorder({
         webchatRepo: this.webchatRepo,
         agentName: params.agentName,
-        channelThreadKey: params.channelThreadKey,
+        channelThreadKey: callerKey(caller),
         turnId: turnStart.turnId,
         existingSessionId: turnStart.sessionId,
         threadContext: params.threadContext,

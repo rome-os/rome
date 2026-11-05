@@ -1,6 +1,7 @@
 import type {
   ForkRunParams as SdkForkRunParams,
   RunParams as SdkRunParams,
+  SessionCaller,
 } from "@rome-os/app-runtime";
 import type { AgentEvent } from "../types.js";
 
@@ -31,16 +32,16 @@ export interface RunParams extends SdkRunParams {
 
 export interface ForkRunParams extends SdkForkRunParams {
   /**
-   * Builds the channel-thread key to leave the completed fork resumable under,
-   * from the fork session id that `runForkedTurn` mints. When set, the fork
-   * asks the provider for a thread of its own and persists it, so a later
-   * `acquire` on this key continues the branch instead of opening a fresh
-   * conversation. Absent — the default — keeps the fork one-shot and ephemeral.
+   * The caller to leave the completed fork resumable for, from the fork
+   * session id that `runForkedTurn` mints. When set, the fork asks the
+   * provider for a thread of its own and keeps it, so a later `open` by this
+   * caller continues the branch instead of opening a fresh conversation.
+   * Absent, the default, keeps the fork one-shot and ephemeral.
    *
-   * A function because the key derives from an id the caller does not have
-   * until the run starts.
+   * A function because the caller names an id it does not have until the run
+   * starts.
    */
-  persistThreadKey?: (forkSessionId: string) => string;
+  continueAs?: (forkSessionId: string) => SessionCaller;
 }
 
 export interface AgentRunnerInterface {

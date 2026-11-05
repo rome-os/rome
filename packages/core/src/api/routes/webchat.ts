@@ -92,7 +92,7 @@ import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js"
 import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
-import { callerKey, type SessionCaller } from "../../core/session-caller.js";
+import type { SessionCaller } from "../../core/session-caller.js";
 
 /** A dashboard chat as the caller of its session. */
 const chatCaller = (chatId: string): SessionCaller => ({ kind: "chat", chatId });
@@ -890,11 +890,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    */
   const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
     if (session.type !== "fork") return false;
-    const row = await deps.sessionManager.findReusableSession(
-      callerKey(chatCaller(session.id)),
+    const stored = await deps.agentSessionManager.find(
       session.agentName ?? "main",
+      chatCaller(session.id),
     );
-    return !!row?.providerThreadId;
+    return !!stored?.hasContext;
   };
 
   const findContinuableSession = async (sessionId: string) => {
@@ -1420,7 +1420,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const agentName = input.session.agentName ?? "main";
     const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
     const caller = chatCaller(input.session.id);
-    const channelThreadKey = callerKey(caller);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
@@ -1475,11 +1474,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         reasoningEffort: await resolveRequestedReasoningEffort(undefined),
       });
       sourceSessionId = source.sessionId;
-      const storedCheckpoint = await deps.sessionsRepo.getTurnCheckpoint(
-        source.sessionId,
-        input.turnId,
-      );
-      if (!storedCheckpoint) {
+      const forkPoint = await source.forkPoint(input.turnId);
+      if (!forkPoint) {
         log.warn("turn fork skipped: source turn checkpoint is unavailable", {
           sessionId: input.session.id,
           sourceSessionId: source.sessionId,
@@ -1491,11 +1487,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // common case) rather than implying a transient failure.
         return "no_turn_checkpoint";
       }
-      sourceCheckpoint = {
-        providerId: storedCheckpoint.provider,
-        providerThreadId: storedCheckpoint.providerThreadId,
-        checkpointId: storedCheckpoint.checkpointId,
-      };
+      sourceCheckpoint = forkPoint;
     } catch (err) {
       log.warn("turn fork skipped: source session could not be acquired", {
         sessionId: input.session.id,
@@ -1513,17 +1505,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         agentName,
         sourceSessionId,
         prompt: input.prompt,
-        channelThreadKey,
+        caller,
         threadContext,
         parentTurnId: input.turnId,
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
-        // Keyed by the fork's own id, exactly what `handleChatSend` will
-        // derive for it later.
-        ...(input.continuable
-          ? { persistThreadKey: (forkSessionId: string) => callerKey(chatCaller(forkSessionId)) }
-          : {}),
+        // The fork's own chat, exactly the caller `handleChatSend` opens it
+        // with later.
+        ...(input.continuable ? { continueAs: chatCaller } : {}),
       })
       [Symbol.asyncIterator]();
 
@@ -1603,7 +1593,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             sessionId: forkSessionId,
             turnId: forkTurnId,
             agentName,
-            channelThreadKey,
+            caller,
           },
         );
         if (
@@ -2469,9 +2459,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    const runtimeSession = await deps.sessionManager.findReusableSession(
-      callerKey(chatCaller(sessionId)),
+    const runtimeSession = await deps.agentSessionManager.find(
       session.agentName ?? "main",
+      chatCaller(sessionId),
     );
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
@@ -3311,11 +3301,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Sending before then (or after a failed first answer) would acquire a
     // fresh thread and silently drop the branched context — refuse instead.
     if (session.parentSessionId !== null) {
-      const branchThread = await deps.sessionManager.findReusableSession(
-        callerKey(chatCaller(session.id)),
+      const branchThread = await deps.agentSessionManager.find(
         session.agentName ?? "main",
+        chatCaller(session.id),
       );
-      if (!branchThread?.providerThreadId) {
+      if (!branchThread?.hasContext) {
         return answer(
           {
             error:

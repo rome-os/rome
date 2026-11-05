@@ -7,11 +7,10 @@ import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
 import type { AIToolStateValue } from "../core/ai-tool-state.js";
-import { callerKey, type SessionCaller } from "../core/session-caller.js";
+import type { SessionCaller } from "../core/session-caller.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SessionManager } from "../core/session-manager.js";
 import {
   resolveWebchatLargeModelSelection,
   WEBCHAT_LARGE_MODEL_SELECTIONS,
@@ -83,9 +82,8 @@ export interface ConciergeDeps {
   tasks: ConciergeTasks;
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
-  sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
-  agentSessionManager: Pick<AgentSessionManager, "live">;
+  agentSessionManager: Pick<AgentSessionManager, "live" | "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
@@ -185,9 +183,7 @@ export class ConciergeService {
     const caller: SessionCaller = { kind: "chat", chatId };
     const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection)?.providerId;
     const pinned =
-      selected ??
-      (await this.deps.sessionManager.findReusableSession(callerKey(caller), CONCIERGE_AGENT_ID))
-        ?.provider;
+      selected ?? (await this.deps.agentSessionManager.find(CONCIERGE_AGENT_ID, caller))?.provider;
     const state = this.deps.aiToolState.get();
     const from = pinned ?? soleExhaustedProvider(state);
     if (from !== "openai" && from !== "anthropic") return null;
@@ -208,11 +204,11 @@ export class ConciergeService {
 
   /** The runtime session id of the Concierge chat, or null before its first turn. */
   async runtimeSessionId(chatId: string): Promise<string | null> {
-    const row = await this.deps.sessionManager.findReusableSession(
-      callerKey({ kind: "chat", chatId }),
-      CONCIERGE_AGENT_ID,
-    );
-    return row?.id ?? null;
+    const stored = await this.deps.agentSessionManager.find(CONCIERGE_AGENT_ID, {
+      kind: "chat",
+      chatId,
+    });
+    return stored?.sessionId ?? null;
   }
 
   /**

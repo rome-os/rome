@@ -1,27 +1,9 @@
 import { v4 as uuidv4 } from "uuid";
 
-/**
- * Whatever hands a session its next input. A session is one agent's turns for
- * one caller, so the agent and the caller find it.
- *
- * - `chat`: a person in a dashboard chat, the handoff chats included.
- * - `place`: one of Rome's accounts in a place on a connection. A `watcher`
- *   follows the place without answering in it (the inbox's sentinel).
- * - `parent-turn`: a subagent's parent turn. Each child gets its own id, so
- *   it never reuses the parent's context.
- * - `fork-point`: a session at one completed turn. Only the fork's own
- *   subagents name it, so they never resume the source's children.
- * - `execution`: a trigger execution, or a run that names no conversation.
- *
- * `chatId` on a place or an execution names the conversation its turns are
- * recorded in, when the caller knows it.
- */
-export type SessionCaller =
-  | { kind: "chat"; chatId: string }
-  | { kind: "place"; connection: string; place: string; watcher?: boolean; chatId?: string }
-  | { kind: "parent-turn"; parent: SessionCaller; childId: string }
-  | { kind: "fork-point"; source: SessionCaller; forkSessionId: string }
-  | { kind: "execution"; id: string; chatId?: string };
+import type { SessionCaller } from "@rome-os/app-runtime";
+
+// The caller is the SDK's, so apps and the host name a session the same way.
+export type { SessionCaller };
 
 // The codec below writes and reads the string stored in
 // `sessions.channel_thread_key`. Each kind serializes to the exact string the

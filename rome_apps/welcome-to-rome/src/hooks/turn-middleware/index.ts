@@ -1,5 +1,6 @@
 import type {
   AgentMessage,
+  SessionCaller,
   TurnMiddlewareContext,
   TurnMiddlewareHook,
   TurnMiddlewareHookDeps,
@@ -13,15 +14,11 @@ import { copyFor } from "./copy.js";
 import { normalizeWelcomeLocale, type WelcomeLocale } from "../../locale.js";
 
 const AGENT_NAME = "welcome-to-rome";
-// A chat's own thread key, as core builds it (`webchatSessionKey`). Subagent
-// (`…:subagent:…`) and fork (`…#fork:…`) keys nest under it and are not chats.
-const WEBCHAT_CHAT_KEY = /^webchat:([^:#]+)$/;
-
-/** The chat a webchat turn belongs to, read from its `webchat:<chatId>` thread
- *  key. The AgentSession id is a different id, which the chat routes do not
- *  know. Null for any other key. */
-function webchatChatId(channelThreadKey: string): string | null {
-  return WEBCHAT_CHAT_KEY.exec(channelThreadKey)?.[1] ?? null;
+/** The chat a turn belongs to, when a person in a dashboard chat handed it.
+ *  The AgentSession id is a different id, which the chat routes do not know.
+ *  Null for any other caller, a subagent or fork of a chat included. */
+function chatOfCaller(caller: SessionCaller | undefined): string | null {
+  return caller?.kind === "chat" ? caller.chatId : null;
 }
 
 /** Cap the inline idea brainstorm so a stuck specialist can't hang the turn —
@@ -88,7 +85,7 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
       const effects = this.makeEffects(ctx);
       // The progress row is one per instance, so the chat that last took a turn
       // is the one the landing screen sends the guardian back to.
-      const chatId = webchatChatId(ctx.session.channelThreadKey);
+      const chatId = chatOfCaller(ctx.session.caller);
       if (chatId && effects.progress.get().sessionId !== chatId) {
         effects.progress.patch({ sessionId: chatId });
       }

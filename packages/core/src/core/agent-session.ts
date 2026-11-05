@@ -230,8 +230,8 @@ export interface ForkedAgentTurnInput extends AgentTurnInput {
    * session's own thread context when absent.
    */
   threadContext?: ThreadContext;
-  /** See `ForkRunParams.persistThreadKey`. */
-  persistThreadKey?: (forkSessionId: string) => string;
+  /** See `ForkRunParams.continueAs`. */
+  continueAs?: (forkSessionId: string) => SessionCaller;
 }
 
 export type AgentSessionStatus = "idle" | "running" | "closed";
@@ -313,10 +313,24 @@ export interface AgentSession {
     options: SubmitInputOptions,
   ): AgentInputReceipt;
   runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
+  /** Where a fork from `turnId` starts in the provider's history, or
+   *  undefined when the turn kept none. */
+  forkPoint(turnId: string): Promise<ForkSourceCheckpoint | undefined>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
+}
+
+/** What is kept of a session between turns. */
+export interface StoredSession {
+  sessionId: string;
+  provider: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
+  /** Whether a turn has kept the provider's context, so the next turn
+   *  continues it instead of starting fresh. */
+  hasContext: boolean;
 }
 
 export interface AgentSessionManager {
@@ -331,6 +345,9 @@ export interface AgentSessionManager {
   /** The session of `agentName` for `caller` while it is open in memory.
    *  Never opens one. */
   live(agentName: string, caller: SessionCaller): AgentSession | undefined;
+  /** What is kept of the session of `agentName` for `caller`, open or not.
+   *  Never opens one. Undefined when the caller has none. */
+  find(agentName: string, caller: SessionCaller): Promise<StoredSession | undefined>;
   /** Start the next turn of that session on a fresh context when `rule`
    *  says the current one is due. The log is untouched. */
   reset(agentName: string, caller: SessionCaller, rule: SessionResetRule): Promise<void>;
@@ -677,6 +694,18 @@ export function createAgentSessionManager(
       }
       const sess = sessions.get(keyOf(canonicalKey));
       return sess && sess.status !== "closed" ? sess : undefined;
+    },
+    async find(agentName, caller) {
+      const row = await deps.sessionManager.findReusableSession(callerKey(caller), agentName);
+      return row
+        ? {
+            sessionId: row.id,
+            provider: row.provider,
+            model: row.model,
+            reasoningEffort: row.reasoningEffort,
+            hasContext: !!row.providerThreadId,
+          }
+        : undefined;
     },
     reset,
     findWorkingDirBySessionId(sessionId) {
@@ -2757,6 +2786,7 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         turnId: sink.turnId,
         agentName: this.key.agentName,
+        caller: this.key.caller,
         channelThreadKey: this.storedKey,
         threadContext: sink.threadContext ?? this.threadContext,
         parent: sink.lifecycleParent,
@@ -2811,6 +2841,7 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         turnId: sink.turnId,
         agentName: this.key.agentName,
+        caller: this.key.caller,
         channelThreadKey: this.storedKey,
         threadContext: sink.threadContext ?? this.threadContext,
         parent: sink.lifecycleParent,
@@ -2849,6 +2880,17 @@ class AgentSessionImpl implements AgentSession {
         };
       },
     };
+  }
+
+  async forkPoint(turnId: string): Promise<ForkSourceCheckpoint | undefined> {
+    const stored = await this.deps.sessionsRepo.getTurnCheckpoint(this.sessionId, turnId);
+    return stored
+      ? {
+          providerId: stored.provider,
+          providerThreadId: stored.providerThreadId,
+          checkpointId: stored.checkpointId,
+        }
+      : undefined;
   }
 
   async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
@@ -2936,7 +2978,7 @@ class AgentSessionImpl implements AgentSession {
             // provider branch is disposable or a thread that may be persisted.
             // `configurationMode` is ForkRunMode (isolated | exact): the tool
             // surface the fork opens with.
-            mode: input.persistThreadKey ? "thread" : "ephemeral",
+            mode: input.continueAs ? "thread" : "ephemeral",
             configurationMode: mode,
             sourceCheckpoint: input.sourceCheckpoint?.checkpointId,
           });
@@ -2953,7 +2995,7 @@ class AgentSessionImpl implements AgentSession {
             model: forkModel?.model ?? sourceModelSession.model,
             threadContext: input.threadContext,
             emit: (msg) => outbound.push(msg),
-            continuable: !!input.persistThreadKey,
+            continuable: !!input.continueAs,
           });
           return { fork, forkOpen, outbound };
         });
@@ -3064,13 +3106,13 @@ class AgentSessionImpl implements AgentSession {
       //     to the parent chat.
       if (
         forkSession &&
-        input.persistThreadKey &&
+        input.continueAs &&
         terminalSeen &&
         status === "completed" &&
         forkSession.providerThreadId !== sourceProviderThreadId
       ) {
         await this.persistForkThread(
-          input.persistThreadKey(forkSessionId),
+          callerKey(input.continueAs(forkSessionId)),
           forkSessionId,
           forkSession,
         );
@@ -3445,6 +3487,7 @@ class AgentSessionImpl implements AgentSession {
         session: {
           id: this.sessionId,
           agentName: this.key.agentName,
+          caller: this.key.caller,
           channelThreadKey: this.storedKey,
         },
         emit: (event) => {

@@ -26,7 +26,12 @@ import { actionExecutionContext, type ActionExecutionStore } from "./context.js"
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
-import { callerConnection, callerFromKey } from "../core/session-caller.js";
+import {
+  callerConnection,
+  callerFromKey,
+  callerKey,
+  type SessionCaller,
+} from "../core/session-caller.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
   fromWireError,
@@ -80,6 +85,13 @@ const log = createLogger("action-engine");
  * propagator. The action worker receives the same ActionRunContext over
  * IPC and re-derives the attrs from it for its own spans.
  */
+/** The context's caller as the action context carries it between hops. */
+function storedCallerOf(
+  ctx: Pick<ActionRunContext, "caller" | "channelThreadKey"> | undefined,
+): string | undefined {
+  return ctx?.caller ? callerKey(ctx.caller) : ctx?.channelThreadKey;
+}
+
 function buildRomeSpanAttrs(ctx?: ActionRunContext): Record<string, string> {
   if (!ctx) return {};
   const out: Record<string, string> = {};
@@ -179,6 +191,8 @@ export interface ActionRunContext {
   /** Session info for agent-level resumption on approval */
   sessionId?: string;
   agentName?: string;
+  /** Whatever handed the calling session its turn. Wins over `channelThreadKey`. */
+  caller?: SessionCaller;
   channelThreadKey?: string;
   /** Allocated by AgentSession.sendTurn; stamped on `action:*` spans so the
    *  trace UI can group every action invocation that happened within one
@@ -597,7 +611,7 @@ export class ActionEngine {
         hookInvocationContext: runContext?.hookInvocationContext,
         sessionId: runContext?.sessionId,
         agentName: runContext?.agentName,
-        channelThreadKey: runContext?.channelThreadKey,
+        channelThreadKey: storedCallerOf(runContext),
         turnId: runContext?.turnId,
         actionName: resolvedName,
         executionId,
@@ -931,7 +945,7 @@ export class ActionEngine {
       sessionId: context?.sessionId ?? parentStore?.sessionId,
       turnId: context?.turnId ?? parentStore?.turnId,
       agentName: context?.agentName ?? parentStore?.agentName,
-      channelThreadKey: context?.channelThreadKey ?? parentStore?.channelThreadKey,
+      channelThreadKey: storedCallerOf(context) ?? parentStore?.channelThreadKey,
     };
 
     const result = await this.executeInvocation(
@@ -1127,7 +1141,7 @@ export class ActionEngine {
       sessionId: invocation.context?.sessionId,
       turnId: invocation.context?.turnId,
       agentName: invocation.context?.agentName,
-      channelThreadKey: invocation.context?.channelThreadKey,
+      channelThreadKey: storedCallerOf(invocation.context),
       runtimeObserver: observer,
     };
     let acceptingEvents = true;
@@ -2120,7 +2134,7 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         turnId: context?.turnId,
         agentName: context?.agentName,
-        channelThreadKey: context?.channelThreadKey,
+        channelThreadKey: storedCallerOf(context),
       };
       preview = await actionExecutionContext.run(previewStore, () => action?.preview?.(args));
     } catch (previewErr) {
@@ -2144,7 +2158,7 @@ export class ActionEngine {
         sharedContext: context?.sharedContext,
         sessionId: context?.sessionId,
         agentName: context?.agentName,
-        channelThreadKey: context?.channelThreadKey,
+        channelThreadKey: storedCallerOf(context),
         preview,
       },
     });

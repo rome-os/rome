@@ -49,7 +49,7 @@ function createEvent(overrides: Partial<AgentTurnFinishedEvent> = {}): AgentTurn
       sessionId: "agent-session-1",
       turnId: "turn-1",
       agentName: "main",
-      channelThreadKey: "webchat:sess-1:large-model:claude-haiku",
+      caller: { kind: "chat", chatId: "sess-1" },
       threadContext: {
         channel: "webchat",
         threadId: "sess-1",
@@ -159,7 +159,12 @@ describe("recap agent-turn-finished hook", () => {
     ).toBe(false);
     expect(
       shouldRecapTurn(
-        createEvent({ turn: { ...createEvent().turn, channelThreadKey: "telegram:1" } }),
+        createEvent({
+          turn: {
+            ...createEvent().turn,
+            caller: { kind: "place", connection: "telegram", place: "1" },
+          },
+        }),
       ),
     ).toBe(false);
     expect(
@@ -207,7 +212,7 @@ describe("recap agent-turn-finished hook", () => {
           turn: {
             ...createEvent().turn,
             threadContext: undefined,
-            channelThreadKey: "webchat:sess-from-key:large-model:gpt-5-5",
+            caller: { kind: "chat", chatId: "sess-from-key" },
           },
         }),
       ),
@@ -248,7 +253,7 @@ describe("recap agent-turn-finished hook", () => {
     expect(runner.forkCalls[0]).toMatchObject({
       agentName: "main",
       sourceSessionId: "agent-session-1",
-      channelThreadKey: "webchat:sess-1:large-model:claude-haiku",
+      caller: { kind: "chat", chatId: "sess-1" },
       prompt: RECAP_PROMPT,
       tier: "small",
       threadContext: {

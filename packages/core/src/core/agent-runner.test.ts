@@ -1376,7 +1376,7 @@ describe("AgentRunner", () => {
           onFork: (params) => {
             forkMode = params.mode;
           },
-          fork: { persistThreadKey: (id: string) => `webchat:${id}` },
+          fork: { continueAs: (id: string) => ({ kind: "chat" as const, chatId: id }) },
         },
       );
 
@@ -1421,7 +1421,7 @@ describe("AgentRunner", () => {
           { sourceProviderThreadId: "source-provider-thread", fork: { mode: "exact", ...fork } },
         );
 
-      await runFork({ persistThreadKey: (id: string) => `webchat:${id}` });
+      await runFork({ continueAs: (id: string) => ({ kind: "chat" as const, chatId: id }) });
       await runFork({});
 
       expect(openParams).toHaveLength(2);
@@ -1443,7 +1443,7 @@ describe("AgentRunner", () => {
           }),
         {
           sourceProviderThreadId: "shared-source-thread",
-          fork: { persistThreadKey: (id: string) => `webchat:${id}` },
+          fork: { continueAs: (id: string) => ({ kind: "chat" as const, chatId: id }) },
         },
       );
 
@@ -1478,7 +1478,7 @@ describe("AgentRunner", () => {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
-        { fork: { persistThreadKey: (id: string) => `webchat:${id}` } },
+        { fork: { continueAs: (id: string) => ({ kind: "chat" as const, chatId: id }) } },
       );
       const failed = await runForkAgainstLiveSession(
         () =>
@@ -1490,7 +1490,7 @@ describe("AgentRunner", () => {
           }),
         {
           sourceProviderThreadId: "source-provider-thread",
-          fork: { persistThreadKey: (id: string) => `webchat:${id}` },
+          fork: { continueAs: (id: string) => ({ kind: "chat" as const, chatId: id }) },
         },
       );
 
@@ -2750,6 +2750,7 @@ describe("AgentRunner", () => {
         sendTurn,
         submitInput: rs.fn(),
         runForkedTurn: rs.fn(),
+        forkPoint: async () => undefined,
         subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         interrupt: rs.fn(async () => undefined),
@@ -2762,6 +2763,7 @@ describe("AgentRunner", () => {
         session: rs.fn(async () => session),
         live: rs.fn(() => undefined),
         reset: rs.fn(),
+        find: rs.fn(async () => undefined),
         findWorkingDirBySessionId: rs.fn(),
         recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),

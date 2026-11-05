@@ -1109,12 +1109,12 @@ async function main() {
   const concierge = new ConciergeService({
     settingsRepo,
     webchatRepo,
-    sessionManager,
     aiToolState,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: {
       live: (agentName, caller) => agentSessionManager.live(agentName, caller),
+      find: (agentName, caller) => agentSessionManager.find(agentName, caller),
     },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
@@ -2056,8 +2056,6 @@ async function main() {
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,
-      sessionManager,
-      sessionsRepo,
       agentSessionManager,
       conversationTitleGenerator,
       agentRunner,

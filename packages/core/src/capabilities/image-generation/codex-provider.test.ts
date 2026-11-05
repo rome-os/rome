@@ -67,10 +67,15 @@ describe("createCodexImageGenerationProvider", () => {
         provider.generate({ prompt: "two" }),
       ]);
 
-      const keys = runner.run.mock.calls.map(([params]) => params.channelThreadKey);
-      expect(keys).toHaveLength(2);
-      for (const key of keys) expect(key).toMatch(/^image_gen:/);
-      expect(keys[0]).not.toBe(keys[1]);
+      const callers = runner.run.mock.calls.map(([params]) => params.caller);
+      expect(callers).toHaveLength(2);
+      for (const caller of callers) {
+        expect(caller).toMatchObject({
+          kind: "execution",
+          id: expect.stringMatching(/^image_gen:/),
+        });
+      }
+      expect(callers[0]).not.toEqual(callers[1]);
     });
 
     it("returns the provider-saved path when no inline data is present", async () => {

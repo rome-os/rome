@@ -71,7 +71,9 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     const req: RunTurnRequest = {
       key: {
         agentName: params.agentName,
-        caller: callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId),
+        caller:
+          params.caller ??
+          callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId),
       },
       init: {
         workingDir: params.workingDir,

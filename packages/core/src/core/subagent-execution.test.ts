@@ -76,6 +76,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
     },
     submitInput: rs.fn(),
     runForkedTurn: rs.fn(),
+    forkPoint: async () => undefined,
     subscribe: () => () => undefined,
     onStatusChange: () => () => undefined,
     interrupt,

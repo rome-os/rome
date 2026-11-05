@@ -530,6 +530,8 @@ export interface TestDeps extends ApiDeps {
   whatsAppAccounts: WhatsAppAccounts;
   linkedInAccounts: LinkedInAccounts;
   sessionsRepo: SessionsRepository;
+  /** The row reader behind `agentSessionManager.find`. No route reads it. */
+  sessionManager: SessionManager;
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
   /** The platform end of each channel `connections` backs, by channel name. */
