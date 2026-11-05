@@ -700,6 +700,8 @@ interface ActiveWebchatStream {
    *  turn is kept by the session's log. */
   ownEvents: (TraceableEvent & { agent?: string })[];
   ownEventsKept: number;
+  /** The chat's own events being written, in order. */
+  ownWrites: Promise<void>;
   /**
    * Accumulated deltas of the in-flight assistant text block, plus the index
    * of that block within the turn. The server states stream facts only:
@@ -1865,7 +1867,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Keep what the chat itself said on the stream, in its own record.
-  const keepOwnEvents = async (stream: ActiveWebchatStream): Promise<void> => {
+  // One write at a time per stream, so each batch starts where the last ended.
+  const keepOwnEvents = (stream: ActiveWebchatStream): Promise<void> => {
+    stream.ownWrites = stream.ownWrites.then(() => writeOwnEvents(stream));
+    return stream.ownWrites;
+  };
+
+  const writeOwnEvents = async (stream: ActiveWebchatStream): Promise<void> => {
     const from = stream.ownEventsKept;
     const upTo = stream.ownEvents.length;
     if (from === upTo) return;
@@ -1936,6 +1944,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       traceEvents: [],
       ownEvents: [],
       ownEventsKept: 0,
+      ownWrites: Promise.resolve(),
       assistantText: "",
       assistantBlockIx: 0,
       segmentBuilder,
@@ -4106,11 +4115,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // so without this the reply would live only in the trace and vanish on
     // reload. Mirrors handleChatSend's `result`→reply capture.
     let replyText = "";
+    // A session turn the task runs keeps its trace under its own id, so its
+    // reply and cards go under that id too, beside the trace.
+    let sessionTurnId: string | undefined;
+    let replyTurnId: string = syntheticTurnId;
     // A backend continuation can ask the guardian a question just like a
     // foreground turn (notably after `defer` wakes it). Its tool result still
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
-    const builtinQuestionCards: PendingInteractionPart[] = [];
+    const builtinQuestionCards: { card: PendingInteractionPart; turnId: string }[] = [];
     // A recorded event's turn delivers its own reply, so its cards are written
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
@@ -4150,11 +4163,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         stream.traceEvents.push(msg);
         // A session's turn, from its turn_start to its turn_end, is kept by
         // the session's log. What the task says around it is the chat's own.
-        if (msg.type === "turn_start") inSessionTurn = true;
-        if (!inSessionTurn) stream.ownEvents.push(msg);
+        if (msg.type === "turn_start") {
+          inSessionTurn = true;
+          sessionTurnId = msg.turnId;
+        }
+        // The chat keeps what the task says outside a session turn as it
+        // happens, so a crash mid-task keeps what already ran.
+        if (!inSessionTurn) {
+          stream.ownEvents.push(msg);
+          void keepOwnEvents(stream);
+        }
         if (msg.type === "turn_end") inSessionTurn = false;
         emitTraceEvent(stream, msg);
-        if (msg.type === "result") replyText = msg.content;
+        if (msg.type === "result") {
+          replyText = msg.content;
+          replyTurnId = sessionTurnId ?? syntheticTurnId;
+        }
       }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
@@ -4166,7 +4190,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               persistSuspensionCard(deps.webchatRepo, sessionId, cardTurnId, card),
             );
           } else if (card) {
-            builtinQuestionCards.push(card);
+            builtinQuestionCards.push({ card, turnId: sessionTurnId ?? syntheticTurnId });
           }
         }
       }
@@ -4179,15 +4203,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.
-      for (const card of builtinQuestionCards) {
-        await persistSuspensionCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
+      for (const { card, turnId } of builtinQuestionCards) {
+        await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
       }
       // Persist + push the reply before the stream emits `done`, so a
       // late-attached subscriber's reload-on-done also sees it. The push
       // (addBackendReplyMessage → message_inserted) is the primary delivery
       // path since the browser isn't subscribed to this synthetic stream.
       if (replyText) {
-        await deps.webchatRepo.addBackendReplyMessage(sessionId, syntheticTurnId, replyText);
+        await deps.webchatRepo.addBackendReplyMessage(sessionId, replyTurnId, replyText);
       }
       return {
         success: true,

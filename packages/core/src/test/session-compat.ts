@@ -6,6 +6,7 @@ import {
   type AgentSessionManager,
   createAgentSessionManager,
   type ManagerDeps,
+  sessionBehind,
   type SessionOpenOptions,
   type SurfaceKeeps,
 } from "../agent-sessions/agent-session.js";
@@ -125,5 +126,5 @@ export function createTestSessionManager(
 /** Where a real session keeps its turns in today's rows, which only the
  *  session reads. */
 export function conversationOf(session: AgentSession): SessionConversation | undefined {
-  return (session as unknown as { conversation?: SessionConversation }).conversation;
+  return (sessionBehind(session) as unknown as { conversation?: SessionConversation }).conversation;
 }

@@ -64,6 +64,7 @@ import {
   type AgentSessionManager,
   type AgentTurnHandle,
   type SendTurnOptions,
+  sessionBehind,
   subagentToolName,
 } from "../agent-sessions/agent-session.js";
 import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
@@ -258,7 +259,7 @@ describe("AgentRunner", () => {
     const second = await manager.acquire(key);
 
     // Same live instance, same session id — not closed + reopened.
-    expect(second).toBe(first);
+    expect(sessionBehind(second)).toBe(sessionBehind(first));
     expect(second.sessionId).toBe(first.sessionId);
 
     await first.close("shutdown");

@@ -1,5 +1,6 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import { callerFromKey } from "./core/session-caller.js";
+import { chatModelSelection } from "./core/chat-model-selection.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -1136,6 +1137,8 @@ async function main() {
       lifecycleDispatcher,
       log: sessionLog,
       routineKeyFor: chatRoutineKeyForToolUse,
+      rememberedModel: (caller, agentName, pinned) =>
+        chatModelSelection(webchatRepo)(callerFromKey(caller), agentName, pinned),
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,

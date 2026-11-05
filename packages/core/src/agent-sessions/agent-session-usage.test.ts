@@ -11,6 +11,7 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import type { LoggedTurn, SessionLog } from "./agent-session.js";
 import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
 import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
@@ -48,6 +49,7 @@ describe("AgentSession turn usage", () => {
   let resolverUsesRomeCredits: boolean;
   let state: AIToolStateValue;
   let providerCalls: number;
+  let deps: Parameters<typeof createTestSessionManager>[0];
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -118,28 +120,26 @@ describe("AgentSession turn usage", () => {
       },
       size: () => 1,
     };
-    manager = createTestSessionManager(
-      {
-        agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
-        sessionsRepo,
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
-        modelResolver: createModelResolver({
-          providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
-          romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
-        }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
-        turnMiddleware,
-        usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
-      },
-      { keepAliveAcrossTurns: true },
-    );
+    deps = {
+      agentLoader: loader,
+      sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
+      sessionsRepo,
+      promptBuilder,
+      actionRegistry,
+      actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+      modelResolver: createModelResolver({
+        providers: [provider],
+        aiToolState: { get: () => state, refresh: async () => state },
+        romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
+      }),
+      capabilityDiscovery: new CapabilityDiscovery(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
+      lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      channelSurface: testChannelSurface,
+      turnMiddleware,
+      usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+    };
+    manager = createTestSessionManager(deps, { keepAliveAcrossTurns: true });
   });
 
   afterEach(async () => {
@@ -147,6 +147,72 @@ describe("AgentSession turn usage", () => {
     testDb.close();
     await rm(directory, { recursive: true, force: true });
     rs.restoreAllMocks();
+  });
+
+  it("replies to the surface its own opener lent, when another opener of the session came after", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const logged: LoggedTurn[] = [];
+    const log: SessionLog = {
+      turn: (turn) => {
+        logged.push(turn);
+        return { conversation: { romeSessionId: turn.sessionId, romeSessionType: "action" } };
+      },
+    };
+    const shared = createTestSessionManager({ ...deps, log }, { keepAliveAcrossTurns: true });
+    try {
+      const caller = "place:test:one";
+      const inbox = await shared.open(AGENT, caller, {
+        cards: false,
+        replies: { channel: "inbox", threadId: "t-1" },
+      });
+      // A second opener of the same caller lends its own surface before the
+      // first one starts its turn.
+      const wake = await shared.open(AGENT, caller, {
+        cards: false,
+        replies: { channel: "wake", threadId: "t-1" },
+      });
+      expect(wake.sessionId).toBe(inbox.sessionId);
+
+      await drain(inbox.sendTurn({ prompt: "from the inbox" }).events);
+      await drain(wake.sendTurn({ prompt: "from the wake" }).events);
+
+      expect(logged.map((turn) => [turn.prompt, turn.replies?.channel])).toEqual([
+        ["from the inbox", "inbox"],
+        ["from the wake", "wake"],
+      ]);
+    } finally {
+      await shared.shutdown();
+    }
+  });
+
+  it("asks the caller's owner for the model it remembers when a session resumes by id without one", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const asked: string[] = [];
+    const resumer = createTestSessionManager(
+      {
+        ...deps,
+        rememberedModel: async (caller) => {
+          asked.push(caller);
+          return undefined;
+        },
+      },
+      { keepAliveAcrossTurns: true },
+    );
+    try {
+      const first = await resumer.open(AGENT, "chat:remembered", { cards: false });
+      await drain(first.sendTurn({ prompt: "hello" }).events);
+      await first.close("user");
+      expect(asked).toEqual([]);
+
+      await resumer.session(first.sessionId, AGENT, { cards: false });
+      expect(asked).toEqual(["chat:remembered"]);
+    } finally {
+      await resumer.shutdown();
+    }
   });
 
   it("records each finished turn once with its accounting, funding, and provider turn id", async () => {

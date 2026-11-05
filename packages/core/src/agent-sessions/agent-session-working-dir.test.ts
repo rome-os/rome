@@ -19,6 +19,7 @@ import {
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
+import { sessionBehind } from "./agent-session.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
@@ -119,7 +120,8 @@ describe("TestSessionManager working dirs", () => {
       { agentName: AGENT, channelThreadKey: "webchat:working-dir" },
       { workingDir: parentDir },
     );
-    const childManager = (parent as unknown as { childManager: TestSessionManager }).childManager;
+    const childManager = (sessionBehind(parent) as unknown as { childManager: TestSessionManager })
+      .childManager;
     const child = await withKeys(childManager).acquire(
       { agentName: AGENT, channelThreadKey: "webchat:working-dir:subagent:1" },
       { workingDir: childDir },

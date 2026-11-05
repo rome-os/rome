@@ -43,7 +43,7 @@ import type {
   CurrentActionContext,
 } from "@rome-os/app-runtime";
 import { getCurrentActionContext } from "@rome-os/app-runtime";
-import { TURN_EXECUTION, TURN_LINKS } from "./turn-context.js";
+import { turnFacts } from "./turn-context.js";
 import { createNullModelSession } from "../core/agent-runner.js";
 import { runDefer, type DeferInput } from "../core/defer.js";
 import type { EventSources } from "../events/event-sources.js";
@@ -398,6 +398,49 @@ export interface AgentSession {
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
 }
 
+const LENT_FROM = Symbol("the session an opener holds");
+
+/** The session itself behind what an opener holds, for tests that read its
+ *  state. */
+export function sessionBehind(session: AgentSession): AgentSession {
+  return (session as { [LENT_FROM]?: AgentSessionImpl })[LENT_FROM] ?? session;
+}
+
+/**
+ * The session as one opener holds it. Openers of one caller share the
+ * session, so the surface a turn replies to is the one its opener lent, not
+ * whichever open came last.
+ */
+function lentTo(session: AgentSessionImpl, surface: SessionSurface): AgentSession {
+  const lent: AgentSession & { [LENT_FROM]: AgentSessionImpl } = {
+    [LENT_FROM]: session,
+    get key() {
+      return session.key;
+    },
+    get sessionId() {
+      return session.sessionId;
+    },
+    get caller() {
+      return session.caller;
+    },
+    get status() {
+      return session.status;
+    },
+    get currentTurnId() {
+      return session.currentTurnId;
+    },
+    sendTurn: (input, options) => session.sendTurnFor(surface, input, options),
+    submitInput: (input, options) => session.submitInputFor(surface, input, options),
+    selectModel: (selectionId) => session.selectModel(selectionId),
+    runForkedTurn: (input) => session.runForkedTurn(input),
+    subscribe: (handler) => session.subscribe(handler),
+    onStatusChange: (listener) => session.onStatusChange(listener),
+    interrupt: (reason, expectedTurnId) => session.interrupt(reason, expectedTurnId),
+    close: (reason) => session.close(reason),
+  };
+  return lent;
+}
+
 /** What is kept of a session between turns. */
 export interface StoredSession {
   sessionId: string;
@@ -459,6 +502,14 @@ export interface ManagerDeps {
   /** The key a routine `propose_routine` enables is created with, so the card
    *  that shows it can find it. Absent, `propose_routine` only drafts. */
   routineKeyFor?(turnId: string, toolUseId: string): string;
+  /** The model the caller's owner remembers for a session resumed by id with
+   *  no model named, such as a dashboard chat's chosen model. `pinned` says
+   *  whether the session's history pins a model. */
+  rememberedModel?(
+    caller: CallerId,
+    agentName: string,
+    pinned: boolean,
+  ): Promise<ModelSelectionId | undefined>;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
@@ -598,7 +649,7 @@ export function createAgentSessionManager(
     key: AgentSessionKey,
     span: Span,
     init: AgentSessionInit,
-  ): Promise<AgentSessionImpl> => {
+  ): Promise<AgentSession> => {
     const k = keyOf(key);
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
@@ -655,7 +706,7 @@ export function createAgentSessionManager(
         existing.lend(init.surface);
         if (init.model !== undefined) existing.selectModel(init.model);
         recordAcquire("reuse");
-        return existing;
+        return lentTo(existing, init.surface);
       }
     }
     const current = sessions.get(k);
@@ -663,14 +714,14 @@ export function createAgentSessionManager(
       current.lend(init.surface);
       if (init.model !== undefined) current.selectModel(init.model);
       recordAcquire("reuse");
-      return current;
+      return lentTo(current, init.surface);
     }
     const inflight = acquireLocks.get(k);
     if (inflight) {
       recordAcquire("coalesced");
       const coalesced = await inflight;
       coalesced.lend(init.surface);
-      return coalesced;
+      return lentTo(coalesced, init.surface);
     }
     recordAcquire(reopen ? "reopen" : "cold");
     // A reset prepared the next generation; an explicit resume names its own.
@@ -689,7 +740,7 @@ export function createAgentSessionManager(
     })();
     acquireLocks.set(k, promise);
     try {
-      return await promise;
+      return lentTo(await promise, init.surface);
     } finally {
       acquireLocks.delete(k);
     }
@@ -1024,7 +1075,14 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
-  const selectionId = init.model ?? undefined;
+  // A resume by id that names no model gets the one the caller's owner
+  // remembers, as a cold resume always did.
+  const selectionId =
+    init.model !== undefined
+      ? (init.model ?? undefined)
+      : init.resumeSessionId
+        ? await deps.rememberedModel?.(key.caller, key.agentName, !!sessionPin)
+        : undefined;
 
   if (isNewSession && !preparedSessionId) {
     const dbSession: DbAgentSession = {
@@ -2038,7 +2096,7 @@ class AgentSessionImpl implements AgentSession {
   private subagentToolNames: Set<string>;
   private readonly turnMutex = new Mutex();
   private readonly inputs = new AgentInputQueue(
-    (input, options) => this.sendTurn(input, options),
+    (input, options, surface) => this.sendTurnFor(surface ?? this.surface, input, options),
     () => this.modelSession,
     (error) =>
       log.warn("conversational input dispatch failed", {
@@ -3240,8 +3298,17 @@ class AgentSessionImpl implements AgentSession {
     input: AgentTurnInput & { inputId: string },
     options: SubmitInputOptions,
   ): AgentInputReceipt {
+    return this.submitInputFor(this.surface, input, options);
+  }
+
+  /** An input of the opener that lent `surface`; its turn replies there. */
+  submitInputFor(
+    surface: SessionSurface,
+    input: AgentTurnInput & { inputId: string },
+    options: SubmitInputOptions,
+  ): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
-    const receipt = this.inputs.submit(input, options);
+    const receipt = this.inputs.submit(input, options, surface);
     // The queue ends its own turn. A system turn (a backend continuation) runs
     // outside the queue, so a `now` input ends it here.
     const sink = this.currentSink;
@@ -3263,6 +3330,16 @@ class AgentSessionImpl implements AgentSession {
   }
 
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
+    return this.sendTurnFor(this.surface, input, options);
+  }
+
+  /** A turn of the opener that lent `surface`: it replies where that
+   *  surface says, whichever opener lent the session last. */
+  sendTurnFor(
+    surface: SessionSurface,
+    input: AgentTurnInput,
+    options?: SendTurnOptions,
+  ): AgentTurnHandle {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
@@ -3271,11 +3348,9 @@ class AgentSessionImpl implements AgentSession {
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
     const turnId = uuidv7();
-    const replies = this.surface.replies;
+    const replies = surface.replies;
     // The turn runs under the caller's execution, when it runs inside one.
-    const execution =
-      (context.active().getValue(TURN_EXECUTION) as CurrentActionContext | undefined) ??
-      getCurrentActionContext();
+    const execution = turnFacts().execution ?? getCurrentActionContext();
     const entry = this.deps.log?.turn?.({
       agentName: this.key.agentName,
       sessionId: this.sessionId,
@@ -3287,7 +3362,7 @@ class AgentSessionImpl implements AgentSession {
       execution,
       served: this.conversation,
       child: this.isSubagent,
-      keeps: this.surface.keeps,
+      keeps: surface.keeps,
     });
     // Without a log the turn is kept nowhere, under the session's own id.
     const recorded: TurnConversation = entry?.conversation ?? {
@@ -3361,7 +3436,7 @@ class AgentSessionImpl implements AgentSession {
         "agent.tier": this.config.tier,
         "prompt.length": input.prompt.length,
       },
-      links: context.active().getValue(TURN_LINKS) as Link[] | undefined,
+      links: turnFacts().links,
     });
     const turnCtx = trace.setSpan(context.active(), span);
 

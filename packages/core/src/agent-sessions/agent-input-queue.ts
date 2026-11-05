@@ -1,5 +1,10 @@
 import type { AgentInputState, InputStatusEvent } from "@rome-os/app-runtime";
-import type { AgentTurnHandle, AgentTurnInput, SendTurnOptions } from "./agent-session.js";
+import type {
+  AgentTurnHandle,
+  AgentTurnInput,
+  SendTurnOptions,
+  SessionSurface,
+} from "./agent-session.js";
 import type { ModelSession } from "../core/agent-runner.js";
 import type { Link } from "@opentelemetry/api";
 import { withTurnLinks } from "./turn-context.js";
@@ -33,6 +38,8 @@ export interface AgentInputReceipt {
 interface Entry {
   input: AgentTurnInput & { inputId: string };
   options: SubmitInputOptions;
+  /** The surface its submitter lent, which its turn replies to. */
+  surface?: SessionSurface;
   state: AgentInputState;
   turnId: string;
   writes: Promise<void>;
@@ -68,6 +75,7 @@ export class AgentInputQueue {
     private readonly startTurn: (
       input: AgentTurnInput,
       options: SendTurnOptions,
+      surface?: SessionSurface,
     ) => AgentTurnHandle,
     private readonly provider: () => Pick<ModelSession, "steerUserInput">,
     private readonly reportError: (error: unknown) => void,
@@ -80,11 +88,19 @@ export class AgentInputQueue {
   submit(
     input: AgentTurnInput & { inputId: string },
     options: SubmitInputOptions,
+    surface?: SessionSurface,
   ): AgentInputReceipt {
     if (this.closed) throw new Error("Input queue is closed");
     const existing = this.entries.get(input.inputId);
     if (existing) return { inputId: input.inputId, turnId: existing.turnId, disposition: "queued" };
-    const entry: Entry = { input, options, state: "queued", turnId: "", writes: Promise.resolve() };
+    const entry: Entry = {
+      input,
+      options,
+      surface,
+      state: "queued",
+      turnId: "",
+      writes: Promise.resolve(),
+    };
     this.entries.set(input.inputId, entry);
     if (!this.active) {
       this.start(entry);
@@ -147,7 +163,7 @@ export class AgentInputQueue {
       priority: _priority,
       ...turnOptions
     } = entry.options;
-    const handle = withTurnLinks(links, () => this.startTurn(input, turnOptions));
+    const handle = withTurnLinks(links, () => this.startTurn(input, turnOptions, entry.surface));
     const bound = [...carried, ...absorbed];
     this.active = {
       handle,

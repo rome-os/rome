@@ -5542,6 +5542,54 @@ describe("Webchat API", () => {
       expect(assistantReplies[0]!.content).toContain("Done — I sent the message.");
     });
 
+    it("keeps an approval's reply under the session turn whose trace it ends", async () => {
+      const sessionId = "sess-approval-turn";
+      await deps.webchatRepo.createSession(sessionId, "Approval Turn");
+      const { runtime } = createWebchatRuntime(deps);
+
+      // The continuation resumes the session, whose turn keeps its trace
+      // under the session's own turn id.
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({ type: "turn_start", turnId: "turn-resumed" } as StreamAgentEvent);
+        emit({ type: "result", content: "Sent." });
+        emit({ type: "turn_end", turnId: "turn-resumed", status: "completed" } as StreamAgentEvent);
+      });
+
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      const reply = messages.find((m) => m.role === "assistant");
+      expect(reply?.content).toContain("Sent.");
+      expect(reply?.turnId).toBe("turn-resumed");
+    });
+
+    it("keeps what an approval task says outside a session turn while the task still runs", async () => {
+      const sessionId = "sess-approval-own-events";
+      await deps.webchatRepo.createSession(sessionId, "Approval Own Events");
+      const { runtime } = createWebchatRuntime(deps);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let ran!: () => void;
+      const started = new Promise<void>((resolve) => {
+        ran = resolve;
+      });
+
+      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        // The approved action runs before the agent resumes.
+        emit({ type: "tool_use", id: "tool-approved", tool: "send_message", input: {} });
+        ran();
+        await gate;
+      });
+      await started;
+
+      await rs.waitFor(async () => {
+        const traces = await deps.webchatRepo.getTraceContents(sessionId);
+        expect(traces.map((trace) => trace.content).join("")).toContain("tool-approved");
+      });
+      release();
+      await task;
+    });
+
     it("reports a running chat in the list and on the status stream", async () => {
       const sessionId = "sess-status";
       await deps.webchatRepo.createSession(sessionId, "Status");
