@@ -13,9 +13,11 @@ const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
   composioSignedIn: async () => true,
   composioAccounts: async () => [
     { toolkit: "gmail", status: "ACTIVE" },
+    { toolkit: "googlecalendar", status: "ACTIVE" },
     { toolkit: "notion", status: "EXPIRED" },
   ],
   gmailAddress: async () => "me@example.com",
+  calendarAddress: async () => "me@example.com",
   ...extra,
 });
 
@@ -61,6 +63,7 @@ describe("listWatchSources", () => {
     expect(watch.map((w) => [w.service, w.status, w.account])).toEqual([
       ["github", "ready", "octo-me"],
       ["gmail", "ready", "me@example.com"],
+      ["googlecalendar", "ready", "me@example.com"],
     ]);
     expect(watch[1]?.kinds[0]?.triggers[0]?.eventName).toBe(
       "provider:event:gmail.gmail_new_gmail_message",
@@ -71,7 +74,11 @@ describe("listWatchSources", () => {
     const off = await listWatchSources(
       deps({ githubToken: async () => null, composioSignedIn: async () => false }),
     );
-    expect(off.watch.map((w) => w.status)).toEqual(["not_connected", "not_connected"]);
+    expect(off.watch.map((w) => w.status)).toEqual([
+      "not_connected",
+      "not_connected",
+      "not_connected",
+    ]);
     const noRelay = await listWatchSources(deps({ relayDepositUrl: async () => null }));
     expect(noRelay.watch[0]).toMatchObject({ status: "no_relay", statusReason: NO_RELAY_REASON });
     const broken = await listWatchSources(
@@ -85,5 +92,28 @@ describe("listWatchSources", () => {
       status: "error",
       statusReason: expect.stringContaining("401"),
     });
+  });
+
+  it("reads the Calendar account on its own, so a Gmail-only Rome cannot watch Calendar", async () => {
+    const gmailOnly = await listWatchSources(
+      deps({ composioAccounts: async () => [{ toolkit: "gmail", status: "ACTIVE" }] }),
+    );
+    expect(gmailOnly.watch.map((w) => [w.service, w.status])).toEqual([
+      ["github", "ready"],
+      ["gmail", "ready"],
+      ["googlecalendar", "not_connected"],
+    ]);
+    const broken = await listWatchSources(
+      deps({
+        calendarAddress: async () => {
+          throw new Error("Google Calendar answered 403");
+        },
+      }),
+    );
+    expect(broken.watch[2]).toMatchObject({
+      status: "error",
+      statusReason: expect.stringContaining("403"),
+    });
+    expect(broken.watch[2]?.target).toBeNull();
   });
 });

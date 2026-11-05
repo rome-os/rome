@@ -6,8 +6,8 @@ import {
   type ActionConfig,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { watchableOf } from "../../watch/catalog.js";
-import { ensureGmailTrigger } from "../../watch/runtime.js";
+import { COMPOSIO_TRIGGERS, eventNameOf, watchableOf } from "../../watch/catalog.js";
+import { ensureComposioTriggers } from "../../watch/runtime.js";
 import {
   describeGithubError,
   ensureGithubEvent,
@@ -38,8 +38,25 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     execute: async ({ source, target, kinds, dryRun }) => {
       const watchable = watchableOf(source);
       if (!watchable) return { status: "error", error: `Rome cannot watch "${source}".` };
-      if (source === "gmail") {
-        const result = await ensureGmailTrigger(deps, dryRun);
+      if (source !== "github") {
+        // A Composio source follows its connected account: arm the triggers
+        // behind the kinds on.
+        const specs = [
+          ...new Set(
+            watchable.kinds
+              .filter((kind) => kinds.includes(kind.kind))
+              .flatMap((kind) => kind.triggers)
+              .map((trigger) => COMPOSIO_TRIGGERS.get(eventNameOf(trigger)))
+              .filter((spec) => spec !== undefined),
+          ),
+        ];
+        if (specs.length === 0) {
+          return {
+            status: "error",
+            error: `None of these kinds can be followed on ${watchable.label}.`,
+          };
+        }
+        const result = await ensureComposioTriggers(deps, source, specs, dryRun);
         return result.ok
           ? { status: "ok", data: { subscription: result.subscription } }
           : { status: "error", error: result.error };

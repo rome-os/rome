@@ -99,6 +99,17 @@ eventSources:
   # with a warning, as before.
   - events: "provider:event:gmail.gmail_new_gmail_message"
     ensureAction: connector_event_ensure
+  # The connected Google Calendar's primary calendar, through Composio's polling
+  # triggers: a meeting about to start, an event created, changed or deleted
+  # (with its attendees), and an attendee's reply. Like Gmail's, they follow
+  # the connected account and name no key, and other Calendar triggers stay
+  # undeclared.
+  - events: "provider:event:googlecalendar.googlecalendar_event_starting_soon_trigger"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:googlecalendar.googlecalendar_google_calendar_event_sync_trigger"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:googlecalendar.googlecalendar_attendee_response_changed_trigger"
+    ensureAction: connector_event_ensure
 
 skills:
   - skills/composio-cli

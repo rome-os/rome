@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
-import { eventNameOf, WATCHABLES } from "./catalog.js";
+import { COMPOSIO_TRIGGERS, eventNameOf, WATCHABLES } from "./catalog.js";
 
 interface EventSource {
   events: string;
@@ -48,5 +48,25 @@ describe("the watch catalog", () => {
         ensureAction: "connector_event_ensure",
       },
     ]);
+  });
+
+  it("declares exactly the Calendar events its kinds listen on, each by name", async () => {
+    const calendar = (await declaredSources()).filter((s) => s.events.includes(":googlecalendar."));
+    const listened = WATCHABLES.find((w) => w.source === "googlecalendar")!
+      .kinds.flatMap((kind) => kind.triggers)
+      .map(eventNameOf);
+    expect(calendar.map((s) => s.events).sort()).toEqual([...new Set(listened)].sort());
+    for (const source of calendar) {
+      expect(source).toEqual({ events: source.events, ensureAction: "connector_event_ensure" });
+    }
+  });
+
+  it("knows how to arm every Composio event a kind listens on", () => {
+    for (const watchable of WATCHABLES.filter((w) => w.source !== "github")) {
+      for (const trigger of watchable.kinds.flatMap((kind) => kind.triggers)) {
+        const spec = COMPOSIO_TRIGGERS.get(eventNameOf(trigger));
+        expect({ trigger, toolkit: spec?.toolkit }).toEqual({ trigger, toolkit: watchable.source });
+      }
+    }
   });
 });

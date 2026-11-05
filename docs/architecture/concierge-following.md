@@ -8,7 +8,7 @@ How an event from a service the guardian follows reaches the Concierge, and the 
 flowchart TD
     subgraph External["External services"]
         GH["GitHub<br/><i>webhook per repository</i>"]
-        CP["Composio<br/><i>Gmail trigger, polled</i>"]
+        CP["Composio<br/><i>Gmail and Calendar triggers, polled</i>"]
     end
     Relay["Relay mailbox<br/><i>Rome Cloud, one per instance</i>"]
     subgraph Conn["Connection: connector app"]

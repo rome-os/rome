@@ -56,10 +56,15 @@ describe("AppManifestSchema eventSources", () => {
         keys: [["repository.full_name"], ["organization.login"]],
         ensureAction: "connector_event_ensure",
       }),
-      {
-        events: "provider:event:gmail.gmail_new_gmail_message",
+      ...[
+        "gmail.gmail_new_gmail_message",
+        "googlecalendar.googlecalendar_event_starting_soon_trigger",
+        "googlecalendar.googlecalendar_google_calendar_event_sync_trigger",
+        "googlecalendar.googlecalendar_attendee_response_changed_trigger",
+      ].map((event) => ({
+        events: `provider:event:${event}`,
         ensureAction: "connector_event_ensure",
-      },
+      })),
     ]);
     expect(manifest.eventSources?.[0]?.types).toEqual(
       expect.arrayContaining(["workflow_run", "pull_request", "check_suite"]),

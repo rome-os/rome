@@ -9,8 +9,8 @@ import {
 } from "@rome-os/app-runtime";
 
 import { PROVIDER_EVENT_PREFIX } from "../../api/topic.js";
-import { eventNameOf, GMAIL_NEW_MAIL_TYPE } from "../../watch/catalog.js";
-import { ensureGmailTrigger } from "../../watch/runtime.js";
+import { COMPOSIO_TRIGGERS } from "../../watch/catalog.js";
+import { ensureComposioTriggers } from "../../watch/runtime.js";
 import {
   ensureGithubWebhookSecret,
   resolveGithubHookSetup,
@@ -27,7 +27,6 @@ import {
 const log = createAppLogger("connector_event_ensure");
 
 const GITHUB_EVENT_PREFIX = `${PROVIDER_EVENT_PREFIX}github.`;
-const GMAIL_NEW_MAIL_EVENT = eventNameOf({ provider: "gmail", type: GMAIL_NEW_MAIL_TYPE });
 const REPO_FIELD = "repository.full_name";
 const ORG_FIELD = "organization.login";
 
@@ -147,8 +146,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     config,
     schema: inputSchema,
     execute: async ({ eventName, filter, dryRun }) => {
-      if (eventName === GMAIL_NEW_MAIL_EVENT) {
-        const result = await ensureGmailTrigger(deps, dryRun);
+      const composio = COMPOSIO_TRIGGERS.get(eventName);
+      if (composio) {
+        const result = await ensureComposioTriggers(deps, composio.toolkit, [composio], dryRun);
         if (!result.ok) return { status: "error", error: result.error };
         // A check answers active | inactive; a subscribe answers existing | created.
         return { status: "ok", data: { subscription: result.subscription } };
@@ -156,7 +156,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!eventName.startsWith(GITHUB_EVENT_PREFIX)) {
         return {
           status: "error",
-          error: `connector_event_ensure handles ${GITHUB_EVENT_PREFIX}* and ${GMAIL_NEW_MAIL_EVENT} events only, not "${eventName}"`,
+          error: `connector_event_ensure handles ${GITHUB_EVENT_PREFIX}* and ${[...COMPOSIO_TRIGGERS.keys()].join(", ")} events only, not "${eventName}"`,
         };
       }
       const event = eventName.slice(GITHUB_EVENT_PREFIX.length);

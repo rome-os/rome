@@ -58,6 +58,8 @@ export interface WatchSourceDeps {
   composioAccounts(): Promise<{ toolkit: string; status: string }[]>;
   /** The connected Gmail account's address. */
   gmailAddress(): Promise<string>;
+  /** The connected Google Calendar account's address. */
+  calendarAddress(): Promise<string>;
 }
 
 export const NO_RELAY_REASON =
@@ -99,6 +101,13 @@ export function composioServices(
   });
 }
 
+/** Whose account a source's events concern: the GitHub login, or the Google account's address. */
+async function accountOf(deps: WatchSourceDeps, source: string): Promise<string> {
+  if (source === "github") return deps.githubLogin((await deps.githubToken()) ?? "");
+  if (source === "googlecalendar") return deps.calendarAddress();
+  return deps.gmailAddress();
+}
+
 async function watchSection(
   deps: WatchSourceDeps,
   watchable: Watchable,
@@ -125,10 +134,7 @@ async function watchSection(
     return { ...base, status: "no_relay", statusReason: NO_RELAY_REASON };
   }
   try {
-    const account =
-      watchable.source === "github"
-        ? await deps.githubLogin((await deps.githubToken()) ?? "")
-        : await deps.gmailAddress();
+    const account = await accountOf(deps, watchable.source);
     return { ...base, status: "ready", account };
   } catch (error) {
     return {

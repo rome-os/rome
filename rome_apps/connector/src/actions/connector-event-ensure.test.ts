@@ -177,8 +177,9 @@ describe("connector_event_ensure action", () => {
     });
     expect(result).toEqual({
       status: "error",
-      error:
-        'connector_event_ensure handles provider:event:github.* and provider:event:gmail.gmail_new_gmail_message events only, not "provider:event:slack.message"',
+      error: expect.stringMatching(
+        /^connector_event_ensure handles provider:event:github\.\* and provider:event:gmail\.gmail_new_gmail_message, .*provider:event:googlecalendar\.googlecalendar_event_starting_soon_trigger.* events only, not "provider:event:slack\.message"$/,
+      ),
     });
   });
 
@@ -188,6 +189,14 @@ describe("connector_event_ensure action", () => {
       filter: [],
     });
     // No Composio sign-in in tests: the Gmail path answers why it cannot subscribe.
+    expect(result).toEqual({ status: "error", error: "Rome is not signed in to Composio." });
+  });
+
+  it("subscribes a Google Calendar event through the connected account, with no filter", async () => {
+    const result = await createAction(config, deps).execute({
+      eventName: "provider:event:googlecalendar.googlecalendar_event_starting_soon_trigger",
+      filter: [],
+    });
     expect(result).toEqual({ status: "error", error: "Rome is not signed in to Composio." });
   });
 

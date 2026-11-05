@@ -16,6 +16,10 @@ export interface WatchTrigger {
   filter?: { field: string; equals: string }[];
 }
 
+/** The bus name of a trigger's raw event. */
+export const eventNameOf = (trigger: Pick<WatchTrigger, "provider" | "type">) =>
+  buildTopic(trigger.provider, trigger.type);
+
 export interface WatchKind {
   kind: string;
   label: string;
@@ -176,10 +180,91 @@ export const GMAIL_WATCHABLE: Watchable = {
   ],
 };
 
-export const WATCHABLES: readonly Watchable[] = [GITHUB_WATCHABLE, GMAIL_WATCHABLE];
+/** A Composio trigger a kind listens on, with the config this app arms it with. */
+export interface ComposioTriggerSpec {
+  toolkit: string;
+  slug: string;
+  config: Record<string, unknown>;
+}
+
+export const CALENDAR_STARTING_SOON: ComposioTriggerSpec = {
+  toolkit: "googlecalendar",
+  slug: "GOOGLECALENDAR_EVENT_STARTING_SOON_TRIGGER",
+  // Composio fixes the lead time per trigger, and one calendar account is
+  // connected at a time, so every follow hears ten minutes ahead.
+  config: { calendarId: "primary", minutesBeforeStart: 10, includeAllDay: false },
+};
+/** Created, updated and deleted events with their attendees, which the narrower triggers lack. */
+export const CALENDAR_EVENT_SYNC: ComposioTriggerSpec = {
+  toolkit: "googlecalendar",
+  slug: "GOOGLECALENDAR_GOOGLE_CALENDAR_EVENT_SYNC_TRIGGER",
+  config: { calendarId: "primary", showDeleted: true },
+};
+export const CALENDAR_RSVP: ComposioTriggerSpec = {
+  toolkit: "googlecalendar",
+  slug: "GOOGLECALENDAR_ATTENDEE_RESPONSE_CHANGED_TRIGGER",
+  config: { calendarId: "primary" },
+};
+
+/** The trigger of a Composio spec, as a kind lists it. */
+const fromComposio = (spec: ComposioTriggerSpec): WatchTrigger => ({
+  provider: spec.toolkit,
+  type: spec.slug.toLowerCase(),
+});
+
+export const CALENDAR_WATCHABLE: Watchable = {
+  source: "googlecalendar",
+  label: "Google Calendar",
+  target: null,
+  // The connected account's primary calendar, so no trigger needs a filter.
+  kinds: [
+    {
+      kind: "meeting_starting_soon",
+      label: "Meetings starting soon",
+      default: true,
+      triggers: [fromComposio(CALENDAR_STARTING_SOON)],
+    },
+    {
+      kind: "invitations_and_changes",
+      label: "Invitations and changes to my events",
+      default: true,
+      triggers: [fromComposio(CALENDAR_EVENT_SYNC)],
+    },
+    {
+      kind: "rsvp_changes",
+      label: "Replies to invitations",
+      default: false,
+      triggers: [fromComposio(CALENDAR_RSVP)],
+    },
+  ],
+  options: [
+    {
+      key: "events",
+      label: "Events to hear about",
+      type: "enum",
+      values: [
+        { value: "with_others", label: "Only meetings with other people" },
+        { value: "all", label: "Also my own events without guests" },
+      ],
+      default: "with_others",
+    },
+  ],
+};
+
+export const WATCHABLES: readonly Watchable[] = [
+  GITHUB_WATCHABLE,
+  GMAIL_WATCHABLE,
+  CALENDAR_WATCHABLE,
+];
+
+/** The Composio triggers watching arms, by the bus name of the event each publishes. */
+export const COMPOSIO_TRIGGERS: ReadonlyMap<string, ComposioTriggerSpec> = new Map(
+  [
+    { toolkit: "gmail", slug: GMAIL_TRIGGER_SLUG, config: GMAIL_TRIGGER_CONFIG },
+    CALENDAR_STARTING_SOON,
+    CALENDAR_EVENT_SYNC,
+    CALENDAR_RSVP,
+  ].map((spec) => [eventNameOf(fromComposio(spec)), spec]),
+);
 
 export const watchableOf = (source: string) => WATCHABLES.find((w) => w.source === source);
-
-/** The bus name of a trigger's raw event. */
-export const eventNameOf = (trigger: Pick<WatchTrigger, "provider" | "type">) =>
-  buildTopic(trigger.provider, trigger.type);
