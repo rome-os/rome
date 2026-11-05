@@ -17,6 +17,7 @@ const allowedWorkspaceGlobs = [
   "packages/web-content",
   "packages/core",
   "packages/discord-cli",
+  "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
   "packages/rome-node-ui",
@@ -33,6 +34,8 @@ const installFilters = [
   "@rome/core...",
   "--filter",
   "@rome/discord-cli...",
+  "--filter",
+  "@rome/signer...",
   "--filter",
   "@rome-os/node...",
   "--filter",
@@ -54,6 +57,7 @@ async function main() {
 
   run("pnpm", ["install", "--frozen-lockfile", ...installFilters], { cwd: workspace });
   run("pnpm", ["--filter", "@rome/discord-cli", "typecheck"], { cwd: workspace });
+  run("pnpm", ["--filter", "@rome/signer", "typecheck"], { cwd: workspace });
   run("pnpm", ["--filter", "@rome-os/node", "typecheck"], { cwd: workspace });
   run("pnpm", ["--filter", "@rome/core", "typecheck"], { cwd: workspace });
   run("pnpm", ["--filter", "rome-web", "build"], { cwd: workspace });
@@ -133,6 +137,7 @@ function isAllowedWorkspacePackage(packagePath) {
     packagePath === "packages/web-content" ||
     packagePath === "packages/core" ||
     packagePath === "packages/discord-cli" ||
+    packagePath === "packages/signer" ||
     packagePath === "packages/rome-node-cli" ||
     packagePath === "packages/rome-node-core" ||
     packagePath === "packages/rome-node-ui" ||
@@ -156,6 +161,7 @@ async function assertImportBoundary() {
     "packages/web-content",
     "packages/core",
     "packages/discord-cli",
+    "packages/signer",
     "packages/rome-node-cli",
     "packages/rome-node-core",
     "packages/rome-node-ui",

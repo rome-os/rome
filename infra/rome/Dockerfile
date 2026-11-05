@@ -121,6 +121,12 @@ RUN set -eux; \
 RUN mkdir -p /workspace /rome-home \
     && chmod 0777 /workspace /rome-home
 
+# State directories of the opt-in signer service (compose.dev.yml). A new named
+# volume inherits their owner, so only the signer's fixed uid can write them.
+RUN mkdir -p /keys /run/rome-signer \
+    && chown 10001:10001 /keys /run/rome-signer \
+    && chmod 0700 /keys
+
 WORKDIR /workspace
 
 ENV PANTHEON_BASE_ORIGIN=https://romeos.cc

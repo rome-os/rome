@@ -1,4 +1,4 @@
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 /**
@@ -34,7 +34,7 @@ export interface NotifyService {
 const HTTP_TIMEOUT_MS = 120_000;
 
 export interface NotifyClientDeps {
-  getToken?: () => string | null;
+  getToken?: () => string | null | Promise<string | null>;
   getOrigin?: () => string | null;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -42,26 +42,26 @@ export interface NotifyClientDeps {
 
 /**
  * Main-process sender for the `send_notification` action. Reads the
- * current instance token and Rome Cloud origin **fresh on every call** (never
+ * current Rome Cloud bearer and origin **fresh on every call** (never
  * cached, never from `ROME_INSTANCE_TOKEN`) so token rotation/revocation is
  * honored, and never mutates the token store — clearing a rejected token stays
  * owned by the existing enrollment/heartbeat flow.
  */
 export class NotifyClient implements NotifyService {
-  private readonly getToken: () => string | null;
+  private readonly getToken: () => string | null | Promise<string | null>;
   private readonly getOrigin: () => string | null;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
   constructor(deps: NotifyClientDeps = {}) {
-    this.getToken = deps.getToken ?? getInstanceToken;
+    this.getToken = deps.getToken ?? cloudBearer;
     this.getOrigin = deps.getOrigin ?? getRomeCloudOrigin;
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.timeoutMs = deps.timeoutMs ?? HTTP_TIMEOUT_MS;
   }
 
   async send(content?: NotifyContent): Promise<SendOutcome> {
-    const token = this.getToken();
+    const token = await this.getToken();
     if (!token) return { kind: "no_token" };
     const origin = this.getOrigin();
     if (!origin) return { kind: "unconfigured" };

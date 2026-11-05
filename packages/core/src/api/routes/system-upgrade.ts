@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { getBuildInfo } from "../../build-info.js";
-import { getInstanceToken } from "../../lib/instance-identity.js";
+import { cloudBearer } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import type { SystemUpgradeService } from "../../system-upgrade/service.js";
 
@@ -22,8 +22,8 @@ export interface SystemUpgradeRoutesDeps {
 // never observe the target version — so both verbs self-reject instead of
 // relaying.
 
-function romeCloudAccess(): { origin: string; token: string } | null {
-  const token = getInstanceToken();
+async function romeCloudAccess(): Promise<{ origin: string; token: string } | null> {
+  const token = await cloudBearer();
   const origin = getRomeCloudOrigin();
   if (!token || !origin) return null;
   return { origin, token };
@@ -71,7 +71,7 @@ export function systemUpgradeRoutes(deps: SystemUpgradeRoutesDeps): Hono {
     const build = getBuildInfo();
     if (!build.version) return c.json({ error: "unversioned_build" }, 503);
 
-    const romeCloud = romeCloudAccess();
+    const romeCloud = await romeCloudAccess();
     if (!romeCloud) return c.json({ error: "pantheon_unconfigured" }, 503);
 
     const url = new URL("/api/instance/upgrade/check", romeCloud.origin);
@@ -101,7 +101,7 @@ export function systemUpgradeRoutes(deps: SystemUpgradeRoutesDeps): Hono {
     const target = typeof payload?.target === "string" ? payload.target.trim() : "";
     if (!target) return c.json({ error: "target_required" }, 400);
 
-    const romeCloud = romeCloudAccess();
+    const romeCloud = await romeCloudAccess();
     if (!romeCloud) return c.json({ error: "pantheon_unconfigured" }, 503);
 
     let response: Response;

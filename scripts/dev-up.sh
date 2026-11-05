@@ -296,6 +296,16 @@ esac
 export PANTHEON_BASE_ORIGIN="$ROME_DEV_PANTHEON_ORIGIN"
 echo "dev-up: Rome Cloud -> ${PANTHEON_BASE_ORIGIN}"
 
+# Opt-in: ROME_DEV_SIGNER=1 also starts the signer, so this stack authenticates
+# to Rome Cloud with signed tokens. The default keeps the legacy instance token.
+DEV_SIGNER_SERVICE=""
+if [ "${ROME_DEV_SIGNER:-}" = "1" ]; then
+  DEV_SIGNER_SERVICE="signer"
+  export COMPOSE_PROFILES="signer"
+  export ROME_DEV_SIGNER_SOCKET="/run/rome-signer/signer.sock"
+  echo "dev-up: signer enabled (ROME_DEV_SIGNER=1)"
+fi
+
 # This instance's own public origin — the browser-reachable address Rome is
 # served at, which core hands Rome Cloud as the enrollment redirect target. The
 # rome container is NOT reachable at its own loopback (the browser reaches it
@@ -377,6 +387,7 @@ echo "dev-up: syncing node_modules (pnpm install --frozen-lockfile) ..."
 if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T -e CI=true rome pnpm install --frozen-lockfile \
   --filter @rome/core... \
   --filter @rome/discord-cli... \
+  --filter @rome/signer... \
   --filter @rome-os/node... \
   --filter rome-web... \
   --filter @rome-os/app-web-sdk... \
@@ -475,7 +486,7 @@ fi
 echo "dev-up: starting worktree stack (project=${SLUG}) ..."
 # Per-worktree stack (project=$SLUG); the reclaim path protects against a wedged
 # rome-edge endpoint.
-ensure_edge_singleton docker compose -f compose.dev.yml -p "$SLUG" up -d rome chrome
+ensure_edge_singleton docker compose -f compose.dev.yml -p "$SLUG" up -d rome chrome ${DEV_SIGNER_SERVICE}
 
 # ---------------------------------------------------------------------------
 # 5b. Wait for /api/health so the readiness banner doesn't print before

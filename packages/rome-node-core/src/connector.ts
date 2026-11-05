@@ -20,7 +20,7 @@ import {
 } from "./frame.js";
 import { validId, type GatewayMessage } from "./protocol.js";
 import { createNodeSocket } from "./socket.js";
-import type { CallerCredential } from "./local.js";
+import { callerToken, type CallerCredential } from "./local.js";
 import type { ChannelEvents, TransferChannel } from "./transfer.js";
 
 /** Most requests and channels the connector keeps pending at once. */
@@ -66,12 +66,13 @@ export class DeviceConnector {
   }
 
   private async initialize(): Promise<void> {
-    const { cloudUrl, token } = this.options.credential;
+    const { cloudUrl } = this.options.credential;
+    const token = callerToken(this.options.credential);
     const gatewayUrl = await gatewayConfig(cloudUrl, token);
     if (this.stopped) throw new Error("connector_stopped");
     this.connection = (this.options.connect ?? connectGateway)({
       gatewayUrl,
-      deviceToken: token,
+      getToken: token,
       createSocket: createNodeSocket,
       beforeConnect: async () => {
         try {
@@ -103,8 +104,12 @@ export class DeviceConnector {
 
   async list(): Promise<unknown> {
     if (this.stopped) throw new Error("connector_stopped");
-    const { cloudUrl, token } = this.options.credential;
-    const body = await cloudRequest(cloudUrl, "/api/account/devices", token);
+    const { cloudUrl } = this.options.credential;
+    const body = await cloudRequest(
+      cloudUrl,
+      "/api/account/devices",
+      callerToken(this.options.credential),
+    );
     if (!isRecord(body) || !Array.isArray(body.items)) throw new CloudError("invalid_response");
     return { items: body.items };
   }
@@ -113,7 +118,8 @@ export class DeviceConnector {
   async rename(deviceId: string, name: string): Promise<void> {
     if (this.stopped) throw new Error("connector_stopped");
     if (!isUuid(deviceId)) throw new CloudError("device_not_found");
-    const { cloudUrl, token } = this.options.credential;
+    const { cloudUrl } = this.options.credential;
+    const token = callerToken(this.options.credential);
     await cloudRequest(cloudUrl, `/api/account/devices/${deviceId}`, token, "PATCH", { name });
   }
 
@@ -125,7 +131,8 @@ export class DeviceConnector {
   async remove(deviceId: string): Promise<void> {
     if (this.stopped) throw new Error("connector_stopped");
     if (!isUuid(deviceId)) throw new CloudError("device_not_found");
-    const { cloudUrl, token } = this.options.credential;
+    const { cloudUrl } = this.options.credential;
+    const token = callerToken(this.options.credential);
     await cloudRequest(cloudUrl, `/api/account/devices/${deviceId}`, token, "DELETE");
   }
 

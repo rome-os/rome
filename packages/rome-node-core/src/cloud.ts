@@ -33,10 +33,13 @@ export function cloudOrigin(value: string): string {
   return url.origin;
 }
 
+/** A fixed token, or a provider that returns a fresh one for each Cloud call. */
+export type TokenSource = string | (() => string | Promise<string>);
+
 export async function cloudRequest(
   origin: string,
   path: string,
-  token: string,
+  token: TokenSource,
   method = "GET",
   json?: unknown,
 ): Promise<unknown> {
@@ -45,7 +48,7 @@ export async function cloudRequest(
     response = await fetch(new URL(path, cloudOrigin(origin)), {
       method,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${typeof token === "string" ? token : await token()}`,
         ...(json === undefined ? {} : { "content-type": "application/json" }),
       },
       body: json === undefined ? undefined : JSON.stringify(json),
@@ -67,7 +70,7 @@ export async function cloudRequest(
   return body;
 }
 
-export async function gatewayConfig(origin: string, token: string): Promise<string> {
+export async function gatewayConfig(origin: string, token: TokenSource): Promise<string> {
   const body = await cloudRequest(origin, "/v1/gateway/config", token);
   if (!isRecord(body) || typeof body.gatewayUrl !== "string")
     throw new CloudError("invalid_response");

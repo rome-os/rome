@@ -100,6 +100,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm fetch \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome/signer... \
     --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
@@ -127,6 +128,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --prefer-offline --frozen-lockfile \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome/signer... \
     --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
@@ -435,6 +437,13 @@ RUN getent group fuse >/dev/null || groupadd --system fuse && \
     usermod -aG fuse rome
 
 RUN printf 'user_allow_other\n' > /etc/fuse.conf
+
+# State directories of the signer service (docker-compose.yml). A named volume
+# mounted over an empty path copies the image directory's owner, so a fresh
+# volume is writable by the signer's fixed uid and by nobody else.
+RUN mkdir -p /keys /run/rome-signer && \
+    chown 10001:10001 /keys /run/rome-signer && \
+    chmod 0700 /keys
 
 # SSH setup
 RUN mkdir -p /run/sshd && \

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { isRecord, cloudOrigin, validId, type ActionResponse } from "@rome-os/node-core";
-import { authorizeServer, configureCaller } from "@rome-os/node-core/auth";
+import { authorizeServer, configureCaller, configureSignerCaller } from "@rome-os/node-core/auth";
 import {
   createNodeClient,
   CallerConfigurationError,
@@ -171,11 +171,14 @@ async function main(): Promise<void> {
   if (positionals[0] === "auth" && positionals.length === 1) {
     const cloudUrl = cloudOrigin(values.cloud ?? "https://romeos.cc");
     if (values.server) {
-      await authorizeServer(cloudUrl, process.env.ROME_INSTANCE_TOKEN, config, () => {
-        process.stderr.write(
-          "Rome Cloud is temporarily unavailable. Retrying server authorization.\n",
-        );
-      });
+      const signerSocket = process.env.ROME_SIGNER_SOCKET?.trim();
+      if (signerSocket) await configureSignerCaller(cloudUrl, signerSocket, config);
+      else
+        await authorizeServer(cloudUrl, process.env.ROME_INSTANCE_TOKEN, config, () => {
+          process.stderr.write(
+            "Rome Cloud is temporarily unavailable. Retrying server authorization.\n",
+          );
+        });
       process.stdout.write(`${JSON.stringify({ configured: true })}\n`);
       return;
     }

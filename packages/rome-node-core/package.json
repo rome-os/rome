@@ -37,6 +37,10 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
+    "./signer": {
+      "types": "./dist/signer.d.ts",
+      "default": "./dist/signer.js"
+    },
     "./socket": {
       "types": "./dist/socket.d.ts",
       "default": "./dist/socket.js"
