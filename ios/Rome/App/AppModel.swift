@@ -319,6 +319,8 @@ final class AppModel {
         guard let old = workspace else { return }
         old.stop()
         old.backend.events.resume()
+        // A 401 from a restarting instance is not an expired session.
+        sessionExpired = false
         await open(Workspace(backend: old.backend, instanceName: old.instanceName, host: old.host, accountLabel: old.accountLabel))
     }
 

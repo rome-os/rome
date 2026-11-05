@@ -32,11 +32,11 @@ final class APIClient: Sendable {
     private let session: URLSession
     private let onUnauthorized: @Sendable () -> Void
 
-    init(origin: URL, token: @escaping @Sendable () -> String?, onUnauthorized: @escaping @Sendable () -> Void = {}) {
+    /// `configuration`: tests pass one with a stub protocol.
+    init(origin: URL, token: @escaping @Sendable () -> String?, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}) {
         self.origin = origin
         self.token = token
         self.onUnauthorized = onUnauthorized
-        let configuration = URLSessionConfiguration.default
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
         configuration.waitsForConnectivity = false
@@ -44,8 +44,11 @@ final class APIClient: Sendable {
         session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
-    func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type = T.self) async throws -> T {
-        let data = try await send(request(path, query: query, method: "GET"))
+    /// `reportsUnauthorized: false` for probes that expect a 401 now and then,
+    /// such as an instance mid-restart; it still throws, but is not taken as an
+    /// expired session.
+    func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type = T.self, reportsUnauthorized: Bool = true) async throws -> T {
+        let data = try await send(request(path, query: query, method: "GET"), reportsUnauthorized: reportsUnauthorized)
         return try decode(data)
     }
 
@@ -110,7 +113,7 @@ final class APIClient: Sendable {
         return request
     }
 
-    private func send(_ request: URLRequest) async throws -> Data {
+    private func send(_ request: URLRequest, reportsUnauthorized: Bool = true) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
@@ -130,7 +133,7 @@ final class APIClient: Sendable {
         case 200..<300:
             return data
         case 401:
-            onUnauthorized()
+            if reportsUnauthorized { onUnauthorized() }
             throw APIError.unauthorized
         case 404:
             let message = Self.errorMessage(data)

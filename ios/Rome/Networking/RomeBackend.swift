@@ -164,8 +164,10 @@ final class LiveBackend: RomeBackend {
         try await client.post("/system/upgrade", json: .object(["target": .string(target)]), as: UpgradeStarted.self)
     }
 
+    /// Polled while the instance restarts after an upgrade; a 401 then is not
+    /// an expired session.
     func buildInfo() async throws -> BuildInfo {
-        try await client.get("/build-info")
+        try await client.get("/build-info", reportsUnauthorized: false)
     }
 
     private func escape(_ value: String) -> String {
