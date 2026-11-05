@@ -29,7 +29,6 @@ import {
   AccountNotConnected,
   type ChannelSend,
 } from "../chats/connected-accounts/connected-account.js";
-import { DeliveryFailure } from "./sending.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
@@ -164,10 +163,7 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
   } catch (error) {
     if (error instanceof SendError) throw error;
     if (isSendRefused(error)) throw new SendError("unsupported", error.message);
-    if (
-      error instanceof AccountNotConnected ||
-      (error instanceof DeliveryFailure && error.kind === "unauthorized")
-    ) {
+    if (error instanceof AccountNotConnected) {
       throw new SendError("not_connected", `No Connection reaches ${describe(sender.account)} now`);
     }
     throw new SendError("failed", error instanceof Error ? error.message : String(error));

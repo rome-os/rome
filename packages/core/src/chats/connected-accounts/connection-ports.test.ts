@@ -10,10 +10,6 @@ import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { makePasteTalk } from "../../connections/test-fixtures.js";
 import { createTestDb, kindChannelOf } from "../../test/helpers.js";
-import { systemClock } from "../../lib/clock.js";
-import { ConnectionPacing } from "../../participation/reply-delivery/connection-pacing.js";
-import { ReplyDelivery } from "../../participation/reply-delivery/reply.js";
-import { type PartReceipt, plainText } from "../../connections/sending.js";
 
 const HOUR = 3_600_000;
 
@@ -321,18 +317,13 @@ describe("a Connection with no channel record", () => {
   });
 });
 
-describe("reply streaming ports", () => {
-  const budget = { burst: 100, refillMs: 1, conversationSpacingMs: 0 };
-
+describe("send port", () => {
   /**
-   * A Connection whose talker sends, and streams when `streams` is set. Its
-   * first send waits to be released, so a test can see whether the second
-   * send starts before the first ends.
+   * A Connection whose talker sends. Its first send waits to be released, so
+   * a test can see whether the second send starts before the first ends.
    */
-  function portsFor({ pacing, streams = true }: { pacing?: ConnectionPacing; streams?: boolean }) {
+  function portsFor() {
     const sent: string[] = [];
-    /** The messages the talker was asked to settle, with their text. */
-    const settled: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const live = { talker: true };
@@ -343,18 +334,6 @@ describe("reply streaming ports", () => {
         sent.push(`end ${message.text}`);
         return { chatId: "chat-1" };
       },
-      ...(streams
-        ? {
-            replyDelivery: {
-              capabilities: { maxPartLength: 10, edit: false, budget },
-              codec: plainText,
-              create: async () => ({ messageId: "m1", chatId: "chat-1", streaming: true as const }),
-              settle: async (receipt: PartReceipt, text: string) => {
-                settled.push(`${receipt.messageId} ${text}`);
-              },
-            },
-          }
-        : {}),
     };
     const connection = {
       id: "conn-1",
@@ -370,37 +349,15 @@ describe("reply streaming ports", () => {
         registeredKinds: () => ["telegram"],
       },
       channelOf: (each: { service: string }) => each.service,
-      ...(pacing ? { pacing } : {}),
     } as unknown as ConnectionPortsDeps;
-    return { send: connectionPorts(deps, "telegram")!.send!, sent, settled, release, live };
+    return { send: connectionPorts(deps, "telegram")!.send!, sent, release, live };
   }
 
-  const pacingWith = (on: boolean) => new ConnectionPacing(systemClock, async () => on);
   const chat = "chat-1" as ChatId;
   const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-  it("offers no replies port without pacing, or from a talker that cannot stream", () => {
-    expect(portsFor({}).send.replies).toBeNull();
-    expect(portsFor({ pacing: pacingWith(true), streams: false }).send.replies).toBeNull();
-  });
-
-  it("offers the replies port whether or not reply streaming is on, since the caller reads the setting", () => {
-    expect(portsFor({ pacing: pacingWith(false) }).send.replies).not.toBeNull();
-  });
-
-  it("paces ordinary sends one at a time while reply streaming is on", async () => {
-    const { send, sent, release } = portsFor({ pacing: pacingWith(true) });
-    const first = send.send(chat, { text: "first" });
-    const second = send.send(chat, { text: "second" });
-    await tick();
-    expect(sent).toEqual(["start first"]);
-    release();
-    await Promise.all([first, second]);
-    expect(sent).toEqual(["start first", "end first", "start second", "end second"]);
-  });
-
-  it("sends at once while reply streaming is off", async () => {
-    const { send, sent, release } = portsFor({ pacing: pacingWith(false) });
+  it("sends at once, without waiting on an earlier send", async () => {
+    const { send, sent, release } = portsFor();
     const first = send.send(chat, { text: "first" });
     const second = send.send(chat, { text: "second" });
     await tick();
@@ -410,38 +367,8 @@ describe("reply streaming ports", () => {
   });
 
   it("refuses a send while talk is locked as not connected", async () => {
-    const { send, live } = portsFor({});
+    const { send, live } = portsFor();
     live.talker = false;
     await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(AccountNotConnected);
-  });
-
-  it("writes a reply through the live talker, and refuses while talk is locked", async () => {
-    const { send, live } = portsFor({ pacing: pacingWith(true) });
-    const replies = send.replies!;
-    await expect(replies.transport.create("chat-1", "hi")).resolves.toEqual({
-      messageId: "m1",
-      chatId: "chat-1",
-      streaming: true,
-    });
-    live.talker = false;
-    await expect(replies.transport.create("chat-1", "hi")).rejects.toMatchObject({
-      kind: "unauthorized",
-    });
-  });
-
-  it("settles a streamed reply's message through the live talker", async () => {
-    const { send, settled } = portsFor({ pacing: pacingWith(true) });
-    const replies = send.replies!;
-    const delivery = new ReplyDelivery({
-      transport: replies.transport,
-      pacer: replies.pacer,
-      policy: { mode: "blocks", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 100 },
-      conversation: "chat-1",
-      clock: systemClock,
-    });
-    delivery.accept({ type: "text", content: "hi there" });
-
-    expect((await delivery.finish()).status).toBe("delivered");
-    expect(settled).toEqual(["m1 hi there"]);
   });
 });

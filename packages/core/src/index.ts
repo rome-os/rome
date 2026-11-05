@@ -121,9 +121,6 @@ import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.j
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
-import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
-import { ReplyStreams } from "./participation/reply-delivery/streams.js";
-import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
 import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
@@ -580,23 +577,6 @@ async function main() {
   // them in Chats. An approval's card goes out on these, so it is on record as
   // the platform shows it.
   const recordedChannels: Channel[] = [];
-  // Reply streaming is off until the guardian turns it on under
-  // Experimental features in Advanced settings. Off, sends go out unpaced and
-  // replies go out whole. On, a channel that can stream paces every write of its
-  // Connection, and the session bridge streams a guardian's direct replies
-  // through the session's speaker.
-  const replyStreamingOn = replyStreamingSwitch(settingsRepo);
-  const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
-  const replyStreams = new ReplyStreams({
-    streaming: replyStreamingOn,
-    clock: systemClock,
-    // A reply is said through its session's speaker, on the platform's own
-    // send port, so it is recorded once.
-    speakers: {
-      channel: (name) => builtChannels?.find((channel) => channel.name === name),
-      replies: chatsWired.replies,
-    },
-  });
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
@@ -605,7 +585,6 @@ async function main() {
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
-    pacing: replyPacing,
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
@@ -1161,7 +1140,6 @@ async function main() {
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
     undefined,
-    replyStreams,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
@@ -1593,7 +1571,6 @@ async function main() {
       registry: connectionRegistry,
       admit,
       channelOf,
-      pacing: replyPacing,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
       heard: (message) => accountProfiles.heard(message),
@@ -1730,7 +1707,6 @@ async function main() {
         registry: connectionRegistry,
         admit,
         channelOf,
-        pacing: replyPacing,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
         heard: (message) => accountProfiles.heard(message),

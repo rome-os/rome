@@ -49,8 +49,6 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
-import { discordTransport } from "./reply-writes.js";
-import type { DeliveryTransport } from "../../sending.js";
 import {
   ALL_ATTACHMENT_TYPES,
   attachmentsToSend,
@@ -1474,20 +1472,6 @@ Use \`/channel agent clear\` to undo.`,
       });
       throw err;
     }
-  }
-
-  /** Streams replies through this adapter's bot, placed as `send` places them,
-   *  so its writes share the bot's rate limits. */
-  replyDelivery(): DeliveryTransport {
-    return discordTransport({
-      rest: this.client.rest,
-      place: async (chatId, replyTo) => {
-        const channel = await this.client.channels.fetch(chatId);
-        if (!channel || !channel.isTextBased())
-          throw new Error(`Channel ${chatId} is not a text channel`);
-        return (await this.replyChannel(channel as SendableChannel, replyTo)).id;
-      },
-    });
   }
 
   /** Where a reply to `replyTo` in `channel` goes. In a guild text channel

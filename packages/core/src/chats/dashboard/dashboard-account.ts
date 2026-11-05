@@ -31,7 +31,6 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
     name: WEBCHAT_CHANNEL,
     send: {
       send: (chatId, message) => adapter.send(chatId, message),
-      replies: null,
       direct: null,
       activity: null,
     },

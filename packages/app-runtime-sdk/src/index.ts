@@ -729,11 +729,19 @@ export interface TurnEndEvent {
    * How the host delivered the reply as it was written, for a run started
    * with `streamReply`, and only when the host streamed it. Absent, the host
    * did not stream the reply and its caller sends it.
+   *
+   * @deprecated The host no longer streams replies to external platforms, so
+   * it never sets this. The caller always sends the reply.
    */
   replyDelivery?: ReplyDeliveryReport;
 }
 
-/** A streamed reply's outcome, as `turn_end` reports it. */
+/**
+ * A streamed reply's outcome, as `turn_end` reports it.
+ *
+ * @deprecated The host no longer streams replies to external platforms, so
+ * no `turn_end` carries one.
+ */
 export interface ReplyDeliveryReport {
   /**
    * `delivered`: every message settled. `partial`: some messages were sent
@@ -1168,6 +1176,9 @@ export interface RunParams {
    * host records it there in place of the run's transcript. A reply reported
    * `failed` recorded nothing, so the caller sends the reply and records it,
    * as `send_message` does.
+   *
+   * @deprecated The host no longer streams replies to external platforms and
+   * ignores this. The caller always sends the reply.
    */
   streamReply?: boolean;
   /** Explicit session ID to continue */
