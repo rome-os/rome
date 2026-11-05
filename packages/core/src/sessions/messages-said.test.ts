@@ -549,4 +549,60 @@ describe("messagesSaid", () => {
     await said.decided(heardOther.recorded);
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
   });
+
+  // Prototype: Telegram is a platform Chats keeps no copy of.
+  describe("on a platform Chats keeps no copy of", () => {
+    it("hears a message without recording it, through the account's session", async () => {
+      const heard: SaidInboundEvent[] = [];
+      said.subscribe(async (event) => {
+        heard.push(event);
+      });
+      await telegram.deliver(message());
+      await telegram.deliver(message());
+      await settled();
+      expect(lines()).toHaveLength(0);
+      expect(heard).toHaveLength(1);
+      expect(Number(heard[0]?.recorded.messageId)).toBeLessThan(0);
+    });
+
+    it("wakes each of Rome's accounts in a group once", async () => {
+      const heard: SaidInboundEvent[] = [];
+      said.subscribe(async (event) => {
+        heard.push(event);
+      });
+      const supergroup = { chatId: "-1001234567890" as ChatId };
+      await telegram.deliver(message(supergroup));
+      await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
+      await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
+      await settled();
+      expect(heard.map((event) => event.message.channel)).toEqual(["telegram", "telegram-2"]);
+      expect(heard[0]?.recorded.chatRecordId).not.toBe(heard[1]?.recorded.chatRecordId);
+    });
+
+    it("hands what woke nobody to the next wake, and never the wake's own prompt", async () => {
+      const heard: SaidInboundEvent[] = [];
+      said.subscribe(async (event) => {
+        heard.push(event);
+      });
+      await telegram.deliver(message({ messageId: "tg-1", text: "lunch?" }));
+      await telegram.deliver(message({ messageId: "tg-2", text: "@rome book a table" }));
+      await settled();
+      const [ambient, waking] = heard;
+      if (!ambient || !waking) throw new Error("not heard");
+      const session = waking.recorded.chatRecordId;
+
+      await said.decided(ambient.recorded);
+      wiring.links.promptHeard(session, "tg-2");
+      await said.decided(waking.recorded);
+
+      const unseen = wiring.links.unseen(session);
+      expect(unseen.map((line) => line.text)).toEqual(["lunch?"]);
+      wiring.links.seen(
+        unseen.map((line) => line.id),
+        session,
+        "turn-1",
+      );
+      expect(wiring.links.unseen(session)).toEqual([]);
+    });
+  });
 });
