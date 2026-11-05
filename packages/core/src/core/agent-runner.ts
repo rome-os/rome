@@ -699,6 +699,7 @@ export class AgentRunner {
         tier: params.tier,
         mode: params.mode,
         sourceCheckpoint: params.sourceCheckpoint,
+        atTurn: params.atTurn,
         threadContext: params.threadContext,
         continueAs: params.continueAs,
       })) {

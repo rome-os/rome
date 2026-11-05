@@ -32,6 +32,7 @@ import type {
   AgentTurnInput,
   SendTurnOptions,
 } from "../../core/agent-session.js";
+import { NoForkPointError } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
 import { guardianAuth, webchatProjects } from "../../db/schema.js";
@@ -330,7 +331,6 @@ describe("Webchat API", () => {
       runForkedTurn: () => {
         throw new Error("not forked");
       },
-      forkPoint: async () => undefined,
       subscribe: () => () => {},
       onStatusChange: () => () => {},
       interrupt: async () => {},
@@ -343,7 +343,6 @@ describe("Webchat API", () => {
       live: () => agent,
       find: async () => undefined,
       findWorkingDirBySessionId: () => undefined,
-      recordConversation: async () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -443,7 +442,6 @@ describe("Webchat API", () => {
       live: () => agent,
       find: async () => undefined,
       findWorkingDirBySessionId: () => undefined,
-      recordConversation: async () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -510,7 +508,6 @@ describe("Webchat API", () => {
       live: () => agent,
       find: async () => undefined,
       findWorkingDirBySessionId: () => undefined,
-      recordConversation: async () => {},
       shutdown: async () => {},
     };
     rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
@@ -4553,15 +4550,9 @@ describe("Webchat API", () => {
           };
         },
       };
-      const forkPoint = rs.fn(async (_turnId: string) => ({
-        providerId: "openai",
-        providerThreadId: "source-provider-thread",
-        checkpointId: "rated-provider-turn",
-      }));
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
-        forkPoint,
-      } as unknown as AgentSession);
+      } as AgentSession);
 
       const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
         status: "place_widget",
@@ -4597,11 +4588,7 @@ describe("Webchat API", () => {
         parentTurnId: TURN_ID,
         label: "feedback",
         mode: "exact",
-        sourceCheckpoint: {
-          providerId: "openai",
-          providerThreadId: "source-provider-thread",
-          checkpointId: "rated-provider-turn",
-        },
+        atTurn: TURN_ID,
       });
       const capturedFork = forkParams as ForkRunParams | null;
       // The learning fork is a background errand the guardian never sees, so
@@ -4892,15 +4879,9 @@ describe("Webchat API", () => {
           };
         },
       };
-      const forkPoint = rs.fn(async (_turnId: string) => ({
-        providerId: "openai",
-        providerThreadId: "source-provider-thread",
-        checkpointId: "provider-turn-t2",
-      }));
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
-        forkPoint,
-      } as unknown as AgentSession);
+      } as AgentSession);
 
       const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
         status: "place_widget",
@@ -4928,11 +4909,7 @@ describe("Webchat API", () => {
         parentTurnId: TURN_ID,
         label: "branch",
         mode: "exact",
-        sourceCheckpoint: {
-          providerId: "openai",
-          providerThreadId: "source-provider-thread",
-          checkpointId: "provider-turn-t2",
-        },
+        atTurn: TURN_ID,
       });
       expect(acquireSource).toHaveBeenCalledWith(
         "main",
@@ -4983,15 +4960,9 @@ describe("Webchat API", () => {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      const exactCheckpoint = rs.fn(async (_turnId: string) => ({
-        providerId: "anthropic",
-        providerThreadId: "claude-thread",
-        checkpointId: "durable-assistant-before-stop",
-      }));
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
-        forkPoint: exactCheckpoint,
-      } as unknown as AgentSession);
+      } as AgentSession);
 
       const app = createWebchatRuntime(deps).routes;
 
@@ -5003,7 +4974,6 @@ describe("Webchat API", () => {
 
       expect(res.status).toBe(409);
       expect(acquireSource).not.toHaveBeenCalled();
-      expect(exactCheckpoint).not.toHaveBeenCalled();
       expect(runForked).not.toHaveBeenCalled();
     });
 
@@ -5051,16 +5021,19 @@ describe("Webchat API", () => {
     });
 
     it("returns a conflict instead of forking from the head when the turn checkpoint is missing", async () => {
-      const runForked = rs.fn(() => (async function* () {})());
+      // The session finds no point to fork at, before the fork starts anything.
+      const runForked = rs.fn(() =>
+        (async function* () {
+          throw new NoForkPointError(TURN_ID);
+        })(),
+      );
       deps.agentRunner = {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      const forkPoint = rs.fn(async (_turnId: string) => undefined);
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
-        forkPoint,
-      } as unknown as AgentSession);
+      } as AgentSession);
 
       const app = createWebchatRuntime(deps).routes;
 
@@ -5074,7 +5047,7 @@ describe("Webchat API", () => {
       // The distinct code lets the client say "this answer has no branch
       // point" instead of implying a transient failure.
       await expect(res.json()).resolves.toMatchObject({ code: "turn_not_branchable" });
-      expect(runForked).not.toHaveBeenCalled();
+      expect(runForked).toHaveBeenCalledWith(expect.objectContaining({ atTurn: TURN_ID }));
     });
 
     it("creates the branch as an ordinary chat owned by the requesting person at 201", async () => {
@@ -5108,15 +5081,9 @@ describe("Webchat API", () => {
           };
         },
       };
-      const forkPoint = rs.fn(async (_turnId: string) => ({
-        providerId: "openai",
-        providerThreadId: "source-provider-thread",
-        checkpointId: "provider-turn-t2",
-      }));
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
-        forkPoint,
-      } as unknown as AgentSession);
+      } as AgentSession);
 
       rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
         status: "place_widget",
@@ -5186,15 +5153,9 @@ describe("Webchat API", () => {
           };
         },
       };
-      const forkPoint = rs.fn(async (_turnId: string) => ({
-        providerId: "openai",
-        providerThreadId: "source-provider-thread",
-        checkpointId: "provider-turn-t2",
-      }));
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
-        forkPoint,
-      } as unknown as AgentSession);
+      } as AgentSession);
 
       rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
         status: "place_widget",
@@ -6621,9 +6582,9 @@ describe("Webchat API", () => {
 
 type FakeSession = Omit<
   AgentSession,
-  "submitInput" | "runForkedTurn" | "selectModel" | "recordsTo" | "caller" | "forkPoint"
+  "submitInput" | "runForkedTurn" | "selectModel" | "recordsTo" | "caller"
 > &
-  Partial<Pick<AgentSession, "recordsTo" | "caller" | "forkPoint">>;
+  Partial<Pick<AgentSession, "recordsTo" | "caller">>;
 
 /**
  * A manager over fake sessions that script only `sendTurn`. Every submitted
@@ -6662,7 +6623,6 @@ function fakeSessionManager(
         : undefined;
     },
     findWorkingDirBySessionId: () => undefined,
-    recordConversation: async () => undefined,
     shutdown: async () => undefined,
   };
 }
@@ -6673,7 +6633,6 @@ let storedSessions: TestDeps["sessionManager"] | undefined;
 function withSubmitInput(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
     caller: fake.caller ?? fake.key.caller,
-    forkPoint: fake.forkPoint ?? (async () => undefined),
     recordsTo:
       fake.recordsTo ??
       ((options?: Parameters<AgentSession["recordsTo"]>[0]) => recordsToOf(fake, options)),

@@ -225,6 +225,12 @@ export interface ForkedAgentTurnInput extends AgentTurnInput {
   /** Exact provider-native history anchor for the source turn. */
   sourceCheckpoint?: ForkSourceCheckpoint;
   /**
+   * The source's completed turn the fork continues from. The session reads
+   * where that turn stands in the provider's history, and throws
+   * `NoForkPointError` before any event when the turn kept no such point.
+   */
+  atTurn?: string;
+  /**
    * Thread metadata the fork's action executions should carry (an exact-mode
    * fork inherits the source conversation's thread). Falls back to the source
    * session's own thread context when absent.
@@ -235,6 +241,14 @@ export interface ForkedAgentTurnInput extends AgentTurnInput {
 }
 
 export type AgentSessionStatus = "idle" | "running" | "closed";
+
+/** A fork asked to continue from a turn that kept no point to fork at. */
+export class NoForkPointError extends Error {
+  constructor(readonly turnId: string) {
+    super(`Turn ${turnId} kept no point to fork at`);
+    this.name = "NoForkPointError";
+  }
+}
 
 export interface AgentTurnHandle {
   turnId: string;
@@ -313,9 +327,6 @@ export interface AgentSession {
     options: SubmitInputOptions,
   ): AgentInputReceipt;
   runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
-  /** Where a fork from `turnId` starts in the provider's history, or
-   *  undefined when the turn kept none. */
-  forkPoint(turnId: string): Promise<ForkSourceCheckpoint | undefined>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
@@ -357,13 +368,6 @@ export interface AgentSessionManager {
    * open session has the id. Never opens a session.
    */
   findWorkingDirBySessionId(sessionId: string): string | undefined;
-  /**
-   * Record the conversation a session serves, for callers that learn it only
-   * after acquire (a subagent's conversation is minted under its own id).
-   * Never overwrites a recorded conversation. Only sessions cached by this
-   * manager see the new value, so call it on the manager that acquired them.
-   */
-  recordConversation(sessionId: string, chatId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -719,18 +723,6 @@ export function createAgentSessionManager(
       }
       return undefined;
     },
-    async recordConversation(sessionId, chatId) {
-      const filled = await deps.sessionsRepo.fillChatId(sessionId, chatId);
-      if (!filled) return;
-      // A cached session reads the same value a cold reopen would. A session
-      // still opening is not cached yet and misses this, so callers record
-      // only after their acquire has returned.
-      for (const session of [...sessions.values()]) {
-        if (session.sessionId !== sessionId || session.conversation) continue;
-        const recorded = await deps.callers?.findConversation?.(chatId);
-        if (recorded) session.conversation = { origin: "recorded", ...recorded };
-      }
-    },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
       const all = [...sessions.values()];
@@ -951,6 +943,8 @@ async function openSession(
   }
 
   const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv7();
+  // A fresh child records its turns under its own session id, as a subagent.
+  const ownChild = key.caller.kind === "parent-turn" && !resumeResult && !requestedRomeSessionId;
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
   // A caller that names no conversation still serves the one the row recorded.
@@ -966,7 +960,9 @@ async function openSession(
       : undefined;
   const conversation: SessionConversation | undefined = requestedRomeSessionId
     ? { origin: "named", id: requestedRomeSessionId, ...(namedType ? { type: namedType } : {}) }
-    : recordedConversation && { origin: "recorded", ...recordedConversation };
+    : ownChild
+      ? { origin: "recorded", id: sessionId, name: "", type: "subagent" }
+      : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -988,7 +984,7 @@ async function openSession(
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: storedKey,
-      chatId: requestedRomeSessionId,
+      chatId: ownChild ? sessionId : requestedRomeSessionId,
       workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -2882,7 +2878,7 @@ class AgentSessionImpl implements AgentSession {
     };
   }
 
-  async forkPoint(turnId: string): Promise<ForkSourceCheckpoint | undefined> {
+  private async forkPoint(turnId: string): Promise<ForkSourceCheckpoint | undefined> {
     const stored = await this.deps.sessionsRepo.getTurnCheckpoint(this.sessionId, turnId);
     return stored
       ? {
@@ -2897,6 +2893,10 @@ class AgentSessionImpl implements AgentSession {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
+    // Read before any event, so a turn with no point to fork at starts nothing.
+    const sourceCheckpoint =
+      input.sourceCheckpoint ?? (input.atTurn ? await this.forkPoint(input.atTurn) : undefined);
+    if (input.atTurn && !sourceCheckpoint) throw new NoForkPointError(input.atTurn);
     this.activeForkedTurnCount++;
     this.lastActiveAt = Date.now();
     const mode: ForkRunMode = input.mode ?? "isolated";
@@ -2951,16 +2951,16 @@ class AgentSessionImpl implements AgentSession {
           const sourceModelSession = this.modelSession;
           sourceFunding = sourceModelSession.funding;
           sourceProviderThreadId = sourceModelSession.providerThreadId;
-          if (input.sourceCheckpoint) {
-            if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
+          if (sourceCheckpoint) {
+            if (sourceCheckpoint.providerId !== sourceModelSession.providerId) {
               throw new Error(
-                `Fork checkpoint provider ${input.sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
+                `Fork checkpoint provider ${sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
               );
             }
             const liveProviderThreadId = sourceModelSession.providerThreadId;
             if (
               liveProviderThreadId &&
-              input.sourceCheckpoint.providerThreadId !== liveProviderThreadId
+              sourceCheckpoint.providerThreadId !== liveProviderThreadId
             ) {
               throw new Error("Fork checkpoint belongs to a different provider thread");
             }
@@ -2980,7 +2980,7 @@ class AgentSessionImpl implements AgentSession {
             // surface the fork opens with.
             mode: input.continueAs ? "thread" : "ephemeral",
             configurationMode: mode,
-            sourceCheckpoint: input.sourceCheckpoint?.checkpointId,
+            sourceCheckpoint: sourceCheckpoint?.checkpointId,
           });
           // One serialized outbound stream for the whole forked turn: the
           // provider-event pump below and out-of-band emitters (exact-mode

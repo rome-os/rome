@@ -42,6 +42,12 @@ export interface ForkRunParams extends SdkForkRunParams {
    * starts.
    */
   continueAs?: (forkSessionId: string) => SessionCaller;
+  /**
+   * The source's completed turn the fork continues from, in place of a
+   * `sourceCheckpoint` the caller read. The run throws `NoForkPointError`
+   * before any event when that turn kept no point to fork at.
+   */
+  atTurn?: string;
 }
 
 export interface AgentRunnerInterface {

@@ -230,26 +230,18 @@ describe("TestSessionManager working dirs", () => {
     expect(byId.conversation).toMatchObject({ origin: "recorded", id: "stored" });
   });
 
-  it("shows a conversation recorded after open on the cached session", async () => {
+  it("records a fresh child under its own session id, as a subagent", async () => {
     const session = await manager.acquire({
       agentName: AGENT,
       channelThreadKey: "webchat:late:subagent:1",
     });
-    expect(session.conversation).toBeUndefined();
-    await webchatRepo.ensureRomeSession({
-      id: session.sessionId,
-      type: "subagent",
-      name: "worker: Parent",
-      agentName: AGENT,
-    });
-
-    await manager.recordConversation!(session.sessionId, session.sessionId);
 
     expect(session.conversation).toMatchObject({
       origin: "recorded",
       id: session.sessionId,
       type: "subagent",
     });
+    expect((await sessionsRepo.findById(session.sessionId))?.chatId).toBe(session.sessionId);
   });
 
   it("looks the recorded conversation up at open, and skips one since deleted", async () => {
@@ -297,19 +289,6 @@ describe("TestSessionManager working dirs", () => {
     expect(reused.sessionId).toBe(original.sessionId);
     expect(reused.conversation).toEqual({ origin: "named", id: "other" });
     expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("kept");
-  });
-
-  it("records a conversation learned after acquire, without overwriting it", async () => {
-    const child = await manager.acquire({
-      agentName: AGENT,
-      channelThreadKey: "main:subagent:1",
-    });
-    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBeNull();
-
-    await manager.recordConversation(child.sessionId, child.sessionId);
-    await manager.recordConversation(child.sessionId, "other");
-
-    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBe(child.sessionId);
   });
 
   it("fills a row with no conversation when a resume names one", async () => {

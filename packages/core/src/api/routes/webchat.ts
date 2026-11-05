@@ -53,7 +53,7 @@ import {
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
-import type { AgentTurnHandle } from "../../core/agent-session.js";
+import { NoForkPointError, type AgentTurnHandle } from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
@@ -68,7 +68,7 @@ import {
 } from "../../core/model-selector.js";
 import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
-import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
+import type { ThreadContext } from "../../core/types.js";
 import {
   buildWorkspaceContextSection,
   type WorkspaceContextSnapshot,
@@ -1422,7 +1422,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const caller = chatCaller(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
-    let sourceCheckpoint: ForkSourceCheckpoint | null = null;
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
@@ -1474,20 +1473,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         reasoningEffort: await resolveRequestedReasoningEffort(undefined),
       });
       sourceSessionId = source.sessionId;
-      const forkPoint = await source.forkPoint(input.turnId);
-      if (!forkPoint) {
-        log.warn("turn fork skipped: source turn checkpoint is unavailable", {
-          sessionId: input.session.id,
-          sourceSessionId: source.sessionId,
-          turnId: input.turnId,
-          label: input.label,
-        });
-        // Distinguishable so the branch route can tell the user this turn has
-        // no branch point (a promoted side chat's own first answer is the
-        // common case) rather than implying a transient failure.
-        return "no_turn_checkpoint";
-      }
-      sourceCheckpoint = forkPoint;
     } catch (err) {
       log.warn("turn fork skipped: source session could not be acquired", {
         sessionId: input.session.id,
@@ -1497,8 +1482,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
       return null;
     }
-
-    if (!sourceCheckpoint) return null;
 
     const iterator = deps.agentRunner
       .runForked({
@@ -1510,7 +1493,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         parentTurnId: input.turnId,
         label: input.label,
         mode: "exact",
-        sourceCheckpoint,
+        // The session reads where this turn stands in the provider's history.
+        atTurn: input.turnId,
         // The fork's own chat, exactly the caller `handleChatSend` opens it
         // with later.
         ...(input.continuable ? { continueAs: chatCaller } : {}),
@@ -1521,6 +1505,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     try {
       first = await iterator.next();
     } catch (err) {
+      if (err instanceof NoForkPointError) {
+        log.warn("turn fork skipped: source turn checkpoint is unavailable", {
+          sessionId: input.session.id,
+          sourceSessionId,
+          turnId: input.turnId,
+          label: input.label,
+        });
+        // Distinguishable so the branch route can tell the user this turn has
+        // no branch point (a promoted side chat's own first answer is the
+        // common case) rather than implying a transient failure.
+        return "no_turn_checkpoint";
+      }
       log.warn("failed to start turn fork", {
         sessionId: input.session.id,
         turnId: input.turnId,

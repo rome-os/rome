@@ -128,16 +128,8 @@ export function createSubagentExecutionService(deps: {
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
         });
-        // A subagent's conversation is minted under its own session id.
-        try {
-          await context.childManager.recordConversation(child.sessionId, child.sessionId);
-        } catch (err) {
-          log.warn("failed to record the subagent session's conversation", {
-            agentName: name,
-            sessionId: child.sessionId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        // The child records its turns under its own session id, which names
+        // the conversation made here.
       }
 
       const handle = child.sendTurn(

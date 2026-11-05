@@ -2750,7 +2750,6 @@ describe("AgentRunner", () => {
         sendTurn,
         submitInput: rs.fn(),
         runForkedTurn: rs.fn(),
-        forkPoint: async () => undefined,
         subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         interrupt: rs.fn(async () => undefined),
@@ -2765,7 +2764,6 @@ describe("AgentRunner", () => {
         reset: rs.fn(),
         find: rs.fn(async () => undefined),
         findWorkingDirBySessionId: rs.fn(),
-        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
