@@ -32,6 +32,7 @@ export type { SessionLog } from "./agent-session.js";
 // Reading turns and their traces back. Turns are Sessions', so every reader
 // outside reads them here.
 export {
+  createKeptTurnReads,
   createTurnReads,
   type KeptTurns,
   type TraceHead,

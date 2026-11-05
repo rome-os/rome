@@ -5108,6 +5108,59 @@ describe("Webchat API", () => {
       );
     });
 
+    it("finishes the branch's first turn when its answer could not be copied into the chat", async () => {
+      await deps.webchatRepo.ensureRomeSession({
+        id: "branch-fork-session",
+        type: "fork",
+        name: "branch: Branch Routes",
+        agentName: null,
+        trigger: { triggerKind: "fork", triggerName: "branch" },
+        parentSessionId: SESSION_ID,
+        parentTurnId: TURN_ID,
+      });
+      rs.spyOn(deps.webchatRepo, "recordAnswerInChat").mockRejectedValue(
+        new Error("chat store down"),
+      );
+      // The fork's turn cleans up (persists its thread, closes its provider,
+      // releases the source) only once it runs to its end.
+      let finished = false;
+      deps.agentRunner = {
+        run: deps.agentRunner.run.bind(deps.agentRunner),
+        async *runForked(params) {
+          try {
+            yield {
+              type: "turn_start",
+              turnId: "branch-fork-turn",
+              sessionId: "branch-fork-session",
+              userPrompt: params.prompt,
+            };
+            yield { type: "result", content: "Here is the side-chat answer." };
+            yield {
+              type: "turn_end",
+              turnId: "branch-fork-turn",
+              status: "completed",
+              durationMs: 1,
+            };
+          } finally {
+            finished = true;
+          }
+        },
+      };
+      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        sessionId: "live-source-session",
+      } as AgentSession);
+      const app = createWebchatRuntime(deps).routes;
+
+      const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "What about the other approach?" }),
+      });
+
+      expect(res.status).toBe(201);
+      await rs.waitFor(() => expect(finished).toBe(true));
+    });
+
     it("refuses a follow-up until the branch thread exists", async () => {
       await deps.webchatRepo.ensureRomeSession({
         id: "branch-fork-session",
@@ -5279,6 +5332,50 @@ describe("Webchat API", () => {
       expect((await app.request(`/chat/sessions/${FORK_ID}`, { method: "DELETE" })).status).toBe(
         404,
       );
+    });
+
+    it("makes a branch from before branches were chats a chat before it continues", async () => {
+      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue(withThread(FORK_ID));
+      deps.agentSessionManager = fakeSessionManager(async () => {
+        return {
+          key: { agentName: "main", caller: `webchat:${FORK_ID}` },
+          caller: `webchat:${FORK_ID}`,
+          sessionId: "fork-agent-session",
+          status: "idle",
+          sendTurn() {
+            return {
+              turnId: "follow-up-turn",
+              events: (async function* () {
+                yield { type: "text", content: "Because the retry budget is per turn." };
+                yield { type: "result", content: "Because the retry budget is per turn." };
+              })(),
+              turnContext: otelContext.active(),
+            };
+          },
+          subscribe: () => () => undefined,
+          onStatusChange: () => () => undefined,
+          interrupt: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      rs.spyOn(deps.actionEngine, "run").mockResolvedValue({ status: "ok" } as never);
+      const app = createWebchatRuntime(deps).routes;
+
+      const res = await app.request(`/chat/sessions/${FORK_ID}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "And what about the failure case?" }),
+      });
+      expect(res.status).toBe(200);
+      const { turnId } = (await res.json()) as { turnId: string };
+      await (await app.request(`/chat/turns/${turnId}/stream`)).text();
+
+      // It stands in a chat of its own, so its answer is said there once and
+      // its session's own copy stays out of its transcript.
+      await expect(deps.webchatRepo.getSession(FORK_ID)).resolves.toMatchObject({
+        type: "webchat",
+        chatId: expect.any(Number),
+      });
     });
 
     it("resumes the branch's own thread for a follow-up turn, with no interactive surface", async () => {

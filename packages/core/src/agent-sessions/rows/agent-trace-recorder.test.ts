@@ -73,7 +73,7 @@ describe("resolveTurnConversation", () => {
       sessionConversation: recorded("channel:telegram:t1", "channel"),
     });
     expect(turn.romeSessionId).toMatch(/^action:/);
-    expect(turn).toMatchObject({ romeSessionType: "action", recorderOwned: false });
+    expect(turn).toMatchObject({ romeSessionType: "action" });
   });
 
   it("leaves a recorded webchat conversation to the webchat route", () => {
@@ -91,8 +91,6 @@ describe("resolveTurnConversation", () => {
       romeSessionId: "child-chat",
       romeSessionType: "subagent",
       existing: true,
-      promptPersisted: false,
-      recorderOwned: true,
     });
   });
 
@@ -136,7 +134,6 @@ describe("resolveTurnConversation", () => {
     expect(turn).toMatchObject({
       romeSessionId: "side-chat",
       romeSessionType: "webchat",
-      recorderOwned: false,
     });
   });
 

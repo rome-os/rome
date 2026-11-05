@@ -410,6 +410,43 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("finishes a turn whose answer could not be copied into its chat", async () => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-copy-fails", "Chat");
+    rs.spyOn(webchatRepo, "recordAnswerInChat").mockRejectedValue(new Error("chat store down"));
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Done." };
+      }),
+    };
+    const manager = createTestSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    const messages = await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "telegram:chat-copy-fails",
+        prompt: "continue",
+        threadContext: {
+          channel: "telegram",
+          threadId: "chat-copy-fails",
+          romeSessionId: "chat-copy-fails",
+        },
+      }),
+    );
+
+    expect(messages.map((message) => message.type)).toEqual(
+      expect.arrayContaining(["result", "turn_end"]),
+    );
+    expect(ownRoles("chat-copy-fails")).toContain("assistant");
+    await manager.shutdown();
+  });
+
   it("records fresh runs that name one session into it, each in its own agent session", async () => {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.ensureRomeSession({

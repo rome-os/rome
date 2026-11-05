@@ -125,8 +125,6 @@ export function conversationOfTurn(turn: LoggedTurn) {
       romeSessionId: turn.sessionId,
       romeSessionType: "subagent" as const,
       existing: true,
-      promptPersisted: false,
-      recorderOwned: true,
     };
   }
   const served = turn.served;

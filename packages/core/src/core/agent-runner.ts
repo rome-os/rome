@@ -636,7 +636,18 @@ export class AgentRunner {
         : undefined;
     for await (const msg of handle.events) {
       if (chatAnswer && msg.type === "result" && msg.content.trim() && this.webchatRepo) {
-        await this.webchatRepo.recordAnswerInChat(chatAnswer, handle.turnId, msg.content);
+        // The session already kept the answer, so a failed copy into the
+        // chat is logged and the turn goes on to its end.
+        await this.webchatRepo
+          .recordAnswerInChat(chatAnswer, handle.turnId, msg.content)
+          .catch((err) => {
+            log.warn("could not copy an answer into its chat", {
+              agent: agentName,
+              chatId: chatAnswer,
+              turnId: handle.turnId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
       }
       yield msg;
     }
