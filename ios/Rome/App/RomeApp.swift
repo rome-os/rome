@@ -13,9 +13,7 @@ struct RomeApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .background: model.workspace?.backend.events.pause()
-                    case .active:
-                        model.workspace?.backend.events.resume()
-                        Task { await model.becameActive() }
+                    case .active: model.workspace?.backend.events.resume()
                     default: break
                     }
                 }

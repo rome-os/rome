@@ -308,11 +308,6 @@ final class AppModel {
         await workspace.start()
     }
 
-    /// The app came back to the foreground.
-    func becameActive() async {
-        await update.check()
-    }
-
     /// The instance restarted on its new release: open it fresh, so the chat,
     /// the tasks and the live socket all come from the new process.
     private func reopenAfterUpgrade() async {
