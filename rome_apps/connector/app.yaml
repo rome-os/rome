@@ -99,6 +99,56 @@ eventSources:
   # with a warning, as before.
   - events: "provider:event:gmail.gmail_new_gmail_message"
     ensureAction: connector_event_ensure
+  # The connected Google Calendar's primary calendar, through Composio's polling
+  # triggers: a meeting about to start, an event created, changed or deleted
+  # (with its attendees), and an attendee's reply. Like Gmail's, these and the
+  # Composio events below follow the connected account and name no key, and
+  # each service's other triggers stay undeclared.
+  - events: "provider:event:googlecalendar.googlecalendar_event_starting_soon_trigger"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:googlecalendar.googlecalendar_google_calendar_event_sync_trigger"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:googlecalendar.googlecalendar_attendee_response_changed_trigger"
+    ensureAction: connector_event_ensure
+  # Linear's public-team webhooks, workspace-wide: a new issue, a changed
+  # issue, a new comment.
+  - events: "provider:event:linear.linear_public_team_issue_created"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:linear.linear_public_team_issue_properties_updated"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:linear.linear_public_team_comment_created"
+    ensureAction: connector_event_ensure
+  # New mail in the connected Outlook inbox.
+  - events: "provider:event:outlook.outlook_message_trigger"
+    ensureAction: connector_event_ensure
+  # Notion's workspace webhooks: a new comment, a page's content or properties
+  # changed, a new page.
+  - events: "provider:event:notion.notion_comment_created"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:notion.notion_page_content_updated"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:notion.notion_page_properties_updated"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:notion.notion_page_created"
+    ensureAction: connector_event_ensure
+  # The connected Stripe account: failed payments and payouts, disputes,
+  # refunds, canceled subscriptions, and successful charges.
+  - events: "provider:event:stripe.stripe_charge_failed"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_invoice_payment_failed"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_charge_dispute_created"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_charge_dispute_closed"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_charge_refunded"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_customer_subscription_deleted"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_payout_failed"
+    ensureAction: connector_event_ensure
+  - events: "provider:event:stripe.stripe_charge_succeeded"
+    ensureAction: connector_event_ensure
 
 skills:
   - skills/composio-cli

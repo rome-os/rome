@@ -1,62 +1,12 @@
-// Turning a raw event from a watched source into the common shape a follower
-// reads: the kind it is, who did it, a link, a short excerpt, whether the
-// guardian did it, how it is addressed to them, and labels, short words this
-// connection chooses for what else it knows (a bot, a mailing list, a failed
-// run). Whether it matters is not decided here. Only spam, trash and events of
-// a kind the follow does not have on are dropped. Each event's id is stable,
-// so its follower drops a repeat delivery.
+// A GitHub webhook delivery in the common shape: who did it, whether it is
+// about the guardian (their pull request, a review requested of them or their
+// team, a mention), and labels for what else is known.
 
-import { excerptOf, subjectOf } from "./text.js";
+import { drop, labelsOf, obj, same, str } from "../../shared/event.js";
+import { excerptOf, subjectOf } from "../../shared/text.js";
+import type { AddressedTo, Json, Normalized } from "../../types.js";
 
-/**
- * How an event is addressed to the guardian: `direct` when it is theirs or
- * asks them (sent To them, a review requested of them, their own pull
- * request), `copy` when they are copied, `other` otherwise.
- */
-export type AddressedTo = "direct" | "copy" | "other";
-
-/** An event as a follower reads it. Every text field came from outside Rome. */
-export interface WatchEvent {
-  /** Stable identity, so a repeat delivery is dropped. */
-  id: string;
-  source: string;
-  kind: string;
-  actor?: string;
-  subject?: string;
-  url?: string;
-  excerpt?: string;
-  /** The guardian did it. */
-  byYou: boolean;
-  addressedTo: AddressedTo;
-  /** What else the connection knows, in short lowercase words. */
-  labels: string[];
-}
-
-export type Normalized = { keep: true; event: WatchEvent } | { keep: false; reason: string };
-
-type Json = Record<string, unknown>;
-
-const obj = (value: unknown): Json =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
-const str = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim()
-    ? value.trim()
-    : typeof value === "number"
-      ? String(value)
-      : undefined;
 const loginOf = (user: unknown) => str(obj(user).login);
-const same = (a: string | undefined, b: string | undefined) =>
-  a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
-const drop = (reason: string): Normalized => ({ keep: false, reason });
-
-/** The labels that apply, each once. */
-const labelsOf = (...labels: (string | false | undefined)[]): string[] => [
-  ...new Set(labels.filter((label): label is string => Boolean(label))),
-];
-
-// ---------------------------------------------------------------------------
-// GitHub
-// ---------------------------------------------------------------------------
 
 export interface GithubContext {
   /** The guardian's GitHub login. */
@@ -229,98 +179,4 @@ export async function normalizeGithub(
     default:
       return drop(`GitHub ${type} is not a kind follows describe`);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Gmail
-// ---------------------------------------------------------------------------
-
-const DROPPED_LABELS = ["SPAM", "TRASH"];
-/** Gmail's tabs, as labels. */
-const CATEGORIES: Record<string, string> = {
-  CATEGORY_PROMOTIONS: "promotions",
-  CATEGORY_SOCIAL: "social",
-  CATEGORY_FORUMS: "forums",
-  CATEGORY_UPDATES: "updates",
-};
-/**
- * Senders no person answers from: a no-reply, notification, bounce or
- * mailer token anywhere in the address's local part, as a whole token between
- * `.`, `_`, `+` or `-` (`jobalerts-noreply@`, `noreply.billing@`), so a name
- * that only contains those letters (`noriko@`, `bouncer.lee@`) is a person.
- */
-export function isAutomatedSender(address: string): boolean {
-  const local = address.split("@")[0]?.toLowerCase() ?? "";
-  return /(^|[._+-])(no-?reply|do-?not-?reply|notifications?|notify|mailer-daemon|postmaster|bounces?)($|[._+-])/.test(
-    local,
-  );
-}
-const BULK_PRECEDENCE = /^(bulk|list|junk)$/i;
-
-/** Composio names a field in snake case in one place and camel case in another. */
-const field = (payload: Json, snake: string, camel: string) => payload[snake] ?? payload[camel];
-
-/** The headers of the raw Gmail message, when the payload carries it. */
-function headers(payload: Json): Map<string, string> {
-  const raw = obj(payload.payload).headers;
-  const out = new Map<string, string>();
-  if (!Array.isArray(raw)) return out;
-  for (const header of raw.map(obj)) {
-    const name = str(header.name);
-    const value = typeof header.value === "string" ? header.value : undefined;
-    if (name && value !== undefined) out.set(name.toLowerCase(), value);
-  }
-  return out;
-}
-
-/** The bare addresses in a header such as `Ana <ana@x.io>, bo@y.io`, lower-cased. */
-export function addressesIn(value: string | undefined): string[] {
-  if (!value) return [];
-  return [...value.matchAll(/[^\s<>,;"']+@[^\s<>,;"']+/g)].map((match) => match[0].toLowerCase());
-}
-
-/** A new Gmail message in the common shape, or why it is not one. */
-export function normalizeGmail(payload: Json, ctx: { address: string }): Normalized {
-  const me = ctx.address.toLowerCase();
-  const head = headers(payload);
-  const labels = field(payload, "label_ids", "labelIds");
-  const labelIds = Array.isArray(labels)
-    ? labels.filter((l): l is string => typeof l === "string")
-    : [];
-  if (labelIds.some((label) => DROPPED_LABELS.includes(label))) return drop("spam or trash");
-  const id = str(field(payload, "message_id", "messageId"));
-  if (!id) return drop("no message id");
-
-  const from = str(field(payload, "sender", "from")) ?? head.get("from");
-  const [sender] = addressesIn(from);
-  const to = addressesIn(str(field(payload, "to", "to")) ?? head.get("to"));
-  const cc = addressesIn(head.get("cc") ?? str(field(payload, "cc", "cc")));
-  const thread = str(field(payload, "thread_id", "threadId"));
-  const preview = obj(payload.preview);
-  const subject = subjectOf(str(payload.subject) ?? str(preview.subject) ?? head.get("subject"));
-  const quoted = excerptOf(str(preview.body) ?? str(field(payload, "message_text", "messageText")));
-  const recipient: AddressedTo = to.includes(me) ? "direct" : cc.includes(me) ? "copy" : "other";
-  return {
-    keep: true,
-    event: {
-      id: `gmail:${me}:${id}`,
-      source: "gmail",
-      kind: "new_mail",
-      ...(from || sender ? { actor: from ?? sender } : {}),
-      ...(subject ? { subject } : {}),
-      ...(thread
-        ? { url: `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(thread)}` }
-        : {}),
-      ...(quoted ? { excerpt: quoted } : {}),
-      byYou: sender === me,
-      addressedTo: recipient,
-      labels: labelsOf(
-        ...labelIds.map((label) => CATEGORIES[label]),
-        labelIds.length > 0 && !labelIds.includes("INBOX") && "not-in-inbox",
-        sender !== undefined && isAutomatedSender(sender) && "automated",
-        (head.has("list-unsubscribe") || head.has("list-id")) && "mailing-list",
-        BULK_PRECEDENCE.test(head.get("precedence")?.trim() ?? "") && "bulk",
-      ),
-    },
-  };
 }

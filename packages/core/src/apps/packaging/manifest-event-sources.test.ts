@@ -50,17 +50,24 @@ describe("AppManifestSchema eventSources", () => {
       new URL("../../../../../rome_apps/connector/app.yaml", import.meta.url),
     );
     const manifest = AppManifestSchema.parse(parseYaml(await readFile(path, "utf-8")));
-    expect(manifest.eventSources).toEqual([
+    const [github, ...composio] = manifest.eventSources ?? [];
+    expect(github).toEqual(
       expect.objectContaining({
         events: "provider:event:github.*",
         keys: [["repository.full_name"], ["organization.login"]],
         ensureAction: "connector_event_ensure",
       }),
-      {
-        events: "provider:event:gmail.gmail_new_gmail_message",
+    );
+    // Every Composio event is declared by its exact name, with no key.
+    expect(composio.map((source) => source.events)).toContain(
+      "provider:event:gmail.gmail_new_gmail_message",
+    );
+    for (const source of composio) {
+      expect(source).toEqual({
+        events: expect.stringMatching(/^provider:event:[a-z]+\.[a-z_]+$/),
         ensureAction: "connector_event_ensure",
-      },
-    ]);
+      });
+    }
     expect(manifest.eventSources?.[0]?.types).toEqual(
       expect.arrayContaining(["workflow_run", "pull_request", "check_suite"]),
     );

@@ -25,7 +25,7 @@ Every service difference lives in the connection. The connector app declares a w
 
 ## Consequences
 
-A new service changes its connection only: its catalog entry, its subscription and its normalizer. Following, triage and delivery stay unchanged.
+A new service changes its connection only: one adapter with its catalog entry, its account, its subscription and its normalizer, listed once in the connection's registry. The connection's own watch actions and shared code dispatch through the registry and name no service either. Following, triage and delivery stay unchanged.
 
 The common shape has to carry enough for triage to judge an event without the raw payload. When a service needs a new fact, the fact is added to the shape as a plain value, never as a service field that core reads.
 

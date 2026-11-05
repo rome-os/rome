@@ -27,6 +27,26 @@ const PUBLISH_EVENT_ACTION = "publish_event";
 /** Bus-event `source`, matched against a routine's optional `sourcePattern`. */
 const EVENT_SOURCE = "connector";
 
+/** The provider of the events GitHub's own webhook delivers. */
+const GITHUB_PROVIDER = "github";
+
+/**
+ * The key a Composio event's bus payload carries its stored delivery id under:
+ * Composio's message id, or the webhook id. It is the same for every publish
+ * of one stored event, so a follower can tell two occurrences apart that carry
+ * the same fields (a reply changed, then changed back) while a republish stays
+ * one. GitHub's payloads stay as GitHub sent them.
+ */
+export const DELIVERY_ID_KEY = "_deliveryId";
+
+/** The bus payload of a stored event. */
+function busPayload(event: { provider: string; eventId: string; payloadJson: string }): unknown {
+  const payload = JSON.parse(event.payloadJson) as unknown;
+  if (event.provider === GITHUB_PROVIDER) return payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  return { ...payload, [DELIVERY_ID_KEY]: event.eventId };
+}
+
 export type RunAction = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
 /** An owed event older than this is abandoned rather than published, since a
@@ -68,7 +88,7 @@ export async function publishPendingEvents(
       await runAction(PUBLISH_EVENT_ACTION, {
         name: event.topic,
         source: EVENT_SOURCE,
-        payload: JSON.parse(event.payloadJson) as unknown,
+        payload: busPayload(event),
       });
     } catch (err) {
       const failures = event.publishAttempts + 1;
@@ -170,7 +190,7 @@ export async function processGithubWebhook(
   deliveryId: string,
   receivedAt: Date,
 ): Promise<ProcessResult> {
-  const provider = "github";
+  const provider = GITHUB_PROVIDER;
   const normalizedEventType = eventType.toLowerCase();
   const topic = buildTopic(provider, normalizedEventType);
 
