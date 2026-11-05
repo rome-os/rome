@@ -3,7 +3,7 @@
 Worker result for "Instance always on the latest version" in [`mobile-app-mvp.md`](mobile-app-mvp.md). The decision came from the user: the app always requires the instance's latest release. The instance API stays backward compatible, so the app's and the instance's versions never need to match.
 
 - Branch: `feat/ios-app` (local only, not pushed)
-- Commits: `1e0d7f18` (API calls and demo data), `4cef5d7d` (decision and upgrade tracking), `588bd463` (update page and wiring), `8868c7e5` (snapshots), `2a50dc60` (this file), `4c3debe2` (Chinese placeholder fix), `d5ef8af2` (no foreground check)
+- Commits: `1e0d7f18` (API calls and demo data), `4cef5d7d` (decision and upgrade tracking), `588bd463` (update page and wiring), `8868c7e5` (snapshots), `2a50dc60` (this file), `4c3debe2` (Chinese placeholder fix), `d5ef8af2` (no foreground check); review fixes `8459ef20`, `b54b4016`, `56f9985c`, `972ec209` (see "Review round 1")
 
 ## What changed
 
@@ -53,5 +53,35 @@ Not checked:
 
 ## Open questions
 
-- Chat shows for a moment (one check round trip) before the update page covers it on a behind instance. Holding Chat back until the check answers would delay every launch, and the check can take up to 15 seconds when Rome Cloud is slow. I left it as it is.
 - `upgradeAvailable` comes from Rome Cloud. If Rome Cloud ever says yes for a release this device cannot reach, the guardian is blocked until it can. This is by design ("never skip"), but worth knowing.
+
+## Review round 1
+
+An independent review of `4d4f12c6..2a50dc60` found six issues. All are fixed. The earlier queued change (no foreground check) was already in as `d5ef8af2`.
+
+1. **A page left over another instance** (`8459ef20`). The updater reset only when an instance opened. Switching from a blocked instance to one that was stopped or failed to connect left the first page up, still posting to and polling the first instance. Switching and connecting now reset the updater. Only the reconnect to the instance an upgrade waits on keeps it.
+2. **A target that never comes** (`56f9985c`). Someone updating further from the web, or Rome Cloud rolling back, blocked the app for 40 minutes, even after a relaunch. The upgrade now remembers the release it started from, and these end the wait:
+   - the instance answers on another release than it started from;
+   - a check that answers says the instance is up to date (finished) or offers a different latest (the page shows again);
+   - such a check runs on every launch with a remembered target, and every 30 seconds while the instance answers during the wait.
+
+   A check that cannot decide keeps the wait.
+3. **The reconnect was cancelled** (`56f9985c`). It now runs in its own task, so opening the instance it reaches is not cancelled along with the poll.
+4. **Raw codes on screen** (`56f9985c`). The following now show readable English and zh-Hans text: `pantheon_unreachable`, `pantheon_unconfigured`, `unversioned_build`, and any other refusal from Rome Cloud.
+5. **A restart's 401 taken as an expired session** (`b54b4016`). `/build-info` 401s no longer trigger the session-expired path. Reopening after an upgrade also clears the flag.
+6. **Chat before the page** (`972ec209`). Opening an instance holds the loading state for up to 1 second for the check. A Rome that is behind then opens straight on the update page; a slower check shows Chat and covers it when the answer comes. Nothing renders under the page, so Chat never shows through while it fades in.
+
+What was checked:
+- **Unit tests:** 51 pass on the iPhone 17 simulator (iOS 27.2), with the live tests skipped. The new tests cover items 1, 2, 4 and 5:
+  - after a reset, nothing posts or blocks;
+  - pure rules for "moved on" and stale targets;
+  - a remembered target is dropped when the check says up to date, and replaced when it offers a newer one;
+  - start failures contain no codes;
+  - a `/build-info` 401 through the real client, with a stub URL protocol, does not report session expiry while other calls still do.
+- **Simulator, demo data:**
+  - A screen recording of launch shows the update page fading in over an empty background, with no frame of Chat.
+  - Switching from the blocked demo instance to another one (which fails to connect in demo) goes to the sign-in screen with no page left over.
+  - The full update still ends in a working Chat.
+
+Not checked: the reconnect path against a real Rome Cloud. It needs an instance that Rome Cloud reports as not running mid-upgrade.
+
