@@ -29,8 +29,7 @@ import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 import { sessionSurfaceOf } from "../connections/session-surface.js";
-import { callerChatId, callerKey, type SessionCaller } from "./session-caller.js";
-import { rememberedChatModel } from "./chat-model-selection.js";
+import { adhocCaller, callerChatId, callerKey, type SessionCaller } from "./session-caller.js";
 import { openNamed } from "../agent-sessions/index.js";
 import type { ThreadContext } from "./types.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -53,7 +52,8 @@ export interface RunTurnKey {
 }
 
 export interface RunTurnRequest {
-  key: RunTurnKey;
+  /** A run that resumes a session by its id may name no caller. */
+  key: { agentName: string; caller?: SessionCaller };
   init?: { workingDir?: string; threadContext?: ThreadContext; contextSuffix?: string };
   sharedContext?: Record<string, unknown>;
   input: AgentTurnInput;
@@ -116,7 +116,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const acquireMode = req.sessionId ? "sessionId" : "key";
         const baseLogFields = {
           agent: req.key.agentName,
-          channelThreadKey: callerKey(req.key.caller),
+          channelThreadKey: req.key.caller ? callerKey(req.key.caller) : undefined,
           requestedSessionId: req.sessionId,
           acquireMode,
         };
@@ -137,10 +137,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
         const thread = req.init?.threadContext;
         const caller = req.key.caller;
-        const callerId = callerKey(caller);
+        // A run that opens a session by its caller always names one.
+        const opener = caller ?? adhocCaller(req.key.agentName);
+        const callerId = callerKey(opener);
         // The conversation the turn is kept in where it replies.
         const romeSessionId =
-          callerChatId(caller) ??
+          (caller ? callerChatId(caller) : undefined) ??
           thread?.romeSessionId ??
           (thread ? channelChatId(thread.channel, thread.threadId) : undefined);
         const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, thread, {
@@ -152,18 +154,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         let session: AgentSession;
         try {
           if (req.sessionId) {
-            const model = await rememberedChatModel(
-              { webchatRepo: this.webchatRepo, sessions: this.manager },
-              {
-                agentName: req.key.agentName,
-                sessionId: req.sessionId,
-                caller,
-                replies: thread,
-              },
-            );
             session = await this.manager.session(req.sessionId, req.key.agentName, surface, {
               workingDir,
-              ...(model ? { model } : {}),
             });
           } else {
             // A wake by a message on a connection applies the place's reset setting.
@@ -172,11 +164,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 this.manager,
                 this.wake?.resolveReset,
                 req.key.agentName,
-                caller,
+                opener,
                 thread,
               );
             }
-            session = await openNamed(callerId, callerChatId(caller), () =>
+            session = await openNamed(callerId, callerChatId(opener), () =>
               this.manager.open(req.key.agentName, callerId, surface, { workingDir }),
             );
           }
@@ -198,8 +190,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // The line the run names by its platform id, which the turn answers,
         // and the one its reply quotes, as Chats holds them.
         const lines =
-          this.runLineDeps && thread?.romeSessionId
-            ? await runLines(this.runLineDeps.lines, thread.romeSessionId, req)
+          this.runLineDeps && romeSessionId
+            ? await runLines(this.runLineDeps.lines, romeSessionId, req)
             : null;
 
         // sendTurn is sync — turnId returned immediately,

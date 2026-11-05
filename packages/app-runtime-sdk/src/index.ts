@@ -520,6 +520,9 @@ export interface LifecycleThreadContext {
  * - `parent-turn`: a subagent's parent turn.
  * - `fork-point`: a session at one completed turn.
  * - `execution`: a trigger execution, or a run that names no conversation.
+ *   Such a run's session is stored under its agent's name and a fresh id, so
+ *   a hook or an action that reads its caller back sees a `place` whose
+ *   `connection` is the agent's name.
  *
  * `chatId` on a place or an execution names the conversation its turns are
  * recorded in, when the caller knows it.

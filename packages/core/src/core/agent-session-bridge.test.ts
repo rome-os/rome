@@ -18,6 +18,7 @@ import type {
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { channelChatId } from "../db/session-kind.js";
 import { createTestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
@@ -573,6 +574,25 @@ describe("AgentSessionBridge answer recording", () => {
     } finally {
       close();
     }
+  });
+
+  it("reads the run's messages in the conversation its connection thread names", async () => {
+    const asked: string[] = [];
+    const { turnEnd } = run(turnEvents(...answer), {
+      runLineDeps: {
+        lines: {
+          recorded: async (sessionId) => {
+            asked.push(sessionId);
+            return null;
+          },
+          stands: () => false,
+        },
+        links: { prompt: () => {} },
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(asked).toEqual([channelChatId("telegram", "chat-1")]);
   });
 
   it("leaves the reply to its caller even when the run asks to stream it", async () => {

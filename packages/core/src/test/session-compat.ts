@@ -6,10 +6,12 @@ import {
   type AgentSessionManager,
   createAgentSessionManager,
   type ManagerDeps,
+  sessionBehind,
   type SessionOpenOptions,
 } from "../agent-sessions/agent-session.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatModelSelection } from "../core/chat-model-selection.js";
 import { callerFromKey } from "../core/session-caller.js";
 import { createSessionLog, openNamed } from "../agent-sessions/rows/session-log.js";
 import {
@@ -112,6 +114,12 @@ export function createTestSessionManager(
         ...rest,
         log: log ?? createSessionLog(webchatRepo),
         routineKeyFor: rest.routineKeyFor ?? chatRoutineKeyForToolUse,
+        // As index.ts wires it: a session resumed by id restores its chat's
+        // model.
+        rememberedModel:
+          rest.rememberedModel ??
+          ((caller, agentName, pinned) =>
+            chatModelSelection(webchatRepo)(callerFromKey(caller), agentName, pinned)),
       },
       options,
     ),
@@ -122,5 +130,5 @@ export function createTestSessionManager(
 /** Where a real session keeps its turns in today's rows, which only the
  *  session reads. */
 export function conversationOf(session: AgentSession): SessionConversation | undefined {
-  return (session as unknown as { conversation?: SessionConversation }).conversation;
+  return (sessionBehind(session) as unknown as { conversation?: SessionConversation }).conversation;
 }

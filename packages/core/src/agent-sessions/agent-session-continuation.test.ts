@@ -25,7 +25,7 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "../core/agent-runner.js";
-import { type AgentSession } from "./agent-session.js";
+import { type AgentSession, sessionBehind } from "./agent-session.js";
 import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import type { ModelSelectionId } from "../core/model-selector.js";
@@ -224,7 +224,7 @@ describe("continuation notice through TestSessionManager", () => {
 
     // The guardian picks a Codex model in the open chat: the same live session
     // takes it from its next turn.
-    expect(await acquire(manager, "gpt-6-luna")).toBe(session);
+    expect(sessionBehind(await acquire(manager, "gpt-6-luna"))).toBe(sessionBehind(session));
     await chatTurn(session, "Which animal was it, and what was my worry?");
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna"]);
