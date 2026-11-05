@@ -240,6 +240,10 @@ export class WhatsAppAdapter {
       // Mirror every message — including our own and group traffic, both of
       // which the agent pipeline below skips — into the address-book store.
       this.persistMessages(messages);
+      // What the guardian said on the account themselves is never delivered
+      // below, so Chats records it here. With nothing listening below, nothing
+      // is delivered at all, and every message is recorded here instead.
+      this.recordHistory(this.handler ? messages.filter((m) => m.key.fromMe) : messages);
 
       if (!this.handler) return;
       for (const waMsg of messages) {
@@ -284,6 +288,7 @@ export class WhatsAppAdapter {
       this.persistContacts(contacts ?? []);
       this.persistChats(chats ?? []);
       this.persistMessages(messages ?? []);
+      this.recordHistory(messages ?? []);
     });
 
     this.sock.ev.on("contacts.upsert", (contacts) => {
@@ -339,9 +344,10 @@ export class WhatsAppAdapter {
     });
   }
 
-  private persistMessages(messages: WAMessage[]): void {
-    if (!this.syncSink || messages.length === 0) return;
-    const inputs = messages
+  /** `messages` as the sync contract has them, every address in the form a
+   *  live message is keyed by. */
+  private syncInputs(messages: WAMessage[]): WaMessageInput[] {
+    return messages
       .map(mapWaMessage)
       .filter((m): m is WaMessageInput => m !== null)
       .map((m) => ({
@@ -349,10 +355,28 @@ export class WhatsAppAdapter {
         chatJid: this.canonicalJid(m.chatJid),
         senderJid: m.senderJid ? this.canonicalJid(m.senderJid) : null,
       }));
+  }
+
+  private persistMessages(messages: WAMessage[]): void {
+    if (!this.syncSink || messages.length === 0) return;
+    const inputs = this.syncInputs(messages);
     if (inputs.length === 0) return;
     void this.syncSink.upsertMessages(inputs).catch((err) => {
       log.error("failed to persist whatsapp messages", { error: errMsg(err) });
     });
+  }
+
+  /** Hand `messages`, which nothing delivers inbound, to Chats as history. */
+  private recordHistory(messages: WAMessage[]): void {
+    const self = this.selfPnJid();
+    if (!this.syncSink?.recordHistory || !self || messages.length === 0) return;
+    const inputs = this.syncInputs(messages);
+    if (inputs.length === 0) return;
+    try {
+      this.syncSink.recordHistory(inputs, self);
+    } catch (err) {
+      log.error("failed to record whatsapp history", { error: errMsg(err) });
+    }
   }
 
   async stop(): Promise<void> {

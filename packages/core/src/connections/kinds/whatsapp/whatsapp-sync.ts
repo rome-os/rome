@@ -7,6 +7,9 @@
  * adapter stay free of any database dependency and makes its unit tests trivial.
  */
 
+import type { Attachment } from "@rome-os/app-runtime";
+import type { SyncedMessage } from "../../history-recording.js";
+
 export interface WaContactInput {
   /** Contact JID — `@s.whatsapp.net` or `@lid` form, as Baileys reports it. */
   jid: string;
@@ -67,4 +70,52 @@ export interface WhatsAppSyncSink {
   upsertContacts(contacts: WaContactInput[]): Promise<void>;
   upsertChats(chats: WaChatInput[]): Promise<void>;
   upsertMessages(messages: WaMessageInput[]): Promise<void>;
+  /**
+   * Record in Chats the messages Rome's account `self` did not hear as they
+   * arrived: a history sync's, and the ones the guardian said on the account
+   * themselves. The adapter never hands over a message it also delivers
+   * inbound, so recording one here never takes its place.
+   */
+  recordHistory?(messages: WaMessageInput[], self: string): void;
+}
+
+/**
+ * A synced WhatsApp message as Chats records it, for Rome's account `self`, or
+ * null for one Chats does not record. A reaction answers a message rather than
+ * being one, so it is left out. Media reads as its kind, with any caption, since
+ * the sync keeps no file.
+ */
+export function syncedFromWhatsApp(message: WaMessageInput, self: string): SyncedMessage | null {
+  if (message.type === "reaction") return null;
+  const group = message.chatJid.endsWith("@g.us");
+  const senderId = message.fromMe ? self : (message.senderJid ?? message.chatJid);
+  const type = attachmentType(message.type);
+  const caption = message.text?.trim();
+  const attachments: Attachment[] =
+    message.hasMedia && type ? [{ type, ...(caption ? { caption } : {}) }] : [];
+  return {
+    address: message.chatJid,
+    kind: group ? "group" : "dm",
+    id: message.id,
+    sender: {
+      id: senderId,
+      ...(!message.fromMe && message.pushName ? { name: message.pushName } : {}),
+    },
+    text: message.text ?? "",
+    attachments,
+    at: message.timestamp,
+  };
+}
+
+function attachmentType(type: string | null | undefined): Attachment["type"] | null {
+  switch (type) {
+    case "image":
+    case "video":
+    case "audio":
+    case "document":
+    case "sticker":
+      return type;
+    default:
+      return null;
+  }
 }

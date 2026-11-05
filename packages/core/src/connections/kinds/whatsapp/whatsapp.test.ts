@@ -299,6 +299,71 @@ describe("WhatsAppAdapter", () => {
       });
     });
 
+    describe("history for Chats", () => {
+      function recordingSink() {
+        const recorded: { ids: string[]; self: string }[] = [];
+        const { sink } = makeSink();
+        sink.recordHistory = (messages, self) => {
+          recorded.push({ ids: messages.map((m) => m.id), self });
+        };
+        return { sink, recorded };
+      }
+
+      it("hands a history sync's messages to Chats as Rome's account heard them", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "h1", fromMe: false } }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "h2", fromMe: true } }),
+          ],
+        });
+
+        expect(recorded).toEqual([{ ids: ["h1", "h2"], self: "1234567890@s.whatsapp.net" }]);
+      });
+
+      it("hands over only what the guardian said while messages are delivered inbound", async () => {
+        const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
+        adapter.onSync(sink);
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
+        await adapter.start();
+
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "in1", fromMe: false } }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+          ],
+        });
+
+        // Inbound recording keeps the one it is handed, so it raises it.
+        expect(delivered).toEqual(["in1"]);
+        expect(recorded.map((batch) => batch.ids)).toEqual([["own1"]]);
+      });
+
+      it("hands over every live message while nothing is delivered inbound", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        await adapter.start();
+
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "in1", fromMe: false } }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+          ],
+        });
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["in1", "own1"]]);
+      });
+    });
+
     it("mirrors our own outbound messages even though the agent pipeline skips them", async () => {
       const { sink, calls } = makeSink();
       let handled = false;

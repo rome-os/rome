@@ -84,6 +84,11 @@ import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
+import { recordSynced } from "./connections/history-recording.js";
+import {
+  syncedFromWhatsApp,
+  type WhatsAppSyncSink,
+} from "./connections/kinds/whatsapp/whatsapp-sync.js";
 import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
 import { WhatsAppAccounts } from "./chats/accounts/whatsapp.js";
 import { createAccountNames } from "./chats/accounts/account-names.js";
@@ -1516,7 +1521,20 @@ async function main() {
     chatStop,
     peopleRepo,
     whatsAppSyncSink: refreshingAfter(
-      whatsAppStoreRepo,
+      {
+        upsertContacts: (contacts) => whatsAppStoreRepo.upsertContacts(contacts),
+        upsertChats: (chats) => whatsAppStoreRepo.upsertChats(chats),
+        upsertMessages: (messages) => whatsAppStoreRepo.upsertMessages(messages),
+        // The mirror above still answers WhatsApp history reads. Chats keeps
+        // its own record beside it, to take over those reads.
+        recordHistory(messages, self) {
+          recordSynced(
+            chatsWired,
+            { platform: "whatsapp", id: self },
+            messages.flatMap((message) => syncedFromWhatsApp(message, self) ?? []),
+          );
+        },
+      } satisfies WhatsAppSyncSink,
       ["upsertContacts", "upsertChats"],
       refreshWhatsAppProfiles,
     ),
