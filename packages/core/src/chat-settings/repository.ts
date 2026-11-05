@@ -515,7 +515,7 @@ export class ChatSettingsRepository {
         ? this.speakerAt(tx, channel, descriptor.parent.chatId)
         : undefined;
       const parentSessionId = parent?.id ?? null;
-      // A thread whose parent stands in no chat stands in none either. The
+      // A thread whose parent Rome holds no speaker for stands in no chat. The
       // legacy chats backfill places it later, by these source columns.
       const legacy = parent?.chatId
         ? {}

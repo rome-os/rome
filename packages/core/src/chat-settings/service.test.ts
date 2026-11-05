@@ -202,6 +202,29 @@ describe("ChatSettingsService", () => {
     }
   });
 
+  it("keeps the legacy source columns on a thread whose parent Rome holds no speaker for", async () => {
+    const { repository, childDescriptor } = await setup();
+    repository.mutate(childDescriptor, childDescriptor.connectionKind, {
+      settings: null,
+      agentName: undefined,
+    });
+
+    // The legacy chats backfill places this row by its source columns.
+    expect(
+      testDb!.db.all(
+        sql`SELECT chat_id, parent_session_id, source_channel, source_thread_id
+            FROM rome_sessions WHERE thread_id = 'child'`,
+      ),
+    ).toEqual([
+      {
+        chat_id: null,
+        parent_session_id: null,
+        source_channel: "discord",
+        source_thread_id: "child",
+      },
+    ]);
+  });
+
   it("keeps settings on the parent while threads inherit without overrides", async () => {
     const { repository, service, changed, parent, child, childDescriptor, listed } = await setup();
 
