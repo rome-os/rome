@@ -21,12 +21,12 @@ function loginCard(promptText: string) {
   };
 }
 
-export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps): Action {
+export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
     schema: inputSchema,
     execute: async () => {
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (client) {
         // A saved key is not proof of a valid sign-in: Composio can revoke it.
         // Ping it, so an agent sent here after a 401 gets the card back instead

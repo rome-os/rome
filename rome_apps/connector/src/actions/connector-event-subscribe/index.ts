@@ -46,7 +46,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             "GitHub events don't run through Composio. Use connector_github_subscribe with a repo ('owner/name') or org and the events you want — it registers Rome's own GitHub webhook.",
         };
       }
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",

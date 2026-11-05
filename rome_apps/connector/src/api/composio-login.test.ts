@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { CliLoginError, parseApiKeyFromSession, parseLoginSession } from "./composio-login.js";
+import {
+  CliLoginError,
+  parseApiKeyFromSession,
+  parseCliProjects,
+  parseLoginSession,
+} from "./composio-login.js";
 
 // Fixtures captured from `composio` CLI v0.2.27 in the dev runtime container.
 const REAL_LOGIN_STDOUT = `{
@@ -90,5 +95,21 @@ describe("parseApiKeyFromSession", () => {
     } catch (err) {
       expect((err as CliLoginError).code).toBe("no_key");
     }
+  });
+});
+
+describe("parseCliProjects", () => {
+  it("reads the projects out of the CLI's JSON, past a banner", () => {
+    const stdout = `Update available\n[{"id":"pr_a","name":"A","is_selected_global_project":false},{"id":"pr_b"}]\n`;
+    expect(parseCliProjects(stdout)).toEqual([
+      { id: "pr_a", name: "A" },
+      { id: "pr_b", name: "pr_b" },
+    ]);
+  });
+
+  it("says so when there is no list to read", () => {
+    expect(() => parseCliProjects("not logged in")).toThrow(
+      "Could not read the Composio project list",
+    );
   });
 });

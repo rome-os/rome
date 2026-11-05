@@ -11,7 +11,14 @@ import { settings } from "../db/schema.js";
 // repo/org hook, and the `/webhook` handler's GitHub branch verifies inbound
 // `X-Hub-Signature-256` against it. One secret per instance, shared by every
 // GitHub hook Rome registers.
-export type SettingsKey = "webhookSecret" | "webhookEndpointId" | "githubWebhookSecret";
+//
+// `composioProject` pins the Composio project a user key addresses, as JSON
+// `{ orgId, projectId, projectName }` (see `composio-project.ts`).
+export type SettingsKey =
+  | "webhookSecret"
+  | "webhookEndpointId"
+  | "githubWebhookSecret"
+  | "composioProject";
 
 export class SettingsStore {
   constructor(private readonly db: AppDbContext) {}

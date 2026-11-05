@@ -103,6 +103,12 @@
         "elsewhere": "正推送到另一个 Rome",
         "setUp": "重新设置",
         "done": "事件推送已设置。"
+      },
+      "project": {
+        "title": "项目",
+        "label": "Composio 项目",
+        "default": "{{name}}（默认）",
+        "switched": "在之前项目中连接的服务，需要在这里重新连接。"
       }
     },
     "loadFailedFallback": "加载连接失败。",

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@rome-os/ui/spinner";
-import { ComposioWebhookRow } from "@/components/connections/composio-services";
+import { ComposioProjectRow, ComposioWebhookRow } from "@/components/connections/composio-services";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
@@ -123,7 +123,10 @@ export function ComposioConnectionSection({
       action={disconnectAction}
     >
       {loggedIn ? (
-        <ComposioWebhookRow onFlash={onFlash} />
+        <div className="flex flex-col gap-2">
+          <ComposioProjectRow onFlash={onFlash} />
+          <ComposioWebhookRow onFlash={onFlash} />
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           <Button

@@ -95,7 +95,7 @@ const inputSchema = z.object({
     .describe("Extra request headers as { name: value }, e.g. { 'Notion-Version': '2022-06-28' }."),
 });
 
-export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps): Action {
+export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
     schema: inputSchema,
@@ -233,7 +233,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
         }
       }
 
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",

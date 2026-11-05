@@ -26,7 +26,7 @@ const config: ActionConfig = {
   reliability: "medium",
   sideEffects: "write",
 };
-const deps = {} as unknown as AppActionRuntimeDeps;
+const deps = { appContext: { db: {} } } as unknown as AppActionRuntimeDeps;
 
 // A connected, unambiguous managed account — the happy resolution so each test
 // reaches the executeTool mapping under test.

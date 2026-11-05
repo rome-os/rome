@@ -71,6 +71,19 @@ function authHeaderFor(apiKey: string): Record<string, string> {
   return apiKey.startsWith("uak_") ? { "x-user-api-key": apiKey } : { "x-api-key": apiKey };
 }
 
+/** The auth header, plus the pinned project's headers when a user key carries a pin. */
+function requestHeadersFor(
+  apiKey: string,
+  project: ComposioClientOptions["project"],
+): Record<string, string> {
+  if (!apiKey.startsWith("uak_") || !project) return authHeaderFor(apiKey);
+  return {
+    ...authHeaderFor(apiKey),
+    "x-org-id": project.orgId,
+    "x-project-id": project.projectId,
+  };
+}
+
 class ComposioHttpError extends Error {
   constructor(
     message: string,
@@ -121,6 +134,19 @@ export interface WebhookEndpointResult {
 export interface ComposioClientOptions {
   apiKey: string;
   baseURL?: string;
+  /**
+   * The project a user key (`uak_`) addresses. Without it, Composio picks the
+   * key's default project, which changes when the guardian creates another
+   * one. A project key (`ak_`) belongs to one project and ignores this.
+   */
+  project?: { orgId: string; projectId: string } | null;
+}
+
+/** The project a user key reaches by default, as Composio's session info names it. */
+export interface ComposioDefaultProject {
+  projectId: string;
+  projectName: string;
+  orgId: string | null;
 }
 
 export interface ActiveTrigger {
@@ -465,15 +491,48 @@ export class ComposioClient {
   private readonly rest: ComposioRestClient;
   private readonly apiKey: string;
   private readonly baseURL: string;
+  private readonly headers: Record<string, string>;
 
   constructor(opts: ComposioClientOptions) {
     this.apiKey = opts.apiKey;
     this.baseURL = opts.baseURL ?? DEFAULT_BASE_URL;
+    this.headers = requestHeadersFor(opts.apiKey, opts.project);
     this.rest = new ComposioRestClient({
       apiKey: null,
       baseURL: this.baseURL,
-      defaultHeaders: authHeaderFor(this.apiKey),
+      defaultHeaders: this.headers,
     });
+  }
+
+  /** Whether the key is a user key, which can reach every project of its account. */
+  get isUserKey(): boolean {
+    return this.apiKey.startsWith("uak_");
+  }
+
+  /**
+   * The project the key reaches with no project headers: Composio's default
+   * for a user key. Reads only `project`, never the signing secret beside it.
+   */
+  async defaultProject(): Promise<ComposioDefaultProject> {
+    const url = `${this.baseURL.replace(/\/$/, "")}/api/v3/auth/session/info`;
+    const response = await fetch(url, { method: "GET", headers: authHeaderFor(this.apiKey) });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new ComposioHttpError(
+        `Composio session info returned ${response.status}: ${text || response.statusText}`,
+        response.status,
+      );
+    }
+    const body = (await response.json()) as {
+      project?: { nano_id?: unknown; name?: unknown; org_id?: unknown };
+    };
+    const id = body.project?.nano_id;
+    if (typeof id !== "string" || !id) throw new Error("Composio session info names no project");
+    return {
+      projectId: id,
+      projectName: typeof body.project?.name === "string" ? body.project.name : id,
+      orgId: typeof body.project?.org_id === "string" ? body.project.org_id : null,
+    };
   }
 
   /**
@@ -912,7 +971,7 @@ export class ComposioClient {
   ): Promise<WebhookEndpointResult> {
     const response = await fetch(this.webhookEndpointsUrl(id), {
       method,
-      headers: { "content-type": "application/json", ...authHeaderFor(this.apiKey) },
+      headers: { "content-type": "application/json", ...this.headers },
       body: JSON.stringify({
         webhook_url: webhookUrl,
         version: "V3",
@@ -942,7 +1001,7 @@ export class ComposioClient {
   private async listWebhookEndpoints(): Promise<Array<{ id?: string; webhook_url?: unknown }>> {
     const response = await fetch(this.webhookEndpointsUrl(), {
       method: "GET",
-      headers: { ...authHeaderFor(this.apiKey) },
+      headers: { ...this.headers },
     });
     if (!response.ok) {
       const text = await response.text();
@@ -960,7 +1019,7 @@ export class ComposioClient {
   async deleteWebhookEndpoint(id: string): Promise<void> {
     const response = await fetch(this.webhookEndpointsUrl(id), {
       method: "DELETE",
-      headers: { ...authHeaderFor(this.apiKey) },
+      headers: { ...this.headers },
     });
     if (!response.ok && response.status !== 404) {
       const text = await response.text();
@@ -1048,7 +1107,7 @@ export class ComposioClient {
     try {
       const response = await fetch(url, {
         method: "GET",
-        headers: { ...authHeaderFor(this.apiKey) },
+        headers: { ...this.headers },
         signal: AbortSignal.timeout(PING_TIMEOUT_MS),
       });
       if (response.ok) return { ok: true };

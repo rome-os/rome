@@ -33,6 +33,22 @@ export interface ComposioWebhookStatus {
 /** Where the Composio project's one webhook delivers; `elsewhere` is usually another Rome. */
 export type ComposioWebhookTarget = "ours" | "elsewhere" | "none" | "unknown";
 
+/** One Composio project of the account, as the Settings picker lists it. */
+export interface ComposioProject {
+  id: string;
+  name: string;
+  /** The project this Rome is pinned to. */
+  selected: boolean;
+  /** Composio's default project for the signed-in key. */
+  isDefault: boolean;
+}
+
+/** The picker's projects; `fixed` when the key belongs to one project and there is nothing to pick. */
+export interface ComposioProjects {
+  fixed: boolean;
+  items: ComposioProject[];
+}
+
 /** A Composio service as one row: connected services carry whether they need
  *  attention, available ones do not. */
 export interface ComposioServiceRow extends ComposioCatalogEntry {
@@ -43,6 +59,7 @@ export const COMPOSIO_CATALOG_QUERY_KEY = ["composio", "catalog"] as const;
 export const COMPOSIO_ACCOUNTS_QUERY_KEY = ["composio", "accounts"] as const;
 export const COMPOSIO_STATUS_QUERY_KEY = ["composio", "status"] as const;
 export const COMPOSIO_WEBHOOK_TARGET_QUERY_KEY = ["composio", "webhook-target"] as const;
+export const COMPOSIO_PROJECTS_QUERY_KEY = ["composio", "projects"] as const;
 
 export async function fetchComposioCatalog(): Promise<ComposioCatalogEntry[]> {
   const body = await fetchJson<{ items: ComposioCatalogEntry[] }>(`${CONNECTOR_API}/catalog`, {
@@ -89,6 +106,20 @@ export async function fetchComposioWebhookTarget(): Promise<ComposioWebhookTarge
     { fallback: "Couldn't check where Composio sends events." },
   );
   return body.target;
+}
+
+export async function fetchComposioProjects(): Promise<ComposioProjects> {
+  return await fetchJson<ComposioProjects>(`${CONNECTOR_API}/projects`, {
+    fallback: "Couldn't load your Composio projects.",
+  });
+}
+
+export async function selectComposioProject(projectId: string): Promise<void> {
+  await fetchJson(`${CONNECTOR_API}/projects/select`, {
+    method: "POST",
+    json: { projectId },
+    fallback: "Couldn't switch the Composio project. Try again.",
+  });
 }
 
 export async function registerComposioWebhook(): Promise<void> {

@@ -1,4 +1,4 @@
-import { SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
+import { type AppDbContext, SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
 
 import {
   ComposioClient,
@@ -7,6 +7,7 @@ import {
 } from "./api/composio-client.js";
 import { forgetActiveTriggers } from "./api/active-triggers.js";
 import { readSessionApiKey } from "./api/composio-login.js";
+import { pinnedProjectFor } from "./api/composio-project.js";
 import { buildTopic } from "./api/topic.js";
 
 /**
@@ -245,14 +246,15 @@ export function githubViaRomeHint(): string {
 /**
  * Build a ComposioClient from the live CLI session key
  * (`~/.composio/user_data.json`) — the single source of truth for the Composio
- * credential. Returns null when the CLI isn't logged in so callers can surface a
+ * credential, addressing this Rome's pinned project (`composio-project.ts`).
+ * Returns null when the CLI isn't logged in so callers can surface a
  * "log in to Composio first" message instead of throwing on a missing
  * credential.
  */
-export async function loadConnectorClient(): Promise<ComposioClient | null> {
+export async function loadConnectorClient(db: AppDbContext): Promise<ComposioClient | null> {
   const apiKey = await readSessionApiKey();
   if (!apiKey) return null;
-  return new ComposioClient({ apiKey });
+  return new ComposioClient({ apiKey, project: await pinnedProjectFor(db, apiKey) });
 }
 
 /**

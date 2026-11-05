@@ -14,8 +14,11 @@ const mocks = rs.hoisted(() => ({
   ensureWebhookRegistered: rs.fn(),
   readSessionApiKey: rs.fn(),
   completeCliLogin: rs.fn(),
+  readSessionOrgId: rs.fn(),
+  listCliProjects: rs.fn(),
   settings: { get: rs.fn(), set: rs.fn(), delete: rs.fn() },
   client: {
+    defaultProject: rs.fn(),
     ensureAuthConfig: rs.fn(),
     ensureConnection: rs.fn(),
     listConnectedAccounts: rs.fn(),
@@ -28,6 +31,8 @@ rs.mock("./composio-login.js", () => ({
   ...composioLoginModule,
   readSessionApiKey: mocks.readSessionApiKey,
   completeCliLogin: mocks.completeCliLogin,
+  readSessionOrgId: mocks.readSessionOrgId,
+  listCliProjects: mocks.listCliProjects,
 }));
 
 rs.mock("./settings-store.js", () => ({
@@ -361,5 +366,90 @@ describe("connector API GitHub webhook outbox", () => {
       ).toEqual({ n: 0 }),
     );
     sqlite.close();
+  });
+});
+
+describe("connector API Composio project pin", () => {
+  const pinned = (projectId: string) =>
+    JSON.stringify({ orgId: "ok_org", projectId, projectName: projectId });
+  let stored: Map<string, string>;
+
+  beforeEach(() => {
+    rs.resetAllMocks();
+    stored = new Map();
+    mocks.settings.get.mockImplementation(async (key: string) => stored.get(key) ?? null);
+    mocks.settings.set.mockImplementation(async (key: string, value: string) => {
+      stored.set(key, value);
+    });
+    mocks.settings.delete.mockImplementation(async (key: string) => {
+      stored.delete(key);
+    });
+    mocks.readSessionApiKey.mockResolvedValue("uak_test");
+    mocks.completeCliLogin.mockResolvedValue("uak_new");
+    mocks.readSessionOrgId.mockResolvedValue("ok_org");
+    mocks.client.ping.mockResolvedValue({ ok: true });
+    mocks.client.defaultProject.mockResolvedValue({
+      projectId: "pr_default",
+      projectName: "Default",
+      orgId: "org-uuid",
+    });
+    mocks.listCliProjects.mockResolvedValue([
+      { id: "pr_default", name: "Default" },
+      { id: "pr_second", name: "Second" },
+    ]);
+  });
+
+  it("pins the key's default project at login, without asking", async () => {
+    const response = await createApiHandler(context()).handle(
+      request("login/complete", "POST", { cliKey: "cli_test_session" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(stored.get("composioProject") ?? "null")).toEqual({
+      orgId: "ok_org",
+      projectId: "pr_default",
+      projectName: "Default",
+    });
+    expect(mocks.listCliProjects).not.toHaveBeenCalled();
+  });
+
+  it("keeps the pinned project at a later login of the same account", async () => {
+    stored.set("composioProject", pinned("pr_second"));
+
+    await createApiHandler(context()).handle(
+      request("login/complete", "POST", { cliKey: "cli_test_session" }),
+    );
+
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_second");
+  });
+
+  it("drops the pin at logout", async () => {
+    stored.set("composioProject", pinned("pr_second"));
+
+    await createApiHandler(context()).handle(request("logout", "POST"));
+
+    expect(stored.has("composioProject")).toBe(false);
+  });
+
+  it("lists the projects with the pinned one selected and Composio's default marked", async () => {
+    stored.set("composioProject", pinned("pr_second"));
+
+    const response = await createApiHandler(context()).handle(request("projects"));
+
+    await expect(response.json()).resolves.toEqual({
+      fixed: false,
+      items: [
+        { id: "pr_default", name: "Default", selected: false, isDefault: true },
+        { id: "pr_second", name: "Second", selected: true, isDefault: false },
+      ],
+    });
+  });
+
+  it("lists no projects for a project key, which is fixed to one", async () => {
+    mocks.readSessionApiKey.mockResolvedValue("ak_test");
+
+    const response = await createApiHandler(context()).handle(request("projects"));
+
+    await expect(response.json()).resolves.toEqual({ fixed: true, items: [] });
   });
 });

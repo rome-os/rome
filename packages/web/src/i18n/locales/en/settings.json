@@ -103,6 +103,12 @@
         "elsewhere": "Going to another Rome",
         "setUp": "Set up again",
         "done": "Event delivery is set up."
+      },
+      "project": {
+        "title": "Project",
+        "label": "Composio project",
+        "default": "{{name}} (default)",
+        "switched": "Services connected in the previous project need connecting again here."
       }
     },
     "loadFailedFallback": "Failed to load connections.",

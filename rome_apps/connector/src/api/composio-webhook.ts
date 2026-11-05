@@ -64,6 +64,11 @@ const TARGET_TTL_MS = 5 * 60_000;
 // Composio each time. Registering drops it, since that re-points the URL.
 let lastTarget: { url: string; target: ComposioWebhookTarget; at: number } | null = null;
 
+/** Drops the kept answer, when this Rome signs out or moves to another project. */
+export function forgetComposioWebhookTarget(): void {
+  lastTarget = null;
+}
+
 const sameUrl = (a: string, b: string) => {
   try {
     return new URL(a).href === new URL(b).href;

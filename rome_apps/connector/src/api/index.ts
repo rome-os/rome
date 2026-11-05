@@ -4,14 +4,25 @@ import {
   isComposioAuthenticationError,
   isComposioNotFoundError,
 } from "./composio-client.js";
+import { forgetActiveTriggers } from "./active-triggers.js";
+import {
+  clearPinnedProject,
+  ensurePinnedProject,
+  livePinDeps,
+  type PinnedProject,
+  readPinnedProject,
+} from "./composio-project.js";
+import { switchProject } from "./composio-project-switch.js";
 import {
   composioWebhookTarget,
   ensureComposioWebhookRegistered,
+  forgetComposioWebhookTarget,
   RelayWebhookUnavailableError,
 } from "./composio-webhook.js";
 import {
   CliLoginError,
   completeCliLogin,
+  listCliProjects,
   logoutCliSession,
   readSessionApiKey,
   startCliLogin,
@@ -39,6 +50,7 @@ import {
   isSupportedToolkit,
   romeManagedConnectHint,
   unsupportedToolkitHint,
+  loadConnectorClient,
   ROME_USER_ID,
   subscribeTriggerFeed,
 } from "../shared.js";
@@ -145,6 +157,10 @@ class ComposioApiHandler implements RomeAppApiHandler {
       if (method === "POST" && path === "login/cancel") return this.handleLoginCancel(request);
       if (method === "POST" && path === "logout") return await this.handleLogout();
       if (method === "GET" && path === "webhook/target") return await this.handleWebhookTarget();
+      if (method === "GET" && path === "projects") return await this.handleListProjects();
+      if (method === "POST" && path === "projects/select") {
+        return await this.handleSelectProject(request);
+      }
       if (method === "POST" && path === "webhook/register")
         return await this.handleRegisterWebhook();
       if (method === "POST" && path === "connectors") {
@@ -190,9 +206,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
   }
 
   private async loadClient(): Promise<ComposioClient | null> {
-    const apiKey = await readSessionApiKey();
-    if (!apiKey) return null;
-    return new ComposioClient({ apiKey });
+    return loadConnectorClient(this.ctx.db);
   }
 
   /** The Composio catalog, for Settings › Connections. `romeManaged` marks
@@ -318,12 +332,12 @@ class ComposioApiHandler implements RomeAppApiHandler {
    * session, which is the single source of truth the app reads live everywhere.
    */
   private async finalizeLogin(apiKey: string, signal?: AbortSignal): Promise<Response> {
-    const client = new ComposioClient({ apiKey });
-    const ping = await client.ping();
+    const ping = await new ComposioClient({ apiKey }).ping();
     if (!ping.ok) {
       if (ping.status === 401) return authenticationError();
       return jsonError(502, "composio_unavailable", ping.message);
     }
+    const client = new ComposioClient({ apiKey, project: await this.pinAtLogin(apiKey) });
 
     // A new Composio project cannot use signing material from the previous one.
     // Drop it before upserting so a failed recovery never leaves the dashboard
@@ -358,6 +372,28 @@ class ComposioApiHandler implements RomeAppApiHandler {
     }
 
     return Response.json({ ok: true });
+  }
+
+  /**
+   * Pins a project at login when none is pinned, without asking: the one that
+   * holds this Rome's webhook endpoint, or else the key's default. A pin from
+   * another Composio organization (a different account signed in) is replaced.
+   * When pinning fails, the login still succeeds, unpinned, and the next client
+   * tries again.
+   */
+  private async pinAtLogin(apiKey: string): Promise<PinnedProject | null> {
+    const deps = livePinDeps(this.ctx.db, apiKey);
+    try {
+      const pinned = await readPinnedProject(deps.store);
+      const orgId = await deps.orgId();
+      if (pinned && orgId && pinned.orgId !== orgId) await clearPinnedProject(deps.store);
+      return await ensurePinnedProject(deps);
+    } catch (err) {
+      this.ctx.log.warn("login: composio project pin failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
   private mapLoginError(err: unknown): Response {
@@ -402,6 +438,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
     }
     await this.settings.delete("webhookSecret");
     await this.settings.delete("webhookEndpointId");
+    await clearPinnedProject(this.settings);
+    forgetComposioWebhookTarget();
+    forgetActiveTriggers();
     try {
       await logoutCliSession();
     } catch (err) {
@@ -437,6 +476,78 @@ class ComposioApiHandler implements RomeAppApiHandler {
       settings: this.ctx.repositories.settings,
     });
     return Response.json({ target });
+  }
+
+  /**
+   * The account's Composio projects for the Settings picker: the pinned one
+   * selected, Composio's default marked. A project key reaches one project,
+   * so it lists none and says the project is fixed.
+   */
+  private async handleListProjects(): Promise<Response> {
+    const apiKey = await readSessionApiKey();
+    if (!apiKey) return jsonError(409, "no_api_key", "Log in to Composio first");
+    if (!apiKey.startsWith("uak_")) return Response.json({ fixed: true, items: [] });
+    const deps = livePinDeps(this.ctx.db, apiKey);
+    const [projects, pinned, fallback] = await Promise.all([
+      deps.listProjects(),
+      ensurePinnedProject(deps).catch(() => readPinnedProject(deps.store)),
+      deps
+        .clientFor(null)
+        .defaultProject()
+        .catch(() => null),
+    ]);
+    return Response.json({
+      fixed: false,
+      items: projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        selected: project.id === pinned?.projectId,
+        isDefault: project.id === fallback?.projectId,
+      })),
+    });
+  }
+
+  /** Pins another project and moves this Rome's Composio events there (`switchProject`). */
+  private async handleSelectProject(request: RomeAppApiRequest): Promise<Response> {
+    const projectId = parseJsonBody<{ projectId?: string }>(request.body)?.projectId?.trim();
+    if (!projectId) return jsonError(400, "missing_project", "projectId is required");
+    const apiKey = await readSessionApiKey();
+    if (!apiKey) return jsonError(409, "no_api_key", "Log in to Composio first");
+    if (!apiKey.startsWith("uak_")) {
+      return jsonError(409, "project_fixed", "This Composio key belongs to one project.");
+    }
+    const deps = livePinDeps(this.ctx.db, apiKey);
+    try {
+      const result = await switchProject(
+        {
+          store: deps.store,
+          orgId: deps.orgId,
+          listProjects: listCliProjects,
+          clientFor: (project) => new ComposioClient({ apiKey, project }),
+          registerWebhook: async (client) => {
+            await ensureComposioWebhookRegistered({
+              client,
+              appSettings: this.settings,
+              settings: this.ctx.repositories.settings,
+            });
+          },
+        },
+        projectId,
+      );
+      if (result.webhookError) {
+        this.ctx.log.warn("project switch: webhook registration failed", {
+          error: result.webhookError,
+        });
+      }
+      return Response.json({ ok: true, ...result });
+    } catch (err) {
+      if (isComposioAuthenticationError(err)) return authenticationError();
+      return jsonError(
+        502,
+        "project_switch_failed",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   private async handleRegisterWebhook(): Promise<Response> {
@@ -735,8 +846,11 @@ class ComposioApiHandler implements RomeAppApiHandler {
       return new Response(null, { status: 401 });
     }
 
-    const client = await this.loadClient();
-    if (!client) return new Response(null, { status: 401 });
+    // Trigger types are Composio's catalog, the same in every project, so this
+    // client needs no pinned project, and a delivery never waits on pinning one.
+    const apiKey = await readSessionApiKey();
+    if (!apiKey) return new Response(null, { status: 401 });
+    const client = new ComposioClient({ apiKey });
 
     let verified;
     try {
