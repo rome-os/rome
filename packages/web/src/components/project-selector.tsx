@@ -33,7 +33,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { IconButton } from "@/components/ui/icon-button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -55,16 +55,22 @@ interface ProjectSelectorProps {
   menuOpen: boolean;
   searchQuery: string;
   setSearchQuery: (value: string) => void;
-  createFormOpen: boolean;
-  setCreateFormOpen: (value: boolean) => void;
-  newProjectName: string;
-  setNewProjectName: (value: string) => void;
-  creatingProject: boolean;
-  connectOnCreate: boolean;
-  setConnectOnCreate: (value: boolean) => void;
   onToggleMenu: () => void;
   onPickProject: (name: string) => void;
-  onCreateProject: () => void;
+  /** The new-project row and form are shown only when this is set. */
+  onCreateProject?: () => void;
+  createFormOpen?: boolean;
+  setCreateFormOpen?: (value: boolean) => void;
+  newProjectName?: string;
+  setNewProjectName?: (value: string) => void;
+  creatingProject?: boolean;
+  connectOnCreate?: boolean;
+  setConnectOnCreate?: (value: boolean) => void;
+  /**
+   * Renders an anchor in place of the trigger button. The popover then opens
+   * only through `menuOpen`, next to whatever the anchor is placed beside.
+   */
+  hideTrigger?: boolean;
   /** Cloud's devices, or null when Rome could not read them. Empty keeps one level. */
   devices?: PickerDevice[] | null;
   /** The draft's device folder. It excludes a project: the draft holds one or the other. */
@@ -75,6 +81,8 @@ interface ProjectSelectorProps {
    */
   onPickDeviceFolder?: (folder: DraftDeviceFolder) => void;
 }
+
+const noop = () => {};
 
 export const ProjectSelector = forwardRef(function ProjectSelector(
   {
@@ -89,13 +97,14 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
     menuOpen,
     searchQuery,
     setSearchQuery,
-    createFormOpen,
-    setCreateFormOpen,
-    newProjectName,
-    setNewProjectName,
-    creatingProject,
-    connectOnCreate,
-    setConnectOnCreate,
+    createFormOpen = false,
+    setCreateFormOpen = noop,
+    newProjectName = "",
+    setNewProjectName = noop,
+    creatingProject = false,
+    connectOnCreate = false,
+    setConnectOnCreate = noop,
+    hideTrigger = false,
     onToggleMenu,
     onPickProject,
     onCreateProject,
@@ -218,31 +227,36 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
           if (next !== menuOpen) onToggleMenu();
         }}
       >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            // The fill is the variant's job: transparent while the default
-            // project is in play, filled once a real one is, and each variant
-            // carries its own open-state fill through `aria-expanded`. `ghost`
-            // sets no resting colour, so the label takes one or it reads as the
-            // loudest thing in a row of muted chrome.
-            variant={isDefault && !folderLabel ? "ghost" : "secondary"}
-            size="sm"
-            disabled={disabled}
-            className={cn(
-              "max-w-[200px] touch-target",
-              isDefault && !folderLabel && "text-muted-foreground",
-            )}
-            title={folderLabel ?? (isDefault ? t("project.buttonLabel") : draftProjectLabel)}
-            aria-label={t("project.buttonLabel")}
-          >
-            {folderLabel ? <Laptop data-icon="inline-start" aria-hidden="true" /> : null}
-            <span className="truncate">
-              {folderLabel ?? (isDefault ? defaultProjectName : draftProjectLabel)}
-            </span>
-            <ChevronDown data-icon="inline-end" aria-hidden="true" />
-          </Button>
-        </PopoverTrigger>
+        {hideTrigger ? (
+          // Fills the box of the element it sits in; that element must be `relative`.
+          <PopoverAnchor className="pointer-events-none absolute inset-0" />
+        ) : (
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              // The fill is the variant's job: transparent while the default
+              // project is in play, filled once a real one is, and each variant
+              // carries its own open-state fill through `aria-expanded`. `ghost`
+              // sets no resting colour, so the label takes one or it reads as the
+              // loudest thing in a row of muted chrome.
+              variant={isDefault && !folderLabel ? "ghost" : "secondary"}
+              size="sm"
+              disabled={disabled}
+              className={cn(
+                "max-w-[200px] touch-target",
+                isDefault && !folderLabel && "text-muted-foreground",
+              )}
+              title={folderLabel ?? (isDefault ? t("project.buttonLabel") : draftProjectLabel)}
+              aria-label={t("project.buttonLabel")}
+            >
+              {folderLabel ? <Laptop data-icon="inline-start" aria-hidden="true" /> : null}
+              <span className="truncate">
+                {folderLabel ?? (isDefault ? defaultProjectName : draftProjectLabel)}
+              </span>
+              <ChevronDown data-icon="inline-end" aria-hidden="true" />
+            </Button>
+          </PopoverTrigger>
+        )}
 
         <PopoverContent
           side="top"
@@ -453,7 +467,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
 
           {/* Outside <Command>: cmdk's root claims the arrow keys and Enter that
               the new-project field needs for editing and submit. */}
-          {atRoot ? null : (
+          {atRoot || (!browse && !onCreateProject) ? null : (
             <div className="border-t border-border-subtle p-1">
               {browse ? (
                 <div className="flex px-1 py-1">
@@ -493,7 +507,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
                         }
                         if (shouldSubmitOnEnter(event)) {
                           event.preventDefault();
-                          onCreateProject();
+                          onCreateProject?.();
                         }
                       }}
                       placeholder={t("project.createPlaceholder")}

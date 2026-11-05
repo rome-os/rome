@@ -68,6 +68,8 @@
       "emptyDescription": "Concierge 正在做、计划做或盯着的任务会显示在这里。"
     },
     "messageDetails": "消息详情",
+    "chooseFolder": "选择文件夹…",
+    "removeFolder": "移除文件夹",
     "composerMenu": "添加文件或切换模型",
     "placeholder": "发消息",
     "empty": {
