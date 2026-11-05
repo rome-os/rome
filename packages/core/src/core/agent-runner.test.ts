@@ -5144,6 +5144,35 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("an id-only resume of a chat's session leaves the chat to its route", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const modelResolver = createModelResolver({
+        providers: [codexProvider([])],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+      const chats = new ChatsWebChatRepository(testDb.db);
+      await chats.createSession("resumed-chat", "Resumed chat");
+      const repo = new SessionsRepository(testDb.db);
+      const sessionId = await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:resumed-chat",
+        status: "active",
+      });
+
+      const manager = createTestSessionManager(managerDeps(modelResolver));
+      const runner = new AgentRunner(manager, agentLoader, chats);
+      await collectMessages(runner.run({ agentName: "test-main", sessionId, prompt: "Continue" }));
+      await manager.shutdown();
+
+      // The run names no conversation, so the session keeps the one its row
+      // recorded, and a chat's own turns are the chat route's to write.
+      await expect(chats.getMessages("resumed-chat")).resolves.toEqual([]);
+      await expect(chats.getTraceContents("resumed-chat")).resolves.toEqual([]);
+    });
+
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
       const state = {
         codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },

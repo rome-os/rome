@@ -198,8 +198,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // The line the run names by its platform id, which the turn answers,
         // and the one its reply quotes, as Chats holds them.
         const lines =
-          this.runLineDeps && thread?.romeSessionId
-            ? await runLines(this.runLineDeps.lines, thread.romeSessionId, req)
+          this.runLineDeps && romeSessionId
+            ? await runLines(this.runLineDeps.lines, romeSessionId, req)
             : null;
 
         // sendTurn is sync — turnId returned immediately,

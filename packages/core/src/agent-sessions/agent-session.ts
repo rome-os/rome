@@ -660,17 +660,12 @@ export function createAgentSessionManager(
     // `rome.session.acquire` counter exposes the reuse hit-rate that the 15s
     // keep-alive is supposed to buy but summon defeats by not passing a stable key.
     let reopen = false;
-    // Prefer the per-call marker (the summon call-site threads `isSubagent`
-    // through the RPC init) over the manager-wide default: the top-level
-    // manager that serves blocking summons is created with `isSubagent=false`,
-    // so labelling off the manager alone would mislabel every summon open.
-    const isSubagentForMetric = isSubagent;
     const recordAcquire = (outcome: "reuse" | "cold" | "reopen" | "coalesced") => {
       span.setAttribute("outcome", outcome);
       sessionAcquireMetric().add(1, {
         outcome,
         "agent.name": key.agentName,
-        is_subagent: isSubagentForMetric,
+        is_subagent: isSubagent,
       });
     };
     const existing = sessions.get(k);
@@ -980,9 +975,13 @@ async function openSession(
   const storedKey = key.caller;
   // The conversation today's rows keep this caller's turns in. A child's is
   // its own session, which a resume fills in when the record failed at mint.
+  // A resume by id keeps the conversation its row recorded: the caller it
+  // reads back from the row names no conversation of its opener's.
   const requestedRomeSessionId = opts.isSubagent
     ? init.resumeSessionId
-    : deps.log?.conversationOf?.(key.caller);
+    : init.resumeSessionId
+      ? undefined
+      : deps.log?.conversationOf?.(key.caller);
   let resumeResult:
     | {
         id: string;
