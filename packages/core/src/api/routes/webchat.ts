@@ -4089,7 +4089,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // AgentSession turnId — they're a higher-level wrapper that may run
     // arbitrary actions. Mint a synthetic turnId so the stream is still
     // addressable via /turns/:turnId/stream like a user-initiated turn. A
-    // recorded turn adds its own id as `agentTurnId` once it starts.
+    // session turn the task runs adds its own id as `agentTurnId` once it
+    // starts.
     const syntheticTurnId = `backend:${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
     // Deliberately top-level only. A side chat has no scheduled wake-ups (see
@@ -4131,11 +4132,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let inSessionTurn = false;
     const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
       const recorded = options?.recorded === true;
-      if (recorded && msg.type === "turn_start") {
-        recordedTurnId = msg.turnId;
-        // The recorded turn saves its trace and reply under its own id, so the
-        // stream adopts that id: a client that names the turn by it then hides
-        // the saved trace behind the live row instead of showing both.
+      if (recorded && msg.type === "turn_start") recordedTurnId = msg.turnId;
+      if (msg.type === "turn_start") {
+        // The session saves the turn's trace and reply under its own id,
+        // whoever delivers the reply, so the stream adopts that id: a client
+        // that names the turn by it then hides the saved trace behind the live
+        // row instead of showing both.
         if (!stream.agentTurnId) {
           stream.agentTurnId = msg.turnId;
           streamsByTurnId.set(msg.turnId, stream);

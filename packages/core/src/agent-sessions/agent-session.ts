@@ -2150,12 +2150,15 @@ class AgentSessionImpl implements AgentSession {
     return this.modelSession.providerId;
   }
 
+  /** The running turn's reply address, even when it has none; between
+   *  turns, the last opener's. */
   get currentTurnThreadContextRef(): ThreadContext | undefined {
-    return this.currentSink?.threadContext ?? this.surface.replies;
+    return this.currentSink ? this.currentSink.threadContext : this.surface.replies;
   }
 
+  /** The running turn's shared context; between turns, the last one's. */
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
-    return this.currentSink?.sharedContext ?? this.sharedContext;
+    return this.currentSink ? this.currentSink.sharedContext : this.sharedContext;
   }
 
   get currentTurnRomeSessionIdRef(): string {
@@ -2854,7 +2857,7 @@ class AgentSessionImpl implements AgentSession {
         turnId: sink.turnId,
         agentName: this.key.agentName,
         caller: this.key.caller,
-        threadContext: sink.threadContext ?? this.surface.replies,
+        threadContext: sink.threadContext,
         parent: sink.lifecycleParent,
       }),
       timing: { startedAt },
@@ -2908,7 +2911,7 @@ class AgentSessionImpl implements AgentSession {
         turnId: sink.turnId,
         agentName: this.key.agentName,
         caller: this.key.caller,
-        threadContext: sink.threadContext ?? this.surface.replies,
+        threadContext: sink.threadContext,
         parent: sink.lifecycleParent,
       }),
       status,
@@ -3375,8 +3378,6 @@ class AgentSessionImpl implements AgentSession {
       romeSessionId: this.sessionId,
       romeSessionType: this.isSubagent ? "subagent" : "action",
     };
-    // The last turn's shared context stands for the session between turns.
-    if (input.sharedContext) this.sharedContext = input.sharedContext;
     const initiatedBy = options?.initiatedBy;
     const parentTurn = typeof initiatedBy === "object" ? initiatedBy.parentTurn : undefined;
     const sink: TurnSink = {
@@ -3458,6 +3459,12 @@ class AgentSessionImpl implements AgentSession {
       this.turnMutex.runExclusive(
         async () => {
           sink.providerTurnIdAtStart = this.modelSession.lastProviderTurnId;
+          // The last turn's shared context stands for the session between
+          // turns, and a turn that names none runs with it. Both are settled
+          // here, in turn order, so a turn queued behind this one changes
+          // neither while it runs.
+          if (input.sharedContext) this.sharedContext = input.sharedContext;
+          else sink.sharedContext = this.sharedContext;
           try {
             await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
           } catch (err) {
@@ -3566,7 +3573,7 @@ class AgentSessionImpl implements AgentSession {
       // userPrompt derivation) still key off it. Step 2 of the stream-shape
       // cleanup demotes it to once-per-session — turn_start above is already
       // the authoritative turn boundary.
-      const tc = sink.threadContext ?? this.surface.replies;
+      const tc = sink.threadContext;
       // Thread + project framing lives on the FIRST user message of a fresh
       // conversation (a `<thread_context>` block), not the system prompt, so the
       // cached system prefix stays identical across sessions. Gated to a new,

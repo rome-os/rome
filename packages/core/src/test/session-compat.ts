@@ -12,6 +12,7 @@ import {
 } from "../agent-sessions/agent-session.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatModelSelection } from "../core/chat-model-selection.js";
 import { callerFromKey } from "../core/session-caller.js";
 import { createSessionLog, openNamed } from "../agent-sessions/rows/session-log.js";
 import {
@@ -116,6 +117,12 @@ export function createTestSessionManager(
         ...rest,
         log: log ?? createSessionLog(webchatRepo),
         routineKeyFor: rest.routineKeyFor ?? chatRoutineKeyForToolUse,
+        // As index.ts wires it: a session resumed by id restores its chat's
+        // model.
+        rememberedModel:
+          rest.rememberedModel ??
+          ((caller, agentName, pinned) =>
+            chatModelSelection(webchatRepo)(callerFromKey(caller), agentName, pinned)),
       },
       options,
     ),

@@ -5878,16 +5878,19 @@ describe("Webchat API", () => {
       ]);
     });
 
-    it("addresses a recorded continuation by its own turn id while it runs", async () => {
-      // A defer wake-up saves its trace under the agent's turn id. The chat
-      // reattaches through the listing, so the listing and the stream must
-      // name that id too, or the chat shows the turn twice.
-      const sessionId = "sess-recorded-turn-id";
-      await deps.webchatRepo.createSession(sessionId, "Recorded Turn Id");
+    it.each([
+      ["a recorded continuation", { recorded: true }],
+      ["an approval continuation", undefined],
+    ])("addresses %s by its session turn id while it runs", async (label, recorded) => {
+      // A defer wake-up or an approval's continuation saves its trace under
+      // the agent's turn id. The chat reattaches through the listing, so the
+      // listing and the stream must name that id too, or the chat shows the
+      // turn twice.
+      const sessionId = `sess-turn-id-${label.replaceAll(" ", "-")}`;
+      await deps.webchatRepo.createSession(sessionId, "Session Turn Id");
       const owner = { currentTurnId: "turn-real", interrupt: rs.fn(async () => {}) };
       rs.spyOn(deps.agentSessionManager, "live").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
-      const recorded = { recorded: true };
       let markStarted!: () => void;
       const started = new Promise<void>((resolve) => {
         markStarted = resolve;

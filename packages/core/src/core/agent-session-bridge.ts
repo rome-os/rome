@@ -30,7 +30,6 @@ import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 import { sessionSurfaceOf, surfaceKeepsLines } from "../connections/session-surface.js";
 import { adhocCaller, callerChatId, callerKey, type SessionCaller } from "./session-caller.js";
-import { rememberedChatModel } from "./chat-model-selection.js";
 import { openNamed } from "../agent-sessions/index.js";
 import type { ThreadContext } from "./types.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -163,18 +162,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         let session: AgentSession;
         try {
           if (req.sessionId) {
-            const model = await rememberedChatModel(
-              { webchatRepo: this.webchatRepo, sessions: this.manager },
-              {
-                agentName: req.key.agentName,
-                sessionId: req.sessionId,
-                caller,
-                replies: thread,
-              },
-            );
             session = await this.manager.session(req.sessionId, req.key.agentName, surface, {
               workingDir,
-              ...(model ? { model } : {}),
             });
           } else {
             // A wake by a message on a connection applies the place's reset setting.

@@ -11,7 +11,7 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import type { LoggedTurn, SessionLog } from "./agent-session.js";
+import { sessionBehind, type LoggedTurn, type SessionLog } from "./agent-session.js";
 import { turnFacts, withTurnExecution } from "./turn-context.js";
 import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
 import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
@@ -265,6 +265,70 @@ describe("AgentSession turn usage", () => {
     await drain(handle.events);
 
     expect(seen).toEqual({});
+  });
+
+  it("keeps a turn with no reply address without one, when a later opener lent an address", async () => {
+    let seen: unknown = "unread";
+    const shared = createTestSessionManager(deps, { keepAliveAcrossTurns: true });
+    try {
+      const caller = "place:test:no-replies";
+      const quiet = await shared.open(AGENT, caller, { cards: false });
+      await shared.open(AGENT, caller, {
+        cards: false,
+        replies: { channel: "wake", threadId: "t-1" },
+      });
+      const behind = sessionBehind(quiet) as unknown as {
+        currentTurnThreadContextRef: unknown;
+      };
+      nextRun = async function* () {
+        seen = behind.currentTurnThreadContextRef;
+        yield { type: "result", content: "done" };
+      };
+
+      await drain(quiet.sendTurn({ prompt: "no address" }).events);
+
+      expect(seen).toBeUndefined();
+    } finally {
+      await shared.shutdown();
+    }
+  });
+
+  it("keeps a running turn's inherited shared context when a turn queued behind it names another", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.open(AGENT, "place:test:shared", { cards: false });
+    await drain(session.sendTurn({ prompt: "first", sharedContext: { who: "first" } }).events);
+
+    const behind = sessionBehind(session) as unknown as {
+      currentTurnSharedContextRef: unknown;
+    };
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    nextRun = async function* () {
+      started();
+      await gate;
+      yield { type: "result", content: "done" };
+    };
+    const paused = session.sendTurn({ prompt: "inherits" });
+    const pausedDone = drain(paused.events);
+    await running;
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const queued = session.sendTurn({ prompt: "names its own", sharedContext: { who: "queued" } });
+
+    expect(behind.currentTurnSharedContextRef).toEqual({ who: "first" });
+    release();
+    await pausedDone;
+    await drain(queued.events);
+    expect(behind.currentTurnSharedContextRef).toEqual({ who: "queued" });
   });
 
   it("records each finished turn once with its accounting, funding, and provider turn id", async () => {
