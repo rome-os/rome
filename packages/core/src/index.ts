@@ -164,8 +164,9 @@ import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
-import { sessionCallers } from "./core/session-callers.js";
+import { createAgentSessionManager } from "./core/agent-session.js";
+import { createSessionLog } from "./core/session-log.js";
+import { talkerChannelSurface } from "./connections/session-surface.js";
 import type { WakeDeps } from "./core/agent-runner.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
@@ -190,6 +191,7 @@ import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
+import { chatRoutineKeyForToolUse } from "./routines/chat-routine-key.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1130,6 +1132,7 @@ async function main() {
   // read from Chats, and applies the place's reset setting first.
   const wake: WakeDeps = {
     catchUp: { turnLinks: chatsWired.links, surface: channelSurface },
+    surface: { channelSurface, connectionKindOfChannel },
     resolveReset: async (ref) => (await chatSettings.get(ref)).effective.session.reset,
   };
   const agentSessionManager = createAgentSessionManager(
@@ -1145,12 +1148,12 @@ async function main() {
       capabilityDiscovery,
       skillCatalog,
       lifecycleDispatcher,
-      callers: sessionCallers({ webchatRepo, connectionKindOfChannel }),
+      log: createSessionLog(webchatRepo),
+      routineKeyFor: chatRoutineKeyForToolUse,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
       usageRecorder,
-      channelSurface,
       eventSources,
       sessionTools: (context) => buildConciergeTools(concierge, context),
     },

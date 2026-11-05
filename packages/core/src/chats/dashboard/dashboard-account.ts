@@ -3,7 +3,7 @@
 // no Connection backs it (docs/domains/connections.md#connection). Rome serves
 // its ports itself, in-process. Channel contract: channel.ts.
 
-import type { ChannelSurface } from "../../core/agent-session.js";
+import type { ChannelSurface } from "../../connections/session-surface.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { Channel } from "../connected-accounts/connected-account.js";
 import { queryPage } from "../history/messages.js";

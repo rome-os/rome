@@ -1,6 +1,8 @@
 import type { AgentInputState, InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput, SendTurnOptions } from "./agent-session.js";
 import type { ModelSession } from "./agent-runner.js";
+import type { Link } from "@opentelemetry/api";
+import { withTurnLinks } from "./turn-context.js";
 
 /**
  * How an input that arrives during a running turn is handled. `next` steers it
@@ -13,6 +15,8 @@ export type InputPriority = "now" | "next";
 export const SUPERSEDED_INTERRUPT_REASON = "superseded";
 
 export interface SubmitInputOptions extends SendTurnOptions {
+  /** Spans the input's turn links to, such as the request that brought it. */
+  links?: Link[];
   /** Called once per actual run, including a late input's follow-up run. */
   onTurn(handle: AgentTurnHandle): void;
   onInputStatus?(status: InputStatusEvent): Promise<void> | void;
@@ -136,7 +140,14 @@ export class AgentInputQueue {
             prompt: parts.map((part) => part.input.prompt).join("\n\n"),
             images: parts.flatMap((part) => part.input.images ?? []),
           };
-    const handle = this.startTurn(input, entry.options);
+    const {
+      links,
+      onTurn: _onTurn,
+      onInputStatus: _onInputStatus,
+      priority: _priority,
+      ...turnOptions
+    } = entry.options;
+    const handle = withTurnLinks(links, () => this.startTurn(input, turnOptions));
     const bound = [...carried, ...absorbed];
     this.active = {
       handle,

@@ -1,5 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
-import { type KeyedInit, recordsToOf, type StoredKey } from "../../test/session-compat.js";
+import { type KeyedInit, type StoredKey } from "../../test/session-compat.js";
 import { callerChatId, callerKey, type SessionCaller } from "../../core/session-caller.js";
 import { callerFromKey } from "../../core/session-caller.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -31,6 +31,7 @@ import type {
   AgentTurnHandle,
   AgentTurnInput,
   SendTurnOptions,
+  SessionSurface,
 } from "../../core/agent-session.js";
 import { NoForkPointError } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
@@ -318,11 +319,8 @@ describe("Webchat API", () => {
     );
     const agent: AgentSession = {
       selectModel: () => {},
-      key: { agentName: "main", caller: callerFromKey("webchat:test") },
-      caller: callerFromKey("webchat:test"),
-      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-        return recordsToOf(this, options);
-      },
+      key: { agentName: "main", caller: "webchat:test" },
+      caller: "webchat:test",
       sessionId: "agent-session",
       status: "running",
       currentTurnId: "input-turn",
@@ -408,11 +406,8 @@ describe("Webchat API", () => {
     let sequence = 0;
     const interrupt = rs.fn(async () => {});
     const agent = withSubmitInput({
-      key: { agentName: "main", caller: callerFromKey("webchat:test") },
-      caller: callerFromKey("webchat:test"),
-      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-        return recordsToOf(this, options);
-      },
+      key: { agentName: "main", caller: "webchat:test" },
+      caller: "webchat:test",
       sessionId: "agent-session",
       status: "running",
       currentTurnId: "stop-1",
@@ -475,11 +470,8 @@ describe("Webchat API", () => {
     const finishers: (() => void)[] = [];
     const interrupt = rs.fn(async () => {});
     const agent = withSubmitInput({
-      key: { agentName: "main", caller: callerFromKey("webchat:test") },
-      caller: callerFromKey("webchat:test"),
-      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-        return recordsToOf(this, options);
-      },
+      key: { agentName: "main", caller: "webchat:test" },
+      caller: "webchat:test",
       sessionId: "agent-session",
       status: "running",
       currentTurnId: "task-1",
@@ -1712,11 +1704,8 @@ describe("Webchat API", () => {
       deps.agentSessionManager = fakeSessionManager(
         async () =>
           ({
-            key: { agentName: "main", caller: callerFromKey("webchat:test") },
-            caller: callerFromKey("webchat:test"),
-            recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-              return recordsToOf(this, options);
-            },
+            key: { agentName: "main", caller: "webchat:test" },
+            caller: "webchat:test",
             sessionId: "agent-session",
             status: "idle",
             sendTurn() {
@@ -2128,17 +2117,14 @@ describe("Webchat API", () => {
   });
 
   it("passes requested reasoning effort to the agent session", async () => {
-    let acquiredInit: SessionOpenOptions | undefined;
+    let acquiredInit: KeyedInit | undefined;
     let sentTurn: AgentTurnInput | undefined;
     let sentOptions: SendTurnOptions | undefined;
     deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
       acquiredInit = init;
       return {
-        key: { agentName: "main", caller: callerFromKey("webchat:test") },
-        caller: callerFromKey("webchat:test"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: "main", caller: "webchat:test" },
+        caller: "webchat:test",
         sessionId: "agent-session",
         status: "idle",
         sendTurn(input: AgentTurnInput, options?: SendTurnOptions) {
@@ -2204,16 +2190,13 @@ describe("Webchat API", () => {
 
     it("stores the real path with a device snapshot and passes it to every turn", async () => {
       const listFiles = mockDevices(async () => ({ ok: true, folder }));
-      let acquiredInit: SessionOpenOptions | undefined;
+      let acquiredInit: KeyedInit | undefined;
       let sentOptions: SendTurnOptions | undefined;
       deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
         acquiredInit = init;
         return {
-          key: { agentName: "main", caller: callerFromKey("webchat:test") },
-          caller: callerFromKey("webchat:test"),
-          recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-            return recordsToOf(this, options);
-          },
+          key: { agentName: "main", caller: "webchat:test" },
+          caller: "webchat:test",
           sessionId: "agent-session",
           status: "idle",
           sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
@@ -2265,7 +2248,6 @@ describe("Webchat API", () => {
       expect(sendRes.status).toBe(200);
       expect(acquiredInit?.workingDir).toBe(join(projectsRoot, "default"));
       expect(acquiredInit?.threadContext?.deviceFolder).toEqual(expected);
-      expect(sentOptions?.threadContext?.deviceFolder).toEqual(expected);
     });
 
     it("creates no session when the device cannot list the folder", async () => {
@@ -2546,11 +2528,8 @@ describe("Webchat API", () => {
       onEvent?: (evt: { event: string; data: string }) => void,
     ) => {
       deps.agentSessionManager = fakeSessionManager(async (key) => ({
-        key: { agentName: key.agentName, caller: callerFromKey("webchat:stream") },
-        caller: callerFromKey("webchat:stream"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: key.agentName, caller: "webchat:stream" },
+        caller: "webchat:stream",
         sessionId: "agent-session",
         status: "idle",
         sendTurn() {
@@ -2765,11 +2744,8 @@ describe("Webchat API", () => {
     it("passes an input's priority to the session and rejects an unknown one", async () => {
       const priorities: unknown[] = [];
       deps.agentSessionManager = fakeSessionManager(async (key) => ({
-        key: { agentName: key.agentName, caller: callerFromKey("webchat:priority") },
-        caller: callerFromKey("webchat:priority"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: key.agentName, caller: "webchat:priority" },
+        caller: "webchat:priority",
         sessionId: "agent-session",
         status: "idle",
         sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
@@ -3254,11 +3230,8 @@ describe("Webchat API", () => {
       const interrupt = rs.fn(async () => undefined);
       const wrongTurnInterrupt = rs.fn(async () => undefined);
       deps.agentSessionManager = fakeSessionManager(async () => ({
-        key: { agentName: "main", caller: callerFromKey("webchat:cancel") },
-        caller: callerFromKey("webchat:cancel"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: "main", caller: "webchat:cancel" },
+        caller: "webchat:cancel",
         sessionId: "runtime",
         status: "running",
         sendTurn: () => ({
@@ -3373,11 +3346,8 @@ describe("Webchat API", () => {
     let sentTurn: AgentTurnInput | undefined;
     deps.agentSessionManager = fakeSessionManager(async () => {
       return {
-        key: { agentName: "main", caller: callerFromKey("webchat:test") },
-        caller: callerFromKey("webchat:test"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: "main", caller: "webchat:test" },
+        caller: "webchat:test",
         sessionId: "agent-session",
         status: "idle",
         sendTurn(input: AgentTurnInput) {
@@ -3460,11 +3430,8 @@ describe("Webchat API", () => {
     let sentTurn: AgentTurnInput | undefined;
     deps.agentSessionManager = fakeSessionManager(async () => {
       return {
-        key: { agentName: "main", caller: callerFromKey("webchat:test") },
-        caller: callerFromKey("webchat:test"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: "main", caller: "webchat:test" },
+        caller: "webchat:test",
         sessionId: "agent-session",
         status: "idle",
         sendTurn(input: AgentTurnInput) {
@@ -3565,11 +3532,8 @@ describe("Webchat API", () => {
       deps.agentSessionManager = fakeSessionManager((key, _init) => {
         acquiredAgents.push(key.agentName);
         const session = {
-          key: { agentName: key.agentName, caller: callerFromKey("webchat:suspend") },
-          caller: callerFromKey("webchat:suspend"),
-          recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-            return recordsToOf(this, options);
-          },
+          key: { agentName: key.agentName, caller: "webchat:suspend" },
+          caller: "webchat:suspend",
           sessionId: "agent-session",
           status: "idle",
           sendTurn(input: AgentTurnInput) {
@@ -3679,7 +3643,8 @@ describe("Webchat API", () => {
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+        expect.anything(),
+        expect.objectContaining({ model: "gpt-6-luna" }),
       );
     });
 
@@ -3693,14 +3658,19 @@ describe("Webchat API", () => {
       deps.concierge = new ConciergeService({ ...deps } as unknown as ConciergeDeps);
       const open = deps.agentSessionManager.open;
       deps.agentSessionManager.open = rs.fn(
-        async (agentName: string, caller: SessionCaller, init?: SessionOpenOptions) => {
-          if (callerKey(caller) === "webchat:ordinary-quota")
+        async (
+          agentName: string,
+          caller: string,
+          surface: SessionSurface,
+          init?: SessionOpenOptions,
+        ) => {
+          if (caller === "webchat:ordinary-quota")
             throw new ModelResolutionError("Claude quota exhausted", {
               code: "model_provider_unavailable",
               provider: "anthropic",
               reason: "quota_exhausted",
             });
-          return open(agentName, caller, init);
+          return open(agentName, caller, surface, init);
         },
       );
       const app = createWebchatRuntime(deps).routes;
@@ -3729,8 +3699,9 @@ describe("Webchat API", () => {
         expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
           expect.anything(),
           expect.anything(),
+          expect.anything(),
           expect.objectContaining({
-            selectionId: id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+            model: id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
           }),
         );
       }
@@ -3757,7 +3728,8 @@ describe("Webchat API", () => {
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ selectionId: null }),
+        expect.anything(),
+        expect.objectContaining({ model: null }),
       );
 
       const picked = await pick("gpt-6-luna");
@@ -3767,7 +3739,8 @@ describe("Webchat API", () => {
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+        expect.anything(),
+        expect.objectContaining({ model: "gpt-6-luna" }),
       );
 
       // Auto clears the pick, and the next acquire clears it on a live session.
@@ -3777,7 +3750,8 @@ describe("Webchat API", () => {
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ selectionId: null }),
+        expect.anything(),
+        expect.objectContaining({ model: null }),
       );
 
       expect((await pick("gpt-99")).status).toBe(400);
@@ -4913,15 +4887,11 @@ describe("Webchat API", () => {
       });
       expect(acquireSource).toHaveBeenCalledWith(
         "main",
-        { kind: "chat", chatId: SESSION_ID },
+        `webchat:${SESSION_ID}`,
         expect.objectContaining({
-          workingDir: join(projectsRoot, "default"),
-          selectionId: undefined,
-          threadContext: expect.objectContaining({
-            channel: "webchat",
-            threadId: SESSION_ID,
-          }),
+          replies: expect.objectContaining({ channel: "webchat", threadId: SESSION_ID }),
         }),
+        expect.objectContaining({ workingDir: join(projectsRoot, "default"), model: undefined }),
       );
       expect(showApp).not.toHaveBeenCalled();
       // A side chat is a conversation: it asks to be left resumable, keyed by
@@ -5198,11 +5168,8 @@ describe("Webchat API", () => {
       });
       deps.agentSessionManager = fakeSessionManager(async () => {
         return {
-          key: { agentName: "main", caller: callerFromKey("webchat:branch-fork-session") },
-          caller: callerFromKey("webchat:branch-fork-session"),
-          recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-            return recordsToOf(this, options);
-          },
+          key: { agentName: "main", caller: "webchat:branch-fork-session" },
+          caller: "webchat:branch-fork-session",
           sessionId: "fork-agent-session",
           status: "idle",
           sendTurn() {
@@ -5311,11 +5278,8 @@ describe("Webchat API", () => {
         acquiredKey = key;
         acquiredInit = init;
         return {
-          key: { agentName: "main", caller: callerFromKey(`webchat:${PROMOTED_ID}`) },
-          caller: callerFromKey(`webchat:${PROMOTED_ID}`),
-          recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-            return recordsToOf(this, options);
-          },
+          key: { agentName: "main", caller: `webchat:${PROMOTED_ID}` },
+          caller: `webchat:${PROMOTED_ID}`,
           sessionId: "fork-agent-session",
           status: "idle",
           sendTurn() {
@@ -5365,11 +5329,8 @@ describe("Webchat API", () => {
       deps.agentSessionManager = fakeSessionManager(async (key) => {
         acquiredKey = key;
         return {
-          key: { agentName: "main", caller: callerFromKey(`webchat:${PROMOTED_ID}`) },
-          caller: callerFromKey(`webchat:${PROMOTED_ID}`),
-          recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-            return recordsToOf(this, options);
-          },
+          key: { agentName: "main", caller: `webchat:${PROMOTED_ID}` },
+          caller: `webchat:${PROMOTED_ID}`,
           sessionId: "fork-agent-session",
           status: "idle",
           sendTurn() {
@@ -6033,11 +5994,8 @@ describe("Webchat API", () => {
       prompts.length = 0;
       const sessionId = options.id ?? "reply-chat";
       deps.agentSessionManager = fakeSessionManager(async () => ({
-        key: { agentName: "main", caller: callerFromKey("webchat:test") },
-        caller: callerFromKey("webchat:test"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: "main", caller: "webchat:test" },
+        caller: "webchat:test",
         sessionId: "agent-session",
         status: "idle",
         sendTurn(input: AgentTurnInput) {
@@ -6580,11 +6538,8 @@ describe("Webchat API", () => {
   });
 });
 
-type FakeSession = Omit<
-  AgentSession,
-  "submitInput" | "runForkedTurn" | "selectModel" | "recordsTo" | "caller"
-> &
-  Partial<Pick<AgentSession, "recordsTo" | "caller">>;
+type FakeSession = Omit<AgentSession, "submitInput" | "runForkedTurn" | "selectModel" | "caller"> &
+  Partial<Pick<AgentSession, "caller">>;
 
 /**
  * A manager over fake sessions that script only `sendTurn`. Every submitted
@@ -6596,13 +6551,26 @@ function fakeSessionManager(
   open: (key: StoredKey, init?: KeyedInit) => Promise<FakeSession> | FakeSession,
 ): AgentSessionManager {
   return {
-    open: rs.fn(async (agentName: string, caller: SessionCaller, options?: SessionOpenOptions) =>
-      withSubmitInput(
-        await open(
-          { agentName, channelThreadKey: callerKey(caller) },
-          { ...options, romeSessionId: callerChatId(caller) },
+    open: rs.fn(
+      async (
+        agentName: string,
+        caller: string,
+        surface: SessionSurface,
+        options?: SessionOpenOptions,
+      ) =>
+        withSubmitInput(
+          await open(
+            { agentName, channelThreadKey: caller },
+            {
+              ...(options?.workingDir !== undefined ? { workingDir: options.workingDir } : {}),
+              ...(options?.model !== undefined ? { selectionId: options.model } : {}),
+              ...(options?.effort !== undefined ? { reasoningEffort: options.effort } : {}),
+              ...(surface.replies ? { threadContext: surface.replies } : {}),
+              ...(surface.about ? { contextSuffix: surface.about } : {}),
+              romeSessionId: callerChatId(callerFromKey(caller)),
+            },
+          ),
         ),
-      ),
     ),
     session: async () => {
       throw new Error("fake manager cannot resume by session id");
@@ -6610,8 +6578,8 @@ function fakeSessionManager(
     live: () => undefined,
     reset: async () => undefined,
     // The stored session is read from the rows, as the real manager reads it.
-    find: async (agentName: string, caller: SessionCaller) => {
-      const row = await storedSessions?.findReusableSession(callerKey(caller), agentName);
+    find: async (agentName: string, caller: string) => {
+      const row = await storedSessions?.findReusableSession(caller, agentName);
       return row
         ? {
             sessionId: row.id,
@@ -6633,9 +6601,6 @@ let storedSessions: TestDeps["sessionManager"] | undefined;
 function withSubmitInput(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
     caller: fake.caller ?? fake.key.caller,
-    recordsTo:
-      fake.recordsTo ??
-      ((options?: Parameters<AgentSession["recordsTo"]>[0]) => recordsToOf(fake, options)),
     selectModel: () => {},
     submitInput: (
       input: AgentTurnInput & { inputId: string },

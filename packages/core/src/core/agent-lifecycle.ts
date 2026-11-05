@@ -13,7 +13,7 @@ import type {
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactRef } from "../apps/state.js";
 import type { ThreadContext } from "./types.js";
-import type { SessionCaller } from "./session-caller.js";
+import { callerFromKey } from "./session-caller.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import { wrapHookSpan } from "../telemetry.js";
@@ -88,8 +88,8 @@ export function createAgentTurnRef(params: {
   sessionId: string;
   turnId: string;
   agentName: string;
-  caller?: SessionCaller;
-  channelThreadKey?: string;
+  /** The session's caller as Sessions holds it. Apps read it decoded. */
+  caller?: string;
   threadContext?: ThreadContext;
   parent?: AgentTurnParentRef;
 }): AgentTurnRef {
@@ -97,8 +97,8 @@ export function createAgentTurnRef(params: {
     sessionId: params.sessionId,
     turnId: params.turnId,
     agentName: params.agentName,
-    caller: params.caller,
-    channelThreadKey: params.channelThreadKey,
+    caller: params.caller === undefined ? undefined : callerFromKey(params.caller),
+    channelThreadKey: params.caller,
     threadContext: toLifecycleThreadContext(params.threadContext),
     parent: params.parent,
   };

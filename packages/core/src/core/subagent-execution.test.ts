@@ -1,5 +1,4 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
-import { callerFromKey } from "./session-caller.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -32,15 +31,8 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   });
   const session: AgentSession = {
     selectModel: () => {},
-    key: { agentName: "researcher", caller: callerFromKey(`subagent:${sessionId}`) },
-    caller: callerFromKey(`subagent:${sessionId}`),
-    recordsTo: () => ({
-      romeSessionId: sessionId,
-      romeSessionType: "subagent",
-      existing: true,
-      promptPersisted: true,
-      recorderOwned: false,
-    }),
+    key: { agentName: "researcher", caller: `webchat:parent-1:subagent:${sessionId}` },
+    caller: `webchat:parent-1:subagent:${sessionId}`,
     sessionId,
     status: "idle",
     sendTurn(input, options) {
@@ -111,7 +103,7 @@ describe("SubagentExecutionService", () => {
 
   afterEach(() => db.close());
 
-  it("returns stable IDs before completion, creates fresh sessions, and persists Child-owned text", async () => {
+  it("returns stable IDs before completion and creates fresh sessions under their own records", async () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
@@ -133,7 +125,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "parent-turn-1",
       parentToolUseId: "tool-1",
       parentAgentName: "main",
-      parentCaller: { kind: "chat" as const, chatId: "parent-1" },
+      childCaller: "webchat:parent-1:subagent:child",
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -186,12 +178,6 @@ describe("SubagentExecutionService", () => {
     second.releases[0].resolve();
     await execution2.completion;
 
-    const childMessages = await repo.getMessages("child-1");
-    expect(childMessages.filter((message) => message.role === "user")).toHaveLength(1);
-    expect(childMessages.filter((message) => message.role === "assistant")).toHaveLength(1);
-    expect(childMessages.filter((message) => message.role === "trace")).toHaveLength(1);
-    const childTrace = await repo.getTraceContents("child-1");
-    expect(childTrace.some((message) => message.content.includes("working"))).toBe(true);
     await expect(repo.getSession("child-1")).resolves.toMatchObject({ type: "subagent" });
     await expect(repo.getSession("child-2")).resolves.toMatchObject({ type: "subagent" });
     const homeChats = await repo.listSessions();
@@ -228,7 +214,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "new-parent-turn",
       parentToolUseId: "tool-resume",
       parentAgentName: "main",
-      parentCaller: { kind: "chat" as const, chatId: "parent-1" },
+      childCaller: "webchat:parent-1:subagent:child",
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -242,6 +228,7 @@ describe("SubagentExecutionService", () => {
     expect(childManager.session).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
+      { cards: false },
       expect.objectContaining({ workingDir: "/tmp/project-a" }),
     );
     resumed.releases[0].resolve();

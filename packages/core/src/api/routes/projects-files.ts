@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { callerKey } from "../../core/session-caller.js";
 import type {
   ProjectDashboardChat,
   ProjectDashboardChatPage,
@@ -157,10 +158,10 @@ async function closeLiveProjectSessions(
 
   await Promise.all(
     sessions.map(async (session) => {
-      const liveSession = agentSessionManager.live(session.agentName ?? "main", {
-        kind: "chat",
-        chatId: session.id,
-      });
+      const liveSession = agentSessionManager.live(
+        session.agentName ?? "main",
+        callerKey({ kind: "chat", chatId: session.id }),
+      );
       if (liveSession) {
         await liveSession.close("user").catch(() => undefined);
       }

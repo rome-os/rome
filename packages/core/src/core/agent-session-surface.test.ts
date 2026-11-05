@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { talkerChannelSurface } from "./agent-session.js";
+import { talkerChannelSurface } from "../connections/session-surface.js";
 
 describe("talkerChannelSurface", () => {
   it("reads an omitted fact as a messaging channel's", () => {

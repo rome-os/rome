@@ -8,6 +8,7 @@ import {
   type MiddlewareLoadFailure,
   type MiddlewareTerminal,
 } from "./middleware-chain.js";
+import { callerFromKey } from "./session-caller.js";
 
 /**
  * app-provided turn middleware live under the `turn-middleware` hook
@@ -32,11 +33,20 @@ export interface TurnMiddlewareChainOptions {
 export function createTurnMiddlewareChain(
   options: TurnMiddlewareChainOptions = {},
 ): TurnMiddlewareChain {
-  return createMiddlewareChain<TurnMiddlewareContext>({
+  const chain = createMiddlewareChain<TurnMiddlewareContext>({
     hookName: TURN_MIDDLEWARE_HOOK_NAME,
     assert: assertTurnMiddleware,
     appRuntimeServices: options.appRuntimeServices,
   });
+  return {
+    ...chain,
+    // Sessions hands over the caller as it holds it; apps read it decoded.
+    run(ctx, terminal) {
+      const stored = ctx.session.channelThreadKey;
+      if (!ctx.session.caller && stored) ctx.session.caller = callerFromKey(stored);
+      return chain.run(ctx, terminal);
+    },
+  };
 }
 
 function assertTurnMiddleware(

@@ -1,7 +1,7 @@
 import type { ChatId, ChatRef, ProviderSessionResetPolicy } from "@rome-os/app-runtime";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import type { AgentSessionManager } from "./agent-session.js";
-import type { SessionCaller } from "./session-caller.js";
+import { callerKey, type SessionCaller } from "./session-caller.js";
 import type { ThreadContext } from "./types.js";
 
 // A connection's reset setting: a wake on a place whose session's context is
@@ -28,7 +28,7 @@ export async function resetWhenDue(
     connectionId: threadContext.connectionId,
     chatId: threadContext.threadId as ChatId,
   });
-  await sessions.reset(agentName, caller, {
+  await sessions.reset(agentName, callerKey(caller), {
     policy: policy.mode,
     when: (context) => evaluateProviderSessionReset(policy, context, interactionAt),
   });

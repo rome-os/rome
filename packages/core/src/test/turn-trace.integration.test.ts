@@ -5,6 +5,7 @@
  * covers the channel-adapter path.
  */
 
+import { withTurnLinks } from "../core/turn-context.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { context, trace, type Context, type SpanContext } from "@opentelemetry/api";
 
@@ -21,13 +22,14 @@ async function drainOneTurn(
 ): Promise<{ turnContext: Context }> {
   const session = await rig.manager.open(
     "test-main",
-    { kind: "chat", chatId: "turn-trace-test" },
+    "webchat:turn-trace-test",
+    { cards: true, replies: { channel: "webchat", threadId: "turn-trace-test" } },
     { workingDir: "/tmp" },
   );
 
-  const handle = session.sendTurn(
-    { prompt: "hi" },
-    opts?.linkFromSpanContext ? { links: [{ context: opts.linkFromSpanContext }] } : undefined,
+  const handle = withTurnLinks(
+    opts?.linkFromSpanContext ? [{ context: opts.linkFromSpanContext }] : undefined,
+    () => session.sendTurn({ prompt: "hi" }),
   );
   for await (const _ of handle.events) {
     // drain

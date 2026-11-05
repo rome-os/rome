@@ -165,7 +165,7 @@ describe("continuation notice through TestSessionManager", () => {
       JSON.stringify([{ type: "text", content: text }]),
     );
     at((now - START) / 1000 + 1);
-    const handle = session.sendTurn({ prompt: text, inputId }, { threadContext });
+    const handle = session.sendTurn({ prompt: text, inputId });
     for await (const _event of handle.events) {
       // drain
     }
@@ -371,8 +371,7 @@ describe("continuation notice through TestSessionManager", () => {
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, romeSessionId: chatId, selectionId: from },
     );
-    for await (const _ of session.sendTurn({ prompt: "first" }, { threadContext: context })
-      .events) {
+    for await (const _ of session.sendTurn({ prompt: "first" }).events) {
     }
     if (concierge) {
       const raw = healthyState();
@@ -388,7 +387,7 @@ describe("continuation notice through TestSessionManager", () => {
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);
     await manager.shutdown();
-    const runner = new AgentRunner(createManager(), loader);
+    const runner = new AgentRunner(createManager(), loader, webchatRepo);
     for await (const _ of runner.run({
       agentName,
       sessionId: session.sessionId,

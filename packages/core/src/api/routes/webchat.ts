@@ -53,7 +53,11 @@ import {
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
-import { NoForkPointError, type AgentTurnHandle } from "../../core/agent-session.js";
+import {
+  NoForkPointError,
+  type AgentTurnHandle,
+  type SessionSurface,
+} from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
@@ -92,10 +96,12 @@ import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js"
 import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
-import type { SessionCaller } from "../../core/session-caller.js";
+import { callerKey, type SessionCaller } from "../../core/session-caller.js";
 
 /** A dashboard chat as the caller of its session. */
 const chatCaller = (chatId: string): SessionCaller => ({ kind: "chat", chatId });
+/** A chat's caller, as Sessions holds it. */
+const chatCallerId = (chatId: string): string => callerKey(chatCaller(chatId));
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -892,7 +898,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.type !== "fork") return false;
     const stored = await deps.agentSessionManager.find(
       session.agentName ?? "main",
-      chatCaller(session.id),
+      chatCallerId(session.id),
     );
     return !!stored?.hasContext;
   };
@@ -1465,13 +1471,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // resumes an evicted source from its persisted provider thread, allowing
       // side chats from settled conversations after the first fork or a
       // backend restart.
-      const source = await deps.agentSessionManager.open(agentName, caller, {
-        workingDir,
-        threadContext,
-        contextSuffix: buildWebchatContextSuffix(),
-        selectionId: modelSelection?.id,
-        reasoningEffort: await resolveRequestedReasoningEffort(undefined),
-      });
+      const source = await deps.agentSessionManager.open(
+        agentName,
+        callerKey(caller),
+        chatSurface(threadContext),
+        {
+          workingDir,
+          model: modelSelection?.id,
+          effort: await resolveRequestedReasoningEffort(undefined),
+        },
+      );
       sourceSessionId = source.sessionId;
     } catch (err) {
       log.warn("turn fork skipped: source session could not be acquired", {
@@ -1769,6 +1778,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
   };
+
+  /**
+   * What a chat lends its session: cards and wake-ups, replies into the chat,
+   * and the guardian's profile. The chat records its turns itself, as it
+   * streams them.
+   */
+  const chatSurface = (
+    threadContext: ThreadContext,
+    about: string = buildWebchatContextSuffix(),
+  ): SessionSurface => ({
+    cards: true,
+    replies: threadContext,
+    wake: true,
+    keeps: { turn: true },
+    about,
+  });
 
   const buildWebchatContextSuffix = (): string =>
     [
@@ -2457,7 +2482,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.agentSessionManager.find(
       session.agentName ?? "main",
-      chatCaller(sessionId),
+      chatCallerId(sessionId),
     );
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
@@ -2473,7 +2498,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
-    const sess = deps.agentSessionManager.live(session?.agentName ?? "main", chatCaller(sessionId));
+    const sess = deps.agentSessionManager.live(
+      session?.agentName ?? "main",
+      chatCallerId(sessionId),
+    );
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
@@ -2993,7 +3021,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // cannot cancel the turn currently producing output.
     const agentSess = deps.agentSessionManager.live(
       stream.agentName,
-      stream.caller ?? chatCaller(stream.sessionId),
+      callerKey(stream.caller ?? chatCaller(stream.sessionId)),
     );
     if (!agentSess || agentSess.currentTurnId !== turnId) {
       return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
@@ -3028,7 +3056,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           status:
             s.caller &&
             (s.agentTurnId ?? s.turnId) ===
-              deps.agentSessionManager.live(s.agentName, s.caller)?.currentTurnId
+              deps.agentSessionManager.live(s.agentName, callerKey(s.caller))?.currentTurnId
               ? "running"
               : "queued",
         })),
@@ -3299,7 +3327,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.parentSessionId !== null) {
       const branchThread = await deps.agentSessionManager.find(
         session.agentName ?? "main",
-        chatCaller(session.id),
+        chatCallerId(session.id),
       );
       if (!branchThread?.hasContext) {
         return answer(
@@ -3557,15 +3585,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     let agentSess;
     try {
-      agentSess = await deps.agentSessionManager.open(agentName, caller, {
-        workingDir,
-        threadContext,
-        contextSuffix,
-        // Null clears a selection an open session still holds, so a chat
-        // switched back to Auto follows its pin again.
-        selectionId: modelSelection?.id ?? null,
-        reasoningEffort,
-      });
+      agentSess = await deps.agentSessionManager.open(
+        agentName,
+        callerKey(caller),
+        chatSurface(threadContext, contextSuffix),
+        {
+          workingDir,
+          // Null clears a selection an open session still holds, so a chat
+          // switched back to Auto follows its pin again.
+          model: modelSelection?.id ?? null,
+          effort: reasoningEffort,
+        },
+      );
     } catch (err) {
       const modelError = toModelResolutionErrorPayload(err);
       if (modelError) {
@@ -4031,7 +4062,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const options = {
       links: turnLinks,
       priority: priority.data,
-      threadContext,
       onTurn: (handle: AgentTurnHandle) => {
         started = attachTurn(handle);
         void started.catch((error) =>
@@ -4142,7 +4172,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       }
       if (msg.type === "turn_start" && stream.caller) {
-        const owner = deps.agentSessionManager.live(msg.agent ?? stream.agentName, stream.caller);
+        const owner = deps.agentSessionManager.live(
+          msg.agent ?? stream.agentName,
+          callerKey(stream.caller),
+        );
         // The wrapper may outlive its provider turn. Never stop a later turn
         // merely because it reuses the same runtime session.
         if (owner?.currentTurnId === msg.turnId) {

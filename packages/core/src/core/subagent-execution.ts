@@ -1,15 +1,10 @@
-import { childCaller, type SessionCaller } from "./session-caller.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { createLogger } from "../logger.js";
-import type { AgentSessionManager } from "./agent-session.js";
-import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
+import type { AgentSessionManager, CallerId, SessionSurface } from "./agent-session.js";
 import type { ThreadContext } from "./types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-
-const log = createLogger("subagent-execution");
 
 export interface ExecuteSubagentInput {
   prompt: string;
@@ -47,8 +42,8 @@ export interface StartSubagentContext {
   parentTurnId: string;
   parentToolUseId: string;
   parentAgentName: string;
-  /** The caller the child names as its parent. */
-  parentCaller: SessionCaller;
+  /** The caller a fresh child opens under, which the parent's session named. */
+  childCaller: CallerId;
   childManager: AgentSessionManager;
   workingDir: string;
   threadContext?: ThreadContext;
@@ -75,6 +70,12 @@ export function createSubagentExecutionService(deps: {
       }
       const parentSession = await deps.webchatRepo.getSession(context.parentSessionId);
 
+      // A child shows nothing and cannot be woken; its tools still deliver
+      // where the parent's do.
+      const surface: SessionSurface = {
+        cards: false,
+        ...(context.threadContext ? { replies: context.threadContext } : {}),
+      };
       let child;
       let isFresh = false;
       if (input.resumeSessionId) {
@@ -105,15 +106,13 @@ export function createSubagentExecutionService(deps: {
         // failed when the subagent was minted.
         // The child's conversation is its own session, which the resume
         // fills in when its record failed at mint.
-        child = await context.childManager.session(input.resumeSessionId, name, {
+        child = await context.childManager.session(input.resumeSessionId, name, surface, {
           workingDir: context.workingDir,
-          threadContext: context.threadContext,
         });
       } else {
         isFresh = true;
-        child = await context.childManager.open(name, childCaller(context.parentCaller), {
+        child = await context.childManager.open(name, context.childCaller, surface, {
           workingDir: context.workingDir,
-          threadContext: context.threadContext,
         });
       }
 
@@ -133,7 +132,7 @@ export function createSubagentExecutionService(deps: {
       }
 
       const handle = child.sendTurn(
-        { prompt: input.prompt },
+        { prompt: input.prompt, sharedContext: context.sharedContext },
         {
           initiatedBy: {
             parentTurn: {
@@ -142,8 +141,6 @@ export function createSubagentExecutionService(deps: {
               agentName: context.parentAgentName,
             },
           },
-          threadContext: context.threadContext,
-          sharedContext: context.sharedContext,
         },
       );
 
@@ -218,15 +215,6 @@ export function createSubagentExecutionService(deps: {
         throw err;
       }
 
-      const recorder = new AgentTraceRecorder({
-        webchatRepo: deps.webchatRepo,
-        agentName: name,
-        turnId: handle.turnId,
-        existingSessionId: child.sessionId,
-        threadContext: context.threadContext,
-        persistTranscript: true,
-      });
-
       void (async () => {
         let resultText = "";
         let structuredOutput: unknown;
@@ -236,10 +224,6 @@ export function createSubagentExecutionService(deps: {
         try {
           for await (const message of handle.events) {
             stream.publish(message);
-            await recordAgentTraceBestEffort(recorder, message, log, {
-              turnId: handle.turnId,
-              source: "subagent-execution",
-            });
             if (message.type === "result") {
               resultText = message.content;
               if (Object.prototype.hasOwnProperty.call(message, "structuredOutput")) {

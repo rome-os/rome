@@ -1565,7 +1565,9 @@ describe("Projects files API", () => {
       >;
       const agentSessionManager: RouteDeps["agentSessionManager"] = {
         live: (agentName, caller) => {
-          const chatId = caller.kind === "chat" ? caller.chatId : undefined;
+          const chatId = caller.startsWith("webchat:")
+            ? caller.slice("webchat:".length)
+            : undefined;
           if (agentName === "main" && chatId === "sess-demo") {
             return { close: closeMain } as unknown as LiveAgentSession;
           }

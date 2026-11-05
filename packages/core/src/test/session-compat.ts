@@ -3,31 +3,45 @@
 
 import {
   type AgentSession,
-  type AgentSessionKey,
   type AgentSessionManager,
-  type SendTurnOptions,
-  type TurnConversation,
   createAgentSessionManager,
   type ManagerDeps,
   type SessionOpenOptions,
+  type SurfaceKeeps,
 } from "../core/agent-session.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { callerFromKey, callerKey, withChatId } from "../core/session-caller.js";
-import { resolveTurnConversation } from "../core/agent-trace-recorder.js";
+import { callerFromKey } from "../core/session-caller.js";
+import { createSessionLog, openNamed } from "../core/session-log.js";
+import {
+  type ChannelSurface,
+  sessionSurfaceOf,
+  type SurfaceDeps,
+} from "../connections/session-surface.js";
+import type { ModelReasoningEffort } from "../core/agent-runner.js";
+import type { ModelSelectionId } from "../core/model-selector.js";
+import type { ThreadContext } from "../core/types.js";
 import type { SessionConversation } from "../core/session-conversation.js";
-import { sessionCallers } from "../core/session-callers.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 
 export interface StoredKey {
   agentName: string;
   channelThreadKey: string;
 }
 
-export interface KeyedInit extends SessionOpenOptions {
+/** The options sessions opened with before the surface. */
+export interface KeyedInit {
+  workingDir?: string;
+  threadContext?: ThreadContext;
+  contextSuffix?: string;
+  selectionId?: ModelSelectionId | null;
+  reasoningEffort?: ModelReasoningEffort;
+  /** The conversation the caller named. */
   romeSessionId?: string;
-  sharedContext?: Record<string, unknown>;
   resumeSessionId?: string;
-  isSubagent?: boolean;
+  keeps?: SurfaceKeeps;
+  /** Overrides whether the surface shows cards. */
+  cards?: boolean;
 }
 
 export interface TestSessionManager extends AgentSessionManager {
@@ -36,75 +50,80 @@ export interface TestSessionManager extends AgentSessionManager {
   peek(key: StoredKey): AgentSession | undefined;
 }
 
-function openOptions(init: KeyedInit | undefined): SessionOpenOptions | undefined {
-  if (!init) return undefined;
-  const {
-    romeSessionId: _romeSessionId,
-    sharedContext: _sharedContext,
-    resumeSessionId: _resumeSessionId,
-    isSubagent: _isSubagent,
-    ...options
-  } = init;
-  return options;
+function openOptions(init: KeyedInit | undefined): SessionOpenOptions {
+  return {
+    ...(init?.workingDir !== undefined ? { workingDir: init.workingDir } : {}),
+    ...(init?.selectionId !== undefined ? { model: init.selectionId } : {}),
+    ...(init?.reasoningEffort !== undefined ? { effort: init.reasoningEffort } : {}),
+  };
 }
 
-/** `manager` with the old key-string entry points. */
-export function withKeys(manager: AgentSessionManager): TestSessionManager {
+/** `manager` with the old key-string entry points, lending the surface the
+ *  old options described. */
+export function withKeys(
+  manager: AgentSessionManager,
+  surfaceDeps: SurfaceDeps = {},
+): TestSessionManager {
   const keyed = manager as TestSessionManager;
+  const surfaceOf = (key: string | undefined, init: KeyedInit | undefined) => {
+    const replies = init?.threadContext;
+    const surface = sessionSurfaceOf(surfaceDeps, key ? callerFromKey(key) : undefined, replies, {
+      ...(init?.keeps ? { keeps: init.keeps } : {}),
+      ...(init?.contextSuffix ? { about: init.contextSuffix } : {}),
+    });
+    return init?.cards === undefined ? surface : { ...surface, cards: init.cards };
+  };
   keyed.acquire = (key, init) =>
     init?.resumeSessionId
-      ? manager.session(init.resumeSessionId, key.agentName, openOptions(init))
-      : manager.open(
+      ? manager.session(
+          init.resumeSessionId,
           key.agentName,
-          withChatId(callerFromKey(key.channelThreadKey), init?.romeSessionId),
+          surfaceOf(key.channelThreadKey, init),
           openOptions(init),
+        )
+      : openNamed(key.channelThreadKey, init?.romeSessionId, () =>
+          manager.open(
+            key.agentName,
+            key.channelThreadKey,
+            surfaceOf(key.channelThreadKey, init),
+            openOptions(init),
+          ),
         );
   keyed.acquireBySessionId = (id, agentName, init) =>
-    manager.session(id, agentName, openOptions(init));
-  keyed.peek = (key) => manager.live(key.agentName, callerFromKey(key.channelThreadKey));
+    manager.session(id, agentName, surfaceOf(undefined, init), openOptions(init));
+  keyed.peek = (key) => manager.live(key.agentName, key.channelThreadKey);
   return keyed;
 }
 
-export type LegacyManagerDeps = Omit<ManagerDeps, "callers"> & {
-  callers?: ManagerDeps["callers"];
+export type LegacyManagerDeps = Omit<ManagerDeps, "log"> & {
+  log?: ManagerDeps["log"];
   webchatRepo?: WebChatRepository;
   connectionKindOfChannel?: ConnectionKindOfChannel;
+  channelSurface?: (channel: string) => ChannelSurface | null;
 };
 
-/** A manager whose callers answer from `webchatRepo` and the connection kinds,
- *  as production wires them. */
+/** A manager whose log writes to `webchatRepo` and whose surfaces answer
+ *  from the connection kinds, as production wires them. */
 export function createTestSessionManager(
   deps: LegacyManagerDeps,
   options?: Parameters<typeof createAgentSessionManager>[1],
 ): TestSessionManager {
-  const { webchatRepo, connectionKindOfChannel, callers, ...rest } = deps;
+  const { webchatRepo, connectionKindOfChannel, channelSurface, log, ...rest } = deps;
   return withKeys(
     createAgentSessionManager(
-      { ...rest, callers: callers ?? sessionCallers({ webchatRepo, connectionKindOfChannel }) },
+      {
+        ...rest,
+        log: log ?? createSessionLog(webchatRepo),
+        routineKeyFor: rest.routineKeyFor ?? chatRoutineKeyForToolUse,
+      },
       options,
     ),
+    { connectionKindOfChannel, ...(channelSurface ? { channelSurface } : {}) },
   );
 }
 
-/**
- * Where a fake session records a turn, resolved the way a real one does. A
- * fake session object passes itself: `recordsTo(o) { return recordsToOf(this, o) }`.
- */
-export function recordsToOf(
-  fake: unknown,
-  options?: Pick<SendTurnOptions, "threadContext" | "execution">,
-): TurnConversation {
-  const session = fake as {
-    key: AgentSessionKey;
-    sessionId: string;
-    conversation?: SessionConversation;
-  };
-  return resolveTurnConversation({
-    agentName: session.key.agentName,
-    agentSessionId: session.sessionId,
-    sessionConversation: session.conversation,
-    channelThreadKey: callerKey(session.key.caller),
-    threadContext: options?.threadContext,
-    actionContext: options?.execution,
-  });
+/** Where a real session keeps its turns in today's rows, which only the
+ *  session reads. */
+export function conversationOf(session: AgentSession): SessionConversation | undefined {
+  return (session as unknown as { conversation?: SessionConversation }).conversation;
 }

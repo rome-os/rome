@@ -1,5 +1,5 @@
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE } from "../chats/dashboard/dashboard-account.js";
-import type { ChannelSurface } from "../core/agent-session.js";
+import type { ChannelSurface } from "../connections/session-surface.js";
 
 /** The channel surfaces production declares, for session managers built in
  *  tests: webchat's own, and every other channel is messaging. */

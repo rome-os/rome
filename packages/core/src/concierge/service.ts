@@ -7,7 +7,7 @@ import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
 import type { AIToolStateValue } from "../core/ai-tool-state.js";
-import type { SessionCaller } from "../core/session-caller.js";
+import { callerKey, type SessionCaller } from "../core/session-caller.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -183,14 +183,17 @@ export class ConciergeService {
     const caller: SessionCaller = { kind: "chat", chatId };
     const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection)?.providerId;
     const pinned =
-      selected ?? (await this.deps.agentSessionManager.find(CONCIERGE_AGENT_ID, caller))?.provider;
+      selected ??
+      (await this.deps.agentSessionManager.find(CONCIERGE_AGENT_ID, callerKey(caller)))?.provider;
     const state = this.deps.aiToolState.get();
     const from = pinned ?? soleExhaustedProvider(state);
     if (from !== "openai" && from !== "anthropic") return null;
     const target = quotaSwitchTarget(state, from);
     if (!target) return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
-    this.deps.agentSessionManager.live(CONCIERGE_AGENT_ID, caller)?.selectModel(target.selectionId);
+    this.deps.agentSessionManager
+      .live(CONCIERGE_AGENT_ID, callerKey(caller))
+      ?.selectModel(target.selectionId);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {
         type: "quota_switch",
@@ -204,10 +207,10 @@ export class ConciergeService {
 
   /** The runtime session id of the Concierge chat, or null before its first turn. */
   async runtimeSessionId(chatId: string): Promise<string | null> {
-    const stored = await this.deps.agentSessionManager.find(CONCIERGE_AGENT_ID, {
-      kind: "chat",
-      chatId,
-    });
+    const stored = await this.deps.agentSessionManager.find(
+      CONCIERGE_AGENT_ID,
+      callerKey({ kind: "chat", chatId }),
+    );
     return stored?.sessionId ?? null;
   }
 

@@ -65,11 +65,7 @@ import {
   type SendTurnOptions,
   subagentToolName,
 } from "./agent-session.js";
-import {
-  recordsToOf,
-  createTestSessionManager,
-  type TestSessionManager,
-} from "../test/session-compat.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
@@ -298,7 +294,10 @@ describe("AgentRunner", () => {
     const acquireBySessionId = rs.fn(async () => {
       throw stop;
     });
-    const manager = { session: acquireBySessionId } as unknown as AgentSessionManager;
+    const manager = {
+      session: acquireBySessionId,
+      find: rs.fn(() => undefined),
+    } as unknown as AgentSessionManager;
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
 
     await expect(
@@ -316,8 +315,9 @@ describe("AgentRunner", () => {
       "agent-session-1",
       "test-main",
       expect.objectContaining({
-        threadContext: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
+        replies: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
       }),
+      expect.anything(),
     );
   });
 
@@ -492,11 +492,8 @@ describe("AgentRunner", () => {
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {
-      key: { agentName: "test-main", caller: callerFromKey("webchat:sess-1") },
-      caller: callerFromKey("webchat:sess-1"),
-      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-        return recordsToOf(this, options);
-      },
+      key: { agentName: "test-main", caller: "webchat:sess-1" },
+      caller: "webchat:sess-1",
       sessionId: "source-session",
       status: "idle" as const,
       sendTurn: rs.fn(),
@@ -531,469 +528,83 @@ describe("AgentRunner", () => {
   });
 
   it("records a forked run as a fork rome session with parent lineage", async () => {
-    const testDb = createTestDb();
-    try {
-      const repo = new ChatsWebChatRepository(testDb.db);
-      await repo.createSession("parent-chat", "Fixing the build");
-
-      const source = {
-        key: { agentName: "main", caller: callerFromKey("webchat:parent-chat") },
-        caller: callerFromKey("webchat:parent-chat"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
-        sessionId: "source-session",
-        status: "idle" as const,
-        sendTurn: rs.fn(),
-        async *runForkedTurn(input: { prompt: string }) {
-          yield {
-            type: "turn_start",
-            turnId: "fork-turn",
-            sessionId: "fork-session",
-            userPrompt: input.prompt,
-            agent: "main",
-          } as const;
-          yield { type: "text", content: "thinking it over", agent: "main" } as const;
-          yield { type: "result", content: "Fork summary", agent: "main" } as const;
-          yield {
-            type: "turn_end",
-            turnId: "fork-turn",
-            status: "completed",
-            durationMs: 5,
-            agent: "main",
-          } as const;
-        },
-        subscribe: rs.fn(() => () => undefined),
-        onStatusChange: rs.fn(() => () => undefined),
-        interrupt: rs.fn(async () => undefined),
-        close: rs.fn(async () => undefined),
-      };
-      const manager = {
-        open: rs.fn(),
-        live: rs.fn(() => source),
-        shutdown: rs.fn(async () => undefined),
-      } as unknown as AgentSessionManager;
-      const runner = new AgentRunner(manager, agentLoader, repo);
-
-      const messages = await collectMessages(
-        runner.runForked({
-          agentName: "main",
-          sourceSessionId: "source-session",
-          channelThreadKey: "webchat:parent-chat",
-          prompt: "summarize",
+    const repo = new ChatsWebChatRepository(testDb.db);
+    await repo.createSession("fork-1", "Fixing the build");
+    const messages = await runForkAgainstLiveSession(
+      () =>
+        forkSessionStub({
+          events: (async function* (): AsyncIterable<AgentEvent> {
+            yield { type: "text", content: "thinking it over" };
+            yield { type: "result", content: "Fork summary" };
+          })(),
+        }),
+      {
+        fork: {
           threadContext: {
             channel: "webchat",
-            threadId: "parent-chat",
-            romeSessionId: "parent-chat",
+            threadId: "fork-1",
+            romeSessionId: "fork-1",
             threadName: "Fixing the build",
             threadType: "private",
             deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
           },
           parentTurnId: "parent-turn-1",
           label: "recap",
-        }),
-      );
-      expect(messages.map((m) => m.type)).toEqual(["turn_start", "text", "result", "turn_end"]);
-
-      const forkSession = await repo.getSession("fork-session");
-      expect(forkSession).toMatchObject({
-        type: "fork",
-        name: "recap: Fixing the build",
-        agentName: null,
-        parentSessionId: "parent-chat",
-        parentTurnId: "parent-turn-1",
-        triggerKind: "fork",
-        triggerName: "recap",
-        // Follow-up turns of the side chat rebuild their context from this row.
-        deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
-      });
-
-      const transcript = await repo.getMessages("fork-session");
-      expect(transcript.map((m) => m.role)).toEqual(["user", "trace", "assistant"]);
-      const trace = await repo.getTraceContentByTurn("fork-session", "fork-turn");
-      expect(JSON.parse(trace?.content ?? "[]").map((b: { type: string }) => b.type)).toEqual([
-        "turn_start",
-        "text",
-        "result",
-        "turn_end",
-      ]);
-    } finally {
-      testDb.close();
-    }
-  });
-
-  describe("a resumed session whose caller names no conversation", () => {
-    function resumedSession(recorded?: RecordedConversation) {
-      type TurnRef = { romeSessionId?: string; romeSessionType?: string };
-      const turns: TurnRef[] = [];
-      const session = {
-        key: { agentName: "main", caller: callerFromKey("telegram:t1") },
-        caller: callerFromKey("telegram:t1"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
         },
-        sessionId: "agent-session",
-        conversation: recorded && { origin: "recorded" as const, ...recorded },
-        status: "idle" as const,
-        sendTurn: rs.fn((input: { prompt: string }, options?: SendTurnOptions) => {
-          // Where the session records the turn, as the runner hands it over.
-          const recorded = session.recordsTo(options);
-          turns.push({
-            romeSessionId: recorded.romeSessionId,
-            romeSessionType: recorded.romeSessionType,
-          });
-          return {
-            turnId: "resumed-turn",
-            turnContext: context.active(),
-            events: (async function* () {
-              yield {
-                type: "turn_start",
-                turnId: "resumed-turn",
-                sessionId: "agent-session",
-                userPrompt: input.prompt,
-                agent: "main",
-              } as const;
-              yield { type: "result", content: "Done", agent: "main" } as const;
-            })(),
-          };
-        }),
-        subscribe: rs.fn(() => () => undefined),
-        onStatusChange: rs.fn(() => () => undefined),
-        interrupt: rs.fn(async () => undefined),
-        close: rs.fn(async () => undefined),
-      };
-      const manager = {
-        open: rs.fn(),
-        session: rs.fn(async () => session),
-        live: rs.fn(),
-        shutdown: rs.fn(async () => undefined),
-      } as unknown as AgentSessionManager;
-      return { manager, turns };
-    }
+      },
+    );
+    const start = messages.find((m) => m.type === "turn_start") as {
+      sessionId: string;
+      turnId: string;
+    };
 
-    it("leaves a recorded channel conversation to the inbox", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.ensureRomeSession({
-          id: "channel:telegram:t1",
-          type: "channel",
-          name: "Telegram thread",
-          agentName: null,
-        });
-        const { manager, turns } = resumedSession({
-          id: "channel:telegram:t1",
-          name: "Telegram thread",
-          type: "channel",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
-        );
-
-        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
-        expect(turns[0]?.romeSessionType).toBe("action");
-        await expect(repo.getMessages("channel:telegram:t1")).resolves.toEqual([]);
-      } finally {
-        testDb.close();
-      }
+    const forkSession = await repo.getSession(start.sessionId);
+    expect(forkSession).toMatchObject({
+      type: "fork",
+      name: "recap: Fixing the build",
+      agentName: "core:test-main",
+      parentSessionId: "fork-1",
+      parentTurnId: "parent-turn-1",
+      triggerKind: "fork",
+      triggerName: "recap",
+      // Follow-up turns of the side chat rebuild their context from this row.
+      deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
     });
 
-    it("writes the prompt into a recorded subagent conversation it alone records", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.ensureRomeSession({
-          id: "child-chat",
-          type: "subagent",
-          name: "researcher: Parent",
-          agentName: "researcher",
-        });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
-        );
-
-        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
-        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
-        expect(roles).toContain("user");
-      } finally {
-        testDb.close();
-      }
-    });
-
-    it("leaves a turn under a webchat thread to that chat", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.ensureRomeSession({
-          id: "child-chat",
-          type: "subagent",
-          name: "researcher: Parent",
-          agentName: "researcher",
-        });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            threadContext: {
-              channel: "webchat",
-              threadId: "parent-chat",
-              threadName: "Parent",
-              threadType: "private",
-              romeSessionId: "parent-chat",
-            },
-          }),
-        );
-
-        expect(turns).toEqual([{ romeSessionId: "parent-chat", romeSessionType: "webchat" }]);
-        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
-      } finally {
-        testDb.close();
-      }
-    });
-
-    it("leaves a turn under a messaging thread to that thread", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.ensureRomeSession({
-          id: "child-chat",
-          type: "subagent",
-          name: "researcher: Telegram thread",
-          agentName: "researcher",
-        });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Telegram thread",
-          type: "subagent",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        // A backend turn delivers its reply to the thread and records it in the
-        // thread's conversation under this turn, so the trace stays there too.
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
-          }),
-        );
-
-        expect(turns).toEqual([
-          { romeSessionId: "channel:telegram:t1", romeSessionType: "channel" },
-        ]);
-        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
-      } finally {
-        testDb.close();
-      }
-    });
-
-    it("writes a recorded subagent transcript when the caller keeps its own", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.ensureRomeSession({
-          id: "child-chat",
-          type: "subagent",
-          name: "researcher: Parent",
-          agentName: "researcher",
-        });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        // A caller that keeps its own transcript keeps it for its channel,
-        // not for this conversation.
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            persistTrace: true,
-            persistTranscript: false,
-          }),
-        );
-
-        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
-        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
-        expect(roles).toEqual(expect.arrayContaining(["user", "assistant"]));
-      } finally {
-        testDb.close();
-      }
-    });
-
-    it("leaves a saved side chat to the webchat route on a backend turn", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.ensureRomeSession({
-          id: "side-chat",
-          type: "fork",
-          name: "Side chat",
-          agentName: "main",
-        });
-        const { manager, turns } = resumedSession({
-          id: "side-chat",
-          name: "Side chat",
-          type: "fork",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            threadContext: {
-              channel: "webchat",
-              threadId: "side-chat",
-              threadName: "Side chat",
-              threadType: "private",
-              romeSessionId: "side-chat",
-            },
-            persistTrace: true,
-            persistTranscript: false,
-          }),
-        );
-
-        expect(turns).toEqual([{ romeSessionId: "side-chat", romeSessionType: "webchat" }]);
-        const roles = (await repo.getMessages("side-chat")).map((m) => m.role);
-        expect(roles).not.toContain("user");
-        expect(roles).not.toContain("assistant");
-      } finally {
-        testDb.close();
-      }
-    });
-
-    it("leaves a recorded webchat conversation to the webchat route", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        await repo.createSession("user-chat", "User chat");
-        const { manager, turns } = resumedSession({
-          id: "user-chat",
-          name: "User chat",
-          type: "webchat",
-        });
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
-        );
-
-        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
-        await expect(repo.getMessages("user-chat")).resolves.toEqual([]);
-      } finally {
-        testDb.close();
-      }
-    });
-
-    it("does not recreate a recorded conversation that was deleted", async () => {
-      const testDb = createTestDb();
-      try {
-        const repo = new ChatsWebChatRepository(testDb.db);
-        // The lookup at open found no conversation, so none is recorded.
-        const { manager, turns } = resumedSession();
-        const runner = new AgentRunner(manager, agentLoader, repo);
-
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
-        );
-
-        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
-        expect(turns[0]?.romeSessionType).toBe("action");
-        await expect(repo.getSession("deleted-chat")).resolves.toBeNull();
-      } finally {
-        testDb.close();
-      }
-    });
+    const transcript = await repo.getMessages(start.sessionId);
+    expect(transcript.map((m) => m.role)).toEqual(["user", "trace", "assistant"]);
+    const trace = await repo.getTraceContentByTurn(start.sessionId, start.turnId);
+    const types = JSON.parse(trace?.content ?? "[]").map((b: { type: string }) => b.type);
+    expect(types[0]).toBe("turn_start");
+    expect(types).toContain("text");
+    expect(types).toContain("result");
   });
 
   it("links a fork to the conversation its source serves when no thread names one", async () => {
-    const testDb = createTestDb();
-    try {
-      const repo = new ChatsWebChatRepository(testDb.db);
-      await repo.createSession("stored-chat", "Stored chat");
-
-      const source = {
-        key: { agentName: "main", caller: callerFromKey("webchat:stored-chat") },
-        caller: callerFromKey("webchat:stored-chat"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
-        sessionId: "source-session",
-        conversation: { origin: "named" as const, id: "stored-chat" },
-        status: "idle" as const,
-        sendTurn: rs.fn(),
-        async *runForkedTurn(input: { prompt: string }) {
-          yield {
-            type: "turn_start",
-            turnId: "fork-turn",
-            sessionId: "fork-session",
-            userPrompt: input.prompt,
-            agent: "main",
-          } as const;
-          yield { type: "result", content: "Fork summary", agent: "main" } as const;
-        },
-        subscribe: rs.fn(() => () => undefined),
-        onStatusChange: rs.fn(() => () => undefined),
-        interrupt: rs.fn(async () => undefined),
-        close: rs.fn(async () => undefined),
-      };
-      const manager = {
-        open: rs.fn(),
-        live: rs.fn(() => source),
-        shutdown: rs.fn(async () => undefined),
-      } as unknown as AgentSessionManager;
-      const runner = new AgentRunner(manager, agentLoader, repo);
-
-      await collectMessages(
-        runner.runForked({
-          agentName: "main",
-          sourceSessionId: "source-session",
-          channelThreadKey: "webchat:stored-chat",
-          prompt: "summarize",
-          label: "recap",
+    const repo = new ChatsWebChatRepository(testDb.db);
+    await repo.createSession("fork-1", "Stored chat");
+    const messages = await runForkAgainstLiveSession(
+      () =>
+        forkSessionStub({
+          events: (async function* (): AsyncIterable<AgentEvent> {
+            yield { type: "result", content: "Fork summary" };
+          })(),
         }),
-      );
+      { fork: { label: "recap" } },
+    );
+    const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
 
-      await expect(repo.getSession("fork-session")).resolves.toMatchObject({
-        type: "fork",
-        name: "recap: Stored chat",
-        parentSessionId: "stored-chat",
-      });
-    } finally {
-      testDb.close();
-    }
+    await expect(repo.getSession(start.sessionId)).resolves.toMatchObject({
+      type: "fork",
+      name: "recap: Stored chat",
+      parentSessionId: "fork-1",
+    });
   });
 
   it("publishes forked runs for live session inspection", async () => {
     const source = {
-      key: { agentName: "main", caller: callerFromKey("webchat:parent-chat") },
-      caller: callerFromKey("webchat:parent-chat"),
-      recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-        return recordsToOf(this, options);
-      },
+      key: { agentName: "main", caller: "webchat:parent-chat" },
+      caller: "webchat:parent-chat",
       sessionId: "source-session",
       status: "idle" as const,
       sendTurn: rs.fn(),
@@ -2005,7 +1616,7 @@ describe("AgentRunner", () => {
       );
       const session = await manager.acquire(
         { agentName: "test-main", channelThreadKey: "webchat:detached-follow-up" },
-        { interactiveSurfaceDetached: true },
+        { cards: false },
       );
       await collectMessages(session.sendTurn({ prompt: "continue" }).events);
 
@@ -2740,11 +2351,8 @@ describe("AgentRunner", () => {
       }));
       const session: AgentSession = {
         selectModel: () => {},
-        key: { agentName: "test-main", caller: callerFromKey("telegram:t-1") },
-        caller: callerFromKey("telegram:t-1"),
-        recordsTo(options?: Parameters<AgentSession["recordsTo"]>[0]) {
-          return recordsToOf(this, options);
-        },
+        key: { agentName: "test-main", caller: "telegram:t-1" },
+        caller: "telegram:t-1",
         sessionId: "sess-1",
         status: "idle",
         sendTurn,
@@ -2779,6 +2387,7 @@ describe("AgentRunner", () => {
       expect(manager.session).toHaveBeenCalledWith(
         "sess-1",
         "test-main",
+        expect.anything(),
         expect.objectContaining({}),
       );
       expect(manager.open).not.toHaveBeenCalled();
@@ -4140,12 +3749,8 @@ describe("AgentRunner", () => {
         { threadContext: webchatThreadContext, workingDir: projectWorkingDir },
       );
 
-      const first = await collectMessages(
-        session.sendTurn({ prompt: "First" }, { threadContext: webchatThreadContext }).events,
-      );
-      const second = await collectMessages(
-        session.sendTurn({ prompt: "Second" }, { threadContext: webchatThreadContext }).events,
-      );
+      const first = await collectMessages(session.sendTurn({ prompt: "First" }).events);
+      const second = await collectMessages(session.sendTurn({ prompt: "Second" }).events);
 
       expect(initUserPrompt(first)).toContain("<thread_context>");
       expect(initUserPrompt(second)).not.toContain("<thread_context>");
@@ -4212,9 +3817,7 @@ describe("AgentRunner", () => {
         { threadContext: webchatThreadContext, workingDir: projectWorkingDir },
       );
 
-      const messages = await collectMessages(
-        session.sendTurn({ prompt: "Subtask" }, { threadContext: webchatThreadContext }).events,
-      );
+      const messages = await collectMessages(session.sendTurn({ prompt: "Subtask" }).events);
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
       await manager.shutdown();
@@ -4236,9 +3839,7 @@ describe("AgentRunner", () => {
         );
         for (const prompt of ["First", "Second"]) {
           const userPrompt = initUserPrompt(
-            await collectMessages(
-              session.sendTurn({ prompt }, { threadContext: withFolder }).events,
-            ),
+            await collectMessages(session.sendTurn({ prompt }).events),
           );
           expect(userPrompt).toContain('Work in folder "/w" on Rome node device "macbook"');
           expect(userPrompt.indexOf("<device_folder>")).toBeLessThan(userPrompt.indexOf(prompt));
@@ -5449,7 +5050,8 @@ describe("AgentRunner", () => {
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
       const manager = createTestSessionManager(managerDeps(modelResolver));
-      const runner = new AgentRunner(manager, agentLoader);
+      // Chats restores the chat's model, so the run reads it through Chats.
+      const runner = new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
       const messages = await collectMessages(
         runner.run({
           agentName: "test-main",
@@ -5478,7 +5080,7 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("a legacy resume without a thread context reads the selection through its key", async () => {
+    it("a legacy resume without a thread context reads the selection through the caller it names", async () => {
       const state = {
         codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
         claude: { loggedIn: true, quotaExhausted: false },
@@ -5510,11 +5112,13 @@ describe("AgentRunner", () => {
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
       const manager = createTestSessionManager(managerDeps(modelResolver));
-      const runner = new AgentRunner(manager, agentLoader);
+      const runner = new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
       const messages = await collectMessages(
         runner.run({
           agentName: "test-main",
           sessionId: legacyId,
+          // Sessions never reads its caller back, so the resume names it.
+          channelThreadKey: "webchat:legacy-no-context",
           prompt: "Continue",
         }),
       );

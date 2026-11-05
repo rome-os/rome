@@ -1,7 +1,9 @@
 import type { MessageReplyReference } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
+import { channelChatId } from "../db/session-kind.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
-import type { ChannelSurface, TurnBriefing } from "./agent-session.js";
+import type { TurnBriefing } from "./agent-session.js";
+import type { ChannelSurface } from "../connections/session-surface.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import type { ThreadContext } from "./types.js";
 
@@ -89,6 +91,8 @@ export function catchUpBriefing(
   deps: CatchUpDeps,
   turn: {
     threadContext?: ThreadContext;
+    /** The conversation the turn's session stands in, when its caller names one. */
+    romeSessionId?: string;
     replyTo?: MessageReplyReference;
     /** The message `replyTo` names, as Rome holds it where the turn's session
      *  stands, or null when Rome holds none. */
@@ -97,12 +101,17 @@ export function catchUpBriefing(
 ): TurnBriefing | undefined {
   const turnLinks = deps.turnLinks;
   const connection = turn.threadContext?.channel;
-  if (!turnLinks || !connection) return undefined;
+  if (!turnLinks || !connection || !turn.threadContext) return undefined;
   const promptContext = deps.surface?.(connection)?.promptContext ?? true;
   if (!promptContext) return undefined;
+  // The conversation Chats keeps where the turn replies, which is where its
+  // session stands.
+  const thread = turn.threadContext;
+  const romeSessionId =
+    turn.romeSessionId ?? thread.romeSessionId ?? channelChatId(thread.channel, thread.threadId);
   return {
-    compose(prompt, recorded) {
-      if (recorded.romeSessionType !== "channel" || !recorded.romeSessionId) return { prompt };
+    compose(prompt, { turnId }) {
+      const recorded = { romeSessionId, turnId };
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
       const unseen = turnLinks.unseen(recorded.romeSessionId);

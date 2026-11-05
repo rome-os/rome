@@ -2,7 +2,9 @@ import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { isConciergeAgent } from "../concierge/service.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
-import type { SessionCaller } from "./session-caller.js";
+import type { AgentSessionManager } from "./agent-session.js";
+import { callerKey, type SessionCaller } from "./session-caller.js";
+import type { ThreadContext } from "./types.js";
 
 /**
  * The model a dashboard chat chose, which a resumed session of that chat
@@ -25,4 +27,38 @@ export function chatModelSelection(webchatRepo: Pick<WebChatRepository, "getSess
       (await webchatRepo.getSession(caller.chatId))?.largeModelSelection,
     )?.id;
   };
+}
+
+/**
+ * The model a dashboard chat chose, for a session resumed by id. Chats restores
+ * it itself: only the chat's own session reads it, and the caller names the
+ * chat, or a run with no caller replies into it.
+ */
+export async function rememberedChatModel(
+  deps: {
+    webchatRepo?: Pick<WebChatRepository, "getSession">;
+    sessions: Pick<AgentSessionManager, "find">;
+  },
+  run: {
+    agentName: string;
+    sessionId: string;
+    caller?: SessionCaller;
+    replies?: ThreadContext;
+  },
+): Promise<ModelSelectionId | undefined> {
+  const chatId =
+    run.caller?.kind === "chat"
+      ? run.caller.chatId
+      : !run.caller && run.replies?.channel === "webchat"
+        ? run.replies.threadId
+        : undefined;
+  if (!chatId || !deps.webchatRepo) return undefined;
+  const chat: SessionCaller = { kind: "chat", chatId };
+  const stored = await deps.sessions.find(run.agentName, callerKey(chat));
+  if (stored?.sessionId !== run.sessionId) return undefined;
+  return chatModelSelection(deps.webchatRepo)(
+    chat,
+    run.agentName,
+    !!(stored.provider && stored.model),
+  );
 }

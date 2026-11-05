@@ -138,7 +138,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     try {
       while (true) {
         if (values.length > 0) {
-          yield attachRomeSession(values.shift()!, response.romeSession);
+          yield values.shift()!;
           continue;
         }
         if (done) {
@@ -152,17 +152,10 @@ export class RpcAgentRunner implements AgentRunnerInterface {
           if (error) throw error;
           return;
         }
-        yield attachRomeSession(next.value, response.romeSession);
+        yield next.value;
       }
     } finally {
       router.release(streamName);
     }
   }
-}
-
-function attachRomeSession(
-  message: StreamAgentEvent,
-  romeSession: RunTurnResponse["romeSession"],
-): StreamAgentEvent {
-  return message.type === "session_init" ? { ...message, romeSession } : message;
 }

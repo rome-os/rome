@@ -1,4 +1,6 @@
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
+import { createSessionLog } from "../core/session-log.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -759,7 +761,8 @@ export async function buildTestDeps(
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
-    channelSurface: testChannelSurface,
+    log: createSessionLog(webchatRepo),
+    routineKeyFor: chatRoutineKeyForToolUse,
     subagentExecutionService,
     activeSubagentRegistry,
   });
@@ -1034,7 +1037,6 @@ import {
   setTelemetryBridge as setTelemetryBridgeOnSdk,
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
-import { testChannelSurface } from "./channel-surface.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;

@@ -10,23 +10,28 @@ import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { shouldPersistAgentTrace } from "./agent-trace-recorder.js";
+import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import { sessionSurfaceOf, type SurfaceDeps } from "../connections/session-surface.js";
 import {
-  AgentTraceRecorder,
-  recordAgentTraceBestEffort,
-  shouldPersistAgentTrace,
-} from "./agent-trace-recorder.js";
-import { findRecordedConversation } from "./session-conversation.js";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { callerFromKey, callerKey, callerOfRun, type SessionCaller } from "./session-caller.js";
+  callerChatId,
+  callerFromKey,
+  callerKey,
+  callerOfRun,
+  type SessionCaller,
+} from "./session-caller.js";
 import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
 import { resetWhenDue, type ResolveConnectionReset } from "./connection-reset.js";
+import { rememberedChatModel } from "./chat-model-selection.js";
+import { openNamed } from "./session-log.js";
 
 /** What a wake on a connection adds to a run: the catch-up it briefs the
- *  agent with, and the reset setting it applies first. */
+ *  agent with, the reset setting it applies first, and what the run's
+ *  surface can show. */
 export interface WakeDeps {
   catchUp?: CatchUpDeps;
   resolveReset?: ResolveConnectionReset;
+  surface?: SurfaceDeps;
 }
 
 const log = createLogger("agent-runner");
@@ -530,113 +535,120 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
+    // The caller that names this run, as the caller's side holds it. A resume
+    // by id may name it too, which its surface reads.
+    const named =
+      params.caller ??
+      (params.channelThreadKey ? callerFromKey(params.channelThreadKey) : undefined);
+    const caller = explicitSessionId
+      ? named
+      : (params.caller ??
+        callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId));
+    // The conversation the run names, where Chats keeps its lines.
+    const chatId = explicitSessionId ? undefined : caller && callerChatId(caller);
     const threadContext = await this.withChatId(params.threadContext);
+    const persistTranscript = params.persistTranscript ?? true;
+    const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, threadContext, {
+      ...(params.contextSuffix ? { about: params.contextSuffix } : {}),
+      keeps: {
+        // A run that names a conversation it does not reply into keeps its
+        // own record there, and the session's log stays out of it.
+        turn: !(params.persistTrace ?? shouldPersistAgentTrace(threadContext)),
+        prompt: !persistTranscript,
+        answer: !persistTranscript || !(params.persistAnswer ?? true),
+      },
+    });
     const options = {
       workingDir: params.workingDir,
-      threadContext,
-      contextSuffix: params.contextSuffix,
+      ...(explicitSessionId
+        ? {
+            model: await rememberedChatModel(
+              { webchatRepo: this.webchatRepo, sessions: this.agentSessionManager },
+              {
+                agentName: params.agentName,
+                sessionId: explicitSessionId,
+                caller: named,
+                replies: threadContext,
+              },
+            ),
+          }
+        : {}),
     };
     let session;
     if (explicitSessionId) {
       session = await this.agentSessionManager.session(
         explicitSessionId,
         params.agentName,
+        surface,
         options,
       );
     } else {
       // A run that names no conversation gets a caller of its own.
-      const caller =
-        params.caller ??
-        callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId);
+      const runCaller = caller!;
       // A wake by a message on a connection applies the place's reset setting.
       if (params.platformMessageId) {
         await resetWhenDue(
           this.agentSessionManager,
           this.wake?.resolveReset,
           params.agentName,
-          caller,
+          runCaller,
           threadContext,
         );
       }
-      session = await this.agentSessionManager.open(params.agentName, caller, options);
+      const runCallerId = callerKey(runCaller);
+      session = await openNamed(runCallerId, chatId, () =>
+        this.agentSessionManager.open(params.agentName, runCallerId, surface, options),
+      );
     }
     const agentName = session.key.agentName;
-    const conversation = session.recordsTo({ threadContext });
-    const { romeSessionId } = conversation;
+    // Where Chats keeps the run's lines: the conversation the run names, else
+    // the one its reply address does.
+    const romeSessionId =
+      chatId ??
+      threadContext?.romeSessionId ??
+      (threadContext ? channelChatId(threadContext.channel, threadContext.threadId) : undefined);
     // The line the run names by its platform id, which the turn answers, and
     // the one its reply quotes, as Chats holds them.
-    const lines = this.runLineDeps
-      ? await runLines(this.runLineDeps.lines, romeSessionId, params)
-      : null;
+    const lines =
+      this.runLineDeps && romeSessionId
+        ? await runLines(this.runLineDeps.lines, romeSessionId, params)
+        : null;
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
     const briefing = catchUpBriefing(this.wake?.catchUp ?? {}, {
       threadContext,
+      ...(romeSessionId ? { romeSessionId } : {}),
       replyTo: params.replyTo,
       quoted: lines?.quoted ?? null,
     });
     const handle = session.sendTurn(
-      { prompt: params.prompt, images: params.images },
       {
-        threadContext,
-        sharedContext: params.sharedContext,
+        prompt: params.prompt,
+        images: params.images,
+        ...(params.sharedContext ? { sharedContext: params.sharedContext } : {}),
+        ...(params.inputLabel ? { label: params.inputLabel } : {}),
+      },
+      {
         ...(briefing ? { briefing } : {}),
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
     this.runLineDeps?.replies?.runs(handle.turnId, agentName);
-    if (lines && this.runLineDeps) {
-      if (conversation.promptPersisted && lines.prompt !== null) {
-        this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
-      }
-    } else if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
-      await this.webchatRepo.assignConversationMessageTurn(
-        romeSessionId,
-        params.platformMessageId,
-        handle.turnId,
+    // Chats wrote the prompt of a run that names its conversation.
+    if (chatId) {
+      await linkPromptToTurn(
+        { webchatRepo: this.webchatRepo, runLineDeps: this.runLineDeps },
+        {
+          romeSessionId: chatId,
+          turnId: handle.turnId,
+          lines,
+          platformMessageId: params.platformMessageId,
+        },
       );
     }
 
-    const persistTrace = params.persistTrace ?? shouldPersistAgentTrace(threadContext);
-    const recorder =
-      this.webchatRepo && persistTrace
-        ? new AgentTraceRecorder({
-            webchatRepo: this.webchatRepo,
-            agentName,
-            agentSessionId: session.sessionId,
-            romeSessionId,
-            existingSessionId: conversation.existing ? romeSessionId : undefined,
-            channelThreadKey: callerKey(session.caller),
-            turnId: handle.turnId,
-            threadContext,
-            // A recorder-owned conversation has no other transcript, whatever
-            // the caller's channel keeps.
-            persistTranscript: conversation.recorderOwned || (params.persistTranscript ?? true),
-            persistUserTranscript: !conversation.promptPersisted,
-            persistAssistantTranscript:
-              conversation.recorderOwned || (params.persistAnswer ?? true),
-          })
-        : null;
-
     for await (const msg of handle.events) {
-      if (recorder) {
-        await recordAgentTraceBestEffort(recorder, msg, log, {
-          turnId: handle.turnId,
-          source: "agent-runner",
-        });
-        // The turn's input, under the caller's label, right after it starts.
-        if (msg.type === "turn_start" && params.inputLabel) {
-          await recorder
-            .recordSystemInput(params.inputLabel, params.prompt)
-            .catch((error: unknown) =>
-              log.warn("system input not recorded", {
-                turnId: handle.turnId,
-                error: error instanceof Error ? error.message : String(error),
-              }),
-            );
-        }
-      }
       yield msg;
     }
 
@@ -667,7 +679,7 @@ export class AgentRunner {
     const caller =
       params.caller ?? (params.channelThreadKey ? callerFromKey(params.channelThreadKey) : null);
     if (!caller) throw new Error("Cannot fork agent session without the source session's caller");
-    const source = this.agentSessionManager.live(params.agentName, caller);
+    const source = this.agentSessionManager.live(params.agentName, callerKey(caller));
     if (!source) {
       throw new Error("Cannot fork agent session because the source session is not live");
     }
@@ -683,16 +695,11 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
-    // Forked turns persist like action runs: the fork gets its own rome
-    // session (type "fork", linked to its parent) and the turn's trace lands
-    // there, so the trajectory shows up under /sessions. The fork mints its
-    // session/turn ids inside runForkedTurn, so the recorder can only be
-    // attached once turn_start surfaces them. Not gated on
-    // shouldPersistAgentTrace: that gate exists because the webchat HTTP
-    // route owns live webchat persistence, but no route owns a forked turn.
-    let recorder: AgentTraceRecorder | null = null;
+    // A fork keeps its own record, under its source's: the session registers
+    // it once the fork's ids are known.
     let forkTurnId: string | undefined;
     let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
+    const continueAs = params.continueAs;
     try {
       for await (const message of source.runForkedTurn({
         prompt: params.prompt,
@@ -701,16 +708,12 @@ export class AgentRunner {
         sourceCheckpoint: params.sourceCheckpoint,
         atTurn: params.atTurn,
         threadContext: params.threadContext,
-        continueAs: params.continueAs,
+        ...(continueAs ? { continueAs: (id: string) => callerKey(continueAs(id)) } : {}),
+        label: params.label,
+        parentTurnId: params.parentTurnId,
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(
-            params,
-            caller,
-            message,
-            source.conversation?.id,
-          );
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -732,12 +735,6 @@ export class AgentRunner {
             }
           }
         }
-        if (recorder) {
-          await recordAgentTraceBestEffort(recorder, message, log, {
-            turnId: forkTurnId ?? "unknown",
-            source: "agent-runner:fork",
-          });
-        }
         liveStream?.publish(message);
         yield message;
       }
@@ -750,65 +747,5 @@ export class AgentRunner {
       sourceSessionId: params.sourceSessionId,
       forkTurnId,
     });
-  }
-
-  /**
-   * Register the fork's rome session (with parent lineage) and return a
-   * recorder targeting it. Best-effort: a persistence failure must not break
-   * the forked run, so any error degrades to "no recording" with a warning.
-   */
-  private async createForkTraceRecorder(
-    params: ForkRunParams,
-    caller: SessionCaller,
-    turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceChatId?: string,
-  ): Promise<AgentTraceRecorder | null> {
-    if (!this.webchatRepo) return null;
-    try {
-      const thread = params.threadContext;
-      // Prefer the source's conversation while it exists. Read again rather
-      // than trusting the session's cached row, which can outlive a deletion.
-      // The fallbacks cover rows that recorded none, or one since deleted.
-      const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
-      const parentSessionId =
-        recorded?.id ??
-        thread?.romeSessionId ??
-        (thread ? channelChatId(thread.channel, thread.threadId) : null);
-      const parent =
-        recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
-      const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
-      const label = params.label ?? "fork";
-      const trigger = { triggerKind: "fork", triggerName: label };
-      await this.webchatRepo.ensureRomeSession({
-        id: turnStart.sessionId,
-        type: "fork",
-        name: `${label}: ${parentName}`,
-        agentName: isCoreMainAgentId(params.agentName) ? null : params.agentName,
-        projectName: thread?.projectName,
-        projectPath: thread?.projectPath,
-        // Later turns of the side chat read the folder from this row.
-        deviceFolder: thread?.deviceFolder ?? null,
-        trigger,
-        parentSessionId: parent ? parentSessionId : null,
-        parentTurnId: parent ? (params.parentTurnId ?? null) : null,
-      });
-      return new AgentTraceRecorder({
-        webchatRepo: this.webchatRepo,
-        agentName: params.agentName,
-        channelThreadKey: callerKey(caller),
-        turnId: turnStart.turnId,
-        existingSessionId: turnStart.sessionId,
-        threadContext: params.threadContext,
-        persistTranscript: true,
-        trigger,
-      });
-    } catch (err) {
-      log.warn("failed to register forked run session; skipping trace persistence", {
-        agent: params.agentName,
-        sourceSessionId: params.sourceSessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
   }
 }
