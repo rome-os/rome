@@ -104,6 +104,7 @@ export function composioAdapter(parts: ComposioAdapterParts): WatchAdapter {
     source: catalog.source,
     catalog,
     events: [...byEvent.keys()],
+    viaComposioWebhook: true,
     async connected(env) {
       if (!(await env.composio.signedIn().catch(() => false))) return false;
       const accounts = await env.composio.accounts().catch(() => []);

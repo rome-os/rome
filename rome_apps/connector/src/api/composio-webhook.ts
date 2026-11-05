@@ -44,7 +44,54 @@ export async function ensureComposioWebhookRegistered(input: {
   assertHttpsRelayDepositUrl(webhookUrl);
 
   const endpoint = await input.client.setWebhookUrl(webhookUrl);
+  lastTarget = null;
   await input.appSettings.set("webhookSecret", endpoint.secret);
   await input.appSettings.set("webhookEndpointId", endpoint.id);
   return { webhookUrl };
+}
+
+/**
+ * Where the Composio project's one webhook delivers: to this instance's relay
+ * mailbox (`ours`), to another URL (`elsewhere`, usually another Rome on the
+ * same project, which registered after this one), nowhere (`none`), or
+ * `unknown` when Composio, the relay or the URL could not be read.
+ */
+export type ComposioWebhookTarget = "ours" | "elsewhere" | "none" | "unknown";
+
+const TARGET_TTL_MS = 5 * 60_000;
+
+// One answer per relay mailbox, kept briefly so listing sources does not ask
+// Composio each time. Registering drops it, since that re-points the URL.
+let lastTarget: { url: string; target: ComposioWebhookTarget; at: number } | null = null;
+
+const sameUrl = (a: string, b: string) => {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return a === b;
+  }
+};
+
+/** Reads where the project's webhook delivers, without changing it. `unknown` is not kept. */
+export async function composioWebhookTarget(input: {
+  client: Pick<ComposioClient, "getWebhookUrl"> | null;
+  settings: Pick<AppSettingsRepository, "get">;
+  now?: number;
+}): Promise<ComposioWebhookTarget> {
+  const now = input.now ?? Date.now();
+  const ours = await resolveRelayDepositUrl(input.settings);
+  if (!input.client || !ours) return "unknown";
+  if (lastTarget && lastTarget.url === ours && now - lastTarget.at < TARGET_TTL_MS) {
+    return lastTarget.target;
+  }
+  let current: string | null | undefined;
+  try {
+    current = await input.client.getWebhookUrl();
+  } catch {
+    return "unknown";
+  }
+  if (current === undefined) return "unknown";
+  const target = current === null ? "none" : sameUrl(current, ours) ? "ours" : "elsewhere";
+  lastTarget = { url: ours, target, at: now };
+  return target;
 }

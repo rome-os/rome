@@ -11,11 +11,13 @@ import {
   COMPOSIO_ACCOUNTS_QUERY_KEY,
   COMPOSIO_CATALOG_QUERY_KEY,
   COMPOSIO_STATUS_QUERY_KEY,
+  COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
   composioServiceRows,
   disconnectComposioService,
   fetchComposioAccounts,
   fetchComposioCatalog,
   fetchComposioWebhookStatus,
+  fetchComposioWebhookTarget,
   registerComposioWebhook,
   startComposioConnect,
   type ComposioCatalogEntry,
@@ -316,7 +318,9 @@ export function ComposioServiceDialog({
 /**
  * Whether connected services can deliver events (new email, new issue) to
  * Rome's routines. Signing in and connecting a service register the webhook
- * on their own; Set up again is the manual repair.
+ * on their own; Set up again is the manual repair. A Composio project has one
+ * webhook, so when another Rome on the same project registered last, events go
+ * there and the row says so.
  */
 export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => void }) {
   const { t } = useTranslation("settings");
@@ -325,17 +329,28 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
     queryKey: COMPOSIO_STATUS_QUERY_KEY,
     queryFn: fetchComposioWebhookStatus,
   });
+  const target = useQuery({
+    queryKey: COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
+    queryFn: fetchComposioWebhookTarget,
+  });
   const register = useMutation({
     mutationFn: registerComposioWebhook,
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: COMPOSIO_STATUS_QUERY_KEY });
+      await client.invalidateQueries({ queryKey: COMPOSIO_WEBHOOK_TARGET_QUERY_KEY });
       toast(t("connections.composioServices.webhook.done"));
     },
     onError: (err) => onFlash(err.message),
   });
   if (!status.data) return null;
   const { relayConfigured, webhookRegistered } = status.data;
-  const state = !relayConfigured ? "unavailable" : webhookRegistered ? "ready" : "notReady";
+  const state = !relayConfigured
+    ? "unavailable"
+    : target.data === "elsewhere"
+      ? "elsewhere"
+      : webhookRegistered
+        ? "ready"
+        : "notReady";
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3">
       <div className="flex min-w-0 flex-col gap-1">

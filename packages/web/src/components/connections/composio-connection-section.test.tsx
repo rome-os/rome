@@ -128,6 +128,17 @@ describe("ComposioConnectionSection", () => {
     );
   });
 
+  it("says when the Composio webhook delivers to another Rome", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/apps/connector/webhook/target"
+        ? Response.json({ target: "elsewhere" })
+        : Response.json({ webhookRegistered: true, relayConfigured: true }),
+    );
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+    expect(await screen.findByText("Going to another Rome")).toBeTruthy();
+    expect(screen.queryByText("Ready")).toBeNull();
+  });
+
   it("Disconnect posts to the composio logout endpoint and refreshes", async () => {
     const fetchMock = rs
       .spyOn(globalThis, "fetch")

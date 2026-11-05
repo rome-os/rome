@@ -5,6 +5,7 @@ import {
   isComposioNotFoundError,
 } from "./composio-client.js";
 import {
+  composioWebhookTarget,
   ensureComposioWebhookRegistered,
   RelayWebhookUnavailableError,
 } from "./composio-webhook.js";
@@ -143,6 +144,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
       }
       if (method === "POST" && path === "login/cancel") return this.handleLoginCancel(request);
       if (method === "POST" && path === "logout") return await this.handleLogout();
+      if (method === "GET" && path === "webhook/target") return await this.handleWebhookTarget();
       if (method === "POST" && path === "webhook/register")
         return await this.handleRegisterWebhook();
       if (method === "POST" && path === "connectors") {
@@ -426,6 +428,15 @@ class ComposioApiHandler implements RomeAppApiHandler {
       "webhook_registration_failed",
       message,
     );
+  }
+
+  /** Where the Composio project's webhook delivers, apart from `status` because it asks Composio. */
+  private async handleWebhookTarget(): Promise<Response> {
+    const target = await composioWebhookTarget({
+      client: await this.loadClient(),
+      settings: this.ctx.repositories.settings,
+    });
+    return Response.json({ target });
   }
 
   private async handleRegisterWebhook(): Promise<Response> {

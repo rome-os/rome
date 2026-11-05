@@ -106,6 +106,7 @@ export const connectorHandlers = [
     }
     return HttpResponse.json({ ok: true, deleted: before - accounts.length });
   }),
+  http.get("/api/apps/connector/webhook/target", () => HttpResponse.json({ target: "ours" })),
   http.post("/api/apps/connector/webhook/register", () =>
     HttpResponse.json({ ok: true, webhookUrl: "https://ingest.example.com/h/mock" }),
   ),

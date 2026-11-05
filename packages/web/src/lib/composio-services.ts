@@ -30,6 +30,9 @@ export interface ComposioWebhookStatus {
   relayConfigured: boolean;
 }
 
+/** Where the Composio project's one webhook delivers; `elsewhere` is usually another Rome. */
+export type ComposioWebhookTarget = "ours" | "elsewhere" | "none" | "unknown";
+
 /** A Composio service as one row: connected services carry whether they need
  *  attention, available ones do not. */
 export interface ComposioServiceRow extends ComposioCatalogEntry {
@@ -39,6 +42,7 @@ export interface ComposioServiceRow extends ComposioCatalogEntry {
 export const COMPOSIO_CATALOG_QUERY_KEY = ["composio", "catalog"] as const;
 export const COMPOSIO_ACCOUNTS_QUERY_KEY = ["composio", "accounts"] as const;
 export const COMPOSIO_STATUS_QUERY_KEY = ["composio", "status"] as const;
+export const COMPOSIO_WEBHOOK_TARGET_QUERY_KEY = ["composio", "webhook-target"] as const;
 
 export async function fetchComposioCatalog(): Promise<ComposioCatalogEntry[]> {
   const body = await fetchJson<{ items: ComposioCatalogEntry[] }>(`${CONNECTOR_API}/catalog`, {
@@ -77,6 +81,14 @@ export async function disconnectComposioService(slug: string): Promise<void> {
     method: "DELETE",
     fallback: "Couldn't disconnect. Try again.",
   });
+}
+
+export async function fetchComposioWebhookTarget(): Promise<ComposioWebhookTarget> {
+  const body = await fetchJson<{ target: ComposioWebhookTarget }>(
+    `${CONNECTOR_API}/webhook/target`,
+    { fallback: "Couldn't check where Composio sends events." },
+  );
+  return body.target;
 }
 
 export async function registerComposioWebhook(): Promise<void> {

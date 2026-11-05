@@ -3,7 +3,7 @@
 // pass a fake one and need no service.
 
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { ensureComposioWebhookRegistered } from "../api/composio-webhook.js";
+import { composioWebhookTarget, ensureComposioWebhookRegistered } from "../api/composio-webhook.js";
 import { resolveRelayDepositUrl } from "../api/relay-webhook.js";
 import { SettingsStore } from "../api/settings-store.js";
 import { loadConnectorClient, ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
@@ -49,6 +49,11 @@ function composioEnv(deps: AppActionRuntimeDeps): ComposioEnv {
       }
       return res.data as Record<string, unknown>;
     },
+    webhookTarget: async () =>
+      composioWebhookTarget({
+        client: await loadConnectorClient().catch(() => null),
+        settings: deps.appContext.repositories.settings,
+      }),
     // Arming also points Composio's webhook at this Rome's relay mailbox. A
     // check answers `active` only when every trigger is armed; arming answers
     // `created` when it armed any.

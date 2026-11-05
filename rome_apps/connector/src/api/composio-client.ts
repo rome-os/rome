@@ -891,6 +891,18 @@ export class ComposioClient {
     return (await this.listWebhookEndpointIds()).includes(id);
   }
 
+  /**
+   * The URL the project's webhook delivers to, read with the same list
+   * `setWebhookUrl` starts from. Null when the project has no webhook;
+   * undefined when it has one whose URL the list does not show.
+   */
+  async getWebhookUrl(): Promise<string | null | undefined> {
+    const rows = await this.listWebhookEndpoints();
+    if (rows.length === 0) return null;
+    const url = rows[0]?.webhook_url;
+    return typeof url === "string" && url.length > 0 ? url : undefined;
+  }
+
   private async writeWebhookEndpoint(
     method: "POST" | "PATCH",
     webhookUrl: string,
@@ -920,6 +932,12 @@ export class ComposioClient {
   }
 
   private async listWebhookEndpointIds(): Promise<string[]> {
+    return (await this.listWebhookEndpoints())
+      .map((row) => row.id)
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+  }
+
+  private async listWebhookEndpoints(): Promise<Array<{ id?: string; webhook_url?: unknown }>> {
     const response = await fetch(this.webhookEndpointsUrl(), {
       method: "GET",
       headers: { ...authHeaderFor(this.apiKey) },
@@ -931,10 +949,10 @@ export class ComposioClient {
         response.status,
       );
     }
-    const body = (await response.json()) as { items?: Array<{ id?: string }> };
-    return (body.items ?? [])
-      .map((row) => row.id)
-      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    const body = (await response.json()) as {
+      items?: Array<{ id?: string; webhook_url?: unknown }>;
+    };
+    return body.items ?? [];
   }
 
   async deleteWebhookEndpoint(id: string): Promise<void> {

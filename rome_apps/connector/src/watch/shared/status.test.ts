@@ -1,9 +1,14 @@
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { createGithubAdapter } from "../adapters/github/index.js";
 import { ADAPTERS } from "../registry.js";
 import type { WatchEnv } from "../types.js";
-import { composioServices, listWatchSources as listWith, NO_RELAY_REASON } from "./status.js";
+import {
+  COMPOSIO_WEBHOOK_ELSEWHERE_REASON,
+  composioServices,
+  listWatchSources as listWith,
+  NO_RELAY_REASON,
+} from "./status.js";
 
 /** What the statuses read, as fakes: GitHub's token and login, the relay, and Composio. */
 interface WatchSourceDeps {
@@ -13,6 +18,7 @@ interface WatchSourceDeps {
   composioSignedIn(): Promise<boolean>;
   composioAccounts(): Promise<{ toolkit: string; status: string }[]>;
   composioAccount(service: string): Promise<string>;
+  composioWebhookTarget(): Promise<"ours" | "elsewhere" | "none" | "unknown">;
 }
 
 /** The registry's adapters over the fakes: GitHub's deps injected, each Composio account read from them. */
@@ -35,6 +41,7 @@ const listWatchSources = (d: WatchSourceDeps) => {
       accounts: d.composioAccounts,
       accountId: async () => "ca_test",
       read: async () => ({}),
+      webhookTarget: d.composioWebhookTarget,
       ensureTriggers: async () => ({ ok: true, subscription: "active" }),
     },
   };
@@ -55,6 +62,7 @@ const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
     { toolkit: "stripe", status: "ACTIVE" },
   ],
   composioAccount: async (service) => (service === "stripe" ? "Acme Inc" : "me@example.com"),
+  composioWebhookTarget: async () => "ours",
   ...extra,
 });
 
@@ -130,6 +138,33 @@ describe("listWatchSources", () => {
       status: "error",
       statusReason: expect.stringContaining("401"),
     });
+  });
+
+  it("says a Composio source cannot receive events when the project's webhook goes to another Rome", async () => {
+    const target = rs.fn(async () => "elsewhere" as const);
+    const { watch } = await listWatchSources(deps({ composioWebhookTarget: target }));
+    expect(watch.map((w) => [w.service, w.status])).toEqual([
+      ["github", "ready"],
+      ["gmail", "error"],
+      ["googlecalendar", "error"],
+      ["linear", "error"],
+      ["outlook", "error"],
+      ["notion", "not_connected"],
+      ["stripe", "error"],
+    ]);
+    expect(watch[1]?.statusReason).toBe(COMPOSIO_WEBHOOK_ELSEWHERE_REASON);
+    expect(target).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Composio sources ready when where the webhook goes is unknown or none", async () => {
+    for (const answer of ["unknown", "none"] as const) {
+      const { watch } = await listWatchSources(deps({ composioWebhookTarget: async () => answer }));
+      expect(watch.filter((w) => w.status === "error")).toEqual([]);
+    }
+    const failing = await listWatchSources(
+      deps({ composioWebhookTarget: async () => Promise.reject(new Error("fetch failed")) }),
+    );
+    expect(failing.watch.filter((w) => w.status === "error")).toEqual([]);
   });
 
   it("reads the Calendar account on its own, so a Gmail-only Rome cannot watch Calendar", async () => {

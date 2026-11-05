@@ -41,6 +41,23 @@ describe("Composio credential rejection", () => {
     );
   });
 
+  it("reads the project's webhook URL from the list, without writing", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ items: [{ id: "ws_1", webhook_url: "https://relay.example/h/a" }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ items: [] }))
+      .mockResolvedValueOnce(Response.json({ items: [{ id: "ws_1" }] }));
+    const client = new ComposioClient({ apiKey: "uak_test" });
+
+    await expect(client.getWebhookUrl()).resolves.toBe("https://relay.example/h/a");
+    await expect(client.getWebhookUrl()).resolves.toBeNull();
+    await expect(client.getWebhookUrl()).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    for (const call of fetch.mock.calls) expect(call[1]).toMatchObject({ method: "GET" });
+  });
+
   it.each([401, 403, 500])("preserves webhook write status %i", async (status) => {
     rs.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ items: [] }))

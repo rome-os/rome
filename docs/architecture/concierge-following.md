@@ -100,6 +100,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 
 - **Unfollowing removes the Concierge's routines and leaves the subscription at the source in place.** One subscription, such as a repository's webhook, may serve several consumers. The connection does not yet count who uses a subscription, so nothing releases one ([#1658](https://github.com/rome-os/rome/issues/1658)).
 - **The Concierge subscribes its follows again after boot and at a fixed interval,** so a subscription another consumer removed comes back.
+- **A Composio project delivers to one Rome at a time, and a Rome it does not deliver to says so.** Each Rome that connects a Composio service points the project's one webhook at its own relay mailbox. A Rome whose project delivers elsewhere reports its Composio sources as not ready, with the reason, until it takes the webhook back ([#1719](https://github.com/rome-os/rome/issues/1719)).
 
 ### The Concierge reaches following through actions
 

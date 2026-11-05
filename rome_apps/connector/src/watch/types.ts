@@ -114,6 +114,8 @@ export interface ComposioEnv {
   accountId(service: ComposioToolkit): Promise<string>;
   /** One read from the service's API through its connected account. */
   read(service: ComposioToolkit, request: ComposioRequest): Promise<Json>;
+  /** Where the Composio project's one webhook delivers: here, elsewhere, nowhere, or unknown. */
+  webhookTarget(): Promise<"ours" | "elsewhere" | "none" | "unknown">;
   /** Checks, or arms, the triggers for the connected account. */
   ensureTriggers(
     service: ComposioToolkit,
@@ -135,6 +137,8 @@ export interface WatchAdapter {
   catalog: Watchable;
   /** The bus events this adapter delivers: exact names, or a prefix ending in `*`. */
   events: readonly string[];
+  /** Its events come through the Composio project's webhook, which one Rome at a time receives. */
+  viaComposioWebhook?: true;
   /** Whether the source is connected to Rome at all. */
   connected(env: WatchEnv): Promise<boolean>;
   /** Whose account the events concern, or why that cannot be read. */
