@@ -5097,6 +5097,15 @@ describe("Webchat API", () => {
       // The sidebar list contains it immediately, with no query change.
       const listed = (await (await app.request("/chat/sessions")).json()) as Array<{ id: string }>;
       expect(listed.map((s) => s.id)).toContain("branch-fork-session");
+      // The first turn's answer, which arrives after the branch became a
+      // chat, shows in the chat as Chats' copy.
+      await rs.waitFor(async () =>
+        expect(
+          (await deps.webchatRepo.getMessages("branch-fork-session"))
+            .filter((message) => message.role === "assistant")
+            .map((message) => message.content),
+        ).toEqual([JSON.stringify([{ type: "text", content: "Here is the side-chat answer." }])]),
+      );
     });
 
     it("refuses a follow-up until the branch thread exists", async () => {
@@ -6623,7 +6632,6 @@ function logged(surface: SessionSurface, caller: string, fake: FakeSession): Age
         ? { origin: "named", id: surface.replies.romeSessionId }
         : undefined,
       child: false,
-      keeps: surface.keeps,
     });
     const writer = entry?.writer;
     if (!writer) return handle;

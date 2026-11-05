@@ -20,7 +20,7 @@ import type { ChatMessage, ChatSession } from "@/lib/chat-types";
 // here decides which app owns an agent or what a run cost. What the handler
 // does reproduce is the *query* — the scope filter, the search, the sort, the
 // facet counts and the page window — mirroring
-// packages/core/src/db/repositories/session-query.ts field for field, since a
+// packages/core/src/agent-sessions/rows/session-query.ts field for field, since a
 // list whose filters do nothing tells a reader nothing about the list.
 
 const DAY = 24 * 60 * 60 * 1000;

@@ -29,6 +29,7 @@ import { MessageRepository, type MessageCursor } from "../chats/storage/message-
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
+import { createTurnReads, type TurnReads } from "../agent-sessions/index.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
  *  it; a line that prompted a turn is the guardian's (or a visitor's) input;
@@ -138,16 +139,20 @@ const LIKE_ESCAPE = "\\";
 export class ChatReadModel {
   private readonly messages: Pick<MessageRepository, "read" | "idOf" | "byIds">;
   private readonly links: Pick<TurnLinks, "turnsOf">;
+  private readonly turns: Pick<TurnReads, "keptTurns" | "traceHeadsOf">;
 
   constructor(
     private readonly db: DrizzleDb,
     deps: {
       messages?: Pick<MessageRepository, "read" | "idOf" | "byIds">;
       links?: Pick<TurnLinks, "turnsOf">;
+      /** Sessions' turns, whose traces and kept messages it shows. */
+      turns?: Pick<TurnReads, "keptTurns" | "traceHeadsOf">;
     } = {},
   ) {
     this.messages = deps.messages ?? new MessageRepository(db);
     this.links = deps.links ?? new TurnLinks(db);
+    this.turns = deps.turns ?? createTurnReads(db);
   }
 
   /**
@@ -286,66 +291,15 @@ export class ChatReadModel {
    * line outside any turn is a turn of its own.
    */
   async sessionTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript> {
-    const before = page?.before ?? null;
-    const rows = await this.db.all<{
-      id: string;
-      turn_id: string | null;
-      input_state: AgentInputState | null;
-      role: TranscriptRole | "trace";
-      content: string;
-      sender_name: string | null;
-      at: number;
-      turn: string;
-      turn_at: number;
-    }>(sql`
-      WITH line AS (
-        -- A trace's blocks load only when the guardian opens it.
-        SELECT id, turn_id, input_state, role,
-          CASE WHEN role = 'trace' THEN '[]' ELSE content END AS content,
-          json_extract(actor, '$.email') AS sender_name,
-          created_at AS at, rowid AS seq, coalesce(turn_id, id) AS turn
-        FROM rome_agent_messages WHERE session_id = ${sessionId}
-      ),
-      turn AS (
-        SELECT turn, min(at) AS turn_at, min(seq) AS turn_seq FROM line GROUP BY turn
-      ),
-      shown AS (
-        SELECT * FROM turn
-        WHERE ${before === null ? 1 : 0} OR turn_at < ${before?.at ?? 0} OR (turn_at = ${before?.at ?? 0}
-          AND turn_seq < (SELECT turn_seq FROM turn WHERE turn = ${before?.id ?? ""}))
-        ORDER BY turn_at DESC, turn_seq DESC
-        -- One turn past the page tells whether more remain.
-        LIMIT ${page ? page.limit + 1 : -1}
-      )
-      SELECT line.*, shown.turn_at FROM line JOIN shown USING (turn)
-      ORDER BY shown.turn_at, shown.turn_seq, line.at, line.seq`);
-    const more = page !== undefined && new Set(rows.map((row) => row.turn)).size > page.limit;
-    const shown = more ? rows.filter((row) => row.turn !== rows[0]?.turn) : rows;
-    const lines: TranscriptLine[] = [];
-    const traces: TurnTrace[] = [];
-    for (const row of shown) {
-      const createdAt = new Date(row.at * 1000);
-      if (row.role !== "trace") {
-        lines.push({
-          id: row.id,
-          sessionId,
-          turnId: row.turn_id,
-          inputState: row.input_state,
-          role: row.role,
-          content: row.content,
-          senderAccountId: null,
-          senderName: row.sender_name,
-          createdAt,
-        });
-      } else if (row.turn_id !== null) {
-        traces.push({ id: row.id, sessionId, turnId: row.turn_id, createdAt });
-      }
-    }
-    const oldest = shown[0];
+    const kept = await this.turns.keptTurns(sessionId, page);
     return {
-      lines,
-      traces,
-      nextCursor: more && oldest ? { at: oldest.turn_at, id: oldest.turn } : null,
+      lines: kept.messages.map((message) => ({
+        ...message,
+        sessionId,
+        senderAccountId: null,
+      })),
+      traces: kept.traces,
+      nextCursor: kept.nextCursor,
     };
   }
 
@@ -373,37 +327,8 @@ export class ChatReadModel {
   }
 
   /** The trace of each of `refs` that has one. */
-  private async tracesOf(refs: readonly TurnRef[]): Promise<TurnTrace[]> {
-    const turns = new Map<string, TurnRef>();
-    for (const ref of refs) turns.set(JSON.stringify([ref.sessionId, ref.turnId]), ref);
-    if (turns.size === 0) return [];
-    // The turns go in as one JSON value, so a long history binds one
-    // parameter however many turns it shows.
-    const wanted = JSON.stringify([...turns.values()].map((turn) => [turn.sessionId, turn.turnId]));
-    const rows = await this.db.all<{
-      id: string;
-      session_id: string;
-      turn_id: string;
-      created_at: number;
-    }>(sql`
-      WITH wanted(session_id, turn_id) AS (
-        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(${wanted})
-      )
-      SELECT t.id, t.session_id, t.turn_id, t.created_at
-      -- CROSS JOIN keeps the wanted turns outside, so each finds its trace
-      -- by turn id. Left to choose, SQLite walks every trace in the database
-      -- and scans the wanted list for each.
-      FROM wanted w
-      CROSS JOIN rome_agent_messages t
-        ON t.session_id = w.session_id AND t.turn_id = w.turn_id AND t.role = 'trace'
-      ORDER BY t.created_at, t.rowid
-    `);
-    return rows.map((row) => ({
-      id: row.id,
-      sessionId: row.session_id,
-      turnId: row.turn_id,
-      createdAt: new Date(row.created_at * 1000),
-    }));
+  private tracesOf(refs: readonly TurnRef[]): Promise<TurnTrace[]> {
+    return this.turns.traceHeadsOf(refs);
   }
 
   /**

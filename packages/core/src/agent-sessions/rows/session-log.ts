@@ -61,6 +61,9 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
     fork: webchatRepo ? (fork) => forkWriter(webchatRepo, fork) : undefined,
     resumableChild: webchatRepo ? (child) => resumableChild(webchatRepo, child) : undefined,
     childStarted: webchatRepo ? (child) => childStarted(webchatRepo, child) : undefined,
+    endInterrupted: webchatRepo
+      ? (windowMs) => webchatRepo.endInterruptedTurns(windowMs)
+      : undefined,
   };
 }
 
@@ -148,11 +151,9 @@ function turnEntry(webchatRepo: WebChatRepository | undefined, turn: LoggedTurn)
     romeSessionId: conversation.romeSessionId,
     romeSessionType: conversation.romeSessionType,
   };
-  const keeps = turn.keeps;
-  if (!webchatRepo || keeps?.turn) return { conversation: kept };
-  const keepsAnswer = keeps?.answer;
-  // A conversation only the log writes gets every message. Otherwise the log
-  // leaves out what the surface writes, and a prompt its opener already wrote.
+  if (!webchatRepo) return { conversation: kept };
+  // The session keeps the whole turn: its prompt, its trace and its answer,
+  // whatever a caller keeps of them in its own record.
   const recorder = new AgentTraceRecorder({
     webchatRepo,
     agentName: turn.agentName,
@@ -164,11 +165,6 @@ function turnEntry(webchatRepo: WebChatRepository | undefined, turn: LoggedTurn)
     threadContext: turn.replies,
     ...(turn.execution ? { actionContext: turn.execution } : {}),
     persistTranscript: true,
-    persistUserTranscript:
-      (conversation.recorderOwned || !keeps?.prompt) && !conversation.promptPersisted,
-    persistAssistantTranscript: () =>
-      conversation.recorderOwned ||
-      !(typeof keepsAnswer === "function" ? keepsAnswer() : keepsAnswer),
   });
   return { conversation: kept, writer: writerOf(recorder, turn.turnId, "agent-session") };
 }

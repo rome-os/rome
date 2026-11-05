@@ -6,20 +6,20 @@
 // Chats stores a line changes this file and not an app. The app
 // repositories hand them to every app.
 
-import type { ChatLine, ChatReads, RecentChat, SessionTrace } from "@rome-os/app-runtime/chats";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import type { ChatLine, ChatReads, RecentChat } from "@rome-os/app-runtime/chats";
+import { sql, type SQL } from "drizzle-orm";
 import { platformOf } from "@rome/api-types/platform";
 import { DASHBOARD_PLATFORM } from "../connections/send.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { romeAgentMessages } from "../db/schema/system.js";
+import type { TurnReads } from "../agent-sessions/index.js";
 import type { ChatReadModel } from "../webchat/chat-read-model.js";
 
 export interface AppChatReadsDeps {
   db: DrizzleDb;
   reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
-  webchatRepo: Pick<WebChatRepository, "getTraceContents">;
+  /** Sessions' turns, whose traces an app reads. */
+  turns: Pick<TurnReads, "tracesWithUsage">;
 }
 
 export function appChatReads(deps: AppChatReadsDeps): ChatReads {
@@ -44,7 +44,7 @@ export function appChatReads(deps: AppChatReadsDeps): ChatReads {
           }),
         );
     },
-    traces: (sessionId) => traces(deps, sessionId),
+    traces: (sessionId) => deps.turns.tracesWithUsage(sessionId),
   };
 }
 
@@ -133,29 +133,4 @@ function recentChats(
     projectPath: row.project_path,
     startedAt: new Date(row.created_at * 1000),
   }));
-}
-
-/** Session `sessionId`'s traces, oldest first, each with its blocks put back
- *  together and what its turn used. */
-async function traces(deps: AppChatReadsDeps, sessionId: string): Promise<SessionTrace[]> {
-  const stubs = deps.db
-    .select({
-      id: romeAgentMessages.id,
-      turnId: romeAgentMessages.turnId,
-      createdAt: romeAgentMessages.createdAt,
-      inputTokens: romeAgentMessages.inputTokens,
-      outputTokens: romeAgentMessages.outputTokens,
-      cacheReadTokens: romeAgentMessages.cacheReadTokens,
-      cacheWriteTokens: romeAgentMessages.cacheWriteTokens,
-      costUsd: romeAgentMessages.costUsd,
-    })
-    .from(romeAgentMessages)
-    .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")))
-    .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id))
-    .all();
-  if (stubs.length === 0) return [];
-  const contents = new Map(
-    (await deps.webchatRepo.getTraceContents(sessionId)).map((trace) => [trace.id, trace.content]),
-  );
-  return stubs.map((stub) => ({ ...stub, content: contents.get(stub.id) ?? "[]" }));
 }

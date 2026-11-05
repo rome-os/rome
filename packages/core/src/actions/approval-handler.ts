@@ -220,7 +220,7 @@ export class ApprovalHandler {
           initiatedBy: "system",
           // The reply is recorded as it is said below, never twice, and a
           // reply that could not be said is not on record as said.
-          ...(messaging ? { persistAnswer: false } : {}),
+          ...(messaging ? { chatAnswer: false } : {}),
         })) {
           if (message.type === "turn_start") turnId = message.turnId;
           if (message.type === "result") reply = message.content;

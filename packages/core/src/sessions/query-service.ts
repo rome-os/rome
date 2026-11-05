@@ -26,7 +26,7 @@ import type {
   RawSessionStats,
   SessionQueryRepository,
   SessionQueryStorageScope,
-} from "../db/repositories/session-query.js";
+} from "../agent-sessions/index.js";
 
 type SessionRow = NonNullable<
   Awaited<ReturnType<SessionQueryRepository["getSessionDetailRows"]>>

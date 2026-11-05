@@ -12,6 +12,8 @@ import { automatedSource, speaksForGuardian } from "./automated-source.js";
 // WebChatRepository at startup. The contract step folds it into that class.
 
 import { randomUUID } from "node:crypto";
+import { keptInputOf, keptTurnMessagesOf, turnRowsOf } from "../agent-sessions/index.js";
+import { textMessageContent, transcriptMessageId } from "../chats/storage/transcript-rows.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
@@ -30,7 +32,7 @@ import {
   type TraceBatch,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
-import { agentTurnMessages, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { agentTurnMessages, romeSessions } from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
@@ -168,25 +170,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       this.startDashboardChat(id, fork.name, fork.agentName);
       const standing = this.standingOf(id);
       if (!standing) throw new Error(`Promoted fork ${id} stands in no chat`);
-      const said = this.db
-        .select({
-          id: romeAgentMessages.id,
-          turnId: romeAgentMessages.turnId,
-          role: romeAgentMessages.role,
-          content: romeAgentMessages.content,
-          actor: romeAgentMessages.actor,
-          inputState: romeAgentMessages.inputState,
-          createdAt: romeAgentMessages.createdAt,
-        })
-        .from(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, id),
-            inArray(romeAgentMessages.role, ["user", "assistant"]),
-          ),
-        )
-        .orderBy(asc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid`)
-        .all();
+      const said = keptTurnMessagesOf(this.db, id);
       for (const line of said) {
         const parts = partsOf(line.content);
         const fromAgent = line.role === "assistant";
@@ -206,44 +190,8 @@ export class ChatsWebChatRepository extends WebChatRepository {
         if (!fromAgent) this.links.prompt(lineId, id, line.turnId, line.inputState);
         else if (line.turnId !== null) this.links.answer(lineId, id, line.turnId);
       }
-      this.db
-        .delete(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, id),
-            inArray(romeAgentMessages.role, ["user", "assistant"]),
-          ),
-        )
-        .run();
-    });
-  }
-
-  /**
-   * Write a turn's trace batch. The prompt and answer it carries are said in
-   * the chat of a session that stands in one, such as a fork promoted while
-   * its turn ran, in the same transaction as the trace, which stays the
-   * session's own: a batch whose answer could not be said leaves nothing
-   * behind, so the recorder's place in the trace stays true.
-   */
-  protected override writeTraceBatch(input: TraceBatch, now = new Date()): void {
-    const said = input.transcriptMessages ?? [];
-    const inChat = said.flatMap((message) => {
-      const standing = this.standingOf(message.sessionId);
-      return standing ? [{ message, standing }] : [];
-    });
-    if (inChat.length === 0) return super.writeTraceBatch(input, now);
-    const own = said.filter((message) => !inChat.some((line) => line.message === message));
-    // Prompt, trace, answer, at the times the base class gives them.
-    const sayAll = (role: "user" | "assistant", at: Date) => {
-      for (const { message, standing } of inChat) {
-        if (message.role !== role) continue;
-        this.say(standing, message.id, role, partsOf(message.content), message.turnId, at);
-      }
-    };
-    this.db.transaction(() => {
-      sayAll("user", now);
-      super.writeTraceBatch({ ...input, transcriptMessages: own }, now);
-      sayAll("assistant", new Date(now.getTime() + 2));
+      // The session's own rows stay, as its copy of its turns. A session in a
+      // chat reads its transcript from the chat, so they no longer show.
     });
   }
 
@@ -268,9 +216,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
         FROM ancestors JOIN rome_sessions AS parent ON parent.id = ancestors.parent_id
       ),
       activity AS MATERIALIZED (
-        SELECT session_id, max(created_at) AS last_message_at FROM rome_agent_messages
-        WHERE session_id IN (SELECT ancestor_id FROM ancestors)
-          AND role IN (SELECT value FROM json_each(${roles}))
+        SELECT session_id, max(created_at) AS last_message_at
+        FROM ${turnRowsOf(sql`(SELECT ancestor_id FROM ancestors)`)}
+        WHERE role IN (SELECT value FROM json_each(${roles}))
         GROUP BY session_id
         UNION ALL
         SELECT s.id, max(m.said_at) FROM rome_sessions s
@@ -342,7 +290,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     inputId: string,
   ): Promise<{ turnId: string | null; inputState: AgentInputState | null } | undefined> {
     const line = this.lineIn(sessionId, inputId);
-    if (line === undefined) return super.getUserInput(sessionId, inputId);
+    if (line === undefined) return keptInputOf(this.db, sessionId, inputId);
     const link = line === null ? null : this.links.linkOf(sessionId, line);
     return link?.role === "prompt"
       ? { turnId: link.turnId, inputState: link.inputState }
@@ -371,6 +319,22 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const standing = role === "user" || role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.addMessage(id, sessionId, role, content, turnId);
     this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
+  }
+
+  override async recordAnswerInChat(
+    sessionId: string,
+    turnId: string,
+    content: string,
+  ): Promise<void> {
+    const standing = this.standingOf(sessionId);
+    if (!standing) return;
+    this.say(
+      standing,
+      transcriptMessageId(sessionId, turnId, "assistant"),
+      "assistant",
+      partsOf(textMessageContent(content)),
+      turnId,
+    );
   }
 
   protected override async insertBackendMessage(
@@ -527,7 +491,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
 
   override async hasTurnInSession(sessionId: string, turnId: string): Promise<boolean> {
     const rows = this.db.all(sql`
-      SELECT 1 FROM rome_agent_messages WHERE session_id = ${sessionId} AND turn_id = ${turnId}
+      SELECT 1 FROM ${turnRowsOf(sql`(${sessionId})`)} WHERE turn_id = ${turnId}
       UNION ALL
       SELECT 1 FROM agent_turn_messages WHERE session_id = ${sessionId} AND turn_id = ${turnId}
       LIMIT 1
@@ -847,7 +811,7 @@ export function sessionLines(sessionIds: readonly string[]) {
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
     UNION ALL
     SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,
-      CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
+      CASE WHEN r.is_trace THEN '[]' ELSE r.content END AS content,
       r.created_at,
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
@@ -855,10 +819,10 @@ export function sessionLines(sessionIds: readonly string[]) {
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,
-      r.rowid AS seq
-    FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
-    WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
-      AND (s.chat_id IS NULL OR r.role = 'trace')
+      r.seq
+    FROM ${turnRowsOf(sql`(SELECT value FROM json_each(${ids}))`)} r
+    JOIN rome_sessions s ON s.id = r.session_id
+    WHERE s.chat_id IS NULL OR r.is_trace
   )`;
 }
 
@@ -873,7 +837,6 @@ const chatsSessionMessageCount = sql<number>`((
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
     and m."said_at" >= "rome_sessions"."created_at"
 ) + (
-  select count(*) from "rome_agent_messages" r
-  where r."session_id" = "rome_sessions"."id"
-    and ("rome_sessions"."chat_id" is null or r."role" = 'trace')
+  select count(*) from ${turnRowsOf(sql`("rome_sessions"."id")`)} r
+  where "rome_sessions"."chat_id" is null or r.is_trace
 ))`.mapWith(Number);

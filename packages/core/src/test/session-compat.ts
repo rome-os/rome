@@ -7,7 +7,6 @@ import {
   createAgentSessionManager,
   type ManagerDeps,
   type SessionOpenOptions,
-  type SurfaceKeeps,
 } from "../agent-sessions/agent-session.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -39,7 +38,6 @@ export interface KeyedInit {
   /** The conversation the caller named. */
   romeSessionId?: string;
   resumeSessionId?: string;
-  keeps?: SurfaceKeeps;
   /** Overrides whether the surface shows cards. */
   cards?: boolean;
 }
@@ -68,7 +66,6 @@ export function withKeys(
   const surfaceOf = (key: string | undefined, init: KeyedInit | undefined) => {
     const replies = init?.threadContext;
     const surface = sessionSurfaceOf(surfaceDeps, key ? callerFromKey(key) : undefined, replies, {
-      ...(init?.keeps ? { keeps: init.keeps } : {}),
       ...(init?.contextSuffix ? { about: init.contextSuffix } : {}),
     });
     return init?.cards === undefined ? surface : { ...surface, cards: init.cards };

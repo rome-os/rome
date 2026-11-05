@@ -154,10 +154,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
-    trace: Pick<
-      RunParams,
-      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel"
-    > = {},
+    trace: Pick<RunParams, "chatAnswer" | "inputLabel"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -291,9 +288,8 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
           await deps.beforeTurn?.(params);
           let reply = "";
           let turnId: string | undefined;
+          // The dashboard chat writes its own copy of the answer.
           const trace = {
-            persistTrace: true,
-            persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
           };
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
@@ -319,11 +315,11 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     assertSpeaker(params.channel);
     let reply = "";
     let turnId: string | undefined;
-    // A speaker puts the answer on record as it says it, so the trace keeps
-    // the turn but writes no answer of its own: one that was never sent
-    // must not read as said, and one that was must not be said twice.
+    // A speaker puts the answer on record in the chat as it says it, so the
+    // run writes none there: one that was never sent must not read as said,
+    // and one that was must not be said twice.
     const trace = {
-      persistAnswer: false,
+      chatAnswer: false,
       ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
     };
     for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {

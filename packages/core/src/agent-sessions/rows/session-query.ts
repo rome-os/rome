@@ -18,11 +18,11 @@ import {
 import { alias } from "drizzle-orm/sqlite-core";
 import type { RunOutcome, SessionsSort } from "@rome/api-types/sessions";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import type { DrizzleDb } from "../index.js";
-import { chats, romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
-import { romeSessionKind, withSessionKind } from "../session-kind.js";
+import type { DrizzleDb } from "../../db/index.js";
+import { chats, romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../../db/schema.js";
+import { romeSessionKind, withSessionKind } from "../../db/session-kind.js";
 import { chatIdsOfKind } from "../../chats/storage/chat-repository.js";
-import { channelOfAccountSql } from "./channel-records.js";
+import { channelOfAccountSql } from "../../db/repositories/channel-records.js";
 import { CHAT_MESSAGES } from "../../chats/storage/messages-sql.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
