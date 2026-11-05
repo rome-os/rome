@@ -104,6 +104,8 @@ final class AppModel {
     var autoOpenHint: String?
 
     let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
+    /// Keeps the open instance on its latest release.
+    let update = InstanceUpdater()
 
     /// The open instance's Web dashboard.
     var webURL: URL? {
@@ -123,6 +125,10 @@ final class AppModel {
         let environment = ProcessInfo.processInfo.environment
         if environment["ROME_DEMO"] == "1" {
             openDemo()
+            return
+        }
+        if environment["ROME_DEMO"] == "update" {
+            openDemo(.updateRequired)
             return
         }
         if let origin = environment["ROME_LOCAL_ORIGIN"],
@@ -214,11 +220,24 @@ final class AppModel {
             ))
         } catch AuthError.instanceNotReady {
             phase = .stopped(instanceName: instance.name)
+            // Mid-upgrade the instance is down for a while: keep the update page
+            // waiting and open it again once Rome Cloud reports it running.
+            _ = update.waitWithoutInstance(instanceID: instance.id) { [weak self] in
+                await self?.reconnectWhenRunning(instance.id)
+            }
         } catch AuthError.cloudUnauthorized {
             phase = .signedOut
         } catch {
             signInError = (error as? LocalizedError)?.errorDescription
             phase = .signedOut
+        }
+    }
+
+    private func reconnectWhenRunning(_ id: String) async {
+        guard let list = try? await cloud.listInstances() else { return }
+        instances = list
+        if let instance = list.first(where: { $0.id == id }), instance.isRunning {
+            await connect(to: instance)
         }
     }
 
@@ -238,6 +257,7 @@ final class AppModel {
     }
 
     func signOut() async {
+        update.reset()
         workspace?.stop()
         workspace = nil
         token.token = nil
@@ -279,7 +299,27 @@ final class AppModel {
     private func open(_ workspace: Workspace) async {
         self.workspace = workspace
         phase = .ready
+        // Its own task: the poll that reports the finish is cancelled when the
+        // reopened workspace attaches, and would cancel the reopen with it.
+        update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
+        if let id = currentInstanceID {
+            Task { await update.attach(backend: workspace.backend, instanceID: id) }
+        }
         await workspace.start()
+    }
+
+    /// The app came back to the foreground.
+    func becameActive() async {
+        await update.check()
+    }
+
+    /// The instance restarted on its new release: open it fresh, so the chat,
+    /// the tasks and the live socket all come from the new process.
+    private func reopenAfterUpgrade() async {
+        guard let old = workspace else { return }
+        old.stop()
+        old.backend.events.resume()
+        await open(Workspace(backend: old.backend, instanceName: old.instanceName, host: old.host, accountLabel: old.accountLabel))
     }
 
     // MARK: Debug paths
@@ -297,6 +337,7 @@ final class AppModel {
     }
 
     func openDemo(_ variant: DemoBackend.Variant = .full) {
+        update.reset()
         workspace?.stop()
         let backend = DemoBackend(variant: variant)
         instances = DemoBackend.instances

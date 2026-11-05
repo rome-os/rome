@@ -11,6 +11,16 @@
         }
       }
     },
+    "%@, account options" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，账户选项"
+          }
+        }
+      }
+    },
     "%@, coming soon" : {
       "localizations" : {
         "zh-Hans" : {
@@ -83,6 +93,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分钟前"
+          }
+        }
+      }
+    },
+    "A newer release just came out. Update to it to keep using the app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刚刚又发布了新版本。更新到它即可继续使用。"
           }
         }
       }
@@ -163,6 +183,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回"
+          }
+        }
+      }
+    },
+    "Can't check for updates" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查更新"
           }
         }
       }
@@ -313,6 +343,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没发出去，请再试一次。"
+          }
+        }
+      }
+    },
+    "Could not start the update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法开始更新"
           }
         }
       }
@@ -498,6 +538,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "五"
+          }
+        }
+      }
+    },
+    "From %@ to %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "From %1$@ to %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 %@ 更新到 %@"
           }
         }
       }
@@ -1414,6 +1470,16 @@
         }
       }
     },
+    "Starting update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开始更新"
+          }
+        }
+      }
+    },
     "Stop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1553,12 +1619,42 @@
         }
       }
     },
+    "The update is taking too long" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新用时过长"
+          }
+        }
+      }
+    },
     "This Rome is not ready yet" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个 Rome 还没准备好。"
+          }
+        }
+      }
+    },
+    "This app works with the latest Rome. Update to keep using it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 App 需要最新版的 Rome。更新后即可继续使用。"
+          }
+        }
+      }
+    },
+    "This can take a few minutes. You can leave the app; it picks up where it left off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这可能需要几分钟。你可以先离开 App，回来后会接着等待。"
           }
         }
       }
@@ -1681,6 +1777,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "接下来"
+          }
+        }
+      }
+    },
+    "Update now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即更新"
+          }
+        }
+      }
+    },
+    "Update your Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新你的 Rome"
+          }
+        }
+      }
+    },
+    "Updating to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在更新到 %@…"
           }
         }
       }
@@ -1840,6 +1966,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "昨天 %@"
+          }
+        }
+      }
+    },
+    "Your Rome has not come back on %@. Check it in Rome Cloud, or try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 还没有以 %@ 重新上线。请在 Rome Cloud 中查看，或重试。"
           }
         }
       }

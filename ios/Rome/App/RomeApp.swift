@@ -13,7 +13,9 @@ struct RomeApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .background: model.workspace?.backend.events.pause()
-                    case .active: model.workspace?.backend.events.resume()
+                    case .active:
+                        model.workspace?.backend.events.resume()
+                        Task { await model.becameActive() }
                     default: break
                     }
                 }
@@ -35,7 +37,14 @@ struct RootView: View {
                 LoginView()
                     .transition(.opacity)
             }
+            if model.update.blocking {
+                // Over everything, with no way past it but updating.
+                UpdateScreen()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
+        .animation(.easeInOut(duration: 0.3), value: model.update.blocking)
         .animation(.easeInOut(duration: 0.35), value: model.phase == .ready)
         .tint(Palette.primary)
         // Past this size the floating headers and cards stop fitting a phone.
