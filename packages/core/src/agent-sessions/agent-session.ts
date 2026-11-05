@@ -608,6 +608,9 @@ export function createAgentSessionManager(
       const chatId = active?.chatId ?? undefined;
       const decision = active ? rule.when(active) : { due: false as const };
       if (!decision.due) return;
+      // An open still in flight would cache the generation this reset
+      // retires, so it finishes first and is closed with the rest.
+      await acquireLocks.get(k)?.catch(() => undefined);
       const cached = sessions.get(k);
       log.info("provider_session.reset_due", {
         chatId,
@@ -1591,12 +1594,15 @@ async function openSession(
         ...(use.startedAt ? { startedAt: use.startedAt } : {}),
       });
     };
+    // The fork keeps the shared context of the turn it forked from, whatever
+    // turn the source runs next.
+    const forkSharedContext = impl.currentTurnSharedContextRef;
     const refs: TurnExecRefs = {
       sessionId: fork.forkSessionId,
       getRomeSessionId: () => fork.forkSessionId,
       getTurnId: () => fork.forkTurnId,
       getThreadContext: () => fork.threadContext ?? init.surface.replies,
-      getSharedContext: () => impl.currentTurnSharedContextRef,
+      getSharedContext: () => forkSharedContext,
       // Nothing drains a fork stream into webchat, so interactive action
       // results (pending_interaction / place_widget) must take the
       // prose fallbacks — otherwise the tool_result claims a card was shown

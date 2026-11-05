@@ -50,6 +50,7 @@ describe("AgentSession turn usage", () => {
   let state: AIToolStateValue;
   let providerCalls: number;
   let deps: Parameters<typeof createTestSessionManager>[0];
+  let beforeOpen: (() => Promise<void>) | undefined;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -76,11 +77,13 @@ describe("AgentSession turn usage", () => {
     beforeModelDispatch = undefined;
     resolverUsesRomeCredits = false;
     providerCalls = 0;
+    beforeOpen = undefined;
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
+        await beforeOpen?.();
         const session = createSessionFromRun(
           "openai",
           () => {
@@ -213,6 +216,39 @@ describe("AgentSession turn usage", () => {
     } finally {
       await resumer.shutdown();
     }
+  });
+
+  it("retires a generation whose open was still in flight when a reset came due", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const caller = "place:test:reset";
+    const surface = { cards: false };
+    const first = await manager.open(AGENT, caller, surface);
+    await drain(first.sendTurn({ prompt: "hello" }).events);
+    await first.close("user");
+
+    // A cold open of the same caller waits on the provider while the reset
+    // comes due.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    beforeOpen = () => gate;
+    const pending = manager.open(AGENT, caller, surface);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const reset = manager.reset(AGENT, caller, {
+      policy: "test",
+      when: () => ({ due: true, reason: "test", elapsedMinutes: 1 }),
+    });
+    release();
+    beforeOpen = undefined;
+    const stale = await pending;
+    await reset;
+
+    const next = await manager.open(AGENT, caller, surface);
+    expect(stale.sessionId).toBe(first.sessionId);
+    expect(next.sessionId).not.toBe(first.sessionId);
   });
 
   it("records each finished turn once with its accounting, funding, and provider turn id", async () => {
