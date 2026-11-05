@@ -427,7 +427,7 @@ describe("WhatsAppAdapter", () => {
         mockSendMessage.mockReset();
       });
 
-      it("leaves out the guardian's edits and deletions, which answer a message", async () => {
+      it("leaves out the guardian's edits, deletions, pins and poll votes, which act on a message", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);
         adapter.onInbound(async () => {});
@@ -445,11 +445,27 @@ describe("WhatsAppAdapter", () => {
               key: { remoteJid: "111@s.whatsapp.net", id: "revoke", fromMe: true },
               message: { protocolMessage: { type: 0, key: { id: "own0" } } },
             }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "pin", fromMe: true },
+              message: { pinInChatMessage: { key: { id: "own0" }, type: 1 } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "keep", fromMe: true },
+              message: { keepInChatMessage: { key: { id: "own0" }, keepType: 1 } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "vote", fromMe: true },
+              message: { pollUpdateMessage: { pollCreationMessageKey: { id: "poll0" } } },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "shared-phone", fromMe: true },
+              message: { protocolMessage: { type: 11 } },
+            }),
             makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
           ],
         });
 
-        expect(recorded.map((batch) => batch.ids)).toEqual([["own1"]]);
+        expect(recorded.map((batch) => batch.ids)).toEqual([["shared-phone", "own1"]]);
       });
 
       it("hands over every live message while nothing is delivered inbound", async () => {

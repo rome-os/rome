@@ -868,9 +868,19 @@ function summarizeLocation(label: string, location: unknown): string {
   return label;
 }
 
-/** Whether `message` edits or deletes another message, rather than saying one. */
+/** Whether `message` acts on another message rather than saying one: an edit,
+ *  a deletion, a pin, keeping it in a disappearing chat, or a poll vote. */
 function answersAMessage(message: WAMessage): boolean {
-  return unwrapMessageContent(message.message)?.protocolMessage != null;
+  const content = unwrapMessageContent(message.message);
+  if (!content) return false;
+  const protocol = content.protocolMessage;
+  return (
+    protocol?.editedMessage != null ||
+    Number(protocol?.type) === 0 ||
+    content.pinInChatMessage != null ||
+    content.keepInChatMessage != null ||
+    content.pollUpdateMessage != null
+  );
 }
 
 function unwrapMessageContent(message: WAMessage["message"]): WaMessageContent | null {
