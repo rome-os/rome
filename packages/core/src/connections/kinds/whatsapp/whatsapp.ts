@@ -46,6 +46,10 @@ import {
  */
 const ROME_ID_PREFIX = "3EB0524F4D45";
 
+/** How long before a socket opens a message may be said and still be
+ *  delivered live. */
+const OPEN_MARGIN_MS = 60_000;
+
 /** How many ids of live messages an adapter keeps, to leave out of a history sync. */
 const HEARD_IDS_KEPT = 5000;
 
@@ -274,36 +278,7 @@ export class WhatsAppAdapter {
       // is delivered at all, and every message is recorded here instead.
       this.recordHistory(this.handler ? messages.filter((m) => m.key.fromMe) : messages);
 
-      if (!this.handler) return;
-      for (const waMsg of messages) {
-        if (!waMsg.key.fromMe) this.rememberHeard(waMsg.key.id);
-      }
-      for (const waMsg of messages) {
-        if (!waMsg.message || waMsg.key.fromMe) continue;
-        // A reaction is an emoji pinned to another message, not an inbound turn —
-        // it is mirrored into the store above, but the agent should not answer it.
-        if (waMsg.message.reactionMessage) continue;
-
-        const msg = this.toChannelMessage(waMsg);
-        // Protocol/system frames (sender-key distribution, app-state sync,
-        // history-sync notifications) carry no text or attachments — they are
-        // mirrored above for completeness but are not an inbound turn.
-        if (!msg.text && msg.attachments.length === 0) continue;
-        log.info("message received", {
-          from: msg.senderId,
-          chatId: msg.chatId,
-          threadKind: msg.thread?.kind,
-        });
-
-        try {
-          await this.handler!(msg);
-        } catch (err) {
-          log.error("message handler error", {
-            messageId: msg.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      await this.deliverInbound(messages);
     });
 
     // The initial history sync delivers contacts, chats, and recent messages in
@@ -320,14 +295,23 @@ export class WhatsAppAdapter {
       this.persistContacts(contacts ?? []);
       this.persistChats(chats ?? []);
       this.persistMessages(messages ?? []);
-      // A message someone else said that is also delivered inbound is
-      // inbound recording's to record and raise: one recorded here first would
-      // never wake anything.
+      if (!this.handler) {
+        this.recordHistory(messages ?? []);
+        return;
+      }
+      // What someone else said since the socket opened is inbound recording's
+      // to record and raise, so it is delivered inbound from here: WhatsApp
+      // can report it in a history sync before its live upsert, or fold the
+      // upsert into the sync and never send it live. Inbound recording keeps
+      // whichever copy comes first and raises it once. One already heard live
+      // is inbound recording's too.
+      const heard = (m: WAMessage) => m.key.id != null && this.heardLive.has(m.key.id);
+      const theirs = (messages ?? []).filter((m) => !m.key.fromMe);
+      const live = theirs.filter((m) => !heard(m) && this.saidSinceOpen(m));
       this.recordHistory(
-        this.handler
-          ? (messages ?? []).filter((m) => m.key.fromMe || !this.deliveredInbound(m))
-          : (messages ?? []),
+        (messages ?? []).filter((m) => m.key.fromMe || (!heard(m) && !live.includes(m))),
       );
+      void this.deliverInbound(live);
     });
 
     this.sock.ev.on("contacts.upsert", (contacts) => {
@@ -406,14 +390,49 @@ export class WhatsAppAdapter {
   }
 
   /**
-   * Whether `message`, from someone else, is or will be delivered inbound:
-   * heard live on this socket, or said since it connected, which WhatsApp
-   * delivers live as well as in a history sync.
+   * Whether `message` was said since this socket opened, or close enough
+   * before it that WhatsApp may also deliver it live. Its timestamp counts
+   * whole seconds on WhatsApp's clock, so the margin covers both the rounding
+   * and a local clock that runs ahead.
    */
-  private deliveredInbound(message: WAMessage): boolean {
-    if (message.key.id && this.heardLive.has(message.key.id)) return true;
+  private saidSinceOpen(message: WAMessage): boolean {
     const seconds = toSeconds(message.messageTimestamp);
-    return this.openedAt !== null && seconds != null && seconds * 1000 >= this.openedAt.getTime();
+    if (this.openedAt === null || seconds == null) return false;
+    return seconds * 1000 >= this.openedAt.getTime() - OPEN_MARGIN_MS;
+  }
+
+  /** Hand what someone else said in `messages` to the inbound handler. */
+  private async deliverInbound(messages: WAMessage[]): Promise<void> {
+    if (!this.handler) return;
+    for (const waMsg of messages) {
+      if (!waMsg.key.fromMe) this.rememberHeard(waMsg.key.id);
+    }
+    for (const waMsg of messages) {
+      if (!waMsg.message || waMsg.key.fromMe) continue;
+      // A reaction is an emoji pinned to another message, not an inbound turn —
+      // it is mirrored into the store, but the agent should not answer it.
+      if (waMsg.message.reactionMessage) continue;
+
+      const msg = this.toChannelMessage(waMsg);
+      // Protocol/system frames (sender-key distribution, app-state sync,
+      // history-sync notifications) carry no text or attachments — they are
+      // mirrored for completeness but are not an inbound turn.
+      if (!msg.text && msg.attachments.length === 0) continue;
+      log.info("message received", {
+        from: msg.senderId,
+        chatId: msg.chatId,
+        threadKind: msg.thread?.kind,
+      });
+
+      try {
+        await this.handler!(msg);
+      } catch (err) {
+        log.error("message handler error", {
+          messageId: msg.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   /** Remember that message `id` was heard live, keeping the latest few thousand. */

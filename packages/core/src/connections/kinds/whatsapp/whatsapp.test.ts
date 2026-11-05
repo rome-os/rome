@@ -330,13 +330,17 @@ describe("WhatsAppAdapter", () => {
         expect(recorded).toEqual([{ ids: ["h1", "h2"], self: "1234567890@s.whatsapp.net" }]);
       });
 
-      it("leaves out of a history sync what someone else said that is delivered inbound", async () => {
+      it("delivers inbound what someone else said since connecting, when a history sync reports it", async () => {
         const { sink, recorded } = recordingSink();
+        const delivered: string[] = [];
         adapter.onSync(sink);
-        adapter.onInbound(async () => {});
+        adapter.onInbound(async (message) => {
+          delivered.push(message.messageId);
+        });
         await adapter.start();
         eventHandlers["connection.update"]({ connection: "open" });
-        const now = Math.floor(Date.now() / 1000) + 1;
+        // Whole seconds, so the second the socket opened in reads as before it.
+        const openSecond = Math.floor(Date.now() / 1000);
         const from = (id: string, fromMe: boolean, messageTimestamp: number) =>
           makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe }, messageTimestamp });
 
@@ -346,12 +350,15 @@ describe("WhatsAppAdapter", () => {
           chats: [],
           messages: [
             from("heard", false, 1700000000),
-            from("since-connect", false, now),
+            // Folded into the sync, or reported before its live upsert.
+            from("since-connect", false, openSecond),
             from("before-connect", false, 1700000001),
-            from("guardian-since-connect", true, now),
+            from("guardian-since-connect", true, openSecond),
           ],
         });
+        await new Promise((resolve) => setImmediate(resolve));
 
+        expect(delivered).toEqual(["heard", "since-connect"]);
         expect(recorded.map((batch) => batch.ids)).toEqual([
           ["before-connect", "guardian-since-connect"],
         ]);
