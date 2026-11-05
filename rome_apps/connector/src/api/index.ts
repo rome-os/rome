@@ -10,7 +10,6 @@ import {
   livePinDeps,
   type PinnedProject,
   readPinnedProject,
-  recoverMissingPin,
 } from "./composio-project.js";
 import { switchProject } from "./composio-project-switch.js";
 import {
@@ -505,9 +504,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
         .catch(() => null),
     ]);
     // A pinned project the list no longer has was deleted on Composio's side.
-    const pinned = await ensurePinnedProject(deps)
-      .then(() => recoverMissingPin(deps, projects))
-      .catch(() => readPinnedProject(deps.store));
+    // The pin stays, nothing is selected, and the guardian picks a project,
+    // which also moves the webhook and its secret there.
+    const pinned = await ensurePinnedProject(deps).catch(() => readPinnedProject(deps.store));
     return Response.json({
       fixed: false,
       items: projects.map((project) => ({

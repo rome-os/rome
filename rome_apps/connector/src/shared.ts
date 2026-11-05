@@ -263,6 +263,16 @@ export async function loadConnectorClient(db: AppDbContext): Promise<ComposioCli
 }
 
 /**
+ * A client for the saved credential alone, addressing no project. Only for
+ * account-wide checks, such as whether the sign-in still works, which must
+ * answer before this Rome's project is confirmed. Null when not logged in.
+ */
+export async function loadCredentialClient(): Promise<ComposioClient | null> {
+  const apiKey = await readSessionApiKey();
+  return apiKey ? new ComposioClient({ apiKey }) : null;
+}
+
+/**
  * The agent-facing error for a Composio call that threw. Points the agent at
  * `connector_login` only when a fresh `ping()` gets a 401, which is the same
  * check `connector_login` uses to decide the saved sign-in is rejected. A 401

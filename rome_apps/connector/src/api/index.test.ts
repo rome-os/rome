@@ -484,14 +484,22 @@ describe("connector API Composio project pin", () => {
     await expect(response.json()).resolves.toEqual({ fixed: true, items: [] });
   });
 
-  it("re-pins when the pinned project was deleted, and lists the new pin as selected", async () => {
+  it("keeps the pin and its webhook secret when the pinned project was deleted, and selects nothing", async () => {
+    // Pinned to A, then A deleted on Composio's side: only B is left.
     stored.set("composioProject", pinned("pr_deleted"));
+    stored.set("webhookSecret", "whsec_a");
+    stored.set("webhookEndpointId", "ws_a");
+    mocks.listCliProjects.mockResolvedValue([{ id: "pr_second", name: "Second" }]);
 
     const response = await createApiHandler(context()).handle(request("projects"));
 
-    const body = (await response.json()) as { items: { id: string; selected: boolean }[] };
-    expect(body.items.find((p) => p.selected)?.id).toBe("pr_default");
-    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_default");
+    await expect(response.json()).resolves.toEqual({
+      fixed: false,
+      items: [{ id: "pr_second", name: "Second", selected: false, isDefault: false }],
+    });
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_deleted");
+    expect(stored.get("webhookSecret")).toBe("whsec_a");
+    expect(stored.get("webhookEndpointId")).toBe("ws_a");
   });
 
   describe("while the project cannot be confirmed", () => {

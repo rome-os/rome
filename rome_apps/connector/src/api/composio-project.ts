@@ -76,16 +76,16 @@ export async function pinDefaultProject(deps: PinDeps): Promise<PinnedProject> {
  * endpoint, so a Rome that already uses a project stays on it, and otherwise
  * the default. Most Romes use the default project, so it is asked first over
  * HTTP; the project list, read through the CLI, is needed only when the
- * endpoint is elsewhere. `listed` is a project list the caller already has.
+ * endpoint is elsewhere.
  */
-async function discoverProject(deps: PinDeps, listed?: CliProject[]): Promise<PinnedProject> {
+async function discoverProject(deps: PinDeps): Promise<PinnedProject> {
   const endpointId = await deps.store.get("webhookEndpointId");
   if (!endpointId || (await deps.clientFor(null).webhookSubscriptionExists(endpointId))) {
     return pinDefaultProject(deps);
   }
   const orgId = await deps.orgId();
   if (orgId) {
-    for (const project of listed ?? (await deps.listProjects())) {
+    for (const project of await deps.listProjects()) {
       const client = deps.clientFor({ orgId, projectId: project.id });
       if (await client.webhookSubscriptionExists(endpointId)) {
         return pinProject(deps.store, { orgId, projectId: project.id, projectName: project.name });
@@ -107,20 +107,6 @@ export async function ensurePinnedProject(deps: PinDeps): Promise<PinnedProject 
   const orgId = await deps.orgId();
   if (pinned && (!orgId || pinned.orgId === orgId)) return pinned;
   return discoverProject(deps);
-}
-
-/**
- * Pins again when the account's project list no longer has the pinned
- * project, because it was deleted on Composio's side. A pin the list holds,
- * or no pin, stays as it is.
- */
-export async function recoverMissingPin(
-  deps: PinDeps,
-  projects: CliProject[],
-): Promise<PinnedProject | null> {
-  const pinned = await readPinnedProject(deps.store);
-  if (!pinned || projects.some((p) => p.id === pinned.projectId)) return pinned;
-  return discoverProject(deps, projects);
 }
 
 /** The live dependencies: this app's settings, the CLI session and project list, and Composio. */

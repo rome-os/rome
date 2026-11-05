@@ -1,11 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 
-import {
-  ensurePinnedProject,
-  type PinDeps,
-  readPinnedProject,
-  recoverMissingPin,
-} from "./composio-project.js";
+import { ensurePinnedProject, type PinDeps, readPinnedProject } from "./composio-project.js";
 
 /** The pin's dependencies over fakes: an in-memory store, two projects, and which one holds an endpoint. */
 function deps(
@@ -103,31 +98,5 @@ describe("ensurePinnedProject", () => {
     const d = deps({ storedEndpoint: "ws_1", endpointIn: "pr_default" });
     await expect(ensurePinnedProject(d.value)).resolves.toMatchObject({ projectId: "pr_default" });
     expect(d.listProjects).not.toHaveBeenCalled();
-  });
-});
-
-describe("recoverMissingPin", () => {
-  const pin = (projectId: string) =>
-    JSON.stringify({ orgId: "ok_org", projectId, projectName: projectId });
-
-  it("pins again when the list no longer has the pinned project", async () => {
-    const d = deps({ storedEndpoint: "ws_1", endpointIn: "pr_used" });
-    d.store.set("composioProject", pin("pr_deleted"));
-    const listed = [
-      { id: "pr_default", name: "Default" },
-      { id: "pr_used", name: "Used" },
-    ];
-    await expect(recoverMissingPin(d.value, listed)).resolves.toMatchObject({
-      projectId: "pr_used",
-    });
-    expect(d.listProjects).not.toHaveBeenCalled();
-  });
-
-  it("keeps a pin the list still has", async () => {
-    const d = deps();
-    d.store.set("composioProject", pin("pr_used"));
-    await expect(
-      recoverMissingPin(d.value, [{ id: "pr_used", name: "Used" }]),
-    ).resolves.toMatchObject({ projectId: "pr_used" });
   });
 });

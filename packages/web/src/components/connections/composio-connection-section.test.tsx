@@ -212,7 +212,7 @@ describe("ComposioConnectionSection", () => {
     expect(screen.queryByRole("combobox", { name: "Composio project" })).toBeNull();
   });
 
-  it("shows the project row for a single project when it is not this Rome's", async () => {
+  it("shows the project row when the pinned project is gone from the list, even with one left", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input) === "/api/apps/connector/projects"
         ? Response.json({
