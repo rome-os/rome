@@ -3,7 +3,8 @@
 // connected account. Every event concerns the guardian's own business, so
 // it is addressed to them, and none is said to be by them.
 
-import { drop, type Json, KIND_OFF, keep, type Normalized, obj, str } from "./normalize.js";
+import { drop, KIND_OFF, keep, obj, str } from "../../shared/event.js";
+import type { Json, Normalized } from "../../types.js";
 
 /** Currencies Stripe counts in whole units, not hundredths. */
 const ZERO_DECIMAL = new Set(

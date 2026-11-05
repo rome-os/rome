@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { LINEAR_WATCHABLE } from "./catalog.js";
-import { mentionsViewer, normalizeLinear } from "./normalize-linear.js";
+import { LINEAR_WATCHABLE } from "./index.js";
+import { mentionsViewer, normalizeLinear } from "./normalize.js";
 import type { LinearIssuePeople, LinearViewer } from "./reads.js";
 
 // Payloads shaped as Linear's webhook bodies, which Composio's public-team

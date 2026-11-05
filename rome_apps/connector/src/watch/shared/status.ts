@@ -4,8 +4,9 @@
 // the watch section of each service it can watch. Rome's own connections
 // (GitHub, Slack, Shopify and the chat channels) come from core.
 
-import { CATALOG } from "../catalog.js";
-import { eventNameOf, type Watchable, WATCHABLES } from "./catalog.js";
+import { CATALOG } from "../../catalog.js";
+import type { WatchAdapter, WatchEnv, WatchKind, Watchable, WatchTrigger } from "../types.js";
+import { eventNameOf } from "./event.js";
 
 export type WatchStatus = "ready" | "not_connected" | "no_relay" | "error";
 
@@ -41,23 +42,8 @@ export interface WatchSection {
   account?: string;
   target: Watchable["target"];
   /** The kinds, each trigger with the bus name of its raw event for the follower's routines. */
-  kinds: (Omit<Watchable["kinds"][number], "triggers"> & {
-    triggers: (Watchable["kinds"][number]["triggers"][number] & { eventName: string })[];
-  })[];
+  kinds: (Omit<WatchKind, "triggers"> & { triggers: (WatchTrigger & { eventName: string })[] })[];
   options: Watchable["options"];
-}
-
-/** What the statuses read, injected so tests need no token, relay or Composio. */
-export interface WatchSourceDeps {
-  githubToken(): Promise<string | null>;
-  relayDepositUrl(): Promise<string | null>;
-  githubLogin(token: string): Promise<string>;
-  /** False when Rome is not signed in to Composio. */
-  composioSignedIn(): Promise<boolean>;
-  /** Composio's connected accounts, as this app's `GET /connectors` lists them. */
-  composioAccounts(): Promise<{ toolkit: string; status: string }[]>;
-  /** Whose account a connected Composio service is: the mailbox address, the Linear user, the Stripe account. */
-  composioAccount(service: string): Promise<string>;
 }
 
 export const NO_RELAY_REASON =
@@ -99,17 +85,12 @@ export function composioServices(
   });
 }
 
-/** Whose account a source's events concern: the GitHub login, or the Composio service's account. */
-async function accountOf(deps: WatchSourceDeps, source: string): Promise<string> {
-  if (source === "github") return deps.githubLogin((await deps.githubToken()) ?? "");
-  return deps.composioAccount(source);
-}
-
 async function watchSection(
-  deps: WatchSourceDeps,
-  watchable: Watchable,
+  env: WatchEnv,
+  adapter: WatchAdapter,
   connected: boolean,
 ): Promise<WatchSection> {
+  const watchable = adapter.catalog;
   const base = {
     service: watchable.source,
     label: watchable.label,
@@ -127,11 +108,11 @@ async function watchSection(
       statusReason: `${watchable.label} is not connected. Connect it in Settings → Connections.`,
     };
   }
-  if (!(await deps.relayDepositUrl())) {
+  if (!(await env.relayDepositUrl())) {
     return { ...base, status: "no_relay", statusReason: NO_RELAY_REASON };
   }
   try {
-    const account = await accountOf(deps, watchable.source);
+    const account = await adapter.account(env);
     return { ...base, status: "ready", account };
   } catch (error) {
     return {
@@ -142,20 +123,23 @@ async function watchSection(
   }
 }
 
-/** The Composio services, and the watch section of every service this app can watch. */
+/** The Composio services, and the watch section of every source an adapter watches. */
 export async function listWatchSources(
-  deps: WatchSourceDeps,
+  adapters: readonly WatchAdapter[],
+  env: WatchEnv,
 ): Promise<{ services: ComposioService[]; watch: WatchSection[] }> {
-  const signedIn = await deps.composioSignedIn().catch(() => false);
-  const accounts = signedIn ? await deps.composioAccounts().catch(() => []) : [];
+  const signedIn = await env.composio.signedIn().catch(() => false);
+  const accounts = signedIn ? await env.composio.accounts().catch(() => []) : [];
   const services = composioServices(accounts, signedIn);
+  // One read of Composio's sign-in and accounts serves every adapter.
+  const once: WatchEnv = {
+    ...env,
+    composio: { ...env.composio, signedIn: async () => signedIn, accounts: async () => accounts },
+  };
   const watch: WatchSection[] = [];
-  for (const watchable of WATCHABLES) {
-    const connected =
-      watchable.source === "github"
-        ? (await deps.githubToken().catch(() => null)) !== null
-        : services.some((s) => s.service === watchable.source && s.state === "working");
-    watch.push(await watchSection(deps, watchable, connected));
+  for (const adapter of adapters) {
+    const connected = await adapter.connected(once).catch(() => false);
+    watch.push(await watchSection(once, adapter, connected));
   }
   return { services, watch };
 }

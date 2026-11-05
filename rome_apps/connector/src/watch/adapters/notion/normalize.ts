@@ -3,21 +3,13 @@
 // page to say whether it mentions the guardian, replies to them, or sits on
 // a page they created.
 
-import {
-  type AddressedTo,
-  drop,
-  type Json,
-  KIND_OFF,
-  keep,
-  type Normalized,
-  obj,
-  str,
-} from "./normalize.js";
-import type { WatchReads } from "./reads.js";
+import { drop, KIND_OFF, keep, obj, str } from "../../shared/event.js";
+import type { AddressedTo, Json, Normalized } from "../../types.js";
+import type { NotionReads } from "./reads.js";
 
 export interface NotionContext {
   kinds: ReadonlySet<string>;
-  reads: Pick<WatchReads, "notionMe" | "notionComment" | "notionComments" | "notionPage">;
+  reads: NotionReads;
 }
 
 const list = (value: unknown): Json[] => (Array.isArray(value) ? value.map(obj) : []);

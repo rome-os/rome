@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { normalizeOutlook } from "./normalize-outlook.js";
+import { normalizeOutlook } from "./normalize.js";
 
 // The trigger payload as Composio's docs list it (`event_type`, `id`,
 // `outlook_message`), and the message as Microsoft Graph returns it.

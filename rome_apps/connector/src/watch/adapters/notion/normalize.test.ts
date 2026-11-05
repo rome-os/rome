@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { NOTION_WATCHABLE } from "./catalog.js";
-import { normalizeNotion, titleOf } from "./normalize-notion.js";
+import { NOTION_WATCHABLE } from "./index.js";
+import { normalizeNotion, titleOf } from "./normalize.js";
 
 // Webhook payloads as Composio's Notion docs list them (ids and authors only:
 // docs.composio.dev/toolkits/notion), and the comment and page objects as

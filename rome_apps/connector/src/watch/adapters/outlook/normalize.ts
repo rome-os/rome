@@ -2,24 +2,15 @@
 // when Composio has them, some of its fields. The message is read by id, so
 // its sender, recipients, headers and Focused Inbox tab are known either way.
 
-import {
-  type AddressedTo,
-  BULK_PRECEDENCE,
-  drop,
-  isAutomatedSender,
-  type Json,
-  KIND_OFF,
-  keep,
-  type Normalized,
-  obj,
-  str,
-} from "./normalize.js";
-import type { WatchReads } from "./reads.js";
+import { drop, KIND_OFF, keep, obj, str } from "../../shared/event.js";
+import { BULK_PRECEDENCE, isAutomatedSender } from "../../shared/mail.js";
+import type { AddressedTo, Json, Normalized } from "../../types.js";
+import type { OutlookReads } from "./reads.js";
 
 export interface OutlookContext {
   address: string;
   kinds: ReadonlySet<string>;
-  reads: Pick<WatchReads, "outlookMessage">;
+  reads: OutlookReads;
 }
 
 /** A Graph recipient's address, lower-cased. */

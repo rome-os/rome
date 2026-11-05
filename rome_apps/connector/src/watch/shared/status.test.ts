@@ -1,10 +1,45 @@
+import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { describe, expect, it } from "@rstest/core";
-import {
-  composioServices,
-  listWatchSources,
-  NO_RELAY_REASON,
-  type WatchSourceDeps,
-} from "./sources.js";
+import { createGithubAdapter } from "../adapters/github/index.js";
+import { ADAPTERS } from "../registry.js";
+import type { WatchEnv } from "../types.js";
+import { composioServices, listWatchSources as listWith, NO_RELAY_REASON } from "./status.js";
+
+/** What the statuses read, as fakes: GitHub's token and login, the relay, and Composio. */
+interface WatchSourceDeps {
+  githubToken(): Promise<string | null>;
+  relayDepositUrl(): Promise<string | null>;
+  githubLogin(token: string): Promise<string>;
+  composioSignedIn(): Promise<boolean>;
+  composioAccounts(): Promise<{ toolkit: string; status: string }[]>;
+  composioAccount(service: string): Promise<string>;
+}
+
+/** The registry's adapters over the fakes: GitHub's deps injected, each Composio account read from them. */
+const listWatchSources = (d: WatchSourceDeps) => {
+  const github = createGithubAdapter({
+    token: d.githubToken,
+    login: d.githubLogin,
+    isTeamMember: async () => false,
+  });
+  const adapters = ADAPTERS.map((adapter) =>
+    adapter.source === github.source
+      ? github
+      : { ...adapter, account: () => d.composioAccount(adapter.source) },
+  );
+  const env: WatchEnv = {
+    app: {} as AppActionRuntimeDeps,
+    relayDepositUrl: d.relayDepositUrl,
+    composio: {
+      signedIn: d.composioSignedIn,
+      accounts: d.composioAccounts,
+      accountId: async () => "ca_test",
+      read: async () => ({}),
+      ensureTriggers: async () => ({ ok: true, subscription: "active" }),
+    },
+  };
+  return listWith(adapters, env);
+};
 
 const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
   githubToken: async () => "gho_test",

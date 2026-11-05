@@ -65,7 +65,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 
 ### The connection owns every service difference
 
-- **Core never names a service.** Which events a service has, how to subscribe to them, what a raw event means, and how to reach the account all come from the connection's watch provider. Following, triage and delivery never branch on a service. A new service changes only its connection. [ADR](../adrs/watch-specifics-in-the-connection.md)
+- **Core never names a service.** Which events a service has, how to subscribe to them, what a raw event means, and how to reach the account all come from the connection's watch provider. Following, triage and delivery never branch on a service. A new service changes only its connection, where it is one adapter in the connection's registry. [ADR](../adrs/watch-specifics-in-the-connection.md)
 - **Core finds watch providers from what apps declare, never by app name.** An app that declares no watch provider is not followed, and an app cannot declare another app's actions as its provider.
 - **The event bus carries the raw event.** The connection normalizes an event when a follow routine asks, with that follow's account and kinds. Other consumers of the same event, such as Code Review and `defer`, read it unchanged.
 - **An event that names only ids is read in full by the connection.** An Outlook message or a Notion comment arrives as an id, so the normalizer reads it through the connected account. When that read fails, the event fails, and its routine tries it once more and logs an error if that fails too.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { STRIPE_WATCHABLE } from "./catalog.js";
-import { amountOf, normalizeStripe } from "./normalize-stripe.js";
+import { STRIPE_WATCHABLE } from "./index.js";
+import { amountOf, normalizeStripe } from "./normalize.js";
 
 // Payloads as Composio's Stripe docs list them (`account`, `data.object`,
 // `livemode`: docs.composio.dev/toolkits/stripe), with Stripe's own objects.

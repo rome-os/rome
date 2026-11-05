@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
-import { COMPOSIO_TRIGGERS, eventNameOf, WATCHABLES } from "./catalog.js";
+import { ADAPTERS, adapterForEvent, adapterOf } from "./registry.js";
+import { eventNameOf } from "./shared/event.js";
+
+const WATCHABLES = ADAPTERS.map((adapter) => adapter.catalog);
+/** Adapters whose events are each declared by exact name. */
+const exact = ADAPTERS.filter((a) => !a.events.some((pattern) => pattern.endsWith("*")));
 
 interface EventSource {
   events: string;
@@ -52,7 +57,7 @@ describe("the watch catalog", () => {
 
   it("declares exactly the Composio events each source's kinds listen on, each by name", async () => {
     const sources = await declaredSources();
-    for (const watchable of WATCHABLES.filter((w) => w.source !== "github")) {
+    for (const { catalog: watchable } of exact) {
       const declared = sources.filter((s) => s.events.includes(`:${watchable.source}.`));
       const listened = watchable.kinds.flatMap((kind) => kind.triggers).map(eventNameOf);
       expect({ source: watchable.source, events: declared.map((s) => s.events).sort() }).toEqual({
@@ -75,12 +80,49 @@ describe("the watch catalog", () => {
     }
   });
 
-  it("knows how to arm every Composio event a kind listens on", () => {
-    for (const watchable of WATCHABLES.filter((w) => w.source !== "github")) {
+  it("finds the adapter of every event a kind listens on, and of every source", () => {
+    for (const watchable of WATCHABLES) {
+      expect(adapterOf(watchable.source)?.catalog).toBe(watchable);
       for (const trigger of watchable.kinds.flatMap((kind) => kind.triggers)) {
-        const spec = COMPOSIO_TRIGGERS.get(eventNameOf(trigger));
-        expect({ trigger, toolkit: spec?.toolkit }).toEqual({ trigger, toolkit: watchable.source });
+        const source = adapterForEvent(eventNameOf(trigger))?.source;
+        expect({ trigger, source }).toEqual({ trigger, source: watchable.source });
       }
+    }
+  });
+
+  it("names each source once", () => {
+    const sources = ADAPTERS.map((a) => a.source);
+    expect(new Set(sources).size).toBe(sources.length);
+  });
+});
+
+describe("dispatch through the registry", () => {
+  const read = (path: string) => readFile(fileURLToPath(new URL(path, import.meta.url)), "utf-8");
+
+  it("leaves the watch actions and the shared code naming no source", async () => {
+    const files = [
+      "../actions/connector-watch-sources/index.ts",
+      "../actions/connector-watch-ensure/index.ts",
+      "../actions/connector-watch-normalize/index.ts",
+      "../actions/connector-watch-release/index.ts",
+      "../actions/connector-event-ensure/index.ts",
+      "./env.ts",
+      "./registry.ts",
+      "./types.ts",
+      "./shared/composio.ts",
+      "./shared/event.ts",
+      "./shared/mail.ts",
+      "./shared/status.ts",
+      "./shared/text.ts",
+    ];
+    for (const file of files) {
+      const code = (await read(file))
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*\*)/.test(line))
+        .filter((line) => !/^import /.test(line))
+        .join("\n");
+      const named = ADAPTERS.map((a) => a.source).filter((source) => code.includes(`"${source}"`));
+      expect({ file, named }).toEqual({ file, named: [] });
     }
   });
 });

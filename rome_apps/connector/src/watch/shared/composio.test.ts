@@ -1,13 +1,14 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ActiveTrigger } from "../api/composio-client.js";
+import type { ActiveTrigger } from "../../api/composio-client.js";
 import {
+  CALENDAR_EVENT_SYNC,
+  CALENDAR_RSVP,
   CALENDAR_STARTING_SOON,
-  COMPOSIO_TRIGGERS,
-  LINEAR_COMMENT_CREATED,
-  GMAIL_TRIGGER_CONFIG,
-  GMAIL_TRIGGER_SLUG,
-} from "./catalog.js";
-import { armsWatch } from "./runtime.js";
+  calendarAdapter,
+} from "../adapters/googlecalendar/index.js";
+import { GMAIL_TRIGGER_CONFIG, GMAIL_TRIGGER_SLUG } from "../adapters/gmail/index.js";
+import { LINEAR_COMMENT_CREATED } from "../adapters/linear/index.js";
+import { armsWatch } from "./composio.js";
 
 const gmail = { toolkit: "gmail", slug: GMAIL_TRIGGER_SLUG, config: GMAIL_TRIGGER_CONFIG };
 const armsGmailWatch = (t: ActiveTrigger, id: string) => armsWatch(t, gmail, id);
@@ -48,8 +49,8 @@ describe("armsWatch for Google Calendar", () => {
   it("does not count one with another lead time, or another Calendar trigger", () => {
     const later = { ...soon, triggerConfig: { ...soon.triggerConfig, minutesBeforeStart: 30 } };
     expect(armsWatch(later, CALENDAR_STARTING_SOON, "ca_me")).toBe(false);
-    const other = [...COMPOSIO_TRIGGERS.values()].find(
-      (spec) => spec.toolkit === "googlecalendar" && spec !== CALENDAR_STARTING_SOON,
+    const other = [CALENDAR_EVENT_SYNC, CALENDAR_RSVP].find(
+      (spec) => spec.toolkit === calendarAdapter.source && spec !== CALENDAR_STARTING_SOON,
     );
     expect(other && armsWatch(soon, other, "ca_me")).toBe(false);
   });

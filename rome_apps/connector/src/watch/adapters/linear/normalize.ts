@@ -2,21 +2,13 @@
 // webhook body: the `actor`, the issue or comment as `data`, and, on an
 // update, the previous values in `updatedFrom`.
 
-import {
-  type AddressedTo,
-  drop,
-  type Json,
-  KIND_OFF,
-  keep,
-  type Normalized,
-  obj,
-  str,
-} from "./normalize.js";
-import type { LinearIssuePeople, LinearViewer, WatchReads } from "./reads.js";
+import { drop, KIND_OFF, keep, obj, str } from "../../shared/event.js";
+import type { AddressedTo, Json, Normalized } from "../../types.js";
+import type { LinearIssuePeople, LinearReads, LinearViewer } from "./reads.js";
 
 export interface LinearContext {
   kinds: ReadonlySet<string>;
-  reads: Pick<WatchReads, "linearViewer" | "linearIssue">;
+  reads: LinearReads;
 }
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
