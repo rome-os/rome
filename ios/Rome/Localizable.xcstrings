@@ -553,7 +553,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从 %@ 更新到 %@"
+            "value" : "从 %1$@ 更新到 %2$@"
           }
         }
       }
