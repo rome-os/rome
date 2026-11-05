@@ -29,7 +29,7 @@ import { MessageRepository, type MessageCursor } from "../chats/storage/message-
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
-import { createTurnReads, type TurnReads } from "../agent-sessions/index.js";
+import { createKeptTurnReads, type TurnReads } from "../agent-sessions/index.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
  *  it; a line that prompted a turn is the guardian's (or a visitor's) input;
@@ -152,7 +152,7 @@ export class ChatReadModel {
   ) {
     this.messages = deps.messages ?? new MessageRepository(db);
     this.links = deps.links ?? new TurnLinks(db);
-    this.turns = deps.turns ?? createTurnReads(db);
+    this.turns = deps.turns ?? createKeptTurnReads(db);
   }
 
   /**

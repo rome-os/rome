@@ -100,17 +100,15 @@ export interface TurnReads {
   ): ReturnType<WebChatRepository["getUsageTotals"]>;
 }
 
-/** Sessions' reads of its turns. A reader built without `repo` reads only
- *  what it keeps without the trace blocks: heads and kept turns. */
-export function createTurnReads(db: DrizzleDb, traceRepo?: TraceRepo): TurnReads {
-  const repo = traceRepo ?? noTraceRepo;
+/** Sessions' reads of its turns. */
+export function createTurnReads(db: DrizzleDb, repo: TraceRepo): TurnReads {
   return {
+    ...createKeptTurnReads(db),
     traces: (conversationId, options) => repo.getTraceContents(conversationId, options),
     trace: (conversationId, turnId, options) =>
       repo.getTraceContentByTurn(conversationId, turnId, options),
     tracesOf: (turns, options) => repo.getTraceContentsByTurns(turns, options),
     traceById: (id, options) => repo.getMessageContentForDisplay(id, options),
-    traceHeadsOf: (turns) => traceHeadsOf(db, turns),
     async tracesWithUsage(conversationId) {
       const stubs = db
         .select({
@@ -135,7 +133,6 @@ export function createTurnReads(db: DrizzleDb, traceRepo?: TraceRepo): TurnReads
       );
       return stubs.map((stub) => ({ ...stub, content: contents.get(stub.id) ?? "[]" }));
     },
-    keptTurns: (sessionId, page) => keptTurns(db, sessionId, page),
     usageTotals: (options, projectPath) =>
       projectPath === undefined
         ? repo.getUsageTotals(options)
@@ -143,17 +140,14 @@ export function createTurnReads(db: DrizzleDb, traceRepo?: TraceRepo): TurnReads
   };
 }
 
-const noTrace = (): never => {
-  throw new Error("This turn reader reads no trace blocks");
-};
-const noTraceRepo: TraceRepo = {
-  getTraceContents: noTrace,
-  getTraceContentByTurn: noTrace,
-  getTraceContentsByTurns: noTrace,
-  getMessageContentForDisplay: noTrace,
-  getUsageTotals: noTrace,
-  getProjectUsageTotals: noTrace,
-};
+/** The reads of a session's turns that need no trace blocks: each turn's
+ *  trace head and the prompts and answers it kept. */
+export function createKeptTurnReads(db: DrizzleDb): Pick<TurnReads, "keptTurns" | "traceHeadsOf"> {
+  return {
+    traceHeadsOf: (turns) => traceHeadsOf(db, turns),
+    keptTurns: (sessionId, page) => keptTurns(db, sessionId, page),
+  };
+}
 
 async function traceHeadsOf(db: DrizzleDb, refs: readonly TurnRef[]): Promise<TraceHead[]> {
   const turns = new Map<string, TurnRef>();

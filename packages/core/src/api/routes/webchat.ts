@@ -1582,11 +1582,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // The session keeps the fork's turn. A fork that became a chat while
       // its first turn ran gets Chats' copy of the answer here, as any caller
       // of a chat puts on record what it said.
-      for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
-        const event = next.value;
-        if (input.continuable && event.type === "result" && event.content.trim()) {
-          await deps.webchatRepo.recordAnswerInChat(forkSessionId, forkTurnId, event.content);
+      // A failed copy is logged, and the drain goes on, so the fork's turn
+      // still finishes and cleans up.
+      try {
+        for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
+          const event = next.value;
+          if (input.continuable && event.type === "result" && event.content.trim()) {
+            await deps.webchatRepo
+              .recordAnswerInChat(forkSessionId, forkTurnId, event.content)
+              .catch((err) => {
+                log.warn("could not copy a branch's answer into its chat", {
+                  forkSessionId,
+                  turnId: forkTurnId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
         }
+      } finally {
+        await iterator.return?.(undefined);
       }
     })().catch((err) => {
       log.warn("turn fork failed", {
@@ -3290,6 +3304,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.type === "webchat" && session.archivedAt) {
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
+
+    // A branch from before branches were born chats has no chat of its own.
+    // It becomes one before it continues, as a new branch does, so its answer
+    // is said once, in its chat, beside the session's own copy.
+    if (session.type === "fork") await deps.webchatRepo.promoteForkToChat(session.id);
 
     // A branch is visible in the sidebar from its 201, but its provider thread
     // only exists once persistForkThread lands at first-answer completion.

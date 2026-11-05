@@ -2950,8 +2950,7 @@ class AgentSessionImpl implements AgentSession {
 
   /**
    * The turn's events, each kept in the session's log before it is handed on.
-   * What the surface keeps itself is left out, and a write that fails never
-   * fails the turn.
+   * A write that fails never fails the turn.
    */
   private async *logged(
     writer: TurnLogWriter | undefined,
