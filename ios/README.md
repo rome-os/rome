@@ -12,7 +12,7 @@ xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simul
 
 If Xcode reports that CoreSimulator is out of date, finish Xcode's first launch once: `sudo xcodebuild -runFirstLaunch`, then `xcodebuild -downloadPlatform iOS` if no iOS runtime is installed.
 
-Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set `DEVELOPMENT_TEAM`. Debug builds use the bundle id `cc.romeos.mobile.dev`.
+Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set `DEVELOPMENT_TEAM`. Debug builds use the bundle id `cc.romeos.mobile.dev` and the name "Rome Dev"; Release builds are the TestFlight app (see "Release to TestFlight").
 
 ### On a physical iPhone
 
@@ -31,6 +31,30 @@ xcrun devicectl device process launch --device <device-id> --terminate-existing 
 ```
 
 Installing works on a locked phone, but launching does not: it fails with "Locked", so unlock the phone first.
+
+## Release to TestFlight
+
+Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome", HTTPS to `https://romeos.cc` only, and no demo data, snapshot runner, debug environment variables or Mac Catalyst. Debug builds are `cc.romeos.mobile.dev`, named "Rome Dev", so both can sit on one phone. `MARKETING_VERSION` is in `Config/Base.xcconfig`.
+
+TestFlight ships under Rome's own Apple Developer team, not a personal one. Pass that team on the command line instead of changing `Config/Local.xcconfig`, which keeps signing your Debug builds. The build number is the archive time in UTC, `YYYYMMDDHHMM`. It always increases whatever branch you archive from, so no upload needs a manual edit.
+
+1. Archive (local only, safe to run):
+
+   ```bash
+   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
+   ```
+
+2. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
+
+   ```bash
+   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates
+   ```
+
+   Xcode needs an Apple ID in Rome's team signed in under Xcode → Settings → Accounts, with the App Manager role or higher. The App Store Connect app record for `cc.romeos.mobile` must exist first.
+
+3. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+
+To check a Release build without signing: `xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -derivedDataPath /tmp/rome-release CODE_SIGNING_ALLOWED=NO build`.
 
 ## Debug modes
 
