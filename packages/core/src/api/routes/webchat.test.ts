@@ -2492,7 +2492,7 @@ describe("Webchat API", () => {
     expect(String(init?.contextSuffix)).toContain("## Guardian");
   });
 
-  it("names a topic chat from its first message, and never the main Concierge chat", async () => {
+  it("names an untitled topic chat from its first message, and never a named one or the main chat", async () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
@@ -2515,10 +2515,15 @@ describe("Webchat API", () => {
     } as never;
     const generateTitle = rs.fn(async () => "Calendar");
     deps.conversationTitleGenerator = { generate: generateTitle };
-    for (const id of ["concierge", "topic-1"]) {
+    // The main chat; an untitled topic chat from the dashboard's plus; one topic_start named.
+    for (const [id, name] of [
+      ["concierge", "Concierge"],
+      ["topic-1", ""],
+      ["topic-2", "Trips"],
+    ]) {
       await deps.webchatRepo.createSession(
-        id,
-        "New Chat",
+        id!,
+        name!,
         undefined,
         undefined,
         null,
@@ -2527,7 +2532,7 @@ describe("Webchat API", () => {
       );
     }
     const app = createWebchatRuntime(deps).routes;
-    for (const id of ["concierge", "topic-1"]) {
+    for (const id of ["concierge", "topic-1", "topic-2"]) {
       const response = await app.request(`/chat/sessions/${id}/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2539,7 +2544,8 @@ describe("Webchat API", () => {
       expect((await deps.webchatRepo.getSession("topic-1"))?.name).toBe("Calendar"),
     );
     expect(generateTitle).toHaveBeenCalledOnce();
-    expect((await deps.webchatRepo.getSession("concierge"))?.name).toBe("New Chat");
+    expect((await deps.webchatRepo.getSession("concierge"))?.name).toBe("Concierge");
+    expect((await deps.webchatRepo.getSession("topic-2"))?.name).toBe("Trips");
   });
 
   it("does not delay the turn terminal event while conversation naming is still running", async () => {

@@ -69,7 +69,7 @@ export function ChatComponent({
   initialSkillName,
   navbarSlot,
 }: ChatComponentProps) {
-  const { i18n, t } = useTranslation("chat");
+  const { i18n } = useTranslation("chat");
 
   const { data: settings } = useSettings();
   const concierge = useConciergeChat();
@@ -268,10 +268,10 @@ export function ChatComponent({
   const isConcierge = isListedConcierge || topicDraft;
   const conciergeEnabled = isConcierge && concierge.enabled;
   const startTopicChat = useCallback(async () => {
-    const chat = await startConciergeTopicChat(t("sidebar.newChat"));
+    const chat = await startConciergeTopicChat();
     void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
     return chat.id;
-  }, [queryClient, t]);
+  }, [queryClient]);
   const recoverMissingSession = useCallback(
     async (missingSessionId: string) => {
       if (missingSessionId !== CONCIERGE_CHAT_ID) return false;

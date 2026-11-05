@@ -20,9 +20,6 @@ import {
   type ModelSelectionId,
 } from "../core/model-selector.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
-import { RESUME_SESSION_ACTION } from "../core/defer.js";
-import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
-import type { RoutineEngine } from "../routines/engine.js";
 import {
   quotaSwitchTarget,
   sameProviderTarget,
@@ -132,14 +129,6 @@ export interface ConciergeDeps {
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
-  /**
-   * The routines a retired chat's wake-ups live in, so they move to the main
-   * chat with its tasks. Absent, nothing is moved.
-   */
-  routines?: {
-    repo: Pick<RoutinesRepository, "listRoutines" | "update" | "findById">;
-    engine: Pick<RoutineEngine, "activate" | "deactivate">;
-  };
   runBackendTurn: (
     params: BackendTurnParams,
     options?: { quiet?: boolean; inputLabel?: string },
@@ -236,10 +225,13 @@ export class ConciergeService {
     return [...(main ? [main] : []), ...topics];
   }
 
-  /** Starts a topic chat on the model the main chat uses, and answers it. */
-  async startTopicChat(name: string): Promise<ConciergeChatRef> {
-    const trimmed = name.trim();
-    if (!trimmed) throw new Error("A topic chat needs a name");
+  /**
+   * Starts a topic chat on the model the main chat uses, and answers it. With
+   * no name it is untitled (an empty name), and its first message names it.
+   */
+  async startTopicChat(name?: string): Promise<ConciergeChatRef> {
+    const trimmed = name?.trim() ?? "";
+    if (name !== undefined && !trimmed) throw new Error("A topic chat needs a name");
     const main = await this.deps.webchatRepo.getSession(await this.ensureChatId());
     const id = uuidv7();
     await this.deps.webchatRepo.createSession(
@@ -270,7 +262,6 @@ export class ConciergeService {
     if (!isConciergeChat(chat)) return;
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId)) ?? 0;
     const tasks = await this.deps.tasks.repo.moveToMainChat(chatId);
-    await this.moveWakeUpsToMainChat(chatId);
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     if (follows === 0 && tasks === 0) return;
     const main = await this.findChatId();
@@ -284,39 +275,6 @@ export class ConciergeService {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-  }
-
-  /**
-   * Points the retired chat's wake-ups, such as the defers that watch its task
-   * rows, at the main chat's session, so none resumes a chat the guardian closed.
-   */
-  private async moveWakeUpsToMainChat(chatId: string): Promise<void> {
-    const routines = this.deps.routines;
-    if (!routines) return;
-    const wakeUps = (await routines.repo.listRoutines()).filter((routine) => {
-      const args = (routine.args ?? {}) as Record<string, unknown>;
-      return (
-        routine.actionName === RESUME_SESSION_ACTION &&
-        args.channel === "webchat" &&
-        args.threadId === chatId &&
-        isConciergeAgent(typeof args.agentName === "string" ? args.agentName : null)
-      );
-    });
-    if (wakeUps.length === 0) return;
-    const main = await this.ensureChatId();
-    const sessionId =
-      (await this.runtimeSessionId(main)) ??
-      (this.attached ? await this.attached.chats.openSession(main) : null);
-    if (!sessionId) return;
-    for (const routine of wakeUps) {
-      await routines.repo.update(routine.id, {
-        args: { ...(routine.args as Record<string, unknown>), threadId: main, sessionId },
-      });
-      await routines.engine.deactivate(routine.id);
-      const row = await routines.repo.findById(routine.id);
-      if (row?.enabled) await routines.engine.activate(toRoutine(row));
-    }
-    log.info("concierge wake-ups moved to the main chat", { chatId, routines: wakeUps.length });
   }
 
   // The YAML tier prefers Codex whenever it is signed in, so the choice is
@@ -425,32 +383,60 @@ export class ConciergeService {
   }
 
   /**
-   * Runs `prompt` as a system turn in a Concierge chat, after the line that
-   * names the chat. Answers whether a turn ran to its end: false before the
-   * chat's first turn, and when the turn errored or was stopped.
+   * Where a Concierge turn runs, decided when it is sent: the chat it names
+   * while that is a live Concierge chat, else the main chat. A chat that never
+   * had a turn gets its runtime first, after the same quota check a send makes.
+   * The turn's input opens with the line naming the chat. Every backend turn
+   * passes here (alerts, digests, task events, recoveries and the wake-ups of
+   * `defer`), so a turn never lands in a chat the guardian closed.
+   */
+  async resolveTurn(params: BackendTurnParams): Promise<BackendTurnParams> {
+    if (params.channel !== "webchat" || !isConciergeAgent(params.agentName)) return params;
+    // Before the main chat exists, the turn stays where it was sent.
+    const chatId = (await this.deliveryChat(params.threadId)) ?? params.threadId;
+    const moved = chatId !== params.threadId;
+    const sessionId =
+      (!moved && params.sessionId) || (await this.runtimeOf(chatId)) || params.sessionId;
+    const chat = await this.conciergeChat(chatId);
+    const prompt =
+      chat && !params.prompt.startsWith("<concierge_chat ")
+        ? `${conciergeChatLine(chat)}\n\n${params.prompt}`
+        : params.prompt;
+    return { ...params, threadId: chatId, sessionId, prompt };
+  }
+
+  /**
+   * A Concierge chat's runtime session, opened when it has none yet, as its
+   * first message would open it: on a provider the quota check left it, read
+   * again after that check.
+   */
+  private async runtimeOf(chatId: string): Promise<string | null> {
+    const existing = await this.runtimeSessionId(chatId);
+    if (existing || !this.attached) return existing;
+    await this.switchIfExhausted(chatId);
+    return this.attached.chats.openSession(chatId);
+  }
+
+  /**
+   * Runs `prompt` as a system turn in a Concierge chat, or in the main chat
+   * when that chat is archived or gone. Answers whether a turn ran to its end:
+   * false when no runtime could be found or opened, and when the turn errored
+   * or was stopped.
    */
   async runSystemTurn(
     chatId: string,
     prompt: string,
     options: { quiet?: boolean; inputLabel?: string } = {},
   ): Promise<boolean> {
-    const chat = await this.conciergeChat(chatId);
-    // A Concierge chat that never had a turn, such as a new topic chat an
-    // alert is for, gets its runtime first.
-    const sessionId =
-      (await this.runtimeSessionId(chatId)) ??
-      (chat && this.attached ? await this.attached.chats.openSession(chatId) : null);
-    if (!sessionId) return false;
-    const outcome = await this.deps.runBackendTurn(
-      {
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId,
-        channel: "webchat",
-        threadId: chatId,
-        prompt: chat ? `${conciergeChatLine(chat)}\n\n${prompt}` : prompt,
-      },
-      options,
-    );
+    const params = await this.resolveTurn({
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: "",
+      channel: "webchat",
+      threadId: chatId,
+      prompt,
+    });
+    if (!params.sessionId) return false;
+    const outcome = await this.deps.runBackendTurn(params, options);
     return outcome === "completed";
   }
 

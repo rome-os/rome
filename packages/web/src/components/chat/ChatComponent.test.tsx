@@ -355,8 +355,8 @@ describe("ChatComponent topic chat draft", () => {
     expect(posted).toEqual([]);
     await userEvent.setup().keyboard("Plan my week{Enter}");
     await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith("topic-9"));
-    // A topic chat, named like any new chat until its first message names it.
-    expect(posted).toEqual([{ url: "/api/concierge/chats", body: { name: "New Chat" } }]);
+    // An untitled topic chat, which its first message names.
+    expect(posted).toEqual([{ url: "/api/concierge/chats", body: {} }]);
     const turnPost = fetchSpy.mock.calls.find(
       ([url, init]) =>
         String(url) === "/api/chat/sessions/topic-9/turns" && init?.method === "POST",

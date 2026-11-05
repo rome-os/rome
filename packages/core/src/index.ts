@@ -1096,7 +1096,6 @@ async function main() {
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
-    routines: { repo: routinesRepo, engine: routineEngine },
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
   });
   const agentSessionManager = createAgentSessionManager(
@@ -1189,6 +1188,7 @@ async function main() {
     resolveWebchatContinuationWorkingDir(channel, threadId, webchatRepo);
 
   const backendTurnRunner = createBackendTurnRunner({
+    resolveTurn: (params) => concierge.resolveTurn(params),
     beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;

@@ -277,7 +277,7 @@ describe("/concierge/chats", () => {
   let testDb: TestDb;
   let webchatRepo: WebChatRepository;
   let enabled: boolean;
-  const started: string[] = [];
+  const started: Array<string | undefined> = [];
 
   const app = () => {
     const concierge = {
@@ -286,9 +286,9 @@ describe("/concierge/chats", () => {
         { id: "concierge", name: "Concierge", main: true },
         { id: "topic-1", name: "Calendar", main: false },
       ],
-      startTopicChat: async (name: string) => {
+      startTopicChat: async (name?: string) => {
         started.push(name);
-        return { id: "topic-2", name: name.trim(), main: false };
+        return { id: "topic-2", name: name?.trim() ?? "", main: false };
       },
     } as unknown as ConciergeService;
     return new Hono().route("/", conciergeRoutes({ concierge, db: testDb.db, webchatRepo }));
@@ -334,7 +334,9 @@ describe("/concierge/chats", () => {
       unread: 0,
     });
     expect((await post({ name: "  " })).status).toBe(400);
-    expect(started).toEqual([" Trips "]);
+    // No name: an untitled chat, which its first message names.
+    expect((await post({})).status).toBe(201);
+    expect(started).toEqual([" Trips ", undefined]);
   });
 
   it("answers only the guardian, and 404s while Concierge is off", async () => {

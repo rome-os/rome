@@ -3552,10 +3552,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
-    // The main Concierge chat keeps its fixed name; a topic chat is named from
-    // its first message, as an ordinary chat is.
+    // The main Concierge chat keeps its fixed name, and so does a topic chat
+    // started with one. An untitled topic chat is named from its first
+    // message, as an ordinary chat is.
     const autoTitle =
-      policy.autoTitle || (isConciergeChat(session) && sessionId !== CONCIERGE_CHAT_ID);
+      policy.autoTitle ||
+      (isConciergeChat(session) && sessionId !== CONCIERGE_CHAT_ID && session.name === "");
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:

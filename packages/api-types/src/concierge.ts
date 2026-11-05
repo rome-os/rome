@@ -36,9 +36,9 @@ export interface ConciergeChatsResponse {
   chats: ConciergeChatDto[];
 }
 
-/** `POST /api/concierge/chats`. */
+/** `POST /api/concierge/chats`. Without a name the chat is untitled until its first message names it. */
 export interface ConciergeChatStartRequest {
-  name: string;
+  name?: string;
 }
 
 /** How many days of finished rows `GET /concierge/tasks` returns by default. */

@@ -63,8 +63,9 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     const body = await c.req
       .json<Partial<ConciergeChatStartRequest>>()
       .catch(() => ({}) as Partial<ConciergeChatStartRequest>);
-    if (typeof body.name !== "string" || !body.name.trim()) {
-      return c.json({ error: "name is required" }, 400);
+    // No name starts an untitled chat, which its first message names.
+    if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim())) {
+      return c.json({ error: "name must not be empty" }, 400);
     }
     const chat = await concierge.startTopicChat(body.name);
     return c.json({ ...chat, unread: 0 }, 201);

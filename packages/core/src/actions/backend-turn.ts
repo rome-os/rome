@@ -140,6 +140,11 @@ export interface BackendTurnRunnerDeps {
    *  it in Chats as the turn's answer. Absent, a messaging continuation's
    *  reply is refused, since nothing could record it. */
   replies?: Pick<SpeakerReplies, "send">;
+  /** Decides where a turn runs, before anything else: a Concierge turn aimed
+   * at a chat that is archived or gone runs in the main chat. Every backend
+   * turn passes here, so a defer's wake-up, a delivery and a recovery are
+   * routed alike. Absent, the turn runs where its params say. */
+  resolveTurn?: (params: BackendTurnParams) => Promise<BackendTurnParams>;
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
@@ -265,9 +270,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   };
 
   async function runAndReport(
-    params: BackendTurnParams,
+    asked: BackendTurnParams,
     options?: BackendTurnOptions,
   ): Promise<BackendTurnOutcome> {
+    const params = deps.resolveTurn ? await deps.resolveTurn(asked) : asked;
     let outcome: BackendTurnOutcome = "failed";
     // Resolve the continued session's project dir up front so the resumed turn
     // runs where its SDK transcript lives (defer/timer fire on a fresh stack

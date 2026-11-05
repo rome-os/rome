@@ -95,11 +95,11 @@ export function useConciergeChats(): ConciergeChatDto[] {
   return enabled ? (data?.chats ?? []) : [];
 }
 
-/** Starts a topic chat and answers it. */
-export async function startConciergeTopicChat(name: string): Promise<ConciergeChatDto> {
+/** Starts an untitled topic chat, which its first message names, and answers it. */
+export async function startConciergeTopicChat(): Promise<ConciergeChatDto> {
   return fetchJson<ConciergeChatDto>("/api/concierge/chats", {
     method: "POST",
-    json: { name },
+    json: {},
     fallback: "",
   });
 }

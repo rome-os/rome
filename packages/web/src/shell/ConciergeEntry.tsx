@@ -172,6 +172,8 @@ function ConciergeTopicEntry({
   onGone: () => void;
 }) {
   const { t } = useTranslation("common");
+  // An untitled chat shows as a new chat until its first message names it.
+  const name = chat.name || t("recentChats.newChat");
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(chat.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -228,12 +230,10 @@ function ConciergeTopicEntry({
         to={`/chat/${chat.id}`}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-8`}
         aria-label={
-          count > 0
-            ? t("recentChats.topicChatUnread", { name: chat.name, count, label })
-            : undefined
+          count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className="flex-1 truncate">{chat.name}</span>
+        <span className="flex-1 truncate">{name}</span>
         {count > 0 ? (
           <Badge
             variant="destructive"
@@ -250,7 +250,7 @@ function ConciergeTopicEntry({
         <DropdownMenuTrigger asChild>
           <IconButton
             size="sm"
-            label={t("recentChats.topicChatActions", { name: chat.name })}
+            label={t("recentChats.topicChatActions", { name })}
             icon={<Ellipsis aria-hidden />}
             className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />

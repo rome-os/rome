@@ -2120,50 +2120,57 @@ describe("Concierge chats", () => {
     expect(s.backendTurns.at(-1)).toMatchObject({ sessionId: "runtime-1" });
   });
 
-  it("moves a retired topic chat's wake-ups to the main chat's session, and no other chat's", async () => {
+  it.each([
+    "archived",
+    "deleted",
+  ] as const)("sends a defer's wake-up for a topic chat to the main chat once the topic chat is %s", async (how) => {
     const s = setup({ startEvents: false });
-    const wake = (id: string, threadId: string, agentName = CONCIERGE_AGENT_ID) => ({
-      id,
-      name: `Watch task:${id}`,
-      enabled: true,
-      actionName: "resume_session",
-      trigger: { type: "schedule" },
-      args: {
-        sessionId: `runtime-${threadId}`,
-        channel: "webchat",
-        threadId,
-        agentName,
-        text: "⏰",
-      },
-    });
-    const rows = new Map(
-      [wake("r1", TOPIC_CHAT), wake("r2", "other-chat"), wake("r3", TOPIC_CHAT, "main")].map(
-        (row) => [row.id, row],
-      ),
-    );
-    const activated: string[] = [];
-    (s.deps as { routines?: unknown }).routines = {
-      repo: {
-        listRoutines: async () => [...rows.values()],
-        update: async (id: string, data: { args: Record<string, unknown> }) => {
-          rows.set(id, { ...rows.get(id)!, args: data.args as never });
-        },
-        findById: async (id: string) => ({ ...rows.get(id)!, key: null, createdAt: new Date() }),
-      },
-      engine: {
-        deactivate: async () => {},
-        activate: async (routine: { id: string }) => void activated.push(routine.id),
-      },
+    // The wake-up `defer` stored while the task was watched in the topic chat.
+    const wakeUp = {
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: "runtime-topic",
+      channel: "webchat",
+      threadId: TOPIC_CHAT,
+      prompt: "⏰ Time's up: watch task:abc",
     };
-    await s.service.retireChat(TOPIC_CHAT, "archived");
-    expect(rows.get("r1")?.args).toMatchObject({
-      threadId: CONCIERGE_CHAT,
-      sessionId: "runtime-1",
+    expect(await s.service.resolveTurn(wakeUp)).toMatchObject({
+      threadId: TOPIC_CHAT,
+      sessionId: "runtime-topic",
     });
-    expect(rows.get("r2")?.args).toMatchObject({ threadId: "other-chat" });
-    // A task chat's own wake-up in that chat is not the Concierge's.
-    expect(rows.get("r3")?.args).toMatchObject({ threadId: TOPIC_CHAT });
-    expect(activated).toEqual(["r1"]);
+    if (how === "archived") {
+      s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
+    } else {
+      s.sessions.delete(TOPIC_CHAT);
+    }
+    const fired = await s.service.resolveTurn(wakeUp);
+    expect(fired).toMatchObject({ threadId: CONCIERGE_CHAT, sessionId: "runtime-1" });
+    expect(fired.prompt).toBe(`${MAIN_LINE}⏰ Time's up: watch task:abc`);
+    // A task chat's own wake-up is not the Concierge's, and stays.
+    const taskWakeUp = { ...wakeUp, agentName: "main" };
+    expect(await s.service.resolveTurn(taskWakeUp)).toEqual(taskWakeUp);
+  });
+
+  it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.sessionManager.findReusableSession = (async () => null) as never;
+    s.deps.aiToolState.get = () =>
+      ({
+        claude: { loggedIn: true, quotaExhausted: true },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      }) as never;
+    s.sessions.set(CONCIERGE_CHAT, {
+      ...s.sessions.get(CONCIERGE_CHAT),
+      largeModelSelection: "claude-sonnet",
+    });
+    const openedOn: unknown[] = [];
+    s.chats.openSession = rs.fn(async (chatId: string) => {
+      openedOn.push(s.sessions.get(chatId)?.largeModelSelection);
+      return `opened-${chatId}`;
+    });
+    await s.service.runSystemTurn(CONCIERGE_CHAT, "<external_events/>");
+    // The runtime opens on the provider the quota check moved it to.
+    expect(openedOn).toEqual(["gpt-6-luna"]);
+    expect(s.backendTurns.at(-1)).toMatchObject({ sessionId: `opened-${CONCIERGE_CHAT}` });
   });
 
   it("lists the main chat first, then the topic chats", async () => {

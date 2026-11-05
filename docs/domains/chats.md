@@ -85,7 +85,7 @@ The one Concierge chat each owner always has.
 A Concierge chat its owner starts for one topic, such as the calendar or a project. It stands beside the main chat, not under it.
 
 - A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
-- One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. The main chat's name never changes on its own.
+- One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
 - Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and unfinished tasks to the main chat, and the Concierge says so there.
 - An owner may have any number of topic chats.
 
