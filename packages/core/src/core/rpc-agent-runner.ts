@@ -18,7 +18,7 @@ import {
 import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
-import { adhocSessionKey } from "./agent-session-key.js";
+import { callerOfRun } from "./session-caller.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 
 const log = createLogger("rpc-agent-runner");
@@ -68,17 +68,17 @@ export class RpcAgentRunner implements AgentRunnerInterface {
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
     const ipc = this.getIpc();
     const router = agentTurnStreamRouterFor(ipc);
-    const channelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
-
     const req: RunTurnRequest = {
-      key: { agentName: params.agentName, channelThreadKey },
+      key: {
+        agentName: params.agentName,
+        caller: callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId),
+      },
       init: {
         workingDir: params.workingDir,
         threadContext: params.threadContext,
-        romeSessionId: params.romeSessionId,
-        sharedContext: params.sharedContext,
         contextSuffix: params.contextSuffix,
       },
+      sharedContext: params.sharedContext,
       input: { prompt: params.prompt, images: params.images },
       platformMessageId: params.platformMessageId,
       replyTo: params.replyTo,

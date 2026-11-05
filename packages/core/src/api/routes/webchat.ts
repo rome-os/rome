@@ -92,7 +92,10 @@ import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js"
 import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
-import { webchatSessionKey } from "../../core/agent-session-key.js";
+import { callerKey, type SessionCaller } from "../../core/session-caller.js";
+
+/** A dashboard chat as the caller of its session. */
+const chatCaller = (chatId: string): SessionCaller => ({ kind: "chat", chatId });
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -706,7 +709,7 @@ interface ActiveWebchatStream {
   resolveFinish: () => void;
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
-  channelThreadKey: string | null;
+  caller: SessionCaller | null;
 }
 
 interface IncomingWebchatUpload {
@@ -888,7 +891,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
     if (session.type !== "fork") return false;
     const row = await deps.sessionManager.findReusableSession(
-      webchatSessionKey(session.id),
+      callerKey(chatCaller(session.id)),
       session.agentName ?? "main",
     );
     return !!row?.providerThreadId;
@@ -1416,7 +1419,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const agentName = input.session.agentName ?? "main";
     const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
-    const channelThreadKey = webchatSessionKey(input.session.id);
+    const caller = chatCaller(input.session.id);
+    const channelThreadKey = callerKey(caller);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
@@ -1463,17 +1467,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // resumes an evicted source from its persisted provider thread, allowing
       // side chats from settled conversations after the first fork or a
       // backend restart.
-      const source = await deps.agentSessionManager.acquire(
-        { agentName, channelThreadKey },
-        {
-          workingDir,
-          threadContext,
-          romeSessionId: input.session.id,
-          contextSuffix: buildWebchatContextSuffix(),
-          selectionId: modelSelection?.id,
-          reasoningEffort: await resolveRequestedReasoningEffort(undefined),
-        },
-      );
+      const source = await deps.agentSessionManager.open(agentName, caller, {
+        workingDir,
+        threadContext,
+        contextSuffix: buildWebchatContextSuffix(),
+        selectionId: modelSelection?.id,
+        reasoningEffort: await resolveRequestedReasoningEffort(undefined),
+      });
       sourceSessionId = source.sessionId;
       const storedCheckpoint = await deps.sessionsRepo.getTurnCheckpoint(
         source.sessionId,
@@ -1521,7 +1521,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         sourceCheckpoint,
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
-        ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
+        ...(input.continuable
+          ? { persistThreadKey: (forkSessionId: string) => callerKey(chatCaller(forkSessionId)) }
+          : {}),
       })
       [Symbol.asyncIterator]();
 
@@ -1926,7 +1928,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const createStream = async (
     sessionId: string,
     turnId: string,
-    channelThreadKey: string | null = null,
+    caller: SessionCaller | null = null,
     agentName: string = "main",
   ): Promise<ActiveWebchatStream> => {
     let resolveFinish!: () => void;
@@ -1963,7 +1965,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       onFinish,
       resolveFinish,
       agentName,
-      channelThreadKey,
+      caller,
     };
   };
 
@@ -2468,7 +2470,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.sessionManager.findReusableSession(
-      webchatSessionKey(sessionId),
+      callerKey(chatCaller(sessionId)),
       session.agentName ?? "main",
     );
     return c.json({
@@ -2485,10 +2487,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
-    const sess = deps.agentSessionManager.peek({
-      agentName: session?.agentName ?? "main",
-      channelThreadKey: webchatSessionKey(sessionId),
-    });
+    const sess = deps.agentSessionManager.live(session?.agentName ?? "main", chatCaller(sessionId));
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
@@ -3006,10 +3005,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A stream without a turn-bound interrupt can only be cancelled through
     // its live session owner. Require the exact active turn so a queued turn
     // cannot cancel the turn currently producing output.
-    const agentSess = deps.agentSessionManager.peek({
-      agentName: stream.agentName,
-      channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
-    });
+    const agentSess = deps.agentSessionManager.live(
+      stream.agentName,
+      stream.caller ?? chatCaller(stream.sessionId),
+    );
     if (!agentSess || agentSess.currentTurnId !== turnId) {
       return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
@@ -3041,12 +3040,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           streamId: s.streamId,
           startedAt: s.startedAt,
           status:
-            s.channelThreadKey &&
+            s.caller &&
             (s.agentTurnId ?? s.turnId) ===
-              deps.agentSessionManager.peek({
-                agentName: s.agentName,
-                channelThreadKey: s.channelThreadKey,
-              })?.currentTurnId
+              deps.agentSessionManager.live(s.agentName, s.caller)?.currentTurnId
               ? "running"
               : "queued",
         })),
@@ -3316,7 +3312,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // fresh thread and silently drop the branched context — refuse instead.
     if (session.parentSessionId !== null) {
       const branchThread = await deps.sessionManager.findReusableSession(
-        webchatSessionKey(session.id),
+        callerKey(chatCaller(session.id)),
         session.agentName ?? "main",
       );
       if (!branchThread?.providerThreadId) {
@@ -3507,7 +3503,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             body.largeModelSelection,
           );
     const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
-    const channelThreadKey = webchatSessionKey(sessionId);
+    const caller = chatCaller(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
     // re-check here so a stale row from a removed app surfaces a clear error
@@ -3575,22 +3571,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     let agentSess;
     try {
-      agentSess = await deps.agentSessionManager.acquire(
-        {
-          agentName,
-          channelThreadKey,
-        },
-        {
-          workingDir,
-          threadContext,
-          romeSessionId: sessionId,
-          contextSuffix,
-          // Null clears a selection an open session still holds, so a chat
-          // switched back to Auto follows its pin again.
-          selectionId: modelSelection?.id ?? null,
-          reasoningEffort,
-        },
-      );
+      agentSess = await deps.agentSessionManager.open(agentName, caller, {
+        workingDir,
+        threadContext,
+        contextSuffix,
+        // Null clears a selection an open session still holds, so a chat
+        // switched back to Auto follows its pin again.
+        selectionId: modelSelection?.id ?? null,
+        reasoningEffort,
+      });
     } catch (err) {
       const modelError = toModelResolutionErrorPayload(err);
       if (modelError) {
@@ -3598,7 +3587,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         const startedAtMs = Date.now();
         await persistUserMessage(turnId);
 
-        const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
+        const stream = await createStream(sessionId, turnId, caller, agentName);
         enqueueStream(sessionId, stream);
         if (policy.autoTitle) {
           void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -3656,7 +3645,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const attachTurn = async (handle: AgentTurnHandle) => {
       const turnId = handle.turnId;
 
-      const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
+      const stream = await createStream(sessionId, turnId, caller, agentName);
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
       if (policy.autoTitle) {
@@ -4057,8 +4046,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       links: turnLinks,
       priority: priority.data,
       threadContext,
-      romeSessionId: sessionId,
-      romeSessionType: session.type as RomeSessionType,
       onTurn: (handle: AgentTurnHandle) => {
         started = attachTurn(handle);
         void started.catch((error) =>
@@ -4135,7 +4122,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const stream = await createStream(
       sessionId,
       syntheticTurnId,
-      webchatSessionKey(sessionId),
+      chatCaller(sessionId),
       session.agentName ?? "main",
     );
     if (options?.quiet) stream.quiet = true;
@@ -4168,11 +4155,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           emitToStream(stream, "turn_id", { turnId: msg.turnId }, "turn_id");
         }
       }
-      if (msg.type === "turn_start" && stream.channelThreadKey) {
-        const owner = deps.agentSessionManager.peek({
-          agentName: msg.agent ?? stream.agentName,
-          channelThreadKey: stream.channelThreadKey,
-        });
+      if (msg.type === "turn_start" && stream.caller) {
+        const owner = deps.agentSessionManager.live(msg.agent ?? stream.agentName, stream.caller);
         // The wrapper may outlive its provider turn. Never stop a later turn
         // merely because it reuses the same runtime session.
         if (owner?.currentTurnId === msg.turnId) {

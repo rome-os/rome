@@ -13,13 +13,21 @@ import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
   recordAgentTraceBestEffort,
-  resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
 import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import { callerFromKey, callerKey, callerOfRun } from "./session-caller.js";
+import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
+import { resetWhenDue, type ResolveConnectionReset } from "./connection-reset.js";
+
+/** What a wake on a connection adds to a run: the catch-up it briefs the
+ *  agent with, and the reset setting it applies first. */
+export interface WakeDeps {
+  catchUp?: CatchUpDeps;
+  resolveReset?: ResolveConnectionReset;
+}
 
 const log = createLogger("agent-runner");
 
@@ -480,6 +488,7 @@ export class AgentRunner {
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
     private runLineDeps?: RunLineDeps,
+    private wake?: WakeDeps,
   ) {}
 
   /**
@@ -511,48 +520,46 @@ export class AgentRunner {
   }
 
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
-    // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
-    // runs). Real conversations always pass a `channelThreadKey`.
-    const requestedChannelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;
 
     log.info("agent run started", {
       agent: params.agentName,
-      channelThreadKey: explicitSessionId ? undefined : requestedChannelThreadKey,
+      channelThreadKey: explicitSessionId ? undefined : params.channelThreadKey,
       sessionId: params.sessionId,
       promptPreview: params.prompt.slice(0, 200),
     });
 
     const threadContext = await this.withChatId(params.threadContext);
-    const init = {
+    const options = {
       workingDir: params.workingDir,
       threadContext,
-      romeSessionId: params.romeSessionId,
-      sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      applyProviderSessionReset: Boolean(params.platformMessageId),
     };
-    const session = explicitSessionId
-      ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)
-      : await this.agentSessionManager.acquire(
-          { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
-          init,
+    let session;
+    if (explicitSessionId) {
+      session = await this.agentSessionManager.session(
+        explicitSessionId,
+        params.agentName,
+        options,
+      );
+    } else {
+      // A run that names no conversation gets a caller of its own.
+      const caller = callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId);
+      // A wake by a message on a connection applies the place's reset setting.
+      if (params.platformMessageId) {
+        await resetWhenDue(
+          this.agentSessionManager,
+          this.wake?.resolveReset,
+          params.agentName,
+          caller,
+          threadContext,
         );
+      }
+      session = await this.agentSessionManager.open(params.agentName, caller, options);
+    }
     const agentName = session.key.agentName;
-    // An explicit sessionId is the source of truth for continuations. Use the
-    // canonical key returned by the session row rather than requiring callers
-    // to carry a duplicate channelThreadKey that can drift from it.
-    const channelThreadKey = session.key.channelThreadKey;
-
-    const conversation = resolveTurnConversation({
-      agentName,
-      agentSessionId: session.sessionId,
-      romeSessionId: params.romeSessionId,
-      sessionConversation: session.conversation,
-      channelThreadKey,
-      threadContext,
-    });
-    const { romeSessionId, romeSessionType } = conversation;
+    const conversation = session.recordsTo({ threadContext });
+    const { romeSessionId } = conversation;
     // The line the run names by its platform id, which the turn answers, and
     // the one its reply quotes, as Chats holds them.
     const lines = this.runLineDeps
@@ -561,15 +568,17 @@ export class AgentRunner {
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
+    const briefing = catchUpBriefing(this.wake?.catchUp ?? {}, {
+      threadContext,
+      replyTo: params.replyTo,
+      quoted: lines?.quoted ?? null,
+    });
     const handle = session.sendTurn(
       { prompt: params.prompt, images: params.images },
       {
         threadContext,
         sharedContext: params.sharedContext,
-        romeSessionId,
-        romeSessionType,
-        replyTo: params.replyTo,
-        ...(lines ? { quoted: lines.quoted } : {}),
+        ...(briefing ? { briefing } : {}),
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
@@ -595,7 +604,7 @@ export class AgentRunner {
             agentSessionId: session.sessionId,
             romeSessionId,
             existingSessionId: conversation.existing ? romeSessionId : undefined,
-            channelThreadKey,
+            channelThreadKey: callerKey(session.caller),
             turnId: handle.turnId,
             threadContext,
             // A recorder-owned conversation has no other transcript, whatever
@@ -652,10 +661,10 @@ export class AgentRunner {
   }
 
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
-    const source = this.agentSessionManager.peek({
-      agentName: params.agentName,
-      channelThreadKey: params.channelThreadKey,
-    });
+    const source = this.agentSessionManager.live(
+      params.agentName,
+      callerFromKey(params.channelThreadKey),
+    );
     if (!source) {
       throw new Error("Cannot fork agent session because the source session is not live");
     }

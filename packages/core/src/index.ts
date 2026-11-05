@@ -165,6 +165,8 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
+import { sessionCallers } from "./core/session-callers.js";
+import type { WakeDeps } from "./core/agent-runner.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -1111,11 +1113,25 @@ async function main() {
     aiToolState,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
-    agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
+    agentSessionManager: {
+      live: (agentName, caller) => agentSessionManager.live(agentName, caller),
+    },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
   });
+  const channelSurface = (channel: string) => {
+    if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
+    const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
+      .talker;
+    return talker ? talkerChannelSurface(talker) : null;
+  };
+  // A wake on a connection briefs the agent with what it has not seen there,
+  // read from Chats, and applies the place's reset setting first.
+  const wake: WakeDeps = {
+    catchUp: { turnLinks: chatsWired.links, surface: channelSurface },
+    resolveReset: async (ref) => (await chatSettings.get(ref)).effective.session.reset,
+  };
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -1129,22 +1145,12 @@ async function main() {
       capabilityDiscovery,
       skillCatalog,
       lifecycleDispatcher,
-      webchatRepo,
-      // Catch-up reads what was said where the session stands from Chats.
-      turnLinks: chatsWired.links,
+      callers: sessionCallers({ webchatRepo, connectionKindOfChannel }),
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
-      resolveProviderSessionReset: async (ref) =>
-        (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
-      channelSurface: (channel) => {
-        if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
-        const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
-          ?.capabilities.talker;
-        return talker ? talkerChannelSurface(talker) : null;
-      },
-      connectionKindOfChannel,
+      channelSurface,
       eventSources,
       sessionTools: (context) => buildConciergeTools(concierge, context),
     },
@@ -1160,6 +1166,7 @@ async function main() {
     undefined,
     replyStreams,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    wake,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1170,6 +1177,7 @@ async function main() {
     agentTurnStreamRegistry,
     actionRegistry,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    wake,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

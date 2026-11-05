@@ -1,5 +1,5 @@
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
-import { sessionKeyChannel } from "./agent-session-key.js";
+import { callerConnection, callerFromKey } from "./session-caller.js";
 
 const GUARDIAN_FACING_CHANNELS = new Set([
   "webchat",
@@ -17,5 +17,7 @@ export function isGuardianFacingChannel(
   channelThreadKey: string,
   connectionKindOf: ConnectionKindOfChannel = (channel) => channel,
 ): boolean {
-  return GUARDIAN_FACING_CHANNELS.has(connectionKindOf(sessionKeyChannel(channelThreadKey) ?? ""));
+  return GUARDIAN_FACING_CHANNELS.has(
+    connectionKindOf(callerConnection(callerFromKey(channelThreadKey)) ?? ""),
+  );
 }

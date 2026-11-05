@@ -13,9 +13,16 @@ import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
-import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
+import type { RecordedConversation, SessionConversation } from "./session-conversation.js";
+import { resolveTurnConversation } from "./agent-trace-recorder.js";
+import {
+  callerConnection,
+  callerChatId,
+  callerKey,
+  callerFromKey,
+  type SessionCaller,
+} from "./session-caller.js";
 import {
   buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
@@ -28,7 +35,6 @@ import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
 import type { RoutineActivationGate } from "./mcp-facade.js";
-import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
@@ -37,15 +43,12 @@ import type {
   AgentTurnOutput,
   AgentTurnStatus,
   TurnErrorEvent,
-  MessageReplyReference,
   TurnResultEvent,
   RomeSessionRef,
   RomeSessionType,
   StreamAgentEvent,
   TurnMiddlewareContext,
-  ChatId,
-  ChatRef,
-  ProviderSessionResetPolicy,
+  CurrentActionContext,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
@@ -68,10 +71,8 @@ import {
   type ModelResolutionErrorPayload,
   type ModelResolver,
 } from "./model-resolver.js";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { isConciergeAgent } from "../concierge/service.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
+import type { ModelSelectionId } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
@@ -119,104 +120,24 @@ import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
 import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import { isGuardianFacingChannel } from "./guardian-channel.js";
 import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
-import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
-import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
-import {
-  forkSessionKey,
-  sessionKeyChannel,
-  webchatConversationOfKey,
-} from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
-/** One line of the context a turn's prompt opens with. */
-interface ConversationContextLine {
-  id: string;
-  sender: string | null;
-  text: string;
-  createdAt?: Date;
-}
-
-function contextLine(message: ContextLine): ConversationContextLine {
-  return {
-    id: String(message.id),
-    sender: message.senderName,
-    text: message.text,
-    createdAt: message.at,
-  };
-}
-
-function conversationContextLine(line: ConversationContextLine): string {
-  return replyContextLine({
-    createdAt: line.createdAt,
-    sender: line.sender?.trim() || "Unknown sender",
-    text: line.text,
-  });
-}
-
-/** How many of the messages the agent has not seen a turn's prompt carries.
- *  The rest are counted, not shown. */
-const CATCH_UP_LIMIT = 20;
-
-function prependConversationContext(
-  prompt: string,
-  context: {
-    notifications: ConversationContextLine[];
-    omittedNotificationCount: number;
-    repliedTo: ConversationContextLine | null;
-  },
-): string {
-  const sections: string[] = [];
-  const notifications = context.repliedTo
-    ? context.notifications.filter((message) => message.id !== context.repliedTo?.id)
-    : context.notifications;
-  if (notifications.length > 0 || context.omittedNotificationCount > 0) {
-    sections.push(
-      "<conversation_context>",
-      ...(context.omittedNotificationCount > 0
-        ? [`[${context.omittedNotificationCount} earlier messages omitted]`]
-        : []),
-      ...notifications.map(conversationContextLine),
-      "</conversation_context>",
-    );
-  }
-  if (context.repliedTo) {
-    sections.push(...replyContextSection(conversationContextLine(context.repliedTo)));
-  }
-  if (sections.length === 0) return prompt;
-  sections.push(...currentMessageSection(prompt));
-  return sections.join("\n");
-}
-
 export interface AgentSessionKey {
   agentName: string;
-  /** e.g. `webchat:<id>`, `telegram:<chatId>`, `sentinel:<channel>:<thread>`. */
-  channelThreadKey: string;
+  /** Whatever hands this session its next input. */
+  caller: SessionCaller;
 }
 
-export interface AgentSessionInit {
+/** What a caller says when it opens a session. */
+export interface SessionOpenOptions {
   workingDir?: string;
+  /** Where the caller's surface delivers: the place, the account, the
+   *  conversation's addressing. */
   threadContext?: ThreadContext;
-  /** Stable Rome conversation bound to this provider/runtime session. */
-  romeSessionId?: string;
-  sharedContext?: Record<string, unknown>;
-  /**
-   * Set by `AgentSessionBridge` for runs that reach the top-level manager over
-   * the worker→main RPC — i.e. an action spawning an agent (blocking `summon`),
-   * which is a nested subagent run by construction. Used only for the
-   * `rome.session.acquire` metric's `is_subagent` label; it does NOT change
-   * session behavior (login-notice gating, defer, etc. still key off the
-   * manager-level `isSubagent`, which is false for the top-level manager).
-   */
-  isSubagent?: boolean;
-  /** Explicit runtime session id to resume. */
-  resumeSessionId?: string;
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
   /**
@@ -234,11 +155,56 @@ export interface AgentSessionInit {
    * same degradation an exact fork's own turn already gets.
    */
   interactiveSurfaceDetached?: boolean;
-  /**
-   * This acquire starts a turn for an inbound channel message, so the
-   * connection's provider-session reset policy applies before the session opens.
-   */
-  applyProviderSessionReset?: boolean;
+}
+
+/** How the session opens, inside the manager: the caller's options plus the
+ *  id `session(id)` resumes. */
+interface AgentSessionInit extends SessionOpenOptions {
+  resumeSessionId?: string;
+}
+
+/** Where a turn is recorded, as the session resolves it. */
+export type TurnConversation = ReturnType<typeof resolveTurnConversation>;
+
+/**
+ * What the caller wants the agent told first. The session asks for it when
+ * the turn starts, under the turn lock, so it reads what was said up to that
+ * moment, and calls `sent` once the prompt reached the model.
+ */
+export interface TurnBriefing {
+  compose(
+    prompt: string,
+    turn: { turnId: string; romeSessionId: string; romeSessionType: RomeSessionType },
+  ): { prompt: string; sent?: () => void };
+}
+
+/** What the session knows only by asking: its callers answer these. */
+export interface SessionCallerPorts {
+  /** The conversation a session's row recorded, when it still exists. */
+  findConversation?(chatId: string): Promise<RecordedConversation | undefined>;
+  /** The model the caller remembers choosing, which a resumed session restores. */
+  rememberedSelection?(
+    caller: SessionCaller,
+    agentName: string,
+    pinned: boolean,
+  ): Promise<ModelSelectionId | undefined>;
+  /** Whether a wake-up (`defer`) can come back to this caller. */
+  canWake?(caller: SessionCaller): boolean;
+  /** The key a routine `propose_routine` enables is created with, so the
+   *  caller's card can find it. */
+  routineKeyFor?(turnId: string, toolUseId: string): string;
+}
+
+/** When a reset is due, decided by the caller from the context's age. */
+export interface SessionResetRule {
+  /** The policy's name, for the logs. */
+  policy: string;
+  when(context: {
+    createdAt: Date;
+    lastActiveAt: Date;
+  }):
+    | { due: false; elapsedMinutes?: number }
+    | { due: true; reason: string; elapsedMinutes: number };
 }
 
 export interface AgentTurnInput {
@@ -284,6 +250,9 @@ export interface AgentTurnHandle {
   turnContext: Context;
 }
 
+/** Who started a turn: a person, Rome itself, or a parent turn (a subagent's). */
+export type TurnInitiator = "user" | "system" | { parentTurn: AgentTurnParentRef };
+
 export interface SendTurnOptions {
   /**
    * OTel span links to attach to the per-turn `agent:*` root span. Used by
@@ -292,21 +261,14 @@ export interface SendTurnOptions {
    * before the turn does).
    */
   links?: Link[];
-  /** Turn-scoped parent ref used when this turn is launched as a subagent. */
-  lifecycleParent?: AgentTurnParentRef;
-  attachmentsCount?: number;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
-  /** Durable Rome session id when it differs from the runtime AgentSession id. */
-  romeSessionId?: string;
-  /** Durable Rome session kind used by Rome-owned navigation. */
-  romeSessionType?: RomeSessionType;
-  /** Platform message referenced by the current ordinary reply. */
-  replyTo?: MessageReplyReference;
-  /** The line `replyTo` names, as Rome holds it where the turn's session
-   *  stands, or null when Rome holds none. Read only with `turnLinks`. */
-  quoted?: ContextLine | null;
-  initiatedBy?: "user" | "system";
+  initiatedBy?: TurnInitiator;
+  /** What the caller wants the agent told first. */
+  briefing?: TurnBriefing;
+  /** The action execution the turn runs under when that execution runs in
+   *  another process, so the turn is recorded under it. */
+  execution?: CurrentActionContext;
 }
 
 export interface AgentSessionStatusEvent {
@@ -330,6 +292,8 @@ export interface AgentSession {
    * await between acquire and sendTurn.
    */
   readonly conversation?: SessionConversation;
+  /** Whatever opened this session. */
+  readonly caller: SessionCaller;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -338,6 +302,11 @@ export interface AgentSession {
    * turn actually begins running turn-lock semantics).
    */
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle;
+  /**
+   * Where a turn with these options is recorded. `sendTurn` records there;
+   * a caller that writes beside the turn (its prompt, its reply) asks first.
+   */
+  recordsTo(options?: Pick<SendTurnOptions, "threadContext" | "execution">): TurnConversation;
   selectModel(selectionId: ModelSelectionId | null): void;
   submitInput(
     input: AgentTurnInput & { inputId: string },
@@ -351,13 +320,20 @@ export interface AgentSession {
 }
 
 export interface AgentSessionManager {
-  acquire(key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
-  acquireBySessionId(
-    sessionId: string,
+  /** The session of `agentName` for `caller`, started if none exists. */
+  open(
     agentName: string,
-    init?: AgentSessionInit,
+    caller: SessionCaller,
+    options?: SessionOpenOptions,
   ): Promise<AgentSession>;
-  peek(key: AgentSessionKey): AgentSession | undefined;
+  /** The session a caller kept the id of, whatever its caller. */
+  session(id: string, agentName: string, options?: SessionOpenOptions): Promise<AgentSession>;
+  /** The session of `agentName` for `caller` while it is open in memory.
+   *  Never opens one. */
+  live(agentName: string, caller: SessionCaller): AgentSession | undefined;
+  /** Start the next turn of that session on a fresh context when `rule`
+   *  says the current one is due. The log is untouched. */
+  reset(agentName: string, caller: SessionCaller, rule: SessionResetRule): Promise<void>;
   /**
    * Working directory of the open session with this runtime id, searching this
    * manager's sessions and the subagent sessions they own. Undefined when no
@@ -374,7 +350,7 @@ export interface AgentSessionManager {
   shutdown(): Promise<void>;
 }
 
-interface ManagerDeps {
+export interface ManagerDeps {
   agentLoader: AgentLoader;
   appCatalog?: Pick<AppCatalog, "get">;
   sessionManager: SessionManager;
@@ -386,27 +362,20 @@ interface ManagerDeps {
   capabilityDiscovery: CapabilityDiscovery;
   skillCatalog: SkillCatalog;
   lifecycleDispatcher: AgentLifecycleDispatcher;
-  /** Stable conversation transcript and notification context store. */
-  webchatRepo?: WebChatRepository;
-  /** Each session's links to what was said where it stands, which a wake's
-   *  catch-up reads and marks. Absent, a channel session catches up on
-   *  nothing. */
-  turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+  /** What only the callers know. Absent, the session asks nothing: it
+   *  finds no recorded conversation, restores no remembered model, offers no
+   *  wake-up and keys no routine. */
+  callers?: SessionCallerPorts;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
    *  model terminal directly (behavior identical to a chain of size 0). */
   turnMiddleware?: TurnMiddlewareChain;
-  /** Resolve the effective reset policy from the existing external thread identity. */
-  resolveProviderSessionReset?: (ref: ChatRef) => Promise<ProviderSessionResetPolicy>;
   /** Receives every turn this manager's sessions finish, forked turns included. */
   usageRecorder?: TurnUsageSink;
   /** What the named channel's surface supports, or null for a name no channel
    *  has. A null result reads as a messaging channel. */
   channelSurface: (channel: string) => ChannelSurface | null;
-  /** The connection kind behind a channel id. When absent, every channel id reads as
-   *  its own connection kind, which holds only where no connection kind has a second channel. */
-  connectionKindOfChannel?: ConnectionKindOfChannel;
   /** App-declared event sources: an event `defer` subscribes through them.
    *  When absent, an event wait is created without any check. */
   eventSources?: EventSources;
@@ -486,7 +455,7 @@ export function createAgentSessionManager(
   const idleTtlMs = options.idleTtlMs ?? 30 * 60 * 1000;
   const isSubagent = options.isSubagent === true;
 
-  const keyOf = (k: AgentSessionKey) => `${k.agentName}::${k.channelThreadKey}`;
+  const keyOf = (k: AgentSessionKey) => `${k.agentName}::${callerKey(k.caller)}`;
   const canonicalizeKey = (key: AgentSessionKey): AgentSessionKey => ({
     ...key,
     agentName: deps.agentLoader.getCanonicalName(key.agentName),
@@ -514,80 +483,68 @@ export function createAgentSessionManager(
     sessions.delete(keyOf(sess.key));
   };
 
+  /** Generations a reset prepared for the next open of their key. */
+  const preparedByKey = new Map<string, { preparedSessionId: string; preparedChatId?: string }>();
+
+  const reset = async (
+    agentName: string,
+    caller: SessionCaller,
+    rule: SessionResetRule,
+  ): Promise<void> => {
+    const key = canonicalizeKey({ agentName, caller });
+    const k = keyOf(key);
+    const chatId = callerChatId(caller);
+    await lifecycleMutex.runExclusive(k, async () => {
+      const active = await deps.sessionManager.findReusableSession(
+        callerKey(key.caller),
+        key.agentName,
+      );
+      const decision = active ? rule.when(active) : { due: false as const };
+      if (!decision.due) return;
+      const cached = sessions.get(k);
+      log.info("provider_session.reset_due", {
+        chatId,
+        agentName: key.agentName,
+        provider: active?.provider ?? undefined,
+        oldSessionId: active?.id,
+        resetReason: decision.reason,
+        policyMode: rule.policy,
+        elapsedMinutes: decision.elapsedMinutes,
+      });
+      if (cached && cached.status !== "closed") {
+        await waitUntilQuiescent(cached);
+        await cached.close("idle");
+      }
+      warnOnConversationMismatch(key, active?.id, active?.chatId, chatId);
+      const replacement = await deps.sessionsRepo.rotateProviderGeneration({
+        agentName: key.agentName,
+        channelThreadKey: callerKey(key.caller),
+        newSessionId: uuidv7(),
+        chatId,
+      });
+      preparedByKey.set(k, {
+        preparedSessionId: replacement.id,
+        preparedChatId: replacement.chatId ?? undefined,
+      });
+      log.info("provider_session.rotated", {
+        chatId,
+        agentName: key.agentName,
+        provider: active?.provider ?? undefined,
+        oldSessionId: active?.id,
+        newSessionId: replacement.id,
+        resetReason: decision.reason,
+        policyMode: rule.policy,
+        result: "succeeded",
+      });
+    });
+  };
+
   const acquireInner = async (
     key: AgentSessionKey,
     span: Span,
     init?: AgentSessionInit,
-    /** Set when the reset policy already ran for this acquire. */
-    resetChecked?: { preparedSessionId?: string; preparedChatId?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
-    const resetRef =
-      init?.applyProviderSessionReset &&
-      init.threadContext?.connectionId &&
-      deps.resolveProviderSessionReset
-        ? {
-            connectionId: init.threadContext.connectionId,
-            chatId: init.threadContext.threadId as ChatId,
-          }
-        : undefined;
-    if (init && resetRef && !init.resumeSessionId && !resetChecked) {
-      const interactionAt = new Date();
-      const reset = await deps.resolveProviderSessionReset!(resetRef);
-      const chatId = init.romeSessionId ?? init.threadContext?.romeSessionId;
-      return await lifecycleMutex.runExclusive(k, async () => {
-        const active = await deps.sessionManager.findReusableSession(
-          key.channelThreadKey,
-          key.agentName,
-        );
-        const decision = active
-          ? evaluateProviderSessionReset(reset, active, interactionAt)
-          : { due: false as const };
-        const cached = sessions.get(k);
-        if (decision.due) {
-          log.info("provider_session.reset_due", {
-            chatId,
-            agentName: key.agentName,
-            provider: active?.provider ?? undefined,
-            oldSessionId: active?.id,
-            resetReason: decision.reason,
-            policyMode: reset.mode,
-            elapsedMinutes: decision.elapsedMinutes,
-          });
-          if (cached && cached.status !== "closed") {
-            await waitUntilQuiescent(cached);
-            await cached.close("idle");
-          }
-        }
-        let preparedSessionId: string | undefined;
-        let preparedChatId: string | undefined;
-        if (decision.due) {
-          warnOnConversationMismatch(key, active?.id, active?.chatId, init.romeSessionId);
-          const replacement = await deps.sessionsRepo.rotateProviderGeneration({
-            agentName: key.agentName,
-            channelThreadKey: key.channelThreadKey,
-            newSessionId: uuidv7(),
-            chatId: init.romeSessionId,
-          });
-          preparedSessionId = replacement.id;
-          preparedChatId = replacement.chatId ?? undefined;
-          log.info("provider_session.rotated", {
-            chatId,
-            agentName: key.agentName,
-            provider: active?.provider ?? undefined,
-            oldSessionId: active?.id,
-            newSessionId: replacement.id,
-            resetReason: decision.reason,
-            policyMode: reset.mode,
-            result: "succeeded",
-          });
-        }
-        return await acquireInner(key, span, init, {
-          preparedSessionId,
-          preparedChatId,
-        });
-      });
-    }
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -598,7 +555,7 @@ export function createAgentSessionManager(
     // through the RPC init) over the manager-wide default: the top-level
     // manager that serves blocking summons is created with `isSubagent=false`,
     // so labelling off the manager alone would mislabel every summon open.
-    const isSubagentForMetric = init?.isSubagent ?? isSubagent;
+    const isSubagentForMetric = isSubagent;
     const recordAcquire = (outcome: "reuse" | "cold" | "reopen" | "coalesced") => {
       span.setAttribute("outcome", outcome);
       sessionAcquireMetric().add(1, {
@@ -657,10 +614,13 @@ export function createAgentSessionManager(
       return await inflight;
     }
     recordAcquire(reopen ? "reopen" : "cold");
+    // A reset prepared the next generation; an explicit resume names its own.
+    const prepared = init?.resumeSessionId ? undefined : preparedByKey.get(k);
+    preparedByKey.delete(k);
     const promise = (async () => {
       const sess = await openSession(deps, key, init ?? {}, {
-        preparedSessionId: resetChecked?.preparedSessionId,
-        preparedChatId: resetChecked?.preparedChatId,
+        preparedSessionId: prepared?.preparedSessionId,
+        preparedChatId: prepared?.preparedChatId,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -685,7 +645,7 @@ export function createAgentSessionManager(
     const canonicalKey = canonicalizeKey(key);
     return withRomeSpan(
       "session.acquire",
-      { "agent.name": canonicalKey.agentName, is_subagent: init?.isSubagent ?? isSubagent },
+      { "agent.name": canonicalKey.agentName, is_subagent: isSubagent },
       (span) => acquireInner(canonicalKey, span, init),
     );
   };
@@ -700,24 +660,25 @@ export function createAgentSessionManager(
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
     return acquire(
-      { agentName, channelThreadKey: row.channelThreadKey },
+      { agentName, caller: callerFromKey(row.channelThreadKey) },
       { ...(init ?? {}), resumeSessionId: sessionId },
     );
   };
 
   return {
-    acquire,
-    acquireBySessionId,
-    peek(key) {
+    open: (agentName, caller, options) => acquire({ agentName, caller }, options),
+    session: (id, agentName, options) => acquireBySessionId(id, agentName, options),
+    live(agentName, caller) {
       let canonicalKey: AgentSessionKey;
       try {
-        canonicalKey = canonicalizeKey(key);
+        canonicalKey = canonicalizeKey({ agentName, caller });
       } catch {
         return undefined;
       }
       const sess = sessions.get(keyOf(canonicalKey));
       return sess && sess.status !== "closed" ? sess : undefined;
     },
+    reset,
     findWorkingDirBySessionId(sessionId) {
       for (const sess of sessions.values()) {
         if (sess.status === "closed") continue;
@@ -737,7 +698,7 @@ export function createAgentSessionManager(
       // only after their acquire has returned.
       for (const session of [...sessions.values()]) {
         if (session.sessionId !== sessionId || session.conversation) continue;
-        const recorded = await findRecordedConversation(deps.webchatRepo, chatId);
+        const recorded = await deps.callers?.findConversation?.(chatId);
         if (recorded) session.conversation = { origin: "recorded", ...recorded };
       }
     },
@@ -790,13 +751,12 @@ interface TurnExecRefs {
    */
   getChildManager: () => AgentSessionManager;
   /**
-   * channelThreadKey under which this owner's children are acquired. Forks
-   * namespace it with the fork session id: splitting the in-memory manager
-   * alone would not stop the fork child's open from resuming the *source*
-   * child's persisted session (findReusableSession matches on this key), which
+   * The caller this owner's children name as their parent. A fork names its
+   * fork point: splitting the in-memory manager alone would not stop the fork
+   * child's open from resuming the *source* child's persisted session, which
    * would contaminate the same provider thread the source resumes later.
    */
-  childChannelThreadKey: string;
+  childCaller: SessionCaller;
   /** Attach the Child execution to this owner's provider tool call. */
   attachSubagentExecution: (toolUseId: string, execution: SubagentExecution) => void;
   /** Bind an async tool callback into the owner's OTel context. */
@@ -867,7 +827,7 @@ function warnOnConversationMismatch(
   log.warn("agent session serves a different conversation than requested", {
     sessionId,
     agentName: key.agentName,
-    channelThreadKey: key.channelThreadKey,
+    channelThreadKey: callerKey(key.caller),
     storedChatId,
     requestedChatId,
   });
@@ -889,7 +849,12 @@ async function openSession(
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
   // without the agent filter a subagent could inherit its parent's provider
   // thread and system prompt/history.
-  const requestedRomeSessionId = init.romeSessionId;
+  const storedKey = callerKey(key.caller);
+  // The conversation the caller names. A child's is its own session, which a
+  // resume fills in when the record failed at mint.
+  const requestedRomeSessionId =
+    callerChatId(key.caller) ??
+    (key.caller.kind === "parent-turn" ? init.resumeSessionId : undefined);
   let resumeResult:
     | {
         id: string;
@@ -913,14 +878,11 @@ async function openSession(
     if (!resumeResult) {
       throw new Error(`Agent session "${init.resumeSessionId}" was not found or cannot be resumed`);
     }
-    if (resumeResult.channelThreadKey !== key.channelThreadKey) {
+    if (resumeResult.channelThreadKey !== storedKey) {
       throw new Error(`Agent session "${init.resumeSessionId}" does not match this session key`);
     }
-  } else if (key.channelThreadKey) {
-    resumeResult = await deps.sessionManager.findReusableSession(
-      key.channelThreadKey,
-      key.agentName,
-    );
+  } else if (storedKey) {
+    resumeResult = await deps.sessionManager.findReusableSession(storedKey, key.agentName);
   }
 
   // The provider keeps a transcript per cwd, so a resumed row reopens where it
@@ -943,13 +905,13 @@ async function openSession(
       log.warn("agent session working dir is gone; starting a fresh generation", {
         sessionId: resumeResult.id,
         agentName: key.agentName,
-        channelThreadKey: key.channelThreadKey,
+        channelThreadKey: storedKey,
         workingDir: resumeResult.workingDir,
       });
       warnOnConversationMismatch(key, resumeResult.id, resumeResult.chatId, requestedRomeSessionId);
       const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
-        channelThreadKey: key.channelThreadKey,
+        channelThreadKey: storedKey,
         newSessionId: uuidv7(),
         chatId: requestedRomeSessionId,
       });
@@ -963,11 +925,18 @@ async function openSession(
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
   // A caller that names no conversation still serves the one the row recorded.
-  const recordedConversation = requestedRomeSessionId
-    ? undefined
-    : await findRecordedConversation(deps.webchatRepo, resumeResult?.chatId ?? preparedChatId);
+  const recordedChatId = resumeResult?.chatId ?? preparedChatId;
+  const recordedConversation =
+    requestedRomeSessionId || !recordedChatId
+      ? undefined
+      : await deps.callers?.findConversation?.(recordedChatId);
+  // A chat records its turns as the kind of chat it is, which its own record says.
+  const namedType =
+    key.caller.kind === "chat" && requestedRomeSessionId
+      ? (await deps.callers?.findConversation?.(requestedRomeSessionId))?.type
+      : undefined;
   const conversation: SessionConversation | undefined = requestedRomeSessionId
-    ? { origin: "named", id: requestedRomeSessionId }
+    ? { origin: "named", id: requestedRomeSessionId, ...(namedType ? { type: namedType } : {}) }
     : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
@@ -977,28 +946,19 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
-  // The conversation's stored selection restores a webchat chat's chosen model
-  // on cold resume. Only Concierge also restores it over a pin, so its quota
-  // failover applies to background turns (docs/adrs/concierge-quota-failover.md).
-  // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
-  // Subagent keys carry a suffix, and app sessions use keys of their own.
-  const chatId = webchatConversationOfKey(key.channelThreadKey);
+  // A resumed session restores the model its caller remembers choosing,
+  // unless the caller chose again now. Whether a pin wins is the caller's rule.
   const persistedSelection =
-    init.resumeSessionId &&
-    (!sessionPin || (chatId === CONCIERGE_CHAT_ID && isConciergeAgent(key.agentName))) &&
-    !init.selectionId &&
-    chatId
-      ? resolveWebchatLargeModelSelection(
-          (await deps.webchatRepo?.getSession(chatId))?.largeModelSelection,
-        )
+    init.resumeSessionId && !init.selectionId
+      ? await deps.callers?.rememberedSelection?.(key.caller, key.agentName, !!sessionPin)
       : undefined;
-  const selectionId = init.selectionId ?? persistedSelection?.id;
+  const selectionId = init.selectionId ?? persistedSelection;
 
   if (isNewSession && !preparedSessionId) {
     const dbSession: DbAgentSession = {
       id: sessionId,
       agentName: key.agentName,
-      channelThreadKey: key.channelThreadKey,
+      channelThreadKey: storedKey,
       chatId: requestedRomeSessionId,
       workingDir,
       createdAt: new Date(),
@@ -1037,11 +997,11 @@ async function openSession(
   // below. The answer feeds the cached system prompt, so the opening caller's
   // channel decides it for the session's life. An opener without a thread
   // context falls back to the channel the key names.
-  const keyChannel = sessionKeyChannel(key.channelThreadKey);
+  const keyChannel = callerConnection(key.caller);
   const openingChannel = init.threadContext?.channel ?? keyChannel;
   if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
     log.warn("session opener's channel differs from the channel its key names", {
-      channelThreadKey: key.channelThreadKey,
+      channelThreadKey: storedKey,
       openingChannel,
     });
   }
@@ -1089,7 +1049,7 @@ async function openSession(
     // The live turn's id is the one the webchat drain sees on its handle.
     routineKeyFor: (toolUseId) => {
       const turnId = impl.currentTurnId;
-      return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
+      return turnId ? deps.callers?.routineKeyFor?.(turnId, toolUseId) : undefined;
     },
   };
   const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
@@ -1154,7 +1114,7 @@ async function openSession(
     // component nobody can mount. Same combination an exact fork runs with.
     supportsInteractiveSurface: supportsInteractiveSurface && !init.interactiveSurfaceDetached,
     getChildManager: () => impl.childManager,
-    childChannelThreadKey: key.channelThreadKey,
+    childCaller: key.caller,
     attachSubagentExecution: (toolUseId, execution) =>
       impl.addSubagentExecution(toolUseId, execution),
     bindTurnCtx: inCurrentTurnCtx,
@@ -1177,7 +1137,7 @@ async function openSession(
             sharedContext: refs.getSharedContext(),
             sessionId: refs.sessionId,
             agentName: key.agentName,
-            channelThreadKey: key.channelThreadKey,
+            channelThreadKey: storedKey,
             turnId: refs.getTurnId(),
           },
         );
@@ -1265,7 +1225,7 @@ async function openSession(
   // would resume through a path that cannot honor the detached surface, and
   // the first branch turn still carries its parent's delivery address.
   const deferEnabled =
-    isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) &&
+    (deps.callers?.canWake?.(key.caller) ?? false) &&
     !opts.isSubagent &&
     !init.interactiveSurfaceDetached;
   const eventSources = deps.eventSources;
@@ -1274,7 +1234,7 @@ async function openSession(
     initiator: `agent:${key.agentName}`,
     sessionId: refs.sessionId,
     agentName: key.agentName,
-    channelThreadKey: key.channelThreadKey,
+    channelThreadKey: storedKey,
     turnId: refs.getTurnId(),
   });
   const makeExecuteDefer =
@@ -1330,7 +1290,7 @@ async function openSession(
             parentTurnId,
             parentToolUseId: toolContext.toolUseId,
             parentAgentName: key.agentName,
-            parentChannelThreadKey: refs.childChannelThreadKey,
+            parentCaller: refs.childCaller,
             childManager: refs.getChildManager(),
             workingDir,
             threadContext: refs.getThreadContext(),
@@ -1380,7 +1340,7 @@ async function openSession(
     maxTurns: config.maxTurns,
     reasoningEffort,
     workingDir,
-    channel: sessionKeyChannel(key.channelThreadKey),
+    channel: callerConnection(key.caller),
     textPrivate: resolveSessionPolicy(config).finalText === "private",
     externalMcpServers,
     sessionId,
@@ -1408,7 +1368,7 @@ async function openSession(
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
     const sessionTools = await deps.sessionTools?.({
       agentName: key.agentName,
-      channelThreadKey: key.channelThreadKey,
+      channelThreadKey: storedKey,
       sessionId,
       isSubagent: opts.isSubagent === true,
       getTurnId: sessionExecRefs.getTurnId,
@@ -1524,7 +1484,7 @@ async function openSession(
       getRomeSessionId: () => fork.forkSessionId,
       getTurnId: () => fork.forkTurnId,
       getThreadContext: () => fork.threadContext ?? init.threadContext,
-      getSharedContext: () => init.sharedContext,
+      getSharedContext: () => impl.currentTurnSharedContextRef,
       // Nothing drains a fork stream into webchat, so interactive action
       // results (pending_interaction / place_widget) must take the
       // prose fallbacks — otherwise the tool_result claims a card was shown
@@ -1539,7 +1499,7 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
+      childCaller: { kind: "fork-point", source: key.caller, forkSessionId: fork.forkSessionId },
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
           parent: {
@@ -1680,7 +1640,6 @@ async function openSession(
     workingDir,
     buildForkOpenParams,
     threadContext: init.threadContext,
-    sharedContext: init.sharedContext,
     isNewSession,
     isSubagent: opts.isSubagent,
     selectionId,
@@ -1707,7 +1666,7 @@ async function openSession(
     agentName: key.agentName,
     sessionId,
     isNewSession,
-    channelThreadKey: key.channelThreadKey,
+    channelThreadKey: storedKey,
   });
 
   return impl;
@@ -1796,8 +1755,7 @@ interface TurnSink {
   sharedContext?: Record<string, unknown>;
   romeSessionId: string;
   romeSessionType: RomeSessionType;
-  replyTo?: MessageReplyReference;
-  quoted?: ContextLine | null;
+  briefing?: TurnBriefing;
   initiatedBy?: "user" | "system";
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -1939,6 +1897,39 @@ class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   conversation?: SessionConversation;
+  get caller(): SessionCaller {
+    return this.key.caller;
+  }
+  /** The key this session's row is stored under. */
+  get storedKey(): string {
+    return callerKey(this.key.caller);
+  }
+
+  recordsTo(options?: Pick<SendTurnOptions, "threadContext" | "execution">): TurnConversation {
+    // A child's turns are recorded in its own conversation, minted under its
+    // own session id.
+    if (this.key.caller.kind === "parent-turn") {
+      return {
+        romeSessionId: this.sessionId,
+        romeSessionType: "subagent",
+        existing: true,
+        promptPersisted: true,
+        recorderOwned: false,
+      };
+    }
+    const resolved = resolveTurnConversation({
+      agentName: this.key.agentName,
+      agentSessionId: this.sessionId,
+      sessionConversation: this.conversation,
+      channelThreadKey: this.storedKey,
+      threadContext: options?.threadContext,
+      actionContext: options?.execution,
+    });
+    const named = this.conversation?.origin === "named" ? this.conversation : undefined;
+    return named?.type && resolved.romeSessionId === named.id
+      ? { ...resolved, romeSessionType: named.type }
+      : resolved;
+  }
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -2766,7 +2757,7 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         turnId: sink.turnId,
         agentName: this.key.agentName,
-        channelThreadKey: this.key.channelThreadKey,
+        channelThreadKey: this.storedKey,
         threadContext: sink.threadContext ?? this.threadContext,
         parent: sink.lifecycleParent,
       }),
@@ -2820,7 +2811,7 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         turnId: sink.turnId,
         agentName: this.key.agentName,
-        channelThreadKey: this.key.channelThreadKey,
+        channelThreadKey: this.storedKey,
         threadContext: sink.threadContext ?? this.threadContext,
         parent: sink.lifecycleParent,
       }),
@@ -3192,6 +3183,11 @@ class AgentSessionImpl implements AgentSession {
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
     const turnId = uuidv7();
+    const recorded = this.recordsTo(options);
+    // The last turn's shared context stands for the session between turns.
+    if (options?.sharedContext) this.sharedContext = options.sharedContext;
+    const initiatedBy = options?.initiatedBy;
+    const parentTurn = typeof initiatedBy === "object" ? initiatedBy.parentTurn : undefined;
     const sink: TurnSink = {
       turnId,
       userPrompt: input.prompt,
@@ -3203,21 +3199,15 @@ class AgentSessionImpl implements AgentSession {
       modelTurnStartMs: 0,
       ttftRecorded: false,
       romeAttrs: {},
-      lifecycleParent: options?.lifecycleParent,
-      lifecycleAttachmentsCount: options?.attachmentsCount,
+      lifecycleParent: parentTurn,
       threadContext: options?.threadContext,
       sharedContext: options?.sharedContext,
-      romeSessionId: options?.romeSessionId ?? this.sessionId,
-      romeSessionType:
-        options?.romeSessionType ??
-        (options?.threadContext?.channel === "webchat"
-          ? "webchat"
-          : options?.threadContext
-            ? "channel"
-            : "action"),
-      replyTo: options?.replyTo,
-      quoted: options?.quoted ?? null,
-      initiatedBy: options?.initiatedBy ?? "user",
+      romeSessionId: recorded.romeSessionId,
+      romeSessionType: recorded.romeSessionType,
+      briefing: options?.briefing,
+      initiatedBy: parentTurn
+        ? "system"
+        : ((initiatedBy as "user" | "system" | undefined) ?? "user"),
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       subagentExecutions: new Map(),
@@ -3236,9 +3226,7 @@ class AgentSessionImpl implements AgentSession {
     // sendTurn is invoked with no active OTel context (the webchat POST
     // case); when invoked inside one (channel adapter path), that span
     // becomes the parent.
-    const channelName = this.key.channelThreadKey
-      ? sessionKeyChannel(this.key.channelThreadKey)
-      : undefined;
+    const channelName = callerConnection(this.key.caller);
 
     // Identifying attrs stamped on every span this turn creates. We pass
     // them explicitly at each span-creation site (rather than via W3C
@@ -3248,7 +3236,7 @@ class AgentSessionImpl implements AgentSession {
       "agent.name": this.key.agentName,
       "session.id": this.sessionId,
       "turn.id": turnId,
-      ...(this.key.channelThreadKey ? { "channel.thread_key": this.key.channelThreadKey } : {}),
+      ...(this.storedKey ? { "channel.thread_key": this.storedKey } : {}),
       ...(channelName ? { "channel.name": channelName } : {}),
     };
     sink.romeAttrs = romeAttrs;
@@ -3392,44 +3380,13 @@ class AgentSessionImpl implements AgentSession {
       // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
-      let unseenLineIds: number[] = [];
-      // A channel conversation stores lines the agent never saw as turns. The
-      // surface says whether this channel does; webchat, for one, does not.
-      const channel = sink.threadContext?.channel;
-      const catchesUp =
-        sink.romeSessionType === "channel" &&
-        sink.romeSessionId &&
-        sink.threadContext &&
-        channel &&
-        channelSurfaceOf(this.deps, channel).promptContext;
-      if (catchesUp && this.deps.turnLinks) {
-        // The agent catches up on the lines said where its session stands
-        // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
-        const unseen = this.deps.turnLinks.unseen(sink.romeSessionId);
-        const shown = unseen.slice(-CATCH_UP_LIMIT);
-        // Rome's first line in a thread quotes the line that started it, said
-        // in the chat outside the thread. No line in the thread is a starter.
-        const threadStarter =
-          unseen.find((line) => line.fromRome && line.quotesOutside)?.quoted ?? null;
-        const repliedTo = sink.quoted
-          ? contextLine(sink.quoted)
-          : sink.replyTo?.content
-            ? {
-                id: `runtime-reply:${sink.replyTo.messageId}`,
-                sender: sink.replyTo.senderName ?? null,
-                text: sink.replyTo.content,
-              }
-            : null;
-        unseenLineIds = unseen.map((line) => line.id);
-        userPrompt = prependConversationContext(userPrompt, {
-          notifications: [
-            ...(threadStarter ? [contextLine(threadStarter)] : []),
-            ...shown.map(contextLine),
-          ],
-          omittedNotificationCount: unseen.length - shown.length,
-          repliedTo,
-        });
-      }
+      // The caller's briefing, read now that the turn holds the turn lock.
+      const briefed = sink.briefing?.compose(userPrompt, {
+        turnId: sink.turnId,
+        romeSessionId: sink.romeSessionId,
+        romeSessionType: sink.romeSessionType,
+      });
+      if (briefed) userPrompt = briefed.prompt;
       // Every turn, subagents included: the folder is where the work happens.
       const deviceFolderBlock = buildDeviceFolderBlock(tc);
       if (deviceFolderBlock) {
@@ -3488,7 +3445,7 @@ class AgentSessionImpl implements AgentSession {
         session: {
           id: this.sessionId,
           agentName: this.key.agentName,
-          channelThreadKey: this.key.channelThreadKey,
+          channelThreadKey: this.storedKey,
         },
         emit: (event) => {
           if (sink.done) return;
@@ -3586,18 +3543,7 @@ class AgentSessionImpl implements AgentSession {
               injectedToolResult: input.injectedToolResult,
             });
             this.inputs.ready(turnId);
-            if (this.deps.turnLinks && unseenLineIds.length > 0) {
-              try {
-                this.deps.turnLinks.seen(unseenLineIds, sink.romeSessionId, sink.turnId);
-              } catch (err) {
-                // As below: the turn goes on, and a later turn retries.
-                log.warn("failed to mark conversation context seen", {
-                  romeSessionId: sink.romeSessionId,
-                  turnId: sink.turnId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }
+            briefed?.sent?.();
           });
         } catch (err) {
           // Provider failed before completing the turn (e.g. mock that throws,

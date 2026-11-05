@@ -1,4 +1,4 @@
-import { subagentSessionKey } from "./agent-session-key.js";
+import { childCaller, type SessionCaller } from "./session-caller.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
@@ -47,7 +47,8 @@ export interface StartSubagentContext {
   parentTurnId: string;
   parentToolUseId: string;
   parentAgentName: string;
-  parentChannelThreadKey: string;
+  /** The caller the child names as its parent. */
+  parentCaller: SessionCaller;
   childManager: AgentSessionManager;
   workingDir: string;
   threadContext?: ThreadContext;
@@ -102,25 +103,18 @@ export function createSubagentExecutionService(deps: {
         }
         // Naming the conversation lets the resume fill a row whose record
         // failed when the subagent was minted.
-        child = await context.childManager.acquireBySessionId(input.resumeSessionId, name, {
-          romeSessionId: input.resumeSessionId,
+        // The child's conversation is its own session, which the resume
+        // fills in when its record failed at mint.
+        child = await context.childManager.session(input.resumeSessionId, name, {
           workingDir: context.workingDir,
           threadContext: context.threadContext,
-          sharedContext: context.sharedContext,
         });
       } else {
         isFresh = true;
-        child = await context.childManager.acquire(
-          {
-            agentName: name,
-            channelThreadKey: subagentSessionKey(context.parentChannelThreadKey),
-          },
-          {
-            workingDir: context.workingDir,
-            threadContext: context.threadContext,
-            sharedContext: context.sharedContext,
-          },
-        );
+        child = await context.childManager.open(name, childCaller(context.parentCaller), {
+          workingDir: context.workingDir,
+          threadContext: context.threadContext,
+        });
       }
 
       if (isFresh) {
@@ -149,16 +143,15 @@ export function createSubagentExecutionService(deps: {
       const handle = child.sendTurn(
         { prompt: input.prompt },
         {
-          lifecycleParent: {
-            sessionId: context.parentAgentSessionId,
-            turnId: context.parentTurnId,
-            agentName: context.parentAgentName,
+          initiatedBy: {
+            parentTurn: {
+              sessionId: context.parentAgentSessionId,
+              turnId: context.parentTurnId,
+              agentName: context.parentAgentName,
+            },
           },
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
-          romeSessionId: child.sessionId,
-          romeSessionType: "subagent",
-          initiatedBy: "system",
         },
       );
 

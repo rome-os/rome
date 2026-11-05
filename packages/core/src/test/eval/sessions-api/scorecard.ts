@@ -60,23 +60,8 @@ const appFiles = readdirSync(join(REPO, "rome_apps"))
 
 /** Source text with comments removed, so a check counts code, not prose. */
 function code(file: string): string {
-  const text = read(file);
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.Standard,
-    text,
-  );
-  let out = "";
-  for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
-    if (
-      kind === ts.SyntaxKind.SingleLineCommentTrivia ||
-      kind === ts.SyntaxKind.MultiLineCommentTrivia
-    )
-      continue;
-    out += scanner.getTokenText();
-  }
-  return out;
+  const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, false);
+  return ts.createPrinter({ removeComments: true }).printFile(source);
 }
 
 interface Check {
