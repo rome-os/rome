@@ -93,6 +93,23 @@ describe("recordSynced", () => {
     expect(said(directMessageKey("whatsapp", SELF, "2000@s.whatsapp.net"))).toHaveLength(1);
   });
 
+  it("leaves a message that failed to record out of what is on record", () => {
+    const failing = {
+      ...deps,
+      messages: {
+        record: (said: Parameters<MessageRepository["record"]>[0]) => {
+          if (said.key.endsWith("bad")) throw new Error("disk full");
+          return messages.record(said);
+        },
+      },
+    };
+
+    expect(recordSynced(failing, ACCOUNT, [synced({ id: "bad" }), synced()])).toEqual({
+      recorded: 1,
+      onRecord: ["m1"],
+    });
+  });
+
   it("records media, which the sync keeps no file of, as a note of its kind and caption", () => {
     recordSynced(deps, ACCOUNT, [
       synced({ id: "voice", text: "", attachments: [{ type: "audio" }] }),
