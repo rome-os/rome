@@ -1326,7 +1326,12 @@ describe("AnthropicProvider", () => {
 
       expect(messages.filter((m) => m.type === "text")).toEqual([]);
       expect(messages.filter((m) => m.type === "result")).toEqual([]);
-      expect(messages.at(-1)).toMatchObject({ type: "error", error: apiErrorText });
+      expect(messages.at(-1)).toMatchObject({
+        type: "error",
+        error: apiErrorText,
+        httpStatus: 500,
+        providerError: "server_error",
+      });
       expect(messages.at(-1)).not.toHaveProperty("code");
       // A failed turn is no fork point and proves nothing about the credential.
       expect(session.lastCompletedTurnCheckpoint).toBeUndefined();

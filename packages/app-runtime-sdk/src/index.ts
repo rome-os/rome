@@ -553,7 +553,14 @@ export interface AgentTurnOutput {
   /** @deprecated Read `stop.reason`. Provider-specific; see `AgentAccounting.stopReason`. */
   stopReason?: string;
   error?: string;
+  failure?: AgentTurnFailure;
   accounting?: AgentAccounting;
+}
+
+export interface AgentTurnFailure
+  extends Pick<TurnErrorEvent, "code" | "reason" | "httpStatus" | "providerError"> {
+  message: string;
+  provider: string;
 }
 
 export interface AgentTurnStartedEvent {
@@ -958,6 +965,7 @@ export interface TurnErrorEvent {
   code?: AgentErrorCode;
   /** HTTP status of the failed provider request, when the provider reports it. */
   httpStatus?: number;
+  providerError?: string;
   /** Provider and cause used by interactive clients to offer recovery UI. */
   provider?: AgentErrorProvider;
   reason?: AgentErrorReason;

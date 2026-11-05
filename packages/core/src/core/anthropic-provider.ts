@@ -713,6 +713,7 @@ export class AnthropicProvider implements ModelProvider {
       let pendingText: string | null = null;
       let pendingTextBlockId: string | undefined;
       let partialText = "";
+      let providerError: string | undefined;
       let partialTextBlockId: string | undefined;
       // Block identity is `<API message id>:<content block index>`. The stream
       // reports the index on each `content_block_*` event; the SDK then sends
@@ -823,6 +824,9 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
           } else if (isAssistantMessage(message)) {
+            if (message.parent_tool_use_id === null && message.error) {
+              providerError = message.error;
+            }
             if (message.parent_tool_use_id === null) {
               activeTurnLastAssistantMessageId = message.uuid;
             }
@@ -1046,6 +1050,16 @@ export class AnthropicProvider implements ModelProvider {
                 terminal = { type: "error", error: errorText, accounting };
               }
             }
+            if (terminal.type === "error") {
+              terminal = {
+                ...terminal,
+                ...(providerError ? { providerError } : {}),
+                ...(isResultSuccess(message) && message.api_error_status
+                  ? { httpStatus: message.api_error_status }
+                  : {}),
+              };
+            }
+            providerError = undefined;
             if (!sdkOwned) yield terminal;
           }
         }
