@@ -54,9 +54,10 @@ function romeMessageId(): string {
   return `${ROME_ID_PREFIX}${randomBytes(8).toString("hex").toUpperCase()}`;
 }
 
-/** Whether `message` is one Rome sent through this account. */
+/** Whether `message` is one Rome sent through this account. Another account's
+ *  Rome mints the same prefix, so only this account's own messages count. */
 export function isRomeSend(message: WAMessage): boolean {
-  return message.key.id?.startsWith(ROME_ID_PREFIX) ?? false;
+  return message.key.fromMe === true && (message.key.id?.startsWith(ROME_ID_PREFIX) ?? false);
 }
 const log = createLogger("whatsapp");
 
@@ -429,8 +430,11 @@ export class WhatsAppAdapter {
   private recordHistory(messages: WAMessage[]): void {
     const self = this.selfPnJid();
     if (!this.syncSink?.recordHistory || !self || messages.length === 0) return;
-    // Chats records what Rome sends when it sends it.
-    const inputs = this.syncInputs(messages.filter((message) => !isRomeSend(message)));
+    // Chats records what Rome sends when it sends it. An edit or a deletion
+    // answers a message rather than being one, as a reaction does.
+    const inputs = this.syncInputs(
+      messages.filter((message) => !isRomeSend(message) && !answersAMessage(message)),
+    );
     if (inputs.length === 0) return;
     try {
       this.syncSink.recordHistory(inputs, self);
@@ -843,6 +847,11 @@ function summarizeLocation(label: string, location: unknown): string {
     return `${label}: ${r.degreesLatitude}, ${r.degreesLongitude}`;
   }
   return label;
+}
+
+/** Whether `message` edits or deletes another message, rather than saying one. */
+function answersAMessage(message: WAMessage): boolean {
+  return unwrapMessageContent(message.message)?.protocolMessage != null;
 }
 
 function unwrapMessageContent(message: WAMessage["message"]): WaMessageContent | null {

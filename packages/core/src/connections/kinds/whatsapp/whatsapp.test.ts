@@ -397,15 +397,52 @@ describe("WhatsAppAdapter", () => {
         await eventHandlers["messages.upsert"]({
           messages: [fromMe(sentIds[0]!), fromMe("typed-on-phone")],
         });
+        // Another account's Rome mints the same prefix, and what it said here
+        // is someone else's message.
+        const otherRome = `${sentIds[0]!.slice(0, 12)}0000000000000000`;
         eventHandlers["messaging-history.set"]({
           contacts: [],
           chats: [],
-          messages: [fromMe(sentIds[0]!), fromMe("typed-earlier")],
+          messages: [
+            fromMe(sentIds[0]!),
+            fromMe("typed-earlier"),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: otherRome, fromMe: false },
+            }),
+          ],
         });
 
         expect(sentIds).toHaveLength(1);
-        expect(recorded.map((batch) => batch.ids)).toEqual([["typed-on-phone"], ["typed-earlier"]]);
+        expect(recorded.map((batch) => batch.ids)).toEqual([
+          ["typed-on-phone"],
+          ["typed-earlier", otherRome],
+        ]);
         mockSendMessage.mockReset();
+      });
+
+      it("leaves out the guardian's edits and deletions, which answer a message", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "edit", fromMe: true },
+              message: {
+                protocolMessage: { type: 14, editedMessage: { conversation: "fixed typo" } },
+              },
+            }),
+            makeWAMessage({
+              key: { remoteJid: "111@s.whatsapp.net", id: "revoke", fromMe: true },
+              message: { protocolMessage: { type: 0, key: { id: "own0" } } },
+            }),
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "own1", fromMe: true } }),
+          ],
+        });
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["own1"]]);
       });
 
       it("hands over every live message while nothing is delivered inbound", async () => {
