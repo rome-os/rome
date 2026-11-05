@@ -24,6 +24,8 @@ One prompt to the agent and the work that follows, until the agent answers or st
 
 - A turn belongs to one session.
 - A turn has a [prompt](#prompt) and, when it ends with one, an [answer](#answer). The steps between them are its trace.
+- A turn and its trace are the session's, never a chat's: Chats keeps no turn and no trace (Ouou, 2026-11-05). The trace is what the agent did in the turn, its steps and tool calls.
+- A chat session's turn is linked to the messages it was prompted by, answered with and caught up on. Participation keeps that link, from a message to a turn the session owns, and the message stays the chat's.
 
 ## Prompt
 
@@ -75,4 +77,5 @@ A session in which an agent runs an [action](../concepts/actions.md), started by
 ## Decided against
 
 - **A session as a kind of chat.** A chat answers who said what, where and as whom. A subagent's request, a routine's instructions and a fork's question were never said in any place, by any account, so a chat for them would record things no participant said or saw (Ouou, 2026-11-04).
+- **Turns and traces kept by Chats.** A chat holds what participants said. A turn and its trace are what one agent did, and a session in no chat has turns with no chat to keep them (Ouou, 2026-11-05).
 - **Placing a session in a chat after it was born.** Every path that could reach a session before it was placed had to handle a session with no chat, and each send path grew a branch for it. Born in a chat or in none, there is no such state.
