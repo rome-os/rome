@@ -60,7 +60,8 @@ export function recordSynced(
 ): number {
   let recorded = 0;
   for (const message of synced) {
-    if (!message.text.trim() && (message.attachments?.length ?? 0) === 0) continue;
+    const text = withNotes(message);
+    if (!text) continue;
     try {
       const key = chatOf(deps, account, message);
       const chat = deps.chats.start(key, message.kind, null);
@@ -71,7 +72,7 @@ export function recordSynced(
           account: { platform: account.platform, id: message.sender.id },
           ...(message.sender.name ? { name: message.sender.name } : {}),
         },
-        body: { text: message.text, attachments: [...(message.attachments ?? [])] },
+        body: { text },
         at: message.at,
       });
       if (deps.messages.record(said) !== null) recorded += 1;
@@ -84,6 +85,16 @@ export function recordSynced(
     }
   }
   return recorded;
+}
+
+/** `message`'s text with a note for each attachment, since a sync keeps no
+ *  file for Chats to point at: the note `recorded-sends.ts` writes for an
+ *  attachment Rome sent. Empty when the message says nothing. */
+function withNotes(message: SyncedMessage): string {
+  const notes = (message.attachments ?? []).map(
+    (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
+  );
+  return [message.text.trim(), ...notes].filter(Boolean).join("\n");
 }
 
 /** The chat `message` was said in, keyed as inbound recording keys it. */

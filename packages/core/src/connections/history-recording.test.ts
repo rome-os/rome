@@ -90,6 +90,18 @@ describe("recordSynced", () => {
     expect(said(directMessageKey("whatsapp", SELF, "2000@s.whatsapp.net"))).toHaveLength(1);
   });
 
+  it("records media, which the sync keeps no file of, as a note of its kind and caption", () => {
+    recordSynced(deps, ACCOUNT, [
+      synced({ id: "voice", text: "", attachments: [{ type: "audio" }] }),
+      synced({ id: "photo", text: "", attachments: [{ type: "image", caption: "sunset" }] }),
+    ]);
+
+    expect(said(directMessageKey("whatsapp", SELF, "2000@s.whatsapp.net"))).toEqual([
+      { key: "voice", sender: "2000@s.whatsapp.net", text: "[audio]" },
+      { key: "photo", sender: "2000@s.whatsapp.net", text: "[image: sunset]" },
+    ]);
+  });
+
   it("records a direct message in the chat Rome already reaches at its address", () => {
     const held = directMessageKey("whatsapp", SELF, "opened-by-send");
     chats.start(held, "dm", null);
@@ -138,6 +150,9 @@ describe("syncedFromWhatsApp", () => {
       syncedFromWhatsApp({ ...base, type: "image", hasMedia: true, text: "sunset" }, SELF)
         ?.attachments,
     ).toEqual([{ type: "image", caption: "sunset" }]);
+    expect(
+      syncedFromWhatsApp({ ...base, type: "image", hasMedia: true, text: "sunset" }, SELF)?.text,
+    ).toBe("");
     expect(
       syncedFromWhatsApp({ ...base, type: "reaction", text: "👍", reactsToId: "w0" }, SELF),
     ).toBeNull();

@@ -101,7 +101,8 @@ export function syncedFromWhatsApp(message: WaMessageInput, self: string): Synce
       id: senderId,
       ...(!message.fromMe && message.pushName ? { name: message.pushName } : {}),
     },
-    text: message.text ?? "",
+    // A media message's text is its caption, which its attachment carries.
+    text: attachments.length > 0 ? "" : (message.text ?? ""),
     attachments,
     at: message.timestamp,
   };
