@@ -40,6 +40,17 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - Some kinds have no platform, such as GitHub, since no chats live there.
 - The kinds ship with Rome. The guardian picks one, and never makes one.
 
+## Watch
+
+What a connection lets Rome hear from the external system without being asked: a review requested of the guardian, a CI run of theirs that failed, a new mail from a person.
+
+- A connection that can watch says what can be watched through it: each source, the kinds of event there in the guardian's words, the options the guardian can state, and whose account the events concern, which is the connected account itself (the GitHub login, the mailbox address).
+- Whether a source can be watched now is the connection's to say, with what is missing and how to fix it: not connected, no relay for events to reach Rome, no admin rights on a repository. Another connected app that cannot be watched says so too.
+- The connection **normalizes** every raw event into one shape. It gives who, what, a link and a short excerpt. It says whether the guardian did it (`byYou`) and how it is addressed to them (`addressedTo`: `direct` when it is theirs or asks them, `copy`, or `other`). It adds labels, short words the connection chooses for what else it knows, such as `bot`, `mailing-list` or `ci-failed`. It drops only spam, trash and kinds the follower has off. Every difference between services ends here, so a new service changes only its connection.
+- A connection's catalog declares the options a follower can store for each source, with their labels and values. They are the guardian's wishes, which a follower renders in words for whoever judges its events. They never filter events in code.
+- Whether an event matters is not the connection's to say. The follower decides, from the generic fields and the labels. The Concierge's triage answers important, digest or ignore.
+- Watching is something others use. It has no agent of its own. The Concierge's following is one user of it. A subscription at the external system, such as a repository's webhook, may serve several users at once, so one user stopping leaves the subscription in place.
+
 ## Decided against
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.
@@ -52,3 +63,5 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - **The dashboard chat as a connection.** It reaches no external account and no access was given for it, so there is nothing to fix or disconnect. It is Rome's own chat. A visitor who signs in to it proves who they are, which gives Rome no access to act as anyone.
 - **"Service" as the name for the kind of connection.** The code's word. It did not say what it was and read as a platform when it is not one, so a Telegram bot and a signed-in Telegram user as "two services" made no sense to the guardian.
 - **A translation layer between the old vocabulary and the new.** That layer is for a context one cannot change, and Rome is one codebase its owners can change. It would add a second vocabulary to keep in step with the first. The code is refactored instead, each change landing as add beside, switch callers, remove.
+- **The connection deciding whether an event concerns the guardian.** It dropped bulk mail, cc mail, bots and the guardian's own actions in code, which hid them from the one who decides, and every new service needed its own rules. Facts on the event let the follower decide.
+- **Each user of watching defining what can be watched.** The Concierge first listed GitHub event types and filtered mail itself. A second user would have repeated that, and the guardian would have met two names for one event and two answers to "can Rome watch this?".

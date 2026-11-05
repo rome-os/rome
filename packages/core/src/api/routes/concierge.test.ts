@@ -208,3 +208,66 @@ describe("GET /concierge/tasks", () => {
     await stream.body?.cancel();
   });
 });
+
+describe("/concierge/connectors", () => {
+  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
+  let testDb: TestDb;
+  let enabled: boolean;
+  const listing = {
+    connectors: [
+      {
+        id: "gmail",
+        label: "Gmail",
+        connection: { status: "connected" },
+        act: true,
+        watch: {
+          status: "ready",
+          account: "me@example.com",
+          target: null,
+          kinds: [{ kind: "new_mail", label: "New mail from people", default: true }],
+          options: [],
+          follows: [],
+        },
+      },
+      {
+        id: "slack",
+        label: "Slack",
+        connection: {
+          status: "not_connected",
+          connect: { kind: "rome_oauth", method: "POST", path: "/api/oauth/slack/start" },
+        },
+        act: false,
+        watch: null,
+      },
+    ],
+    rules: { digestTimes: ["09:00", "18:00"], quietHours: null },
+  };
+
+  const app = () => {
+    const following = {
+      list: async () => listing,
+    };
+    const concierge = { isEnabled: async () => enabled, following } as unknown as ConciergeService;
+    return new Hono().route(
+      "/",
+      conciergeRoutes({ concierge, db: testDb.db, webchatRepo: new WebChatRepository(testDb.db) }),
+    );
+  };
+  beforeEach(() => {
+    testDb = createTestDb();
+    enabled = true;
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  it("answers the same structure the Concierge reads, for the guardian only, while the Concierge is on", async () => {
+    expect((await app().request("/concierge/connectors")).status).toBe(401);
+    await expect((await app().request("/concierge/connectors", guardian)).json()).resolves.toEqual(
+      listing,
+    );
+    enabled = false;
+    expect((await app().request("/concierge/connectors", guardian)).status).toBe(404);
+  });
+});

@@ -41,6 +41,37 @@ describe("EventSources", () => {
     ]);
   });
 
+  it("lists a source that declares one exact event as that event", () => {
+    const gmail: DeclaredEventSource = {
+      appId: "connector",
+      events: "provider:event:gmail.gmail_new_gmail_message",
+      keys: [],
+      types: [],
+      ensureAction: "connector_event_ensure",
+    };
+    const list = sources([], [gmail]);
+    expect(list.declaredEntries().map((e) => e.eventType)).toEqual([gmail.events]);
+    expect(list.sourceFor(gmail.events)?.appId).toBe("connector");
+  });
+
+  it("leaves another Gmail event undeclared, so its wait is set with a warning", async () => {
+    const gmail: DeclaredEventSource = {
+      appId: "connector",
+      events: "provider:event:gmail.gmail_new_gmail_message",
+      keys: [],
+      types: [],
+      ensureAction: "connector_event_ensure",
+    };
+    const run = rs.fn<RunEnsureAction>();
+    const result = await sources([], [gmail]).prepareWait(
+      "provider:event:gmail.gmail_email_sent",
+      [],
+      run,
+    );
+    expect(result).toMatchObject({ ok: true, warning: expect.stringContaining("no app declares") });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   describe("prepareWait", () => {
     it("calls the ensure action and returns its subscription", async () => {
       const run = rs.fn<RunEnsureAction>(async () => ({

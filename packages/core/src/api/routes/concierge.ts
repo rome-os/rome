@@ -1,4 +1,9 @@
-import { CONCIERGE_DONE_DAYS, type ConciergeTasksResponse } from "@rome/api-types/concierge";
+import {
+  CONCIERGE_DONE_DAYS,
+  type ConciergeConnectorsResponse,
+  type ConciergeTasksResponse,
+} from "@rome/api-types/concierge";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
@@ -77,6 +82,32 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
       sse.onAbort(finish);
       await closed;
     });
+  });
+
+  // The Concierge's connectors: every tool it can act through or watch, with
+  // what it follows there, and the rules. The same structure its following
+  // list returns, read by native clients.
+  // Guardian-only; 404 while off.
+  const followingOf = async (c: Context) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return { error: c.json({ error: "Not authenticated" }, 401) };
+    }
+    const concierge = deps.concierge;
+    if (!concierge || !(await concierge.isEnabled())) {
+      return { error: c.json({ error: "Concierge is off" }, 404) };
+    }
+    return { following: concierge.following };
+  };
+  const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  app.get("/concierge/connectors", async (c) => {
+    const { following, error } = await followingOf(c);
+    if (error) return error;
+    try {
+      return c.json((await following.list()) satisfies ConciergeConnectorsResponse);
+    } catch (err) {
+      return c.json({ error: messageOf(err) }, 502);
+    }
   });
 
   return app;

@@ -16,7 +16,7 @@ import {
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { sessions } from "../db/schema.js";
+import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { RecordedConversation } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
@@ -387,6 +387,99 @@ describe("AgentRunner", () => {
     const roles = (await webchatRepo.getMessages("chat-answer")).map((message) => message.role);
     expect(roles).toContain("trace");
     expect(roles.includes("assistant")).toBe(answered);
+    await manager.shutdown();
+  });
+
+  it("records fresh runs that name one session into it, each in its own agent session", async () => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.ensureRomeSession({
+      id: "shared-record",
+      type: "action",
+      name: "Shared record",
+      agentName: "test-main",
+    });
+    const opened: { sessionId: string; isNewSession: boolean }[] = [];
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: async (params) => {
+        opened.push({ sessionId: params.sessionId, isNewSession: params.isNewSession === true });
+        return createSessionFromRun(
+          "anthropic",
+          async function* () {
+            yield { type: "result", content: "decided" };
+          },
+          params,
+        );
+      },
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+    for (const prompt of ["batch one", "batch two"]) {
+      await collectMessages(
+        runner.run({ agentName: "test-main", prompt, romeSessionId: "shared-record" }),
+      );
+    }
+    // No history carried: each run opened a session of its own, new to the provider.
+    expect(opened).toHaveLength(2);
+    expect(opened.every((o) => o.isNewSession)).toBe(true);
+    expect(opened[0]?.sessionId).not.toBe(opened[1]?.sessionId);
+    // Both runs are in the one session: a trace and an answer each.
+    const roles = (await webchatRepo.getMessages("shared-record")).map((m) => m.role);
+    expect(roles.filter((role) => role === "trace")).toHaveLength(2);
+    expect(roles.filter((role) => role === "assistant")).toHaveLength(2);
+    await manager.shutdown();
+  });
+
+  it.each([
+    ["keeps", "Following · important (1)"],
+    ["keeps no", undefined],
+  ])("%s a system turn's input in its trace as the caller asks, never as a chat line", async (_label, inputLabel) => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.ensureRomeSession({
+      id: "system-input",
+      type: "action",
+      name: "System input",
+      agentName: "test-main",
+    });
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "" };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+    const prompt = '<external_events untrusted="true" delivery="important">…</external_events>';
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        prompt,
+        romeSessionId: "system-input",
+        persistTranscript: false,
+        ...(inputLabel ? { inputLabel } : {}),
+      }),
+    );
+    const blocks = testDb.db
+      .select({ content: romeAgentTraceBlocks.content })
+      .from(romeAgentTraceBlocks)
+      .where(eq(romeAgentTraceBlocks.sessionId, "system-input"))
+      .all()
+      .map((row) => JSON.parse(row.content) as { type: string; label?: string; content?: string });
+    const inputs = blocks.filter((block) => block.type === "system_input");
+    expect(inputs).toEqual(
+      inputLabel ? [{ type: "system_input", label: inputLabel, content: prompt }] : [],
+    );
+    // It is the turn's input in the trace, not a line of the conversation.
+    const roles = (await webchatRepo.getMessages("system-input")).map((m) => m.role);
+    expect(roles.filter((role) => role === "user" || role === "assistant")).toEqual([]);
     await manager.shutdown();
   });
 

@@ -56,6 +56,19 @@ actions:
   - actions/connector-github-subscribe
   - actions/connector-github-unsubscribe
   - actions/connector-event-ensure
+  - actions/connector-watch-sources
+  - actions/connector-watch-ensure
+  - actions/connector-watch-normalize
+  - actions/connector-watch-release
+
+# What this app's connections let Rome watch. Core discovers watch providers
+# from this declaration and never names the app; the Concierge's following
+# reads the connectors, kinds and options through `sources`.
+watchProvider:
+  sources: connector_watch_sources
+  ensure: connector_watch_ensure
+  normalize: connector_watch_normalize
+  release: connector_watch_release
 
 # Events this app delivers on the bus. A `defer` on one of them calls
 # `ensureAction` to subscribe first, and `search_event_catalog` lists `types`
@@ -79,6 +92,12 @@ eventSources:
       - create
       - delete
       - deployment_status
+    ensureAction: connector_event_ensure
+  # New mail in the connected Gmail inbox, through Composio's polling trigger.
+  # It follows the connected account, so a wait names no key. Only this one
+  # event: other Gmail triggers stay undeclared, so `defer` sets their waits
+  # with a warning, as before.
+  - events: "provider:event:gmail.gmail_new_gmail_message"
     ensureAction: connector_event_ensure
 
 skills:

@@ -799,6 +799,20 @@
       "when": 1794000007000,
       "tag": "0114_remove_dead_person_mapping",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1794000008000,
+      "tag": "0115_concierge_follow_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "6",
+      "when": 1794000009000,
+      "tag": "0116_routine_keep_trigger_payload",
+      "breakpoints": true
     }
   ]
 }

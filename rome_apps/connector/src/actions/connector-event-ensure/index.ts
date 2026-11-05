@@ -9,11 +9,14 @@ import {
 } from "@rome-os/app-runtime";
 
 import { PROVIDER_EVENT_PREFIX } from "../../api/topic.js";
+import { eventNameOf, GMAIL_NEW_MAIL_TYPE } from "../../watch/catalog.js";
+import { ensureGmailTrigger } from "../../watch/runtime.js";
 import {
   ensureGithubWebhookSecret,
   resolveGithubHookSetup,
   subscribeGithubWebhook,
 } from "../connector-github-subscribe/index.js";
+import { withGithubHookLock } from "../github-hook-lock.js";
 import {
   createGithubHookClient,
   type GithubHook,
@@ -24,6 +27,7 @@ import {
 const log = createAppLogger("connector_event_ensure");
 
 const GITHUB_EVENT_PREFIX = `${PROVIDER_EVENT_PREFIX}github.`;
+const GMAIL_NEW_MAIL_EVENT = eventNameOf({ provider: "gmail", type: GMAIL_NEW_MAIL_TYPE });
 const REPO_FIELD = "repository.full_name";
 const ORG_FIELD = "organization.login";
 
@@ -143,10 +147,16 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     config,
     schema: inputSchema,
     execute: async ({ eventName, filter, dryRun }) => {
+      if (eventName === GMAIL_NEW_MAIL_EVENT) {
+        const result = await ensureGmailTrigger(deps, dryRun);
+        if (!result.ok) return { status: "error", error: result.error };
+        // A check answers active | inactive; a subscribe answers existing | created.
+        return { status: "ok", data: { subscription: result.subscription } };
+      }
       if (!eventName.startsWith(GITHUB_EVENT_PREFIX)) {
         return {
           status: "error",
-          error: `connector_event_ensure handles ${GITHUB_EVENT_PREFIX}* events only, not "${eventName}"`,
+          error: `connector_event_ensure handles ${GITHUB_EVENT_PREFIX}* and ${GMAIL_NEW_MAIL_EVENT} events only, not "${eventName}"`,
         };
       }
       const event = eventName.slice(GITHUB_EVENT_PREFIX.length);
@@ -164,17 +174,19 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!resolved.ok) return { status: "error", error: resolved.error };
       const { octokit, relayDepositUrl, legacyInstanceUrl } = resolved.setup;
       try {
-        const subscription = await ensureGithubEvent({
-          client: createGithubHookClient(octokit, target),
-          targetName,
-          targetField,
-          canonicalName: () => readGithubCanonicalName(octokit, target),
-          relayDepositUrl,
-          legacyInstanceUrl,
-          event,
-          dryRun,
-          secret: () => ensureGithubWebhookSecret(deps),
-        });
+        const subscription = await withGithubHookLock(deps.appContext.db, target, () =>
+          ensureGithubEvent({
+            client: createGithubHookClient(octokit, target),
+            targetName,
+            targetField,
+            canonicalName: () => readGithubCanonicalName(octokit, target),
+            relayDepositUrl,
+            legacyInstanceUrl,
+            event,
+            dryRun,
+            secret: () => ensureGithubWebhookSecret(deps),
+          }),
+        );
         if (subscription === "created") {
           log.info("github event subscribed", { target: targetName, event });
         }

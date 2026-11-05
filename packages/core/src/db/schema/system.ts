@@ -724,6 +724,40 @@ export const conciergeTasks = sqliteTable(
   ],
 );
 
+/**
+ * Events from what the Concierge follows that its triage kept. An `important`
+ * one goes to the Concierge after its batch, and every one, important or not,
+ * goes into the next digest. Only the triage's one-line description is kept,
+ * never the event's text. A row is owed until it was offered and digested, so
+ * a restart loses none.
+ */
+export const conciergeFollowItems = sqliteTable(
+  "concierge_follow_items",
+  {
+    id: text("id").primaryKey(),
+    /** The event's stable id from its connection, so a repeat is kept once. */
+    eventId: text("event_id").notNull(),
+    source: text("source").notNull(),
+    kind: text("kind").notNull(),
+    target: text("target").notNull(),
+    decision: text("decision", { enum: ["important", "digest"] }).notNull(),
+    /** Why triage decided so, in one line. */
+    reason: text("reason").notNull(),
+    /** What happened, in one line, as triage wrote it. */
+    line: text("line").notNull(),
+    url: text("url"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /** Set once an important item went to the Concierge, or the hourly cap skipped it. */
+    offeredAt: integer("offered_at", { mode: "timestamp_ms" }),
+    /** Set once a digest included the item. */
+    digestedAt: integer("digested_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("idx_concierge_follow_items_event").on(table.eventId),
+    index("idx_concierge_follow_items_digest").on(table.digestedAt),
+  ],
+);
+
 export const webchatWorkspaceLayouts = sqliteTable("webchat_workspace_layouts", {
   sessionId: text("session_id")
     .primaryKey()
@@ -995,6 +1029,10 @@ export const routines = sqliteTable("routines", {
 
   actionName: text("action_name").notNull(),
   args: text("args", { mode: "json" }).notNull(), // JSON array
+  // Whether a run's record keeps the payload that fired it. Off for a routine
+  // whose payloads are private and large, such as a whole mail: its runs then
+  // keep only the payload's size.
+  keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
 
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),

@@ -147,6 +147,22 @@ export class AgentTraceRecorder {
     await this.recordBatch([msg], this.seq);
   }
 
+  /** Keeps what a system turn was handed, under its label, as one trace block. */
+  async recordSystemInput(label: string, content: string): Promise<void> {
+    await this.ensureSession();
+    const sessionId = this.romeSessionId();
+    await this.input.webchatRepo.appendTraceBlocks({
+      messageId: this.traceMessageId(sessionId),
+      sessionId,
+      turnId: this.input.turnId,
+      startSeq: this.seq,
+      blocks: [{ type: "system_input", label, content }],
+      trigger: this.triggerMetadata(),
+      transcriptMessages: [],
+    });
+    this.seq += 1;
+  }
+
   async recordBatch(
     messages: (AgentEvent & { agent?: string })[],
     startSeq = this.seq,
@@ -294,12 +310,12 @@ export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean 
   return threadContext?.channel !== "webchat";
 }
 
-function textMessageContent(content: string): string {
+export function textMessageContent(content: string): string {
   const parts: MessagePart[] = [{ type: "text", content }];
   return JSON.stringify(parts);
 }
 
-function transcriptMessageId(
+export function transcriptMessageId(
   sessionId: string,
   turnId: string,
   role: RomeAgentTranscriptMessageInput["role"],

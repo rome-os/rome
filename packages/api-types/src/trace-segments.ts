@@ -197,6 +197,16 @@ export interface TraceStructuredOutputEvent extends TraceEventBase {
   payload: unknown;
 }
 
+/**
+ * What a system turn was handed, kept in its trace under a label, such as
+ * "Following · important (1)", for a turn whose caller asked for it.
+ */
+export interface TraceSystemInputEvent extends TraceEventBase {
+  type: "system_input";
+  label: string;
+  content: string;
+}
+
 export interface TracePlanUpdateEvent extends TraceEventBase {
   type: "plan_update";
   plan: AgentPlan;
@@ -215,7 +225,8 @@ export type TraceEventDto =
   | TraceResultEvent
   | TraceErrorEvent
   | TraceStructuredOutputEvent
-  | TracePlanUpdateEvent;
+  | TracePlanUpdateEvent
+  | TraceSystemInputEvent;
 
 export interface TraceRunSegment {
   kind: "run";

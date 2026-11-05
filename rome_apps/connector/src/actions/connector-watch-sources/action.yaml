@@ -1,0 +1,18 @@
+name: connector_watch_sources
+type: custom
+description: |
+  What this app adds to Rome's list of services, for followers such as the
+  Concierge. `services`: the Composio services, read from the same catalog
+  and account list as Settings → Connections (state working, broken when its
+  access expired, or null; and, when not working, the call that starts
+  connecting it). `watch`: for each service this app can watch, its status
+  (ready, not_connected, no_relay, error) with a reason saying what is
+  missing, the account events concern, the target format, the kinds of
+  event in guardian-readable words with the raw events behind each, and the
+  options that tune them. Reads only; changes nothing.
+entry: ./index.ts
+visibility: explicit
+complexity: simple
+speed: moderate
+reliability: medium
+sideEffects: read-only

@@ -1,0 +1,14 @@
+name: connector_watch_release
+type: custom
+description: |
+  Say that a follower no longer needs a source's subscription for a target.
+  For now it releases nothing: a repo's webhook and the Gmail trigger may serve
+  other apps, and nothing yet counts who needs them (rome-os/rome#1658). It
+  answers `released: false`, so the follower keeps working the same once it
+  does count.
+entry: ./index.ts
+visibility: explicit
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

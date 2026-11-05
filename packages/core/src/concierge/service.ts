@@ -21,6 +21,7 @@ import type { AgentSessionManager } from "../core/agent-session.js";
 import { quotaSwitchTarget, soleExhaustedProvider } from "../core/quota-switch.js";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
+import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
 
@@ -87,13 +88,18 @@ export interface ConciergeDeps {
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
-  runBackendTurn: (params: BackendTurnParams, options?: { quiet?: boolean }) => Promise<void>;
+  /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
+  runBackendTurn: (
+    params: BackendTurnParams,
+    options?: { quiet?: boolean; inputLabel?: string },
+  ) => Promise<"completed" | "failed" | void>;
 }
 
 export class ConciergeService {
   private creating: Promise<string> | null = null;
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  private attachedFollowing: ConciergeFollowing | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
 
@@ -209,15 +215,19 @@ export class ConciergeService {
     return row?.id ?? null;
   }
 
-  /** Runs `prompt` as a system turn in the Concierge chat. A no-op before its first turn. */
+  /**
+   * Runs `prompt` as a system turn in the Concierge chat. Answers whether a
+   * turn ran to its end: false before the chat's first turn, and when the turn
+   * errored or was stopped.
+   */
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean } = {},
-  ): Promise<void> {
+    options: { quiet?: boolean; inputLabel?: string } = {},
+  ): Promise<boolean> {
     const sessionId = await this.runtimeSessionId(chatId);
-    if (!sessionId) return;
-    await this.deps.runBackendTurn(
+    if (!sessionId) return false;
+    const outcome = await this.deps.runBackendTurn(
       {
         agentName: CONCIERGE_AGENT_ID,
         sessionId,
@@ -227,11 +237,22 @@ export class ConciergeService {
       },
       options,
     );
+    return outcome === "completed";
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
   attachTaskEvents(events: TaskEventCoalescer | null): void {
     this.taskEvents = events;
+  }
+
+  /** What the Concierge follows, once {@link startConciergeFollowing} has started it. */
+  attachFollowing(following: ConciergeFollowing | null): void {
+    this.attachedFollowing = following;
+  }
+
+  get following(): ConciergeFollowing {
+    if (!this.attachedFollowing) throw new Error("Following is not running");
+    return this.attachedFollowing;
   }
 
   /** The id of the todo row that links a chat, or null. Read before the chat is deleted. */

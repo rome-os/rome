@@ -173,6 +173,9 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
+import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
+import { listConnectionViews } from "./api/routes/connections.js";
+import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -1111,7 +1114,7 @@ async function main() {
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
-    runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
+    runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
   });
   const agentSessionManager = createAgentSessionManager(
     {
@@ -1220,6 +1223,24 @@ async function main() {
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);
+  // The Concierge reaches the connector's watch actions as itself.
+  startConciergeFollowing(concierge, {
+    routines: routinesRepo,
+    routineEngine,
+    actions: actionRegistry,
+    // Every enabled app that declares `watchProvider`, read live so an install
+    // or disable takes effect without a restart. Core names no provider.
+    providers: () =>
+      watchProvidersOf(appCatalog.listResolved(), (name) => actionRegistry.getMetadata(name)),
+    runAction: (name, args, options) =>
+      actionEngine.run(name, args, { initiator: "agent:core:concierge", ...options }),
+    settings: settingsRepo,
+    // The same projection `GET /connections` serves, so both read one model.
+    connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+    items: new ConciergeFollowItemsRepository(db),
+    agentRunner,
+    triageRecord: webchatRepo,
+  });
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
