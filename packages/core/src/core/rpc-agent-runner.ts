@@ -71,9 +71,13 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     const req: RunTurnRequest = {
       key: {
         agentName: params.agentName,
+        // A resume by id that names no caller stays without one, so main reads
+        // the chat it replies into and the session's own caller.
         caller:
           params.caller ??
-          callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId),
+          (params.sessionId && !params.channelThreadKey && !params.romeSessionId
+            ? undefined
+            : callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId)),
       },
       init: {
         workingDir: params.workingDir,

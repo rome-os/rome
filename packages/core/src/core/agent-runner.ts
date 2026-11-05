@@ -25,7 +25,6 @@ import {
 } from "./session-caller.js";
 import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
 import { resetWhenDue, type ResolveConnectionReset } from "./connection-reset.js";
-import { rememberedChatModel } from "./chat-model-selection.js";
 import { openNamed } from "../agent-sessions/index.js";
 
 /** What a wake on a connection adds to a run: the catch-up it briefs the
@@ -553,22 +552,7 @@ export class AgentRunner {
     const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, threadContext, {
       ...(params.contextSuffix ? { about: params.contextSuffix } : {}),
     });
-    const options = {
-      workingDir: params.workingDir,
-      ...(explicitSessionId
-        ? {
-            model: await rememberedChatModel(
-              { webchatRepo: this.webchatRepo, sessions: this.agentSessionManager },
-              {
-                agentName: params.agentName,
-                sessionId: explicitSessionId,
-                caller: named,
-                replies: threadContext,
-              },
-            ),
-          }
-        : {}),
-    };
+    const options = { workingDir: params.workingDir };
     let session;
     if (explicitSessionId) {
       session = await this.agentSessionManager.session(

@@ -685,6 +685,41 @@ checks.push({
   detail: skips,
 });
 
+// --- C21 A running turn keeps what its opener lent ----------------------------
+// Several openers can hold one session, and each lends its surface for its own
+// turns. While a turn runs, its reply address and shared context are the ones
+// it captured, even when it captured none: nothing falls back from the turn's
+// sink to the latest opener's surface or to a context a queued turn set.
+const CAPTURED = /^(threadContext|sharedContext)$/;
+const borrowed: [string, string][] = [];
+for (const file of MODULE) {
+  const sf = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken &&
+      ts.isPropertyAccessExpression(node.left) &&
+      CAPTURED.test(node.left.name.text) &&
+      /sink$/i.test(node.left.expression.getText(sf)) &&
+      /^this\.(surface|sharedContext)\b/.test(node.right.getText(sf))
+    ) {
+      const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+      borrowed.push([`${rel(file)}:${line}`, node.getText(sf)]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+}
+const borrowedPlaces = places(borrowed);
+quantities.turnFallbacks = borrowedPlaces.length;
+checks.push({
+  id: "C21",
+  name: "A running turn keeps the reply address and shared context it captured; nothing falls back to the latest opener's surface or a queued turn's context",
+  measured: `${borrowedPlaces.length} fallbacks`,
+  pass: borrowedPlaces.length === 0,
+  detail: borrowedPlaces,
+});
+
 // --- Quantities without a target -------------------------------------------
 quantities.moduleLines = MODULE.reduce((sum, file) => sum + read(file).split("\n").length, 0);
 const APP_KEY_PARSING =
