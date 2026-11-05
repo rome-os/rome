@@ -39,6 +39,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | Variable | Effect |
 |---|---|
 | `ROME_DEMO=1` | Opens built-in demo data: every task state, an approval, a question, a failed task. Also available by long-pressing "Rome" on the sign-in screen. |
+| `ROME_DEMO=update` | Opens the demo data on a Rome one release behind, so the update page shows; "Update now" finishes after a few seconds. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
 
 To run a local Rome for this, start core with its own profile so it does not touch `~/.rome/default`:

@@ -12,6 +12,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 - When building, pass `-derivedDataPath` under `/tmp/rome-*`, as the `README.md` commands do, so a build never lands in `~/Library/Developer/Xcode/DerivedData` under a name nobody can trace back.
 - When removing a worktree or archiving a worker, delete its `/tmp/rome-*` build folders and snapshot folders too, and shut down any simulator it booted (`xcrun simctl shutdown all`). Each build folder holds a few hundred MB. Keep `/tmp/rome-device` while the phone build is current, because a reinstall reuses it.
 - When adding text, write it in English, following [`docs/ui/VOICE.md`](../docs/ui/VOICE.md), and add its Simplified Chinese to `Rome/Localizable.xcstrings`. `LocalizationTests` fails on a key without zh-Hans text. Build once, then run `xcrun xcstringstool sync` with the build's `.stringsdata` files to list new keys.
+- When reading the instance's API, rely on it staying backward compatible. The app always requires the instance's latest release (the update page in `Rome/Features/Update`) and never pins an instance version.
 
 ## Traps
 

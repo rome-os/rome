@@ -38,7 +38,7 @@ Result: [`mobile-app-mvp-feel-1.md`](mobile-app-mvp-feel-1.md). Review round 1 f
 
 Decision (user, 2026-11-04): the app always requires the instance's latest release; the instance's API stays backward compatible, so the app's and the instance's versions never need to match.
 
-- [ ] Block the app with a full-screen "Update your Rome" page while the instance is not on the latest release, with one "Update now" action; track the upgrade until the new version answers
+- [x] Block the app with a full-screen "Update your Rome" page while the instance is not on the latest release, with one "Update now" action; track the upgrade until the new version answers (`1e0d7f18`, `4cef5d7d`, `588bd463`, `8868c7e5`: never blocks when the check cannot decide; resumes waiting after a relaunch; checked on demo data and a local Rome that answers `unversioned_build`. Result: [`mobile-app-mvp-forced-update.md`](mobile-app-mvp-forced-update.md))
 
 ## Next
 
