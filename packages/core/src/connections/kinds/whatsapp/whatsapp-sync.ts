@@ -82,11 +82,16 @@ export interface WhatsAppSyncSink {
 /**
  * A synced WhatsApp message as Chats records it, for Rome's account `self`, or
  * null for one Chats does not record. A reaction answers a message rather than
- * being one, so it is left out. Media reads as its kind, with any caption, since
+ * being one, so it is left out, as is anything said outside a chat. Media reads as its kind, with any caption, since
  * the sync keeps no file.
  */
 export function syncedFromWhatsApp(message: WaMessageInput, self: string): SyncedMessage | null {
   if (message.type === "reaction") return null;
+  // A status, a broadcast list and a channel's posts are no chat: neither a
+  // group nor a direct message.
+  if (message.chatJid.endsWith("@broadcast") || message.chatJid.endsWith("@newsletter")) {
+    return null;
+  }
   const group = message.chatJid.endsWith("@g.us");
   const senderId = message.fromMe ? self : (message.senderJid ?? message.chatJid);
   const type = attachmentType(message.type);

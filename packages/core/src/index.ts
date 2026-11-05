@@ -1527,12 +1527,16 @@ async function main() {
         upsertMessages: (messages) => whatsAppStoreRepo.upsertMessages(messages),
         // The mirror above still answers WhatsApp history reads. Chats keeps
         // its own record beside it, to take over those reads.
+        // One transaction for a batch: a full history sync hands over
+        // thousands of messages at once.
         recordHistory(messages, self) {
-          recordSynced(
-            chatsWired,
-            { platform: "whatsapp", id: self },
-            messages.flatMap((message) => syncedFromWhatsApp(message, self) ?? []),
-          );
+          db.transaction(() => {
+            recordSynced(
+              chatsWired,
+              { platform: "whatsapp", id: self },
+              messages.flatMap((message) => syncedFromWhatsApp(message, self) ?? []),
+            );
+          });
         },
       } satisfies WhatsAppSyncSink,
       ["upsertContacts", "upsertChats"],

@@ -157,4 +157,10 @@ describe("syncedFromWhatsApp", () => {
       syncedFromWhatsApp({ ...base, type: "reaction", text: "👍", reactsToId: "w0" }, SELF),
     ).toBeNull();
   });
+
+  it("leaves out statuses, broadcast lists and channel posts, which are no chat", () => {
+    for (const chatJid of ["status@broadcast", "1234@broadcast", "1200@newsletter"]) {
+      expect(syncedFromWhatsApp({ ...base, chatJid, fromMe: true }, SELF)).toBeNull();
+    }
+  });
 });
