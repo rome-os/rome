@@ -252,6 +252,100 @@ describe("ConnectionsSection — list of rows", () => {
   });
 });
 
+describe("ConnectionsSection — Connected attention dot", () => {
+  const connectedTab = () => screen.getByRole("radio", { name: /Connected/ });
+  const dot = () => connectedTab().querySelector("span[aria-hidden]");
+
+  it("has no attention dot or accessible warning when all connections are healthy", () => {
+    renderSection([oauth("github", "authorized"), oauth("google")]);
+    expect(dot()).toBeNull();
+    expect(screen.queryByRole("radio", { name: /needs attention/ })).toBeNull();
+    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(within(connectedTab()).getByText("1")).toBeTruthy();
+  });
+
+  it.each([
+    { problem: "broken", row: () => oauth("github", "degraded") },
+    {
+      problem: "unknown account",
+      row: () =>
+        connection({
+          connectionKind: "email",
+          state: "working",
+          accountUnknown: true,
+          grants: { inbox: "authorized" },
+        }),
+    },
+    {
+      problem: "degraded",
+      row: () =>
+        connection({
+          connectionKind: "wechat",
+          grants: { account: "authorized" },
+          capabilities: {
+            chat: {
+              state: "unlocked",
+              degradation: { reason: "Session is stale.", retryAt: null },
+            },
+            act: { state: "unsupported" },
+            watch: { state: "unsupported" },
+          },
+        }),
+    },
+  ])("shows an attention dot for a $problem card without changing Available", ({ row }) => {
+    renderSection([row(), oauth("google")]);
+    expect(dot()).toBeTruthy();
+    expect(dot()?.getAttribute("aria-hidden")).toBe("true");
+    expect(dot()?.className).toContain("size-2");
+    expect(dot()?.className).toContain("rounded-full");
+    expect(dot()?.className).toContain("bg-warning");
+    expect(screen.getByRole("radio", { name: /Connected.*needs attention/ })).toBeTruthy();
+    expect(within(connectedTab()).getByText("needs attention").className).toContain("sr-only");
+    expect(within(connectedTab()).getByText("1")).toBeTruthy();
+    expect(connectedTab().querySelector("svg")).toBeNull();
+    const available = screen.getByRole("radio", { name: /Available/ });
+    expect(available.getAttribute("aria-checked")).toBe("true");
+    expect(available.querySelector("span[aria-hidden]")).toBeNull();
+    expect(within(available).getByText("1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open Google" })).toBeTruthy();
+  });
+
+  it("keeps the attention dot when search hides the problem and while viewing Connected", () => {
+    renderSection([oauth("github", "degraded"), oauth("google")]);
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "google" } });
+    expect(screen.queryByRole("button", { name: "Open GitHub" })).toBeNull();
+    expect(within(connectedTab()).getByText("0")).toBeTruthy();
+    expect(dot()).toBeTruthy();
+    fireEvent.click(connectedTab());
+    expect(connectedTab().getAttribute("aria-checked")).toBe("true");
+    expect(dot()).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    fireEvent.click(connectedTab());
+    const rowDot = screen
+      .getByRole("button", { name: "Open GitHub" })
+      .querySelector("span[aria-hidden]");
+    expect(dot()?.className).toBe(rowDot?.className);
+    expect(dot()).toBeTruthy();
+  });
+
+  it("clears the attention dot and accessible warning only after a refresh fixes the problem", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(
+      sectionWith([oauth("github", "degraded"), oauth("google")], onRefresh),
+    );
+    expect(dot()).toBeTruthy();
+    fireEvent.click(connectedTab());
+    expect(dot()).toBeTruthy();
+    rerender(sectionWith([oauth("github", "authorized"), oauth("google")], onRefresh));
+    expect(dot()).toBeNull();
+    expect(screen.queryByRole("radio", { name: /needs attention/ })).toBeNull();
+    expect(connectedTab().getAttribute("aria-checked")).toBe("true");
+    expect(within(connectedTab()).getByText("1")).toBeTruthy();
+  });
+});
+
 describe("ConnectionsSection — tabs, search and groups", () => {
   function mixed(): ApiConnection[] {
     return [
@@ -297,7 +391,7 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     renderSection(mixed());
     expect(screen.getAllByRole("radio").map((tab) => tab.textContent)).toEqual([
       "Available2",
-      "Connected3",
+      "Connected3needs attention",
     ]);
     expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
     expect(rowNames()).toEqual(["Open WhatsApp", "Open Google"]);
@@ -767,6 +861,18 @@ describe("ConnectionsSection — Composio services", () => {
       "true",
     );
     await screen.findByRole("button", { name: "Connect Linear" });
+    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+  });
+
+  it("shows an attention dot for an unfiltered Composio row that needs attention", async () => {
+    renderSection([oauth("github", "authorized"), oauth("google")], signedIn());
+    const tab = await screen.findByRole("radio", { name: /Connected.*needs attention/ });
+    expect(tab.querySelector("span[aria-hidden]")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "google" } });
+    expect(within(tab).getByText("0")).toBeTruthy();
+    expect(tab.querySelector("span[aria-hidden]")).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
