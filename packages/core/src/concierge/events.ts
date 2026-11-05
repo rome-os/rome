@@ -184,6 +184,7 @@ export function startConciergeEvents(
           await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
             30_000,
           );
+          if (!(await service.isEnabled())) return;
           next = await recover(failure, reason, true);
         } else {
           const moved = await service.switchForFailure(chatId, failure, reason);

@@ -11,6 +11,11 @@ it.each<[string, FailoverReason | null]>([
   ["API Error: 503", "temporary"],
   ["Request timed out", "temporary"],
   ["Connection error", "temporary"],
+  ["connect ECONNREFUSED 127.0.0.1:443", "temporary"],
+  ["Connection refused", "temporary"],
+  ["unexpected status 503 Service Unavailable", "temporary"],
+  ["Order 500 was not found", null],
+  ["Could not read report-403.txt", null],
   ["stream disconnected before completion: connection closed", "temporary"],
   ["Server is temporarily limiting requests (not your usage limit)", "temporary"],
   ["Selected model is at capacity. Please try a different model.", "model_limit"],
@@ -97,6 +102,19 @@ it("keeps exclusions and model wording ahead of generic kinds and statuses", () 
       "quota",
     );
 });
+it("does not recover a turn Rome credits paid for, unless the credits ran out or the login failed", () => {
+  const raw = state();
+  raw.codex.loggedIn = false;
+  const failed = (extra: object) =>
+    failoverReason({ provider: "openai", message: "Selected model is busy", ...extra }, raw);
+  expect(failed({ code: "transient" })).toBeNull();
+  expect(failed({ httpStatus: 503 })).toBeNull();
+  expect(failed({ code: "model_unavailable" })).toBeNull();
+  expect(failed({ code: "credits_used_up" })).toBe("quota");
+  expect(failed({ code: "auth_revoked" })).toBe("login");
+  expect(failed({ reason: "not_logged_in" })).toBe("login");
+});
+
 it("refuses API key sources, unknown providers and absent failures", () => {
   const raw = state();
   raw.claude.authMethod = "environment";

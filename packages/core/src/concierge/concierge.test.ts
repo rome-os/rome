@@ -1699,6 +1699,22 @@ describe("Concierge provider recovery", () => {
       to: "openai",
     });
   });
+  it("drops a pending retry when Concierge is turned off during the wait", async () => {
+    let release!: () => void;
+    const delay = rs.fn(
+      (_ms: number) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { s } = await prepared({ delay });
+    await finish(s, failure("Repeated 529 Overloaded errors"));
+    expect(delay).toHaveBeenCalledTimes(1);
+    s.deps.settingsRepo.get = rs.fn(async () => false) as never;
+    release();
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(0);
+  });
   it("waits about thirty seconds before one same-model retry, then stops on success", async () => {
     let release!: () => void;
     const delay = rs.fn(

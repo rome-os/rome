@@ -21,6 +21,15 @@ export function failoverReason(
       : state.codex.accountType === "api_key"
   )
     return null;
+  // Rome credits pay for Codex while its login is out, and recovery must not spend them.
+  if (
+    failure.provider === "openai" &&
+    state.codex.loggedIn === false &&
+    code !== "auth_revoked" &&
+    code !== "credits_used_up" &&
+    reason !== "not_logged_in"
+  )
+    return null;
   if (code === "model_unavailable" || reason === "model_access_denied") return "model_limit";
   if (
     code === "context_window_exceeded" ||
@@ -28,7 +37,7 @@ export function failoverReason(
     httpStatus === 400 ||
     providerError === "invalid_request" ||
     providerError === "max_output_tokens" ||
-    /prompt[_ ](?:is[_ ])?too[_ ]long|context[_ ](?:window[_ ])?(?:exceeded|too long)|max[_ -](?:output[_ -])?tokens|content refusal|content policy|refus(?:al|ed)|user.*(?:stop|interrupt)|(?:stop|interrupt).*user|turn interrupted|rome (?:is )?(?:restart|shut)|structured[ -]output|submit_output|maximum number of turns|max_turns|credit balance is too low|process exited with code/i.test(
+    /prompt[_ ](?:is[_ ])?too[_ ]long|context[_ ](?:window[_ ])?(?:exceeded|too long)|max[_ -](?:output[_ -])?tokens|content refusal|content policy|\brefusal\b|user.*(?:stop|interrupt)|(?:stop|interrupt).*user|turn interrupted|rome (?:is )?(?:restart|shut)|structured[ -]output|submit_output|maximum number of turns|max_turns|credit balance is too low|process exited with code/i.test(
       message,
     )
   )
@@ -52,7 +61,9 @@ export function failoverReason(
     /authentication_failed|oauth_org_not_allowed|account_on_hold|verification_required|cloud_credential_error/.test(
       providerError ?? "",
     ) ||
-    /failed to authenticate|oauth session expired|\b(?:401|403)\b/i.test(message) ||
+    /failed to authenticate|oauth session expired|\b(?:status|error):?\s*(?:401|403)\b/i.test(
+      message,
+    ) ||
     (failure.provider === "anthropic" ? state.claude : state.codex).needsReauth
   )
     return "login";
@@ -68,7 +79,7 @@ export function failoverReason(
     [408, 429].includes(httpStatus ?? 0) ||
     (httpStatus !== undefined && httpStatus >= 500 && httpStatus < 600) ||
     /^(?:rate_limit|overloaded|server_error)$/.test(providerError ?? "") ||
-    /\b(?:429|5\d\d)\b|overload|stream disconnected before completion|timed? out|connection error|network error|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|temporarily limiting requests/i.test(
+    /\b(?:status|error):?\s*(?:429|5\d\d)\b|overload|stream disconnected before completion|timed? out|connection error|connection refused|network error|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|temporarily limiting requests/i.test(
       message,
     )
   )
