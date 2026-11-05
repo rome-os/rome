@@ -368,7 +368,7 @@ function labelAccounts(cards: ConnectionCard[]): void {
 }
 
 /** The two views of the Connections page. */
-export type ConnectionTab = "connected" | "available";
+export type ConnectionTab = "all" | "connected";
 
 /** The groups the Connections page sorts cards into. Channels the guardian
  *  talks to Rome through are Messaging; accounts Rome acts in (Rome OAuth and
@@ -386,10 +386,10 @@ export function connectionGroup(card: ConnectionCard): ConnectionGroup {
   return card.kind === "channel" ? "messaging" : "accounts";
 }
 
-/** Splits the cards into the groups of one tab, in group order. A card that
- *  needs attention leads its group; the rest keep the list order. An empty
- *  group is left out unless `keep` names it, for a caller that adds rows of
- *  its own to that group. */
+/** Splits the cards into the groups of one tab, in group order. Attention
+ *  leads each group, then connected cards, then unconnected cards, otherwise
+ *  keeping the list order. An empty group is left out unless `keep` names it,
+ *  for a caller that adds rows of its own to that group. */
 export function groupConnectionCards(
   cards: ConnectionCard[],
   needsAttention: (card: ConnectionCard) => boolean,
@@ -403,7 +403,8 @@ export function groupConnectionCards(
         group,
         cards: [
           ...inGroup.filter(needsAttention),
-          ...inGroup.filter((card) => !needsAttention(card)),
+          ...inGroup.filter((card) => !needsAttention(card) && isConnectedCard(card)),
+          ...inGroup.filter((card) => !needsAttention(card) && !isConnectedCard(card)),
         ],
       };
     })
