@@ -17,7 +17,7 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 ## Waiting on the user
 
 - [x] Rome Cloud sign-in on the simulator works end to end (confirmed by the user)
-- [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of 8d9450e2 (round 1 feel fixes), team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
+- [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of eab3914d (round 1 feel fixes and the always-latest instance update), team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
 - [x] English as the default language, zh-Hans a translation: merged from `claude/epic-vaughan-1e52a1` after an independent review found no serious defects (result: [`mobile-app-mvp-english.md`](mobile-app-mvp-english.md))
 - [x] Reinstall the merged build on the user's iPhone (b72cb7d8, tests passed first)
 - [x] Routines and Search from the drawer open in place, no push over Chat: they are root pages the drawer switches between, with the drawer button at top left (a no-animation push did not work on iOS 27)
@@ -58,6 +58,6 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
 
 | Name | Session | Task | Status |
 | --- | --- | --- | --- |
-| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: reinstalled 8d9450e2 (round 1 feel fixes) from a clean export. Mac Catalyst unit tests passed on it (39 tests in 10 suites), `devicectl` install and launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
+| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: reinstalled eab3914d (round 1 feel fixes and the always-latest instance update) from a clean export. Mac Catalyst unit tests passed on it (53 tests in 13 suites), `devicectl` install and launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
 | ios-feel-fixes | local_a0f3f229-481e-440c-9bde-fb0f72bddd0a | Feel fixes, round 1; then instance forced update | round 1 done; forced update working |
 | make-english-the-ios-app | local_066dd861-f965-4eff-89db-ee9aa13d5d0c | English default, zh-Hans translation | done, merged, archived; worktree and branch removed |
