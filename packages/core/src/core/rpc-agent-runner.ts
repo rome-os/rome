@@ -75,13 +75,14 @@ export class RpcAgentRunner implements AgentRunnerInterface {
         // the chat it replies into and the session's own caller.
         caller:
           params.caller ??
-          (params.sessionId && !params.channelThreadKey && !params.romeSessionId
+          (params.sessionId && !params.channelThreadKey
             ? undefined
-            : callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId)),
+            : callerOfRun(params.agentName, params.channelThreadKey)),
       },
       init: {
         workingDir: params.workingDir,
         threadContext: params.threadContext,
+        romeSessionId: params.romeSessionId,
         contextSuffix: params.contextSuffix,
       },
       sharedContext: params.sharedContext,

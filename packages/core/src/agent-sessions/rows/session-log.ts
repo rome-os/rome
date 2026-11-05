@@ -13,21 +13,21 @@ import type {
 } from "../agent-session.js";
 import { AgentTraceRecorder, resolveTurnConversation } from "./agent-trace-recorder.js";
 import { findRecordedConversation } from "./session-conversation.js";
-import { callerChatId, callerFromKey } from "../../core/session-caller.js";
+import { callerFromKey, chatOfCaller } from "../../core/session-caller.js";
 
 const log = createLogger("session-log");
 
 /**
- * Conversations Chats named for callers whose stored form carries none, held
- * while their session opens. A chat's own caller names its chat; a place or a
- * run that Chats keeps in a conversation is named here.
+ * Conversations Chats named for sessions while they open, by the caller that
+ * opens one or by the id a resume names. A chat's own caller names its chat;
+ * a place or a run that Chats keeps in a conversation is named here.
  */
 const named = new Map<string, string>();
 
 /**
- * Opens a session of `caller` with `chatId` as the conversation today's rows
- * keep its turns in. Storage keeps that link on the session's row, so it is
- * only needed while the session opens.
+ * Opens a session, by its caller or by its id, with `chatId` as the
+ * conversation today's rows keep its turns in. Storage keeps that link on the
+ * session's row, so it is only needed while the session opens.
  */
 export async function openNamed<T>(
   caller: string,
@@ -52,7 +52,7 @@ export async function openNamed<T>(
 export function createSessionLog(webchatRepo: WebChatRepository | undefined): SessionLog {
   return {
     findConversation: (id) => findRecordedConversation(webchatRepo, id),
-    conversationOf: (caller) => named.get(caller) ?? callerChatId(callerFromKey(caller)),
+    conversationOf: (opener) => named.get(opener) ?? chatOfCaller(callerFromKey(opener)),
     turn: (turn) => turnEntry(webchatRepo, turn),
     fork: webchatRepo ? (fork) => forkWriter(webchatRepo, fork) : undefined,
     resumableChild: webchatRepo ? (child) => resumableChild(webchatRepo, child) : undefined,
@@ -63,21 +63,31 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
   };
 }
 
+const MAX_WRITE_ATTEMPTS = 3;
+
 function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string): TurnLogWriter {
   // Events a write failed to keep. Each write tries them again ahead of its
   // own, at the sequence the failed one would have taken, so a transient
-  // failure drops no block and the turn goes on either way.
+  // failure drops no block and the turn goes on either way. After
+  // MAX_WRITE_ATTEMPTS failures in a row the oldest is given up, so one block
+  // that can never be written does not hold back the rest of the turn.
   let pending: StreamAgentEvent[] = [];
+  let failures = 0;
   const record = async (event: StreamAgentEvent) => {
     pending.push(event);
     try {
       await recorder.recordBatch(pending);
       pending = [];
+      failures = 0;
     } catch (err) {
+      failures += 1;
+      const dropped = failures >= MAX_WRITE_ATTEMPTS ? pending.shift() : undefined;
+      if (dropped) failures = 0;
       log.warn("failed to persist agent trace", {
         turnId,
         source,
         pending: pending.length,
+        ...(dropped ? { dropped: dropped.type } : {}),
         error: err instanceof Error ? err.message : String(err),
       });
     }

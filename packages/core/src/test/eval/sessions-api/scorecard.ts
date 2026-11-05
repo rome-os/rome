@@ -720,6 +720,42 @@ checks.push({
   detail: borrowedPlaces,
 });
 
+// --- C22 The SDK's caller names identity only -------------------------------
+// A caller names who hands the session its input. The conversation a run's
+// turns are recorded in is the run's own field, so a kind other than a
+// dashboard chat (which is its own conversation) carries no chat id, and
+// nothing folds one into a caller.
+const conversationOnCaller: string[] = [];
+sdkSource.forEachChild((node) => {
+  if (!ts.isTypeAliasDeclaration(node) || node.name.text !== "SessionCaller") return;
+  const kinds = ts.isUnionTypeNode(node.type) ? node.type.types : [node.type];
+  for (const kind of kinds) {
+    if (!ts.isTypeLiteralNode(kind)) continue;
+    const names = kind.members.flatMap((member) =>
+      member.name ? [member.name.getText(sdkSource)] : [],
+    );
+    const kindName = kind.members
+      .find((member) => member.name?.getText(sdkSource) === "kind")
+      ?.getText(sdkSource);
+    if (names.includes("chatId") && !/"chat"/.test(kindName ?? ""))
+      conversationOnCaller.push(`SessionCaller: ${kindName}`);
+  }
+});
+const FOLDS =
+  /\bcallerChatId\b|\bwithChatId\(\s*\w*(place|caller)|\{\s*\.\.\.\w*(place|caller)\w*,\s*chatId\b/gi;
+for (const file of [...coreFiles, ...appFiles]) {
+  for (const hit of code(file).match(FOLDS) ?? [])
+    conversationOnCaller.push(`${rel(file)}: ${hit}`);
+}
+quantities.conversationOnCaller = conversationOnCaller.length;
+checks.push({
+  id: "C22",
+  name: "The SDK's caller names identity only: no kind but a dashboard chat carries a chat id, and nothing folds a conversation into a caller",
+  measured: `${conversationOnCaller.length} places`,
+  pass: conversationOnCaller.length === 0,
+  detail: conversationOnCaller,
+});
+
 // --- Quantities without a target -------------------------------------------
 quantities.moduleLines = MODULE.reduce((sum, file) => sum + read(file).split("\n").length, 0);
 const APP_KEY_PARSING =

@@ -17,10 +17,10 @@ import {
   type SurfaceDeps,
 } from "../connections/session-surface.js";
 import {
-  callerChatId,
   callerFromKey,
   callerKey,
   callerOfRun,
+  chatOfCaller,
   type SessionCaller,
 } from "./session-caller.js";
 import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
@@ -544,10 +544,11 @@ export class AgentRunner {
       (params.channelThreadKey ? callerFromKey(params.channelThreadKey) : undefined);
     const caller = explicitSessionId
       ? named
-      : (params.caller ??
-        callerOfRun(params.agentName, params.channelThreadKey, params.romeSessionId));
-    // The conversation the run names, where Chats keeps its lines.
-    const chatId = explicitSessionId ? undefined : caller && callerChatId(caller);
+      : (params.caller ?? callerOfRun(params.agentName, params.channelThreadKey));
+    // The conversation the run names, where Chats keeps its lines. A resume by
+    // id keeps the one its session recorded unless the run names one.
+    const chatId =
+      params.romeSessionId ?? (explicitSessionId || !caller ? undefined : chatOfCaller(caller));
     const threadContext = await this.withChatId(params.threadContext);
     const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, threadContext, {
       ...(params.contextSuffix ? { about: params.contextSuffix } : {}),
@@ -555,11 +556,8 @@ export class AgentRunner {
     const options = { workingDir: params.workingDir };
     let session;
     if (explicitSessionId) {
-      session = await this.agentSessionManager.session(
-        explicitSessionId,
-        params.agentName,
-        surface,
-        options,
+      session = await openNamed(explicitSessionId, chatId, () =>
+        this.agentSessionManager.session(explicitSessionId, params.agentName, surface, options),
       );
     } else {
       // A run that names no conversation gets a caller of its own.

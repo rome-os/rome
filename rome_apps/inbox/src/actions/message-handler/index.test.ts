@@ -454,6 +454,13 @@ describe("message reply bond-level settings", () => {
     expect(result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
     expect(agentRunner.calls).toHaveLength(1);
     expect(agentRunner.calls[0].prompt).toBe("Can you answer?");
+    // The run's caller is the place; its conversation is named on its own.
+    expect(agentRunner.calls[0].caller).toEqual({
+      kind: "place",
+      connection: expect.any(String),
+      place: "thread-1",
+    });
+    expect(agentRunner.calls[0].romeSessionId).toBe("channel:telegram:thread-1");
     expect(sentMessages).toEqual([
       {
         channel: "telegram",

@@ -29,7 +29,7 @@ import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 import { sessionSurfaceOf } from "../connections/session-surface.js";
-import { adhocCaller, callerChatId, callerKey, type SessionCaller } from "./session-caller.js";
+import { adhocCaller, callerKey, chatOfCaller, type SessionCaller } from "./session-caller.js";
 import { openNamed } from "../agent-sessions/index.js";
 import type { ThreadContext } from "./types.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -54,7 +54,13 @@ export interface RunTurnKey {
 export interface RunTurnRequest {
   /** A run that resumes a session by its id may name no caller. */
   key: { agentName: string; caller?: SessionCaller };
-  init?: { workingDir?: string; threadContext?: ThreadContext; contextSuffix?: string };
+  init?: {
+    workingDir?: string;
+    threadContext?: ThreadContext;
+    /** The conversation the run's turns are recorded in, when it names one. */
+    romeSessionId?: string;
+    contextSuffix?: string;
+  };
   sharedContext?: Record<string, unknown>;
   input: AgentTurnInput;
   platformMessageId?: string;
@@ -141,9 +147,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const opener = caller ?? adhocCaller(req.key.agentName);
         const callerId = callerKey(opener);
         // The conversation the run names. A resume by id keeps the
-        // conversation its session recorded, so the caller it names picks
-        // none, as in the runner.
-        const named = caller && !req.sessionId ? callerChatId(caller) : undefined;
+        // conversation its session recorded unless the run names one, so the
+        // caller it names picks none, as in the runner.
+        const named =
+          req.init?.romeSessionId ?? (caller && !req.sessionId ? chatOfCaller(caller) : undefined);
         // The conversation the turn is kept in where it replies.
         const romeSessionId =
           named ??
@@ -158,9 +165,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         let session: AgentSession;
         try {
           if (req.sessionId) {
-            session = await this.manager.session(req.sessionId, req.key.agentName, surface, {
-              workingDir,
-            });
+            const sessionId = req.sessionId;
+            session = await openNamed(sessionId, named, () =>
+              this.manager.session(sessionId, req.key.agentName, surface, { workingDir }),
+            );
           } else {
             // A wake by a message on a connection applies the place's reset setting.
             if (req.platformMessageId) {
@@ -172,7 +180,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 thread,
               );
             }
-            session = await openNamed(callerId, callerChatId(opener), () =>
+            session = await openNamed(callerId, named, () =>
               this.manager.open(req.key.agentName, callerId, surface, { workingDir }),
             );
           }
