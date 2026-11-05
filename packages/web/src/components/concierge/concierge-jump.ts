@@ -17,19 +17,3 @@ export function onConciergeJump(handler: (messageId: string) => void): () => voi
   window.addEventListener(CONCIERGE_JUMP_EVENT, listener);
   return () => window.removeEventListener(CONCIERGE_JUMP_EVENT, listener);
 }
-
-/** A jump waiting for another Concierge chat to open. */
-let deferred: { chatId: string; messageId: string } | null = null;
-
-/** Keeps a jump for when Concierge chat `chatId` opens, as when the panel sends the guardian to it. */
-export function deferConciergeJump(chatId: string, messageId: string): void {
-  deferred = { chatId, messageId };
-}
-
-/** The message a jump waits to show in `chatId`, once: null when none waits for it. */
-export function takeConciergeJump(chatId: string): string | null {
-  if (deferred?.chatId !== chatId) return null;
-  const { messageId } = deferred;
-  deferred = null;
-  return messageId;
-}

@@ -64,12 +64,12 @@ function host(overrides: Partial<ToolTasksHost> = {}): ToolTasksHost {
   return { active: false, compact: false, show: rs.fn(), hide: rs.fn(), ...overrides };
 }
 
-function renderPill(pane: ToolTasksHost | null = host()) {
+function renderPill(pane: ToolTasksHost | null = host(), chatId = "concierge") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = (
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <ConciergeTasksPill />
+        <ConciergeTasksPill chatId={chatId} />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -106,6 +106,14 @@ describe("ConciergeTasksPill", () => {
     expect(pill.className).toContain("bg-warning-bg");
   });
 
+  it("counts only the tasks of the chat it is in", async () => {
+    const topic = { conciergeChat: { id: "topic-1", name: "Calendar", main: false } };
+    server.tasks = [row("needs_user", topic), row("doing"), row("doing", topic)];
+    renderPill();
+    const pill = await screen.findByRole("button", { name: "Tasks, 1 in progress" });
+    expect(pill.textContent).toBe("1");
+  });
+
   it("is a small inline pill with a 44px hit area around it, not a control-sized button", async () => {
     server.tasks = [row("needs_user")];
     renderPill();
@@ -140,8 +148,8 @@ describe("ConciergeTasksPill", () => {
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
         <QueryClientProvider client={client}>
           <MemoryRouter>
-            <ConciergeTasksPill />
-            <ConciergeTasksPill />
+            <ConciergeTasksPill chatId="concierge" />
+            <ConciergeTasksPill chatId="concierge" />
           </MemoryRouter>
         </QueryClientProvider>
       </LiveEventsClientContext.Provider>,
@@ -179,7 +187,7 @@ describe("ConciergeTasksPill", () => {
       <ToolTasksContext.Provider value={active}>
         <QueryClientProvider client={client}>
           <MemoryRouter>
-            <ConciergeTasksPill />
+            <ConciergeTasksPill chatId="concierge" />
           </MemoryRouter>
         </QueryClientProvider>
       </ToolTasksContext.Provider>,

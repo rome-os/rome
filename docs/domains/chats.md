@@ -70,7 +70,7 @@ A dashboard chat where its owner talks with the Concierge: a [main chat](#main-c
 - The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
 - A Concierge chat belongs to its owner, as every dashboard chat does. Today the guardian is the only owner.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One thing is followed once, whatever chat asks for it.
-- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it.
+- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat.
 
 ## Main chat
 

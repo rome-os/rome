@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
 import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
@@ -12,7 +12,7 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
-import { onConciergeJump, takeConciergeJump } from "./concierge-jump";
+import { onConciergeJump } from "./concierge-jump";
 import { ConciergeTaskPanel } from "./ConciergeTaskPanel";
 import { PENDING_TIMEOUT_MS, resetPending } from "./task-pending";
 
@@ -92,19 +92,13 @@ function mockServer() {
   }) as typeof fetch);
 }
 
-/** The route the panel left the guardian on. */
-function Where() {
-  return <output data-testid="where">{useLocation().pathname}</output>;
-}
-
-function renderPanel(props: { onNavigate?: () => void } = {}) {
+function renderPanel(props: { chatId?: string; onNavigate?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={["/chat/concierge"]}>
           <ConciergeTaskPanel {...props} />
-          <Where />
         </MemoryRouter>
       </QueryClientProvider>
     </LiveEventsClientContext.Provider>,
@@ -345,33 +339,35 @@ describe("ConciergeTaskPanel", () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it("names a topic chat's row by its chat, sends its buttons there, and opens it to jump", async () => {
+  it("lists only the rows of the Concierge chat it is opened in", async () => {
     const topic = { id: "topic-1", name: "Calendar", main: false };
     server.recent = [
-      row("doing", {
-        title: "Agenda",
-        chat: { id: "c1", name: "c" },
-        sourceMessageId: "m-agenda",
-        summary: "Reading",
-        conciergeChat: topic,
-      }),
+      row("doing", { title: "Main work" }),
+      row("doing", { title: "Agenda", conciergeChat: topic }),
+    ];
+    mockServer();
+    renderPanel();
+    expect(await screen.findByText("Main work")).toBeTruthy();
+    expect(screen.queryByText("Agenda")).toBeNull();
+    cleanup();
+    renderPanel({ chatId: "topic-1" });
+    expect(await screen.findByText("Agenda")).toBeTruthy();
+    expect(screen.queryByText("Main work")).toBeNull();
+  });
+
+  it("sends a topic chat's buttons to that chat", async () => {
+    const topic = { id: "topic-1", name: "Calendar", main: false };
+    server.recent = [
+      row("doing", { title: "Agenda", chat: { id: "c1", name: "c" }, conciergeChat: topic }),
     ];
     mockServer();
     topicPosts.length = 0;
-    const jumps: string[] = [];
-    const off = onConciergeJump((messageId) => jumps.push(messageId));
     const user = userEvent.setup();
-    renderPanel();
-    expect(await screen.findByText("Calendar · Reading")).toBeTruthy();
+    renderPanel({ chatId: "topic-1" });
+    await screen.findByText("Agenda");
     await user.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(topicPosts).toHaveLength(1));
     expect(posts).toEqual([]);
-    await user.click(screen.getByText("Agenda"));
-    off();
-    // The message is in the topic chat: the panel opens it, which then shows the message.
-    expect(jumps).toEqual([]);
-    expect(screen.getByTestId("where").textContent).toBe("/chat/topic-1");
-    expect(takeConciergeJump("topic-1")).toBe("m-agenda");
   });
 
   it("closes the mobile sheet before it asks for the jump", async () => {

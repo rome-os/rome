@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
-import { needsYouCount } from "@/components/concierge/tasks";
+import { needsYouCount, tasksOfChat } from "@/components/concierge/tasks";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
@@ -55,7 +55,8 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   useSessionsChanged(recount);
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
-  const needsYou = needsYouCount(useConciergeTasks().tasks);
+  // The main chat's own tasks: a topic chat's are counted in that chat.
+  const needsYou = needsYouCount(tasksOfChat(useConciergeTasks().tasks, chatId));
   const needsYouLabel = t("recentChats.conciergeNeedsYou", { count: needsYou });
   const unreadLabel = t("recentChats.conciergeUnread", { count, label });
   const linkLabel =

@@ -87,6 +87,10 @@ export function pillState(tasks: readonly ConciergeTaskDto[]): PillState {
   return { kind: "idle" };
 }
 
+/** The rows of one Concierge chat: the panel and its pill show only the chat they are opened in. */
+export const tasksOfChat = (tasks: readonly ConciergeTaskDto[], chatId: string | null) =>
+  tasks.filter((task) => task.conciergeChat.id === chatId);
+
 export const needsYouCount = (tasks: readonly ConciergeTaskDto[]) => countOf(tasks, "needs_user");
 
 /**

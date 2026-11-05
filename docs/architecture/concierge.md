@@ -46,6 +46,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 
 - **A follow reports to one Concierge chat.** A new follow reports to the chat that asked for it. It moves only when a change names another chat, so following the same thing from a second chat answers where it reports and leaves it there.
 - **A task row reports to the Concierge chat it was written in.** Its task chat's results, questions and approvals go there as task events, and the panel's buttons for the row send there.
+- **A Concierge chat's task panel and its pill show that chat's rows only,** the main chat's included. There is no view of every chat's rows. A row moves to the main chat's panel when its chat is archived or deleted.
 - **Something that reports to a chat that is archived or gone goes to the main chat.** No alert, task event or result waits on a chat the guardian closed.
 - **One delivery is one Concierge turn per chat.** A batch of important items or task events that spans chats becomes one turn in each, and each turn counts against the hourly cap of important turns.
 - **The digest goes to the main chat only,** with every chat's items grouped under the chat they report to, so an item in a topic chat the guardian does not open is still read.
