@@ -54,6 +54,7 @@ import {
   setInstanceTokenInMemory,
 } from "../../lib/instance-identity.js";
 import { guardianAuth, persons, settings } from "../../db/schema.js";
+import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
 const testDb = createTestDb();
@@ -364,7 +365,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
     const deps = {
       ...(await buildTestDeps(testDb.db)),
       isCloudAuthEnabled: async () => true,
-      provisionNodeCaller: () => {
+      provisionAfterLink: () => {
         provisioned = true;
         return new Promise<void>(() => {});
       },
@@ -389,6 +390,44 @@ describe("/api/auth/cloud — vanilla instance", () => {
     expect(provisioned).toBe(true);
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.accountId).toBe("A");
+  });
+
+  it("reports a registration conflict instead of signing in", async () => {
+    insertGuardian({ accountId: null });
+    const signer = await startFakeSigner({ aud: ISSUER });
+    rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: URL | string) =>
+      new URL(String(input)).pathname === "/api/instance/key"
+        ? Response.json({ error: "key_in_use" }, { status: 409 })
+        : Response.json({ error: "invalid_instance_token" }, { status: 401 })) as typeof fetch;
+    const provisionAfterLink = rs.fn(async () => {});
+    try {
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        isCloudAuthEnabled: async () => true,
+        provisionAfterLink,
+      };
+      const romeCloud = fakeRomeCloud((nonce) => ({
+        id_token: signIdToken({ sub: "A", nonce }),
+        instance_token: "romeinst_new",
+        instance_id: "inst-1",
+      }));
+      const app = new Hono();
+      app.route("/api", cloudLoginRoutes(deps, { fetchImpl: romeCloud.fetch }));
+      const { state, nonce } = await start(app);
+      romeCloud.setNonce(nonce);
+      const res = await callback(
+        app,
+        `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`,
+      );
+      expect(res.headers.get("location")).toBe("/login?cloud=error&reason=key_conflict");
+      expect(provisionAfterLink).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = realFetch;
+      rs.unstubAllEnvs();
+      await signer.close();
+    }
   });
 
   it("creates the guardian seat from the cloud account when none exists", async () => {

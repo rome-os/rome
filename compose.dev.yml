@@ -72,6 +72,11 @@ x-rome-volumes: &rome-volumes
   - type: bind
     source: ${ROME_HOST_PNPM_STORE:-/var/empty/rome-pnpm-store-unset}
     target: /pnpm-store
+  # The signer's socket, when `ROME_DEV_SIGNER=1` starts one. Empty otherwise.
+  - type: volume
+    source: signer-sock
+    target: /run/rome-signer
+    read_only: true
 
 x-rome-env: &rome-env
   SHELL: /bin/bash
@@ -160,6 +165,8 @@ x-rome-env: &rome-env
   # forcing the real browser consent → enroll round trip. Empty by default so the
   # fast loop / CI keep their seeded token.
   ROME_DEV_SKIP_TOKEN_SEED: ${ROME_DEV_SKIP_TOKEN_SEED:-}
+  # Set by dev-up.sh when ROME_DEV_SIGNER=1. Empty keeps the legacy token path.
+  ROME_SIGNER_SOCKET: ${ROME_DEV_SIGNER_SOCKET:-}
 
 # ---------------------------------------------------------------------------
 # Services
@@ -240,6 +247,33 @@ services:
     depends_on:
       rome-sync:
         condition: service_healthy
+
+  # Opt-in signer (`ROME_DEV_SIGNER=1 pnpm dev:all`): runs the workspace's
+  # built packages/signer like production runs its own container, so local
+  # development can exercise the signed-token path. Not started by default.
+  signer:
+    profiles: ["signer"]
+    image: rome-dev:${ROME_WORKTREE_SLUG:-dev}
+    entrypoint: ["node", "/workspace/packages/signer/dist/main.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    environment:
+      SIGNER_AUDIENCE: ${PANTHEON_BASE_ORIGIN:-https://romeos.cc}
+      SIGNER_KEY_DIR: /keys
+      SIGNER_SOCKET: /run/rome-signer/signer.sock
+    volumes:
+      - type: volume
+        source: rome-workspace
+        target: /workspace
+        read_only: true
+      - signer-key:/keys
+      - signer-sock:/run/rome-signer
+    restart: unless-stopped
 
   # Source-sync sidecar: the ONLY bridge from host source into the
   # container-owned /workspace volume. Bind-mounts the worktree READ-ONLY at
@@ -342,6 +376,9 @@ volumes:
     # rome-workspace volume. The pnpm content-addressable store lives at
     # /pnpm-store via a host bind mount, not here. Container's HOME points
     # here; mounted at /rome-home.
+
+  signer-key:
+  signer-sock:
 
   chrome-profile:
     # Chrome sidecar's persistent profile (~/.rome/chrome-profile inside the

@@ -1,0 +1,20 @@
+{
+  "name": "@rome/signer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "../../scripts/test-env.sh rstest"
+  },
+  "devDependencies": {
+    "@rstest/core": "^0.11.11",
+    "@types/node": "25.2.3",
+    "typescript": "^5.9.3"
+  }
+}

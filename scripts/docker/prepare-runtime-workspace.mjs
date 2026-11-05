@@ -27,6 +27,7 @@ const runtimePackages = [
   "packages/web-content",
   "packages/core",
   "packages/discord-cli",
+  "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
   "packages/rome-node-ui",
@@ -58,6 +59,7 @@ const runtimeWorkspacePackagesYaml = `packages:
   - "packages/web-content"
   - "packages/core"
   - "packages/discord-cli"
+  - "packages/signer"
   - "packages/rome-node-cli"
   - "packages/rome-node-core"
   - "packages/rome-node-ui"

@@ -1,4 +1,4 @@
-import { getInstanceToken } from "../lib/instance-identity.js";
+import { cloudBearer } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 
 /**
@@ -9,12 +9,13 @@ import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
  * The token goes only to the configured Rome Cloud origin, never to a URL a
  * caller or test resolver pointed somewhere else.
  */
-export function withRomeCloudReadAuth(
+export async function withRomeCloudReadAuth(
   url: URL,
   headers: Record<string, string>,
-): Record<string, string> {
-  const token = getInstanceToken();
+): Promise<Record<string, string>> {
   const cloudOrigin = getRomeCloudOrigin();
-  if (!token || !cloudOrigin || url.origin !== cloudOrigin) return headers;
+  if (!cloudOrigin || url.origin !== cloudOrigin) return headers;
+  const token = await cloudBearer();
+  if (!token) return headers;
   return { ...headers, authorization: `Bearer ${token}` };
 }

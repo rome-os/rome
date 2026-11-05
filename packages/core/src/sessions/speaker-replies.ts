@@ -5,11 +5,9 @@
 // Nothing calls this yet: the Chats switch moves Agents' replies onto it.
 
 import type { Channel, ChatId } from "@rome-os/app-runtime";
-import type { DeliveryPolicy } from "../connections/sending.js";
 import type { OutboundMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
-import type { ChatAdapters, Outbound, StreamedReply } from "../connections/chat-adapter.js";
-import type { Clock } from "../lib/clock.js";
+import type { ChatAdapters, Outbound } from "../connections/chat-adapter.js";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { Speaker, Speakers } from "./speakers.js";
@@ -20,8 +18,8 @@ const log = createLogger("speaker-replies");
 export interface SpeakerRepliesDeps {
   speakers: Pick<Speakers, "speakerOf">;
   /** Each channel's chat adapter, which the speaker says its messages through. */
-  adapters: Pick<ChatAdapters, "of" | "keyOf">;
-  messages: Pick<MessageRepository, "send" | "byIds">;
+  adapters: Pick<ChatAdapters, "of">;
+  messages: Pick<MessageRepository, "send">;
   links: Pick<TurnLinks, "answer">;
   /** Moves session `sessionId`'s activity up to `at`, when it is later. */
   activity?: (sessionId: string, at: Date) => void;
@@ -158,78 +156,6 @@ export class SpeakerReplies {
     if (sent.id === null) return { id: null, at: sent.at, sent: messageKey, speaker, landedIn };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
     return { id: sent.id, at: sent.at, sent: messageKey, speaker, landedIn };
-  }
-
-  /**
-   * Open a reply where session `sessionId` stands, written through its
-   * account's adapter on `channel` as the run goes, and put it on record as
-   * turn `turnId`'s answer once it settles. `replyTo` is the message it
-   * answers, by its id in Chats. Null when the session stands in no chat or
-   * the channel cannot stream.
-   */
-  async stream(
-    sessionId: string,
-    channel: Channel,
-    options: {
-      turnId: string;
-      replyTo?: number;
-      /** The agent whose turn writes the reply, when it is not the one the
-       *  session names, as an account's own agent is not. */
-      agent?: string;
-      policy: DeliveryPolicy;
-      clock: Clock;
-    },
-  ): Promise<StreamedReply | null> {
-    const speaker = this.deps.speakers.speakerOf(sessionId);
-    if (!speaker) return null;
-    const { account, adapter } = this.adapterOf(speaker, channel);
-    const replyTo = options.replyTo;
-    const chat = this.deps.adapters.keyOf(speaker.place.chat);
-    // A key names a message only in its own chat.
-    const line = replyTo === undefined ? undefined : this.deps.messages.byIds([replyTo])[0];
-    const quoted = line?.place.chat.id === speaker.place.chat.id ? line.key : null;
-    const reply = adapter.stream?.(chat.externalId, speaker.place.threadId ?? null, {
-      ...(quoted === null ? {} : { replyTo: quoted }),
-      policy: options.policy,
-      clock: options.clock,
-    });
-    if (!reply) return null;
-    return {
-      accept: (event) => reply.accept(event),
-      stop: () => reply.stop(),
-      settle: async (stopped) => {
-        const settled = await reply.settle(stopped);
-        // Each message the platform shows is the turn's answer, in order. The
-        // first answers the message the reply quotes.
-        for (const [i, { text, key, threadId }] of settled.shown.entries()) {
-          try {
-            // Delivered already: recording says so.
-            const sent = await this.deps.messages.send(
-              {
-                direction: "fromRome",
-                place: speaker.place,
-                saidBy: { account, agent: options.agent ?? speaker.agent },
-                parts: [{ type: "text", content: text }],
-                ...(i > 0 || replyTo === undefined ? {} : { replyTo }),
-              },
-              async () => ({ key, ...landed(speaker, threadId) }),
-            );
-            this.active(sessionId, sent.at);
-            if (sent.id !== null) this.answered(sent.id, sessionId, options.turnId);
-          } catch (error) {
-            // The messages are already on the platform. A failed record must
-            // not make anything send them again.
-            log.warn("reply delivered but recording failed", {
-              sessionId,
-              turnId: options.turnId,
-              key,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-        return settled;
-      },
-    };
   }
 
   /** Move the session's activity up to a message it said. The message is

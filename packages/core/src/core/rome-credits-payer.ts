@@ -1,7 +1,7 @@
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import type { AIToolState } from "./ai-tool-state.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js";
-import { getInstanceToken } from "../lib/instance-identity.js";
+import { instanceCredentialId } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { fetchRomeCredits } from "../lib/rome-credits.js";
 import { createLogger } from "../logger.js";
@@ -54,11 +54,12 @@ function canSpend(view: RomeCreditsView | null): view is RomeCreditsView {
 export function createRomeCreditsPayer(options: {
   aiToolState: Pick<AIToolState, "get">;
   appServerManager: CodexPayerManager;
-  getInstanceToken?: () => string | null;
+  /** The instance credential's stable id (see instanceCredentialId), or null when not linked. */
+  getCredentialId?: () => string | null;
   hasRomeCloud?: () => boolean;
   fetchRomeCredits?: () => Promise<RomeCreditsView | null>;
 }): RomeCreditsPayer {
-  const token = options.getInstanceToken ?? getInstanceToken;
+  const token = options.getCredentialId ?? instanceCredentialId;
   const hasRomeCloud = options.hasRomeCloud ?? (() => getRomeCloudOrigin() !== null);
   const provider = (): string | null => options.appServerManager.getDefaultProvider();
   const fetchCredits = options.fetchRomeCredits ?? (() => fetchRomeCredits());

@@ -1,4 +1,4 @@
-import type { MessageReplyReference, ReplyDeliveryReport } from "@rome-os/app-runtime";
+import type { MessageReplyReference } from "@rome-os/app-runtime";
 
 /**
  * message_handler — Process an inbound message from a channel.
@@ -90,7 +90,6 @@ export interface MessageHandlerOutput {
   action:
     | "blocked"
     | "sent"
-    | "streamed"
     | "no_response"
     | "pending_approval"
     | "rejected_by_envoy"
@@ -100,6 +99,4 @@ export interface MessageHandlerOutput {
   response?: string;
   /** Reason for the action taken (e.g. block or rejection reason). */
   reason?: string;
-  /** What the host's streamed reply delivered, when the action is `streamed`. */
-  streamed?: ReplyDeliveryReport;
 }

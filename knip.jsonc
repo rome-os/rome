@@ -167,6 +167,7 @@
       "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
     },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
+    "packages/signer": { "entry": ["src/**/*.test.ts", "src/main.ts"] },
     "packages/app-web-sdk": {
       // bin/rome.js reaches the CLI through a dynamic import of the compiled
       // ../dist/cli/index.js, so nothing in the graph reaches src/cli unless

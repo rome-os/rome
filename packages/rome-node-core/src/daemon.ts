@@ -135,7 +135,7 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
   // The store opens only after the listener binds, so a losing daemon never touches the file.
   const store = new ObserveStore({
     path: join(config.directory, "observe.db"),
-    secrets: [credential.token, state.token],
+    secrets: credential.token ? [credential.token, state.token] : [state.token],
   });
   const caller = {
     connection: "stopped" as ConnectionStatus,

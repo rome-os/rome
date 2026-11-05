@@ -79,7 +79,7 @@ describe("openChannelChat as a speaker", () => {
   });
 
   it("stands a session opened at a thread Rome knows in that thread of its chat", async () => {
-    // A streamed reply opened thread T in group G before anything was heard
+    // A reply opened thread T in group G before anything was heard
     // in it, so only the thread's address is named.
     new ChatAddresses(testDb.db).bindThread({ platform: "telegram", id: "111" }, "T", "G");
 

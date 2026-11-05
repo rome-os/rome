@@ -10,12 +10,15 @@ import { loadConfig } from "./config.js";
 import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
-  getInstanceToken,
+  cloudBearer,
   hydrateInstanceToken,
+  instanceCredentialId,
+  isInstanceLinked,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
   proveIdentity,
+  onInstanceLinked,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
@@ -119,9 +122,6 @@ import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.j
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
-import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
-import { ReplyStreams } from "./participation/reply-delivery/streams.js";
-import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
 import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
@@ -582,23 +582,6 @@ async function main() {
   // them in Chats. An approval's card goes out on these, so it is on record as
   // the platform shows it.
   const recordedChannels: Channel[] = [];
-  // Reply streaming is off until the guardian turns it on under
-  // Experimental features in Advanced settings. Off, sends go out unpaced and
-  // replies go out whole. On, a channel that can stream paces every write of its
-  // Connection, and the session bridge streams a guardian's direct replies
-  // through the session's speaker.
-  const replyStreamingOn = replyStreamingSwitch(settingsRepo);
-  const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
-  const replyStreams = new ReplyStreams({
-    streaming: replyStreamingOn,
-    clock: systemClock,
-    // A reply is said through its session's speaker, on the platform's own
-    // send port, so it is recorded once.
-    speakers: {
-      channel: (name) => builtChannels?.find((channel) => channel.name === name),
-      replies: chatsWired.replies,
-    },
-  });
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
@@ -607,7 +590,6 @@ async function main() {
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
-    pacing: replyPacing,
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
@@ -1076,9 +1058,9 @@ async function main() {
     turnStreams: agentTurnStreamRegistry,
   });
   const romeCloudAccess = (): RomeCloudAccess | null => {
-    const token = getInstanceToken();
+    const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
-    return token && origin ? { token, origin } : null;
+    return credentialId && origin ? { credentialId, bearer: cloudBearer, origin } : null;
   };
   const usageAttribution = new UsageAttributionResolver(
     {
@@ -1106,7 +1088,7 @@ async function main() {
     attribution: usageAttribution,
     credential: () => {
       const access = romeCloudAccess();
-      return access ? credentialFingerprint(access.token) : null;
+      return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
@@ -1171,7 +1153,6 @@ async function main() {
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
     undefined,
-    replyStreams,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     wake,
   );
@@ -1605,7 +1586,6 @@ async function main() {
       registry: connectionRegistry,
       admit,
       channelOf,
-      pacing: replyPacing,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
       heard: (message) => accountProfiles.heard(message),
@@ -1742,7 +1722,6 @@ async function main() {
         registry: connectionRegistry,
         admit,
         channelOf,
-        pacing: replyPacing,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
         heard: (message) => accountProfiles.heard(message),
@@ -2006,13 +1985,15 @@ async function main() {
     }
   };
 
+  // Bound once the favor runner exists, below.
+  let provisionAfterLink = async (): Promise<void> => {};
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
-      provisionNodeCaller,
+      provisionAfterLink: () => provisionAfterLink(),
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       nodeDevices,
       channelsService,
@@ -2092,12 +2073,33 @@ async function main() {
   const favorDispatchRunner = new FavorDispatchRunner({
     favorService,
     actionEngine,
-    canSync: () => getInstanceToken() !== null,
+    canSync: () => isInstanceLinked(),
   });
 
   await routineEngine.start();
 
   favorDispatchRunner.start();
+
+  // Everything that needs a linked instance: the node caller, the self-provisioned
+  // relay mailbox (re-minted with a full-TTL drain key each time), and the first
+  // favor sync. Run after the boot identity check, after a sign-in links, and
+  // when a background check links an instance that was not linked. Each step is
+  // idempotent and handles a missing credential, so one failing never stops the next.
+  provisionAfterLink = async () => {
+    const steps = [
+      provisionNodeCaller,
+      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
+      () => favorDispatchRunner.runOnce(),
+    ];
+    for (const step of steps) {
+      await step().catch((err) => {
+        log.warn("provisioning after link failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  };
+  const unsubscribeInstanceLinked = onInstanceLinked(() => void provisionAfterLink());
 
   // Rome reserves 3:00–3:30am local for upgrades; the probe runs at the start
   // of that window. There is no bespoke scheduler — the routine cron *is* the
@@ -2206,9 +2208,11 @@ async function main() {
   // It also gates connecting email for a seat created before sign-in connected
   // it: only an enrolled instance can provision an inbox, and a warm-pool
   // instance with no seat has no owner to provision one for.
-  void logInstanceIdentityAtBoot(getBuildInfo().version)
+  void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // Signer mode links the instance during this check, so provisioning waits for it.
+      await provisionAfterLink();
       if (identity.status !== "ok") return;
       if (!(await getGuardianAuthState(db)).exists) return;
       await connectEmailWithoutClick("boot");
@@ -2234,14 +2238,6 @@ async function main() {
     access: romeCloudAccess,
   });
   usageReporter.start();
-
-  // Self-provision the webhook-relay mailbox using the durable instance token
-  //: present it to Rome Cloud, store the returned credential, and point
-  // the live drainer at it. Fire-and-forget and idempotent — it re-mints a
-  // full-TTL drain key on every boot, and no-ops when the instance is not
-  // enrolled (leaving any manually-pasted relay setting untouched).
-  void provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer });
-  void provisionNodeCaller();
 
   process.on("unhandledRejection", (reason) => {
     const shutdownLog = createLogger("shutdown");
@@ -2313,6 +2309,7 @@ async function main() {
 
     unsubscribeCodexAccountChanged();
     unsubscribeInstanceTokenChanged();
+    unsubscribeInstanceLinked();
     romeCreditsPayer.close();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");

@@ -8,9 +8,6 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { ChatBuffers } from "../participation/conversation-buffer.js";
-import { Pacer } from "../participation/reply-delivery/pacer.js";
-import { DeliveryFailure, type DeliveryTransport, plainText } from "./sending.js";
-import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { chats } from "../db/schema.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -33,11 +30,10 @@ import {
 import { chatKey } from "./chat-ids.js";
 
 const ROME: Account = { platform: "telegram", id: "rome_bot" };
-const OPEN_BUDGET = { burst: 1000, refillMs: 1, conversationSpacingMs: 0 };
 
 /** A Telegram channel that hands each event to its subscriber and keeps what
  *  it was asked to send. */
-function fakeChannel(transport?: DeliveryTransport) {
+function fakeChannel() {
   let handler: ((event: InboundEvent) => Promise<void>) | null = null;
   const sent: Array<{ to: ChatId; message: OutgoingMessage }> = [];
   const channel = {
@@ -47,7 +43,6 @@ function fakeChannel(transport?: DeliveryTransport) {
         sent.push({ to, message });
         return { messageId: `p${sent.length}`, chatId: to };
       },
-      ...(transport ? { replies: { transport, pacer: new Pacer(OPEN_BUDGET, systemClock) } } : {}),
     },
     inbound: {
       subscribe(next: (event: InboundEvent) => Promise<void>) {
@@ -536,184 +531,6 @@ describe("channelAdapter", () => {
     expect(delivered).toEqual([]);
     await expect(adapter.send("-42", null, { text: "hi" })).rejects.toThrow(ChannelWithoutAccount);
     expect(sent).toEqual([]);
-  });
-
-  it("open no stream on a channel that cannot stream", () => {
-    const { channel } = fakeChannel();
-    const adapter = channelAdapter(channel, deps());
-    expect(
-      adapter.stream?.("-42", null, {
-        policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-        clock: systemClock,
-      }),
-    ).toBeNull();
-  });
-
-  it("settle a streamed reply to the message shown and its key, as the account holds it", async () => {
-    const created: string[] = [];
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
-      codec: plainText,
-      create: async (conversation, text) => {
-        created.push(text);
-        return { messageId: `s${created.length}`, chatId: conversation };
-      },
-    };
-    const { channel } = fakeChannel(transport);
-    const adapter = channelAdapter(channel, deps());
-    const reply = adapter.stream?.("-42", null, {
-      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-      clock: systemClock,
-    });
-    if (!reply) throw new Error("expected a stream");
-
-    reply.accept({ type: "text", content: "All done." });
-    const settled = await reply.settle(false);
-
-    expect(created).toEqual(["All done."]);
-    expect(settled.shown).toEqual([{ text: "All done.", key: "rome_bot:s1", threadId: null }]);
-  });
-
-  it("settle a reply the platform split to each message shown, each keyed by its own id", async () => {
-    const created: string[] = [];
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 20, edit: false, budget: OPEN_BUDGET },
-      codec: plainText,
-      create: async (conversation, text) => {
-        created.push(text);
-        return { messageId: `s${created.length}`, chatId: conversation };
-      },
-    };
-    const { channel } = fakeChannel(transport);
-    const adapter = channelAdapter(channel, deps());
-    const reply = adapter.stream?.("-42", null, {
-      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-      clock: systemClock,
-    });
-    if (!reply) throw new Error("expected a stream");
-
-    const text = "one two three four five six seven eight";
-    reply.accept({ type: "text", content: text });
-    const { shown } = await reply.settle(false);
-
-    expect(created.length).toBeGreaterThan(1);
-    expect(shown.map((message) => message.key)).toEqual(
-      created.map((_, i) => `rome_bot:s${i + 1}`),
-    );
-    expect(shown.map((message) => message.text).join("")).toBe(text);
-  });
-
-  it("open no thread with a first direct message, and reach the chat where it opened", async () => {
-    const { channel } = fakeChannel();
-    (channel.send as { send: unknown }).send = async () => ({ messageId: "m1", chatId: "dm-77" });
-    const adapter = channelAdapter(channel, deps());
-    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
-
-    const landed = await adapter.send(dm.externalId, null, { text: "hi" });
-
-    expect(landed.threadId).toBeNull();
-    expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-77");
-  });
-
-  it("answer a sent direct message even when its new address cannot be kept", async () => {
-    const { channel } = fakeChannel();
-    (channel.send as { send: unknown }).send = async () => ({ messageId: "m1", chatId: "dm-77" });
-    const broken = {
-      ...deps(),
-      addresses: Object.assign(Object.create(addresses), {
-        bind: () => {
-          throw new Error("disk full");
-        },
-      }),
-    };
-    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
-
-    const sentTo = await channelAdapter(channel, broken).send(dm.externalId, null, { text: "hi" });
-    expect(sentTo).toEqual({ key: "m1", threadId: null });
-
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
-      codec: plainText,
-      create: async () => ({ messageId: "s1", chatId: "dm-78" }),
-    };
-    const reply = channelAdapter(fakeChannel(transport).channel, broken).stream?.(
-      dm.externalId,
-      null,
-      {
-        policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-        clock: systemClock,
-      },
-    );
-    if (!reply) throw new Error("expected a stream");
-    reply.accept({ type: "text", content: "hi" });
-    expect((await reply.settle(false)).shown).toEqual([{ text: "hi", key: "s1", threadId: null }]);
-  });
-
-  it("settle a first streamed direct message to no thread, and reach the chat where it opened", async () => {
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
-      codec: plainText,
-      create: async () => ({ messageId: "s1", chatId: "dm-78" }),
-    };
-    const { channel } = fakeChannel(transport);
-    const adapter = channelAdapter(channel, deps());
-    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
-    const reply = adapter.stream?.(dm.externalId, null, {
-      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-      clock: systemClock,
-    });
-    if (!reply) throw new Error("expected a stream");
-
-    reply.accept({ type: "text", content: "hi" });
-
-    expect((await reply.settle(false)).shown).toMatchObject([{ threadId: null }]);
-    expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-78");
-  });
-
-  it("settle a streamed reply to the thread its message landed in", async () => {
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
-      codec: plainText,
-      create: async () => ({ messageId: "s1", chatId: "thread-8" }),
-    };
-    const { channel } = fakeChannel(transport);
-    const adapter = channelAdapter(channel, deps());
-    const reply = adapter.stream?.("-1001234567890123", null, {
-      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-      clock: systemClock,
-    });
-    if (!reply) throw new Error("expected a stream");
-
-    reply.accept({ type: "text", content: "All done." });
-
-    expect((await reply.settle(false)).shown).toMatchObject([{ key: "s1", threadId: "thread-8" }]);
-  });
-
-  it("settle a part whose create is unknown to the thread the parts before it landed in", async () => {
-    const created: string[] = [];
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 20, edit: false, budget: OPEN_BUDGET },
-      codec: plainText,
-      create: async (conversation) => {
-        created.push(conversation);
-        // The platform opens a thread for the first part; the second's answer is lost.
-        if (created.length === 1) return { messageId: "s1", chatId: "thread-8" };
-        throw new DeliveryFailure("unknown", "the answer was lost");
-      },
-    };
-    const { channel } = fakeChannel(transport);
-    const adapter = channelAdapter(channel, deps());
-    const reply = adapter.stream?.("-1001234567890123", null, {
-      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-      clock: systemClock,
-    });
-    if (!reply) throw new Error("expected a stream");
-
-    reply.accept({ type: "text", content: "one two three four five six seven eight" });
-    const { shown } = await reply.settle(false);
-
-    expect(created).toEqual(["-1001234567890123", "thread-8"]);
-    expect(shown.map((message) => message.threadId)).toEqual(["thread-8", "thread-8"]);
   });
 });
 

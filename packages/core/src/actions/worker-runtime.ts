@@ -302,7 +302,6 @@ function mainChannel(name: string, service: Pick<ChannelsService, "send">): Chan
       name,
       send: {
         send: (chatId, message) => service.send(name, chatId, message),
-        replies: null,
         direct: null,
       },
       inbound: null,

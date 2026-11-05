@@ -19,12 +19,37 @@ afterEach(() => {
 });
 
 function renderComposer(props: Partial<ConciergeComposerProps> = {}, reply?: ReplyTarget) {
-  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
-    String(input) === "/api/settings"
-      ? Response.json({ enableModelSelector: true, webchatReasoningEffort: "low" })
-      : Response.json({}, { status: 404 })) as typeof fetch);
+  rs.spyOn(globalThis, "fetch").mockImplementation(
+    (async (input: RequestInfo | URL) =>
+      ({
+        "/api/settings": () =>
+          Response.json({
+            enableModelSelector: true,
+            webchatReasoningEffort: "low",
+          }),
+        "/api/chat/locations": () =>
+          Response.json({
+            projects: {
+              rootPath: "/home/alex/.rome/default/projects",
+              defaultPath: "/home/alex/.rome/default/projects",
+              projects: [{ name: "app", path: "/home/alex/.rome/default/projects/app" }],
+            },
+            devices: [{ id: "0f3c", name: "workstation", platform: "macos" }],
+          }),
+        "/api/devices/0f3c/files": () =>
+          Response.json({
+            path: "/home/alex",
+            parent: "/home",
+            entries: [],
+            truncated: false,
+          }),
+      })[new URL(String(input), "http://rome.test").pathname]?.() ??
+      Response.json({}, { status: 404 })) as typeof fetch,
+  );
   const onSend = rs.fn(async (_snapshot: ChatComposerSnapshot) => {});
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   render(
     <QueryClientProvider client={client}>
       <ReplyDraftHarness initial={reply}>
@@ -136,7 +161,10 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(screen.getByPlaceholderText("Message"), "why there?{Enter}");
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "why there?", replyTo: reply });
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "why there?",
+      replyTo: reply,
+    });
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 
@@ -167,5 +195,95 @@ describe("ConciergeComposer reply", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Cancel reply" }));
 
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  describe("choosing a folder", () => {
+    const openPicker = async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Add files or change the model" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /Choose folder/ }));
+      return screen.findByRole("combobox");
+    };
+    const pickDeviceFolder = async () => {
+      await openPicker();
+      await userEvent.click(await screen.findByRole("option", { name: /workstation/ }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use this folder" }));
+    };
+    const deviceLine = '- Folder: "/home/alex" on Rome node device "workstation" (id 0f3c)';
+    // The placeholder changes once a file is attached, so find it by role.
+    const box = () => screen.getByRole("textbox") as HTMLTextAreaElement;
+
+    it("opens the selector from the + menu with focus in its search field, and keeps it open", async () => {
+      renderComposer();
+      const search = await openPicker();
+      await waitFor(() => expect(document.activeElement).toBe(search));
+      expect(await screen.findByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+      expect(screen.getByRole("option", { name: /workstation/ })).toBeTruthy();
+      // No new-project row in this selector.
+      expect(screen.queryByText("Create project")).toBeNull();
+      expect(screen.queryByRole("menuitem")).toBeNull();
+    });
+
+    it("sends a device folder as a line of text and clears the chip", async () => {
+      const { onSend } = renderComposer();
+      await pickDeviceFolder();
+      expect(await screen.findByRole("button", { name: "Remove folder" })).toBeTruthy();
+
+      await userEvent.type(box(), "run the tests{Enter}");
+
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].text).toBe(`run the tests\n\n${deviceLine}`);
+      expect(screen.queryByRole("button", { name: "Remove folder" })).toBeNull();
+    });
+
+    it("sends a Rome project by its path, and nothing once the chip is removed", async () => {
+      const { onSend } = renderComposer();
+      await openPicker();
+      await userEvent.click(await screen.findByRole("option", { name: /Rome Cloud/ }));
+      await userEvent.click(await screen.findByRole("option", { name: /app/ }));
+      await userEvent.type(box(), "hi{Enter}");
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].text).toBe(
+        'hi\n\n- Folder: "/home/alex/.rome/default/projects/app" (Rome project "app")',
+      );
+
+      await pickDeviceFolder();
+      await userEvent.click(await screen.findByRole("button", { name: "Remove folder" }));
+      await userEvent.type(box(), "again{Enter}");
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+      expect(onSend.mock.calls[1][0].text).toBe("again");
+    });
+
+    it("sends a folder alone, and puts the folder back when the send fails", async () => {
+      const { onSend } = renderComposer();
+      onSend.mockRejectedValueOnce(new Error("offline"));
+      await pickDeviceFolder();
+
+      await userEvent.click(screen.getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].text).toBe(deviceLine);
+      expect(await screen.findByRole("button", { name: "Remove folder" })).toBeTruthy();
+
+      await userEvent.type(box(), "retry{Enter}");
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+      expect(onSend.mock.calls[1][0].text).toBe(`retry\n\n${deviceLine}`);
+    });
+
+    it("keeps the text, the attachments and the folder when a send with files fails", async () => {
+      const { onSend } = renderComposer();
+      onSend.mockRejectedValueOnce(new Error("offline"));
+      await pickDeviceFolder();
+      const file = new File(["x"], "notes.txt", { type: "text/plain" });
+      await userEvent.upload(
+        document.querySelector('input[type="file"]') as HTMLInputElement,
+        file,
+      );
+      await userEvent.type(box(), "see notes{Enter}");
+
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].uploads).toHaveLength(1);
+      expect(box().value).toBe("see notes");
+      expect(await screen.findByRole("button", { name: "Remove folder" })).toBeTruthy();
+      expect(screen.getByText("notes.txt")).toBeTruthy();
+    });
   });
 });

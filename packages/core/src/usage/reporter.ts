@@ -46,7 +46,10 @@ interface ActionRunCursor {
 }
 
 export interface RomeCloudAccess {
-  token: string;
+  /** Stable name of the credential; the input to {@link credentialFingerprint}. */
+  credentialId: string;
+  /** A bearer for one Rome Cloud request, or null when none is available. */
+  bearer: () => Promise<string | null>;
   origin: string;
 }
 
@@ -121,7 +124,7 @@ export class UsageReporter {
     const now = this.now();
     const stored = await this.deps.settings.get<ActionRunCursor>(ACTION_RUN_CURSOR_KEY);
     const access = this.deps.access();
-    const credential = access ? credentialFingerprint(access.token) : null;
+    const credential = access ? credentialFingerprint(access.credentialId) : null;
     if (!stored || !credential || stored.credential !== credential) {
       // finished_at is stored in whole seconds, so a cursor inside a second
       // would still admit that second's earlier runs. Start at the next one.
@@ -180,7 +183,7 @@ export class UsageReporter {
     for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
       const access = this.deps.access();
       if (!access) return;
-      const credential = credentialFingerprint(access.token);
+      const credential = credentialFingerprint(access.credentialId);
       const dropped = await this.deps.outbox.pruneOtherCredentials(credential);
       if (dropped > 0) {
         log.info("dropped usage events queued under an earlier enrollment", { dropped });
@@ -198,6 +201,8 @@ export class UsageReporter {
   }
 
   private async post(access: RomeCloudAccess, events: unknown[]): Promise<ShipOutcome> {
+    const bearer = await access.bearer();
+    if (!bearer) return "retry_later";
     let response: Response;
     try {
       response = await (this.deps.fetch ?? globalThis.fetch)(
@@ -205,7 +210,7 @@ export class UsageReporter {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${access.token}`,
+            Authorization: `Bearer ${bearer}`,
             "Content-Type": "application/json",
             "Cache-Control": "no-store",
           },

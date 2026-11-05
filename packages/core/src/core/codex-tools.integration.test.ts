@@ -101,11 +101,12 @@ describe("bundled Codex app-server", () => {
   let gateway: ReturnType<typeof createServer>;
   let provider: CodexAppServerProvider;
   let previousOrigin: string | undefined;
+  let previousPort: string | undefined;
 
   beforeAll(async () => {
     home = await mkdtemp(join(tmpdir(), "rome-codex-tools-"));
     gateway = createServer((request, response) => {
-      if (request.method !== "POST" || request.url !== "/v1/responses") {
+      if (request.method !== "POST" || request.url !== "/_internal/rome-credits/v1/responses") {
         response.writeHead(404).end();
         return;
       }
@@ -156,6 +157,9 @@ describe("bundled Codex app-server", () => {
     if (!address || typeof address === "string") throw new Error("mock gateway did not bind");
     previousOrigin = process.env.PANTHEON_BASE_ORIGIN;
     process.env.PANTHEON_BASE_ORIGIN = `http://127.0.0.1:${address.port}`;
+    // This mock listens where core's credits proxy would.
+    previousPort = process.env.INTERNAL_API_PORT;
+    process.env.INTERNAL_API_PORT = String(address.port);
     provider = new CodexAppServerProvider({
       appServerManager: new CodexAppServerManager({
         cwd: home,
@@ -174,6 +178,8 @@ describe("bundled Codex app-server", () => {
     provider.close();
     if (previousOrigin === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
     else process.env.PANTHEON_BASE_ORIGIN = previousOrigin;
+    if (previousPort === undefined) delete process.env.INTERNAL_API_PORT;
+    else process.env.INTERNAL_API_PORT = previousPort;
     await new Promise<void>((resolve) => gateway.close(() => resolve()));
     await new Promise((resolve) => setTimeout(resolve, 200));
     await rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

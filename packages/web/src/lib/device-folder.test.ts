@@ -1,8 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  appendFolderLine,
   childPath,
   deviceFolderLabel,
   deviceFolderName,
+  folderLine,
+  type FolderSelection,
   pathSegments,
   tildePath,
 } from "./device-folder";
@@ -29,7 +32,12 @@ describe("device folder paths", () => {
     ).toBe("macbook:~/code/foo");
     // A folder group in the sidebar opens a draft without the device's home.
     expect(
-      deviceFolderLabel({ deviceId: "mac", deviceName: "macbook", path: "/srv/app", home: null }),
+      deviceFolderLabel({
+        deviceId: "mac",
+        deviceName: "macbook",
+        path: "/srv/app",
+        home: null,
+      }),
     ).toBe("macbook:app");
   });
 
@@ -59,5 +67,49 @@ describe("device folder paths", () => {
       "C:\\Work\\",
       "C:\\Work\\rome",
     ]);
+  });
+});
+
+describe("folder line", () => {
+  const device = (path: string, deviceName = "workstation"): FolderSelection => ({
+    kind: "device",
+    folder: { deviceId: "0f3c", deviceName, path, home: null },
+  });
+
+  it("names a POSIX path, the device and its id", () => {
+    expect(folderLine(device("/Users/alex/code/app"))).toBe(
+      '- Folder: "/Users/alex/code/app" on Rome node device "workstation" (id 0f3c)',
+    );
+  });
+
+  it("leaves backslashes, spaces and non-ASCII as they are", () => {
+    expect(folderLine(device("C:\\Users\\Zoë\\my code", "Büro PC"))).toBe(
+      '- Folder: "C:\\Users\\Zoë\\my code" on Rome node device "Büro PC" (id 0f3c)',
+    );
+  });
+
+  it("JSON-escapes a quote or a newline, and only then", () => {
+    expect(folderLine(device('/tmp/a"b'))).toContain('"/tmp/a\\"b"');
+    expect(folderLine(device("/tmp/a\nb", 'my "pc"'))).toContain(
+      '"/tmp/a\\nb" on Rome node device "my \\"pc\\""',
+    );
+  });
+
+  it("names a Rome project by path", () => {
+    expect(
+      folderLine({
+        kind: "project",
+        name: "app",
+        path: "/home/alex/.rome/default/projects/app",
+      }),
+    ).toBe('- Folder: "/home/alex/.rome/default/projects/app" (Rome project "app")');
+  });
+
+  it("sets the line apart from the text, and stands alone without text", () => {
+    const selection = device("/srv/app");
+    const line = folderLine(selection);
+    expect(appendFolderLine(" fix it ", selection)).toBe(`fix it\n\n${line}`);
+    expect(appendFolderLine("", selection)).toBe(line);
+    expect(appendFolderLine("fix it", null)).toBe("fix it");
   });
 });

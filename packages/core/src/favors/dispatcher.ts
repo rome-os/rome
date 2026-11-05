@@ -53,7 +53,6 @@ export class FavorDispatchRunner {
 
   start(): void {
     if (this.timer) return;
-    void this.runOnce();
     this.timer = setInterval(
       () => void this.runOnce(),
       this.deps.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS,
