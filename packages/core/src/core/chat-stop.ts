@@ -1,6 +1,6 @@
 import type { Account, ChatRef, ChatStopInput, ChatStopResult } from "@rome-os/app-runtime";
 import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
-import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 
 export async function stopActiveConversationTurn(
   input: ChatStopInput,

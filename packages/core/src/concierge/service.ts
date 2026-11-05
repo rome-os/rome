@@ -11,13 +11,13 @@ import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SessionManager } from "../core/session-manager.js";
+import type { SessionManager } from "../agent-sessions/index.js";
 import {
   resolveWebchatLargeModelSelection,
   WEBCHAT_LARGE_MODEL_SELECTIONS,
   type ModelSelectionId,
 } from "../core/model-selector.js";
-import type { AgentSessionManager } from "../core/agent-session.js";
+import type { AgentSessionManager } from "../agent-sessions/index.js";
 import { quotaSwitchTarget, soleExhaustedProvider } from "../core/quota-switch.js";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";

@@ -10,12 +10,12 @@ import {
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
-import type { AgentLoader } from "./agent-loader.js";
+import type { AgentLoader } from "../core/agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
+import { findRecordedConversation, type SessionConversation } from "./rows/session-conversation.js";
 import {
   buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
@@ -23,14 +23,14 @@ import {
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
   type PromptBuilder,
-} from "./prompt-builder.js";
+} from "../core/prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
-import type { RoutineActivationGate } from "./mcp-facade.js";
+import type { RoutineActivationGate } from "../core/mcp-facade.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
-import type { CapabilityDiscovery } from "./capability-discovery.js";
-import type { SkillCatalog } from "./skill-catalog.js";
+import type { CapabilityDiscovery } from "../core/capability-discovery.js";
+import type { SkillCatalog } from "../core/skill-catalog.js";
 import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
 import type {
   AgentStop,
@@ -47,8 +47,8 @@ import type {
   ChatRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
-import { createNullModelSession } from "./agent-runner.js";
-import { runDefer, type DeferInput } from "./defer.js";
+import { createNullModelSession } from "../core/agent-runner.js";
+import { runDefer, type DeferInput } from "../core/defer.js";
 import type { EventSources } from "../events/event-sources.js";
 import type {
   ActionMcpDefinition,
@@ -61,18 +61,21 @@ import type {
   ModelToolCallContext,
   ProviderId,
   SkillMcpDefinition,
-} from "./agent-runner.js";
+} from "../core/agent-runner.js";
 import {
   toModelResolutionErrorPayload,
   type ModelResolution,
   type ModelResolutionErrorPayload,
   type ModelResolver,
-} from "./model-resolver.js";
+} from "../core/model-resolver.js";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { isConciergeAgent } from "../concierge/service.js";
-import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
-import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
+import { resolveAgentModelRequest } from "../core/agent-model-selection.js";
+import {
+  resolveWebchatLargeModelSelection,
+  type ModelSelectionId,
+} from "../core/model-selector.js";
+import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "../core/types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
 import { enterSession } from "../telemetry-context.js";
@@ -95,7 +98,7 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
-import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
+import { isTerminalEvent, isTransientDelta } from "../core/agent-message.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -107,7 +110,7 @@ import {
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
 } from "../apps/packaging/output-schema-validator.js";
-import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
+import { translateTurnSpans, type CapturedEvent } from "../core/turn-span-translator.js";
 import {
   buildRequiredTiming,
   classifyAgentTurnStatus,
@@ -115,23 +118,27 @@ import {
   type AgentLifecycleDispatcher,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
-import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
+import { isInterruptedAccounting, resolveTurnStop } from "../core/stop-reason.js";
 import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import { isGuardianFacingChannel } from "./guardian-channel.js";
-import { resolveSessionPolicy } from "./session-policy.js";
+import { isGuardianFacingChannel } from "../core/guardian-channel.js";
+import { resolveSessionPolicy } from "../core/session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
-import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
+import {
+  currentMessageSection,
+  replyContextLine,
+  replyContextSection,
+} from "../core/reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
   forkSessionKey,
   sessionKeyChannel,
   webchatConversationOfKey,
-} from "./agent-session-key.js";
+} from "../core/agent-session-key.js";
 
 const log = createLogger("agent-session");
 

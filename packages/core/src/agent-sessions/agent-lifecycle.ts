@@ -12,11 +12,11 @@ import type {
 } from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactRef } from "../apps/state.js";
-import type { ThreadContext } from "./types.js";
+import type { ThreadContext } from "../core/types.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import { wrapHookSpan } from "../telemetry.js";
-import { loadAppHook } from "./hook-loader.js";
+import { loadAppHook } from "../core/hook-loader.js";
 import {
   createHookDispatchResult,
   evaluateHookInvocation,
@@ -27,7 +27,7 @@ import {
   type HookDispatchResult,
   type HookIdentity,
   type HookInvocationContext,
-} from "./hook-recursion.js";
+} from "../core/hook-recursion.js";
 
 const log = createLogger("agent-lifecycle");
 

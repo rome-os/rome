@@ -1,10 +1,10 @@
-import { subagentSessionKey } from "./agent-session-key.js";
+import { subagentSessionKey } from "../core/agent-session-key.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 import type { AgentSessionManager } from "./agent-session.js";
-import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
-import type { ThreadContext } from "./types.js";
+import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./rows/agent-trace-recorder.js";
+import type { ThreadContext } from "../core/types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";

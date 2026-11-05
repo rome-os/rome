@@ -7,7 +7,7 @@ import {
   type MiddlewareChain,
   type MiddlewareLoadFailure,
   type MiddlewareTerminal,
-} from "./middleware-chain.js";
+} from "../core/middleware-chain.js";
 
 /**
  * app-provided turn middleware live under the `turn-middleware` hook

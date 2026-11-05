@@ -8,12 +8,15 @@ import {
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import {
+  createAgentSessionManager,
+  type AgentSessionManager,
+} from "../agent-sessions/agent-session.js";
+import { createAgentLifecycleDispatcher } from "../agent-sessions/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
-import { SessionManager } from "../core/session-manager.js";
+import { SessionManager } from "../agent-sessions/session-manager.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";

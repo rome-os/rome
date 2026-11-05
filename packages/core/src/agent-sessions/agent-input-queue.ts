@@ -1,6 +1,6 @@
 import type { AgentInputState, InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput, SendTurnOptions } from "./agent-session.js";
-import type { ModelSession } from "./agent-runner.js";
+import type { ModelSession } from "../core/agent-runner.js";
 
 /**
  * How an input that arrives during a running turn is handled. `next` steers it

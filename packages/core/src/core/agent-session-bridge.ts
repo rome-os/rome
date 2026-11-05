@@ -19,7 +19,7 @@ import type {
   AgentSession,
   AgentTurnHandle,
   AgentTurnInput,
-} from "./agent-session.js";
+} from "../agent-sessions/index.js";
 import { createLogger } from "../logger.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -28,12 +28,12 @@ import {
   recordAgentTraceBestEffort,
   resolveTurnConversation,
   shouldPersistAgentTrace,
-} from "./agent-trace-recorder.js";
+} from "../agent-sessions/index.js";
 import {
   type ActionWorkerCoordinator,
   registerActionSubprocessHost,
 } from "../actions/action-subprocess.js";
-import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 
