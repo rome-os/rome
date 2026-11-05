@@ -1699,6 +1699,22 @@ describe("Concierge provider recovery", () => {
       to: "openai",
     });
   });
+  it("moves an Auto chat whose first turn failed before any provider was recorded", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
+    s.service.deps.webchatRepo = s.storedChats;
+    s.deps.aiToolState.get = () => ({
+      claude: { loggedIn: true, quotaExhausted: false },
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    });
+    expect(
+      await s.service.switchForFailure(
+        CONCIERGE_CHAT,
+        { message: "You've hit your limit", provider: "anthropic" },
+        "quota",
+      ),
+    ).toMatchObject({ from: "anthropic", to: "openai" });
+  });
   it("keeps a Codex pick that Rome credits pay for, and still moves on a Codex reauth", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");

@@ -209,7 +209,12 @@ export class ConciergeService {
       ? null
       : await this.deps.sessionManager.findReusableSession(key.channelThreadKey, key.agentName);
     const state = this.deps.aiToolState.get();
-    const from = selected?.providerId ?? runtime?.provider ?? soleExhaustedProvider(state);
+    // An Auto chat whose first turn failed has no recorded provider yet.
+    const from =
+      selected?.providerId ??
+      runtime?.provider ??
+      failure?.provider ??
+      soleExhaustedProvider(state);
     if (from !== "openai" && from !== "anthropic") return null;
     if (failure && failure.provider !== from) return null;
     const source = from === "openai" ? state.codex : state.claude;
