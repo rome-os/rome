@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
-import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { createAgentTurnStreamRegistry } from "../agent-sessions/agent-turn-stream-registry.js";
 import type {
   AgentSession,
   AgentSessionInit,
   AgentSessionManager,
   AgentTurnHandle,
-} from "./agent-session.js";
+} from "../agent-sessions/agent-session.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";

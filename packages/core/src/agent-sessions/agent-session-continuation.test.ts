@@ -15,7 +15,7 @@ import {
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import {
   AgentRunner,
@@ -24,19 +24,19 @@ import {
   type ModelRunParams,
   type ModelSessionParams,
   type ProviderId,
-} from "./agent-runner.js";
+} from "../core/agent-runner.js";
 import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
 } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import type { ModelSelectionId } from "./model-selector.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { CapabilityDiscovery } from "../core/capability-discovery.js";
+import type { ModelSelectionId } from "../core/model-selector.js";
+import { createModelResolver } from "../core/model-resolver.js";
+import { PromptBuilder } from "../core/prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
-import { SkillCatalog } from "./skill-catalog.js";
-import type { ThreadContext } from "./types.js";
+import { SkillCatalog } from "../core/skill-catalog.js";
+import type { ThreadContext } from "../core/types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "continuation_agent";

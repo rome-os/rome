@@ -19,7 +19,7 @@ import {
 } from "../core/conversation-title.js";
 import type { FacadeToolDef } from "../core/mcp-facade.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
-import type { SessionToolContext } from "../core/session-tools.js";
+import type { SessionToolContext } from "../agent-sessions/index.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
 import {

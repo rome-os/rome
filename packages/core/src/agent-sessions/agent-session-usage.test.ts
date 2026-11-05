@@ -9,17 +9,17 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/help
 import type { AgentEvent } from "../types.js";
 import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
+import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { CapabilityDiscovery } from "../core/capability-discovery.js";
+import { createModelResolver } from "../core/model-resolver.js";
+import { PromptBuilder } from "../core/prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillCatalog } from "../core/skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import type { AIToolStateValue } from "./ai-tool-state.js";
+import type { AIToolStateValue } from "../core/ai-tool-state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
-import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { createAgentTurnStreamRegistry } from "../agent-sessions/agent-turn-stream-registry.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./chat-stop.js";
 
 const ref = {

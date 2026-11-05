@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
-import { SessionManager } from "./session-manager.js";
+import { SessionManager } from "../agent-sessions/session-manager.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
 import {
@@ -17,11 +17,11 @@ import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
-import type { RecordedConversation } from "./session-conversation.js";
+import type { RecordedConversation } from "../agent-sessions/rows/session-conversation.js";
 import type { ForkRunParams } from "./types.js";
-import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
-import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./subagent-execution.js";
+import { createActiveSubagentRegistry } from "../agent-sessions/active-subagent-registry.js";
+import { createAgentTurnStreamRegistry } from "../agent-sessions/agent-turn-stream-registry.js";
+import { createSubagentExecutionService } from "../agent-sessions/subagent-execution.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -63,12 +63,15 @@ import {
   type AgentSessionManager,
   type AgentTurnHandle,
   subagentToolName,
-} from "./agent-session.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
+} from "../agent-sessions/agent-session.js";
+import { createAgentLifecycleDispatcher } from "../agent-sessions/agent-lifecycle.js";
+import {
+  createTurnMiddlewareChain,
+  type TurnMiddlewareChain,
+} from "../agent-sessions/turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { SkillCatalog } from "./skill-catalog.js";
-import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import type { AgentLifecycleDispatcher } from "../agent-sessions/agent-lifecycle.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,

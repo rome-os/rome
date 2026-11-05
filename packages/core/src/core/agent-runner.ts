@@ -4,19 +4,19 @@ import type { DeferInput } from "./defer.js";
 import type { FacadeToolDef, RoutineActivationGate } from "./mcp-facade.js";
 import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSessionManager } from "../agent-sessions/index.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
-import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import {
   AgentTraceRecorder,
   recordAgentTraceBestEffort,
   resolveTurnConversation,
   shouldPersistAgentTrace,
-} from "./agent-trace-recorder.js";
-import { findRecordedConversation } from "./session-conversation.js";
+} from "../agent-sessions/index.js";
+import { findRecordedConversation } from "../agent-sessions/index.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";

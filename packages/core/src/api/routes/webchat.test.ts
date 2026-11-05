@@ -16,7 +16,7 @@ import {
   AgentInputQueue,
   type AgentInputReceipt,
   type SubmitInputOptions,
-} from "../../core/agent-input-queue.js";
+} from "../../agent-sessions/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
@@ -28,7 +28,7 @@ import type {
   AgentTurnHandle,
   AgentTurnInput,
   SendTurnOptions,
-} from "../../core/agent-session.js";
+} from "../../agent-sessions/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
 import { guardianAuth, webchatProjects } from "../../db/schema.js";

@@ -3,18 +3,18 @@ import {
   type CurrentActionContext,
   type RomeSessionType,
 } from "@rome-os/app-runtime";
-import { channelChatId } from "../db/session-kind.js";
+import { channelChatId } from "../../db/session-kind.js";
 import type {
   RomeAgentTranscriptMessageInput,
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
-} from "../db/repositories/webchat.js";
-import type { AgentEvent, MessagePart } from "../types.js";
-import type { ThreadContext } from "./types.js";
-import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import type { Logger } from "../logger.js";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { isTransientDelta } from "./agent-message.js";
+} from "../../db/repositories/webchat.js";
+import type { AgentEvent, MessagePart } from "../../types.js";
+import type { ThreadContext } from "../../core/types.js";
+import { toTraceEvent, type TraceableEvent } from "../../api/helpers.js";
+import type { Logger } from "../../logger.js";
+import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { isTransientDelta } from "../../core/agent-message.js";
 import type { SessionConversation } from "./session-conversation.js";
 
 export interface AgentTraceRecorderInput {
