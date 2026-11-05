@@ -4,15 +4,18 @@ import type { DeferInput } from "./defer.js";
 import type { FacadeToolDef, RoutineActivationGate } from "./mcp-facade.js";
 import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSessionManager } from "../agent-sessions/index.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
-import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { shouldPersistAgentTrace } from "./agent-trace-recorder.js";
+import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { sessionSurfaceOf, type SurfaceDeps } from "../connections/session-surface.js";
+import {
+  sessionSurfaceOf,
+  surfaceKeepsTurn,
+  type SurfaceDeps,
+} from "../connections/session-surface.js";
 import {
   callerChatId,
   callerFromKey,
@@ -23,7 +26,7 @@ import {
 import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
 import { resetWhenDue, type ResolveConnectionReset } from "./connection-reset.js";
 import { rememberedChatModel } from "./chat-model-selection.js";
-import { openNamed } from "./session-log.js";
+import { openNamed } from "../agent-sessions/index.js";
 
 /** What a wake on a connection adds to a run: the catch-up it briefs the
  *  agent with, the reset setting it applies first, and what the run's
@@ -553,7 +556,10 @@ export class AgentRunner {
       keeps: {
         // A run that names a conversation it does not reply into keeps its
         // own record there, and the session's log stays out of it.
-        turn: !(params.persistTrace ?? shouldPersistAgentTrace(threadContext)),
+        turn:
+          params.persistTrace === undefined
+            ? surfaceKeepsTurn(threadContext)
+            : !params.persistTrace,
         prompt: !persistTranscript,
         answer: !persistTranscript || !(params.persistAnswer ?? true),
       },

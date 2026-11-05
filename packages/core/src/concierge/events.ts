@@ -3,7 +3,7 @@
 // without speaking gets one reminder turn.
 
 import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import type { AgentLifecycleDispatcher } from "../agent-sessions/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {

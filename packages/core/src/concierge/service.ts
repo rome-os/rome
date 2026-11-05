@@ -16,7 +16,7 @@ import {
   WEBCHAT_LARGE_MODEL_SELECTIONS,
   type ModelSelectionId,
 } from "../core/model-selector.js";
-import type { AgentSessionManager } from "../core/agent-session.js";
+import type { AgentSessionManager } from "../agent-sessions/index.js";
 import { quotaSwitchTarget, soleExhaustedProvider } from "../core/quota-switch.js";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";

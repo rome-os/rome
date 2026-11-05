@@ -2,7 +2,7 @@ import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { isConciergeAgent } from "../concierge/service.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSessionManager } from "../agent-sessions/index.js";
 import { callerKey, type SessionCaller } from "./session-caller.js";
 import type { ThreadContext } from "./types.js";
 

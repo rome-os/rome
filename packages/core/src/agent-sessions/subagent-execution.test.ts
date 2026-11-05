@@ -1,3 +1,4 @@
+import { createSessionLog } from "./rows/session-log.js";
 import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
@@ -115,7 +116,7 @@ describe("SubagentExecutionService", () => {
     } as unknown as AgentSessionManager;
     const registry = createActiveSubagentRegistry();
     const service = createSubagentExecutionService({
-      webchatRepo: repo,
+      log: createSessionLog(repo),
       activeRegistry: registry,
       turnStreams: createAgentTurnStreamRegistry(),
     });
@@ -204,7 +205,7 @@ describe("SubagentExecutionService", () => {
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
-      webchatRepo: repo,
+      log: createSessionLog(repo),
       activeRegistry: createActiveSubagentRegistry(),
       turnStreams: createAgentTurnStreamRegistry(),
     });

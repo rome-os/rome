@@ -7,7 +7,7 @@ import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import {
   createSessionFromRun,
@@ -15,13 +15,13 @@ import {
   type ModelRunParams,
   type ModelSessionParams,
   type ProviderId,
-} from "./agent-runner.js";
+} from "../core/agent-runner.js";
 import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { CapabilityDiscovery } from "../core/capability-discovery.js";
+import { createModelResolver } from "../core/model-resolver.js";
+import { PromptBuilder } from "../core/prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillCatalog } from "../core/skill-catalog.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,

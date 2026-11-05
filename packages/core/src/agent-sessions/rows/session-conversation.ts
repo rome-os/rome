@@ -1,6 +1,6 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { createLogger } from "../logger.js";
+import type { WebChatRepository } from "../../db/repositories/webchat.js";
+import { createLogger } from "../../logger.js";
 
 const log = createLogger("session-conversation");
 

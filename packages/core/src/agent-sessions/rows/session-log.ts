@@ -1,11 +1,22 @@
-import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { channelChatId } from "../db/session-kind.js";
-import { createLogger } from "../logger.js";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import type { LoggedFork, LoggedTurn, SessionLog, TurnLogWriter } from "./agent-session.js";
-import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
+import type { WebChatRepository } from "../../db/repositories/webchat.js";
+import { channelChatId } from "../../db/session-kind.js";
+import { createLogger } from "../../logger.js";
+import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import type {
+  LoggedFork,
+  LoggedTurn,
+  SessionLog,
+  TurnConversation,
+  TurnLogEntry,
+  TurnLogWriter,
+} from "../agent-session.js";
+import {
+  AgentTraceRecorder,
+  recordAgentTraceBestEffort,
+  resolveTurnConversation,
+} from "./agent-trace-recorder.js";
 import { findRecordedConversation } from "./session-conversation.js";
-import { callerChatId, callerFromKey } from "./session-caller.js";
+import { callerChatId, callerFromKey } from "../../core/session-caller.js";
 
 const log = createLogger("session-log");
 
@@ -45,8 +56,10 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
   return {
     findConversation: (id) => findRecordedConversation(webchatRepo, id),
     conversationOf: (caller) => named.get(caller) ?? callerChatId(callerFromKey(caller)),
-    turn: webchatRepo ? (turn) => turnWriter(webchatRepo, turn) : undefined,
+    turn: (turn) => turnEntry(webchatRepo, turn),
     fork: webchatRepo ? (fork) => forkWriter(webchatRepo, fork) : undefined,
+    resumableChild: webchatRepo ? (child) => resumableChild(webchatRepo, child) : undefined,
+    childStarted: webchatRepo ? (child) => childStarted(webchatRepo, child) : undefined,
   };
 }
 
@@ -63,8 +76,49 @@ function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string):
   };
 }
 
-function turnWriter(webchatRepo: WebChatRepository, turn: LoggedTurn): TurnLogWriter {
-  const { conversation } = turn;
+/**
+ * Where today's rows keep a turn. A child's turns go to its own conversation,
+ * minted under its session id. Otherwise the conversation its opener named
+ * wins, then a subagent or fork conversation the session's row recorded, then
+ * the one its reply address or execution derives.
+ */
+export function conversationOfTurn(turn: LoggedTurn) {
+  if (turn.child) {
+    return {
+      romeSessionId: turn.sessionId,
+      romeSessionType: "subagent" as const,
+      existing: true,
+      promptPersisted: false,
+      recorderOwned: true,
+    };
+  }
+  const served = turn.served;
+  const resolved = resolveTurnConversation({
+    agentName: turn.agentName,
+    agentSessionId: turn.sessionId,
+    sessionConversation: served,
+    channelThreadKey: turn.caller,
+    threadContext: turn.replies,
+    actionContext: turn.execution,
+  });
+  // A chat keeps its turns as the kind of chat its own record says.
+  const named = served?.origin === "named" ? served : undefined;
+  return named?.type && resolved.romeSessionId === named.id
+    ? { ...resolved, romeSessionType: named.type }
+    : resolved;
+}
+
+function turnEntry(webchatRepo: WebChatRepository | undefined, turn: LoggedTurn): TurnLogEntry {
+  const conversation = conversationOfTurn(turn);
+  const kept: TurnConversation = {
+    romeSessionId: conversation.romeSessionId,
+    romeSessionType: conversation.romeSessionType,
+  };
+  const keeps = turn.keeps;
+  if (!webchatRepo || keeps?.turn) return { conversation: kept };
+  const keepsAnswer = keeps?.answer;
+  // A conversation only the log writes gets every message. Otherwise the log
+  // leaves out what the surface writes, and a prompt its opener already wrote.
   const recorder = new AgentTraceRecorder({
     webchatRepo,
     agentName: turn.agentName,
@@ -76,10 +130,13 @@ function turnWriter(webchatRepo: WebChatRepository, turn: LoggedTurn): TurnLogWr
     threadContext: turn.replies,
     ...(turn.execution ? { actionContext: turn.execution } : {}),
     persistTranscript: true,
-    persistUserTranscript: turn.writes.prompt,
-    persistAssistantTranscript: turn.writes.answer,
+    persistUserTranscript:
+      (conversation.recorderOwned || !keeps?.prompt) && !conversation.promptPersisted,
+    persistAssistantTranscript: () =>
+      conversation.recorderOwned ||
+      !(typeof keepsAnswer === "function" ? keepsAnswer() : keepsAnswer),
   });
-  return writerOf(recorder, turn.turnId, "agent-session");
+  return { conversation: kept, writer: writerOf(recorder, turn.turnId, "agent-session") };
 }
 
 /**
@@ -137,4 +194,51 @@ async function forkWriter(
     });
     return undefined;
   }
+}
+
+async function resumableChild(
+  webchatRepo: WebChatRepository,
+  child: { id: string; agentName: string; parent: string },
+): Promise<void> {
+  const parent = await webchatRepo.getSession(child.parent);
+  if (!parent) throw new Error(`Parent Rome session "${child.parent}" was not found`);
+  const stored = await webchatRepo.getSession(child.id);
+  if (!stored || stored.type !== "subagent") {
+    throw new Error(`Subagent session "${child.id}" was not found`);
+  }
+  const storedAgentName = stored.agentName ?? "main";
+  if (storedAgentName !== child.agentName) {
+    throw new Error(
+      `Subagent session "${child.id}" belongs to agent "${storedAgentName}", not "${child.agentName}"`,
+    );
+  }
+  if (stored.parentSessionId !== child.parent) {
+    throw new Error(`Subagent session "${child.id}" belongs to a different Parent session`);
+  }
+  if ((stored.projectPath ?? null) !== (parent.projectPath ?? null)) {
+    throw new Error(`Subagent session "${child.id}" belongs to a different project`);
+  }
+}
+
+async function childStarted(
+  webchatRepo: WebChatRepository,
+  child: {
+    id: string;
+    agentName: string;
+    parent: string;
+    parentAgentName: string;
+    parentTurnId: string;
+  },
+): Promise<void> {
+  const parent = await webchatRepo.getSession(child.parent);
+  await webchatRepo.ensureRomeSession({
+    id: child.id,
+    type: "subagent",
+    name: `${child.agentName}: ${parent?.name ?? child.parentAgentName}`,
+    agentName: isCoreMainAgentId(child.agentName) ? null : child.agentName,
+    projectName: parent?.projectName,
+    projectPath: parent?.projectPath,
+    parentSessionId: child.parent,
+    parentTurnId: child.parentTurnId,
+  });
 }

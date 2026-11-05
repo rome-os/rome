@@ -10,12 +10,11 @@ import {
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
-import type { AgentLoader } from "./agent-loader.js";
+import type { AgentLoader } from "../core/agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import type { RecordedConversation, SessionConversation } from "./session-conversation.js";
-import { resolveTurnConversation } from "./agent-trace-recorder.js";
+import type { RecordedConversation, SessionConversation } from "./rows/session-conversation.js";
 import {
   buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
@@ -23,13 +22,13 @@ import {
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
   type PromptBuilder,
-} from "./prompt-builder.js";
+} from "../core/prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
-import type { RoutineActivationGate } from "./mcp-facade.js";
-import type { CapabilityDiscovery } from "./capability-discovery.js";
-import type { SkillCatalog } from "./skill-catalog.js";
+import type { RoutineActivationGate } from "../core/mcp-facade.js";
+import type { CapabilityDiscovery } from "../core/capability-discovery.js";
+import type { SkillCatalog } from "../core/skill-catalog.js";
 import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
 import type {
   AgentStop,
@@ -45,8 +44,8 @@ import type {
 } from "@rome-os/app-runtime";
 import { getCurrentActionContext } from "@rome-os/app-runtime";
 import { TURN_EXECUTION, TURN_LINKS } from "./turn-context.js";
-import { createNullModelSession } from "./agent-runner.js";
-import { runDefer, type DeferInput } from "./defer.js";
+import { createNullModelSession } from "../core/agent-runner.js";
+import { runDefer, type DeferInput } from "../core/defer.js";
 import type { EventSources } from "../events/event-sources.js";
 import type {
   ActionMcpDefinition,
@@ -59,16 +58,16 @@ import type {
   ModelToolCallContext,
   ProviderId,
   SkillMcpDefinition,
-} from "./agent-runner.js";
+} from "../core/agent-runner.js";
 import {
   toModelResolutionErrorPayload,
   type ModelResolution,
   type ModelResolutionErrorPayload,
   type ModelResolver,
-} from "./model-resolver.js";
-import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import type { ModelSelectionId } from "./model-selector.js";
-import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
+} from "../core/model-resolver.js";
+import { resolveAgentModelRequest } from "../core/agent-model-selection.js";
+import type { ModelSelectionId } from "../core/model-selector.js";
+import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "../core/types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
 import { enterSession } from "../telemetry-context.js";
@@ -91,7 +90,7 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
-import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
+import { isTerminalEvent, isTransientDelta } from "../core/agent-message.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -103,7 +102,7 @@ import {
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
 } from "../apps/packaging/output-schema-validator.js";
-import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
+import { translateTurnSpans, type CapturedEvent } from "../core/turn-span-translator.js";
 import {
   buildRequiredTiming,
   classifyAgentTurnStatus,
@@ -111,11 +110,11 @@ import {
   type AgentLifecycleDispatcher,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
-import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
+import { isInterruptedAccounting, resolveTurnStop } from "../core/stop-reason.js";
 import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import { resolveSessionPolicy } from "./session-policy.js";
+import { resolveSessionPolicy } from "../core/session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 
@@ -182,8 +181,12 @@ interface AgentSessionInit extends SessionOpenOptions {
   resumeSessionId?: string;
 }
 
-/** Where a turn is recorded, as the session resolves it. */
-export type TurnConversation = ReturnType<typeof resolveTurnConversation>;
+/** The conversation the log keeps a turn in, as the log names it. The session
+ *  hands it to the turn's tools and reads none of it. */
+export interface TurnConversation {
+  romeSessionId: string;
+  romeSessionType: RomeSessionType;
+}
 
 /**
  * What the caller wants the agent told first. The session asks for it when
@@ -204,12 +207,21 @@ export interface LoggedTurn {
   /** The label the turn's input is kept under, for a turn Rome started. */
   label?: string;
   replies?: ThreadContext;
-  /** Where today's rows keep the turn, which the session resolved. */
-  conversation: TurnConversation;
   /** The execution the turn runs under, when it runs inside one. */
   execution?: CurrentActionContext;
-  /** Which of the turn's messages the log writes beside its trace. */
-  writes: { prompt: boolean; answer: () => boolean };
+  /** The conversation the session serves, as the log found it at open. */
+  served?: SessionConversation;
+  /** The session is a child of another session's turn. */
+  child: boolean;
+  /** What the surface keeps of the turn itself. */
+  keeps?: SurfaceKeeps;
+}
+
+/** Where the log keeps a turn, and the writer that keeps it. */
+export interface TurnLogEntry {
+  conversation: TurnConversation;
+  /** Absent when the surface keeps the whole turn itself. */
+  writer?: TurnLogWriter;
 }
 
 /** A forked turn as the session hands it to its log. */
@@ -243,10 +255,22 @@ export interface SessionLog {
   /** The conversation today's rows keep a caller's turns in, when its
    *  context names one. */
   conversationOf?(caller: CallerId): string | undefined;
-  /** A writer for one turn, or undefined when nothing is written. */
-  turn?(turn: LoggedTurn): TurnLogWriter | undefined;
+  /** Where one turn is kept, and its writer. The log decides the
+   *  conversation and what of the turn it writes. */
+  turn?(turn: LoggedTurn): TurnLogEntry;
   /** A writer for a forked turn, which registers the fork's own record. */
   fork?(turn: LoggedFork): Promise<TurnLogWriter | undefined>;
+  /** Throws unless the child `id` was started for `agentName` under the
+   *  conversation `parent`, so it can be resumed there. */
+  resumableChild?(child: { id: string; agentName: string; parent: string }): Promise<void>;
+  /** Keeps a fresh child's conversation under its parent's. */
+  childStarted?(child: {
+    id: string;
+    agentName: string;
+    parent: string;
+    parentAgentName: string;
+    parentTurnId: string;
+  }): Promise<void>;
 }
 
 /** When a reset is due, decided by the caller from the context's age. */
@@ -1938,34 +1962,6 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /** Where today's rows keep a turn that reaches `replies` under `execution`. */
-  private recordedIn(
-    replies: ThreadContext | undefined,
-    execution: CurrentActionContext | undefined,
-  ): TurnConversation {
-    // A child's turns are recorded in its own conversation, minted under its
-    // own session id.
-    if (this.isSubagent) {
-      return {
-        romeSessionId: this.sessionId,
-        romeSessionType: "subagent",
-        existing: true,
-        promptPersisted: false,
-        recorderOwned: true,
-      };
-    }
-    const resolved = resolveTurnConversation({
-      agentName: this.key.agentName,
-      agentSessionId: this.sessionId,
-      sessionConversation: this.conversation,
-      channelThreadKey: this.key.caller,
-      threadContext: replies,
-      actionContext: execution,
-    });
-    const named = this.conversation?.origin === "named" ? this.conversation : undefined;
-    return named?.type && resolved.romeSessionId === named.id
-      ? { ...resolved, romeSessionType: named.type }
-      : resolved;
-  }
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -2902,38 +2898,10 @@ class AgentSessionImpl implements AgentSession {
    * fails the turn.
    */
   private async *logged(
-    turn: {
-      turnId: string;
-      prompt: string;
-      label?: string;
-      replies?: ThreadContext;
-      conversation: TurnConversation;
-      execution?: CurrentActionContext;
-    },
+    writer: TurnLogWriter | undefined,
+    turn: { prompt: string; label?: string },
     events: AsyncIterable<StreamAgentEvent>,
   ): AsyncIterable<StreamAgentEvent> {
-    const keeps = this.surface.keeps;
-    const { conversation } = turn;
-    const keepsAnswer = keeps?.answer;
-    const writer = keeps?.turn
-      ? undefined
-      : this.deps.log?.turn?.({
-          agentName: this.key.agentName,
-          sessionId: this.sessionId,
-          caller: this.key.caller,
-          turnId: turn.turnId,
-          prompt: turn.prompt,
-          label: turn.label,
-          replies: turn.replies,
-          conversation,
-          execution: turn.execution,
-          writes: {
-            prompt: (conversation.recorderOwned || !keeps?.prompt) && !conversation.promptPersisted,
-            answer: () =>
-              conversation.recorderOwned ||
-              !(typeof keepsAnswer === "function" ? keepsAnswer() : keepsAnswer),
-          },
-        });
     for await (const event of events) {
       if (writer) {
         await writer.write(event);
@@ -3305,7 +3273,24 @@ class AgentSessionImpl implements AgentSession {
     const execution =
       (context.active().getValue(TURN_EXECUTION) as CurrentActionContext | undefined) ??
       getCurrentActionContext();
-    const recorded = this.recordedIn(replies, execution);
+    const entry = this.deps.log?.turn?.({
+      agentName: this.key.agentName,
+      sessionId: this.sessionId,
+      caller: this.key.caller,
+      turnId,
+      prompt: input.prompt,
+      label: input.label,
+      replies,
+      execution,
+      served: this.conversation,
+      child: this.isSubagent,
+      keeps: this.surface.keeps,
+    });
+    // Without a log the turn is kept nowhere, under the session's own id.
+    const recorded: TurnConversation = entry?.conversation ?? {
+      romeSessionId: this.sessionId,
+      romeSessionType: this.isSubagent ? "subagent" : "action",
+    };
     // The last turn's shared context stands for the session between turns.
     if (input.sharedContext) this.sharedContext = input.sharedContext;
     const initiatedBy = options?.initiatedBy;
@@ -3340,14 +3325,8 @@ class AgentSessionImpl implements AgentSession {
       usageRecorded: false,
     };
     const events = this.logged(
-      {
-        turnId,
-        prompt: input.prompt,
-        label: input.label,
-        replies,
-        conversation: recorded,
-        execution,
-      },
+      entry?.writer,
+      { prompt: input.prompt, label: input.label },
       this.buildTurnEvents(sink),
     );
 

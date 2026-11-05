@@ -1,4 +1,8 @@
-import type { TurnMiddlewareContext, TurnMiddlewareHook } from "@rome-os/app-runtime";
+import type {
+  SessionCaller,
+  TurnMiddlewareContext,
+  TurnMiddlewareHook,
+} from "@rome-os/app-runtime";
 import type { ArtifactRef } from "../apps/state.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import {
@@ -7,8 +11,7 @@ import {
   type MiddlewareChain,
   type MiddlewareLoadFailure,
   type MiddlewareTerminal,
-} from "./middleware-chain.js";
-import { callerFromKey } from "./session-caller.js";
+} from "../core/middleware-chain.js";
 
 /**
  * app-provided turn middleware live under the `turn-middleware` hook
@@ -28,6 +31,9 @@ export type TurnTerminal = MiddlewareTerminal;
 
 export interface TurnMiddlewareChainOptions {
   appRuntimeServices?: RomeAppRuntimeServices;
+  /** How apps read the session's caller. Absent, they get only the stored
+   *  string. */
+  describeCaller?: (caller: string) => SessionCaller;
 }
 
 export function createTurnMiddlewareChain(
@@ -43,7 +49,9 @@ export function createTurnMiddlewareChain(
     // Sessions hands over the caller as it holds it; apps read it decoded.
     run(ctx, terminal) {
       const stored = ctx.session.channelThreadKey;
-      if (!ctx.session.caller && stored) ctx.session.caller = callerFromKey(stored);
+      if (!ctx.session.caller && stored && options.describeCaller) {
+        ctx.session.caller = options.describeCaller(stored);
+      }
       return chain.run(ctx, terminal);
     },
   };

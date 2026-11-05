@@ -19,23 +19,22 @@ import type {
   AgentSession,
   AgentTurnHandle,
   AgentTurnInput,
-} from "./agent-session.js";
-import { withTurnExecution } from "./turn-context.js";
+} from "../agent-sessions/index.js";
+import { withTurnExecution } from "../agent-sessions/index.js";
 import { createLogger } from "../logger.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { shouldPersistAgentTrace } from "./agent-trace-recorder.js";
 import {
   type ActionWorkerCoordinator,
   registerActionSubprocessHost,
 } from "../actions/action-subprocess.js";
-import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { sessionSurfaceOf } from "../connections/session-surface.js";
+import { sessionSurfaceOf, surfaceKeepsTurn } from "../connections/session-surface.js";
 import { callerChatId, callerKey, type SessionCaller } from "./session-caller.js";
 import { rememberedChatModel } from "./chat-model-selection.js";
-import { openNamed } from "./session-log.js";
+import { openNamed } from "../agent-sessions/index.js";
 import type { ThreadContext } from "./types.js";
 import { channelChatId } from "../db/session-kind.js";
 import { catchUpBriefing } from "./connection-briefing.js";
@@ -160,7 +159,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const stands = romeSessionId ? !!this.runLineDeps?.lines.stands(romeSessionId) : false;
         const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, thread, {
           keeps: {
-            turn: !shouldPersistAgentTrace(thread),
+            turn: surfaceKeepsTurn(thread),
             answer: () => !!reply || stands,
           },
           ...(req.init?.contextSuffix ? { about: req.init.contextSuffix } : {}),

@@ -25,9 +25,9 @@ describe("isGuardianFacingChannel", () => {
     const connectionKindOf = recordedConnectionKindOf(testDb.db);
 
     expect(second).not.toBe("telegram");
-    expect(isGuardianFacingChannel(`${second}:42`, connectionKindOf)).toBe(true);
-    expect(isGuardianFacingChannel("telegram:42", connectionKindOf)).toBe(true);
-    expect(isGuardianFacingChannel("webchat:chat-1", connectionKindOf)).toBe(true);
-    expect(isGuardianFacingChannel("slack:C1", connectionKindOf)).toBe(false);
+    expect(isGuardianFacingChannel(second, connectionKindOf)).toBe(true);
+    expect(isGuardianFacingChannel("telegram", connectionKindOf)).toBe(true);
+    expect(isGuardianFacingChannel("webchat", connectionKindOf)).toBe(true);
+    expect(isGuardianFacingChannel("slack", connectionKindOf)).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import type { MessageReplyReference } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import { channelChatId } from "../db/session-kind.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
-import type { TurnBriefing } from "./agent-session.js";
+import type { TurnBriefing } from "../agent-sessions/index.js";
 import type { ChannelSurface } from "../connections/session-surface.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import type { ThreadContext } from "./types.js";

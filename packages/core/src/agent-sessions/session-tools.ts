@@ -1,5 +1,5 @@
-import type { FacadeToolDef } from "./mcp-facade.js";
-import type { ThreadContext } from "./types.js";
+import type { FacadeToolDef } from "../core/mcp-facade.js";
+import type { ThreadContext } from "../core/types.js";
 
 /** What a session-tools provider sees of the session it equips. */
 export interface SessionToolContext {

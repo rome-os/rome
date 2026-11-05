@@ -1,5 +1,5 @@
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
-import { createSessionLog } from "../core/session-log.js";
+import { createSessionLog } from "../agent-sessions/rows/session-log.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -28,13 +28,13 @@ import { createAIToolState } from "../core/ai-tool-state.js";
 import type { CodexAccountService } from "../core/codex/account-service.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
-import { createAgentSessionManager } from "../core/agent-session.js";
-import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
-import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "../core/subagent-execution.js";
+import { createAgentSessionManager } from "../agent-sessions/agent-session.js";
+import { createActiveSubagentRegistry } from "../agent-sessions/active-subagent-registry.js";
+import { createAgentTurnStreamRegistry } from "../agent-sessions/agent-turn-stream-registry.js";
+import { createSubagentExecutionService } from "../agent-sessions/subagent-execution.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { SessionManager } from "../core/session-manager.js";
+import { createAgentLifecycleDispatcher } from "../agent-sessions/agent-lifecycle.js";
+import { SessionManager } from "../agent-sessions/session-manager.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
@@ -746,7 +746,7 @@ export async function buildTestDeps(
   const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const subagentExecutionService = createSubagentExecutionService({
-    webchatRepo,
+    log: createSessionLog(webchatRepo),
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });

@@ -1,6 +1,6 @@
-import type { SessionSurface, SurfaceKeeps } from "../core/agent-session.js";
+import type { SessionSurface, SurfaceKeeps } from "../agent-sessions/index.js";
 import { isGuardianFacingChannel } from "../core/guardian-channel.js";
-import { callerConnection, callerKey, type SessionCaller } from "../core/session-caller.js";
+import { callerConnection, type SessionCaller } from "../core/session-caller.js";
 import type { ThreadContext } from "../core/types.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE } from "../chats/dashboard/dashboard-account.js";
@@ -59,12 +59,8 @@ export function sessionSurfaceOf(
     !!channel &&
     ((deps.channelSurface ?? dashboardOnly)(channel) ?? MESSAGING_CHANNEL_SURFACE).interactiveCards;
   // A resume that names no caller is woken where it replies.
-  const wakeKey = caller
-    ? callerKey(caller)
-    : replies
-      ? `${replies.channel}:${replies.threadId}`
-      : undefined;
-  const wake = !!wakeKey && isGuardianFacingChannel(wakeKey, deps.connectionKindOfChannel);
+  const wakeChannel = caller ? callerConnection(caller) : replies?.channel;
+  const wake = !!wakeChannel && isGuardianFacingChannel(wakeChannel, deps.connectionKindOfChannel);
   return {
     cards,
     ...(replies ? { replies } : {}),
@@ -72,4 +68,11 @@ export function sessionSurfaceOf(
     ...(extra.keeps ? { keeps: extra.keeps } : {}),
     ...(extra.about ? { about: extra.about } : {}),
   };
+}
+
+/** Whether the surface at `replies` keeps a turn's whole trace itself. The
+ *  dashboard chat's route writes its own as it streams; anywhere else the
+ *  session's log keeps it. */
+export function surfaceKeepsTurn(replies?: ThreadContext): boolean {
+  return replies?.channel === WEBCHAT_CHANNEL;
 }

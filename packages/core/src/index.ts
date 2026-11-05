@@ -1,4 +1,5 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
+import { callerFromKey } from "./core/session-caller.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -142,7 +143,7 @@ import { ExecutionJournalRepository } from "./db/repositories/execution-journal.
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { AgentLoader } from "./core/agent-loader.js";
-import { SessionManager } from "./core/session-manager.js";
+import { SessionManager } from "./agent-sessions/index.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
@@ -164,8 +165,8 @@ import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager } from "./core/agent-session.js";
-import { createSessionLog } from "./core/session-log.js";
+import { createAgentSessionManager } from "./agent-sessions/index.js";
+import { createSessionLog } from "./agent-sessions/index.js";
 import { talkerChannelSurface } from "./connections/session-surface.js";
 import type { WakeDeps } from "./core/agent-runner.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
@@ -179,9 +180,9 @@ import { startConciergeEvents } from "./concierge/events.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
-import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
+import { createAgentLifecycleDispatcher } from "./agent-sessions/index.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
-import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
+import { createTurnMiddlewareChain } from "./agent-sessions/index.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
@@ -223,9 +224,9 @@ import {
   resolveWebchatContinuationWorkingDir,
 } from "./webchat/projects.js";
 import { SkillCatalog } from "./core/skill-catalog.js";
-import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
-import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./core/subagent-execution.js";
+import { createActiveSubagentRegistry } from "./agent-sessions/index.js";
+import { createAgentTurnStreamRegistry } from "./agent-sessions/index.js";
+import { createSubagentExecutionService } from "./agent-sessions/index.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
@@ -955,6 +956,7 @@ async function main() {
   };
   const lifecycleDispatcher = createAgentLifecycleDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
+    describeCaller: callerFromKey,
   });
   // Turn-middleware onion. Shares the same app-runtime services as the
   // lifecycle dispatcher (the `agentRunner` field is filled in below, before
@@ -962,6 +964,7 @@ async function main() {
   // agents and reach its own app DB.
   const turnMiddlewareChain = createTurnMiddlewareChain({
     appRuntimeServices: lifecycleAppRuntimeServices,
+    describeCaller: callerFromKey,
   });
   const appStartedDispatcher = createAppStartedDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
@@ -1066,8 +1069,9 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
+  const sessionLog = createSessionLog(webchatRepo);
   const subagentExecutionService = createSubagentExecutionService({
-    webchatRepo,
+    log: sessionLog,
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });
@@ -1148,7 +1152,7 @@ async function main() {
       capabilityDiscovery,
       skillCatalog,
       lifecycleDispatcher,
-      log: createSessionLog(webchatRepo),
+      log: sessionLog,
       routineKeyFor: chatRoutineKeyForToolUse,
       subagentExecutionService,
       activeSubagentRegistry,

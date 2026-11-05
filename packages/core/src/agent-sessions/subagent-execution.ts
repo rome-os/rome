@@ -1,10 +1,8 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
-import type { AgentSessionManager, CallerId, SessionSurface } from "./agent-session.js";
-import type { ThreadContext } from "./types.js";
+import type { AgentSessionManager, CallerId, SessionLog, SessionSurface } from "./agent-session.js";
+import type { ThreadContext } from "../core/types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
 
 export interface ExecuteSubagentInput {
   prompt: string;
@@ -59,7 +57,8 @@ export interface SubagentExecutionService {
 }
 
 export function createSubagentExecutionService(deps: {
-  webchatRepo: WebChatRepository;
+  /** Where a child's conversation is kept under its parent's. */
+  log?: SessionLog;
   activeRegistry: ActiveSubagentRegistry;
   turnStreams: AgentTurnStreamRegistry;
 }): SubagentExecutionService {
@@ -68,8 +67,6 @@ export function createSubagentExecutionService(deps: {
       if (!input.prompt || typeof input.prompt !== "string") {
         throw new Error("execute_subagent requires a non-empty prompt");
       }
-      const parentSession = await deps.webchatRepo.getSession(context.parentSessionId);
-
       // A child shows nothing and cannot be woken; its tools still deliver
       // where the parent's do.
       const surface: SessionSurface = {
@@ -79,29 +76,11 @@ export function createSubagentExecutionService(deps: {
       let child;
       let isFresh = false;
       if (input.resumeSessionId) {
-        if (!parentSession) {
-          throw new Error(`Parent Rome session "${context.parentSessionId}" was not found`);
-        }
-        const stored = await deps.webchatRepo.getSession(input.resumeSessionId);
-        if (!stored || stored.type !== "subagent") {
-          throw new Error(`Subagent session "${input.resumeSessionId}" was not found`);
-        }
-        const storedAgentName = stored.agentName ?? "main";
-        if (storedAgentName !== name) {
-          throw new Error(
-            `Subagent session "${input.resumeSessionId}" belongs to agent "${storedAgentName}", not "${name}"`,
-          );
-        }
-        if (stored.parentSessionId !== context.parentSessionId) {
-          throw new Error(
-            `Subagent session "${input.resumeSessionId}" belongs to a different Parent session`,
-          );
-        }
-        if ((stored.projectPath ?? null) !== (parentSession?.projectPath ?? null)) {
-          throw new Error(
-            `Subagent session "${input.resumeSessionId}" belongs to a different project`,
-          );
-        }
+        await deps.log?.resumableChild?.({
+          id: input.resumeSessionId,
+          agentName: name,
+          parent: context.parentSessionId,
+        });
         // Naming the conversation lets the resume fill a row whose record
         // failed when the subagent was minted.
         // The child's conversation is its own session, which the resume
@@ -117,14 +96,11 @@ export function createSubagentExecutionService(deps: {
       }
 
       if (isFresh) {
-        await deps.webchatRepo.ensureRomeSession({
+        await deps.log?.childStarted?.({
           id: child.sessionId,
-          type: "subagent",
-          name: `${name}: ${parentSession?.name ?? context.parentAgentName}`,
-          agentName: isCoreMainAgentId(name) ? null : name,
-          projectName: parentSession?.projectName,
-          projectPath: parentSession?.projectPath,
-          parentSessionId: context.parentSessionId,
+          agentName: name,
+          parent: context.parentSessionId,
+          parentAgentName: context.parentAgentName,
           parentTurnId: context.parentTurnId,
         });
         // The child records its turns under its own session id, which names

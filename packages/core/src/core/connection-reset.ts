@@ -1,6 +1,6 @@
 import type { ChatId, ChatRef, ProviderSessionResetPolicy } from "@rome-os/app-runtime";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSessionManager } from "../agent-sessions/index.js";
 import { callerKey, type SessionCaller } from "./session-caller.js";
 import type { ThreadContext } from "./types.js";
 

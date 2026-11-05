@@ -16,7 +16,7 @@ import { createLogger } from "../../logger.js";
 import { logInboundMessage } from "../../telemetry.js";
 import { getGuardianProfileFile } from "../../profile-memory.js";
 import { toTraceEvent, toWebchatSessionResponse, type TraceableEvent } from "../helpers.js";
-import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
+import { AgentTraceRecorder } from "../../agent-sessions/index.js";
 import {
   buildTraceSnapshot,
   createSegmentBuilder,
@@ -57,7 +57,7 @@ import {
   NoForkPointError,
   type AgentTurnHandle,
   type SessionSurface,
-} from "../../core/agent-session.js";
+} from "../../agent-sessions/index.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";

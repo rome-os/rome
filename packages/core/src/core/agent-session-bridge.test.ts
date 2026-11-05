@@ -7,14 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { Channel, ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
-import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { createAgentTurnStreamRegistry } from "../agent-sessions/agent-turn-stream-registry.js";
 import type {
   AgentSession,
   SessionOpenOptions,
   SessionSurface,
   AgentSessionManager,
   AgentTurnHandle,
-} from "./agent-session.js";
+} from "../agent-sessions/agent-session.js";
 import { Pacer } from "../participation/reply-delivery/pacer.js";
 import { ReplyDelivery } from "../participation/reply-delivery/reply.js";
 import {

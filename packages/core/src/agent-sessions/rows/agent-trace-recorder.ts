@@ -3,18 +3,19 @@ import {
   type CurrentActionContext,
   type RomeSessionType,
 } from "@rome-os/app-runtime";
-import { channelChatId } from "../db/session-kind.js";
+import { channelChatId } from "../../db/session-kind.js";
 import type {
   RomeAgentTranscriptMessageInput,
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
-} from "../db/repositories/webchat.js";
-import type { AgentEvent, MessagePart } from "../types.js";
-import type { ThreadContext } from "./types.js";
-import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import type { Logger } from "../logger.js";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { isTransientDelta } from "./agent-message.js";
+} from "../../db/repositories/webchat.js";
+import type { AgentEvent } from "../../types.js";
+import { textMessageContent, transcriptMessageId } from "../../chats/storage/transcript-rows.js";
+import type { ThreadContext } from "../../core/types.js";
+import { toTraceEvent, type TraceableEvent } from "../../api/helpers.js";
+import type { Logger } from "../../logger.js";
+import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { isTransientDelta } from "../../core/agent-message.js";
 import type { SessionConversation } from "./session-conversation.js";
 
 export interface AgentTraceRecorderInput {
@@ -305,23 +306,6 @@ export class AgentTraceRecorder {
       }
     }
   }
-}
-
-export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean {
-  return threadContext?.channel !== "webchat";
-}
-
-export function textMessageContent(content: string): string {
-  const parts: MessagePart[] = [{ type: "text", content }];
-  return JSON.stringify(parts);
-}
-
-export function transcriptMessageId(
-  sessionId: string,
-  turnId: string,
-  role: RomeAgentTranscriptMessageInput["role"],
-): string {
-  return `transcript-message:${sessionId}:${turnId}:${role}`;
 }
 
 export async function recordAgentTraceBestEffort(

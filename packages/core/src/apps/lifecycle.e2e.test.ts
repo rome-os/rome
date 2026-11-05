@@ -9,12 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createTestSessionManager } from "../test/session-compat.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import { createAgentLifecycleDispatcher } from "../agent-sessions/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { createRomeMcpServer, type RomeMcpGroup, type RomeMcpServer } from "../core/mcp/server.js";
 import { createModelResolver } from "../core/model-resolver.js";
-import { SessionManager } from "../core/session-manager.js";
+import { SessionManager } from "../agent-sessions/session-manager.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import {
   createAppLifecycleHarness,

@@ -27,8 +27,16 @@ const SRC = join(CORE, "src");
 const REPO = resolve(CORE, "../..");
 const PARITY = process.argv.includes("--parity");
 
-/** The session module: the files that make up Sessions. */
-const MODULE = ["core/agent-session.ts"].map((file) => join(SRC, file));
+/** Sessions' folder. Everything outside it reaches a session through
+ *  `PUBLIC` alone (C17). */
+const SESSIONS = join(SRC, "agent-sessions");
+const PUBLIC = join(SESSIONS, "index.ts");
+/** The log over today's rows, the one place Sessions meets Chats' tables
+ *  while storage is unchanged. Held to C17, and left out of the checks on
+ *  what the session itself knows (C1, C2, C14). */
+const ROWS = join(SESSIONS, "rows");
+/** The session module: the files that make up Sessions, its row log aside. */
+const MODULE = sources(SESSIONS).filter((file) => !file.startsWith(`${ROWS}/`));
 /** Where a session's stored key is written and read back. The only place
  *  allowed to spell or parse it. */
 const CODEC = ["core/session-caller.ts", "core/agent-session-key.ts"].map((file) =>
@@ -305,7 +313,7 @@ checks.push({
 // caller between hops may spell the stored caller. Everything else (routes,
 // Concierge, capabilities, connections, routines, wiring) asks the manager.
 const SESSION_SIDE = [
-  /^core\//,
+  /^agent-sessions\//,
   /^db\//,
   /^actions\/(context|engine|call-action|ipc|approval-handler)\.ts$/,
   /^apps\/context\.ts$/,
@@ -320,9 +328,23 @@ const BYPASS_SESSION =
   /\b(findReusableSession|findResumableSessionById|findActiveByChannelThreadKey|findByChannelThreadKey|getTurnCheckpoint|sessionsRepo|SessionsRepository|SessionManager|callerFromKey|callerOfRun|persistThreadKey)\b/g;
 // The wiring builds the repositories and hands them to the session.
 const WIRING = ["index.ts"];
+// The codec, and the runners that take an app's run: until the SDK drops the
+// deprecated `channelThreadKey`, a run may still name its caller by the
+// stored string, and the runner reads it back into the typed caller. Counted
+// below, so the debt stays visible.
+const CALLER_ADAPTERS = [
+  "core/session-caller.ts",
+  "core/agent-runner.ts",
+  "core/rpc-agent-runner.ts",
+];
+const adapterReads = CALLER_ADAPTERS.slice(1)
+  .map((file) => join(SRC, file))
+  .flatMap((file) => code(file).match(/\b(callerFromKey|callerOfRun)\b/g) ?? []);
+quantities.deprecatedCallerReads = adapterReads.length;
 const consumerBypasses = coreFiles
   .filter((file) => !SESSION_SIDE.some((pattern) => pattern.test(relative(SRC, file))))
   .filter((file) => !WIRING.includes(relative(SRC, file)))
+  .filter((file) => !CALLER_ADAPTERS.includes(relative(SRC, file)))
   .flatMap((file) => (code(file).match(BYPASS_SESSION) ?? []).map((hit) => `${rel(file)}: ${hit}`));
 quantities.consumerBypasses = consumerBypasses.length;
 checks.push({
@@ -430,6 +452,33 @@ checks.push({
   measured: `${recordLeaks.length} leaks`,
   pass: recordLeaks.length === 0,
   detail: recordLeaks,
+});
+
+// --- C17 Everything outside Sessions goes through its public module ----------
+// Tests and the test kit build sessions from their parts, so only product code
+// is held to it.
+const internalImports = coreFiles
+  .filter((file) => !file.startsWith(`${SESSIONS}/`))
+  .flatMap((file) =>
+    [...read(file).matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)\.js["']/g)]
+      .map((match) => match[1]!)
+      .map((spec) =>
+        spec.startsWith("@/") ? join(SRC, spec.slice(2)) : resolve(join(file, ".."), spec),
+      )
+      .filter((target) => target.startsWith(`${SESSIONS}/`) && `${target}.ts` !== PUBLIC)
+      .map((target) => `${rel(file)}: ${relative(SRC, target)}`),
+  );
+quantities.internalImports = internalImports.length;
+const publicExports = [
+  ...read(PUBLIC).matchAll(/^\s+(?:type\s+)?(\w+),?$|export \{ (\w+) \}|export type \{ (\w+) \}/gm),
+].length;
+quantities.publicExports = publicExports;
+checks.push({
+  id: "C17",
+  name: "Code outside Sessions imports only its public module (agent-sessions/index.ts), never a file inside",
+  measured: `${internalImports.length} imports of internals; the public module exports ${publicExports} names`,
+  pass: internalImports.length === 0,
+  detail: [...new Set(internalImports)],
 });
 
 // --- Quantities without a target -------------------------------------------

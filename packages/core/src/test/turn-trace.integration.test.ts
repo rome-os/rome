@@ -5,7 +5,7 @@
  * covers the channel-adapter path.
  */
 
-import { withTurnLinks } from "../core/turn-context.js";
+import { withTurnLinks } from "../agent-sessions/turn-context.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { context, trace, type Context, type SpanContext } from "@opentelemetry/api";
 

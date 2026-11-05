@@ -8,11 +8,11 @@ import {
   type ManagerDeps,
   type SessionOpenOptions,
   type SurfaceKeeps,
-} from "../core/agent-session.js";
+} from "../agent-sessions/agent-session.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { callerFromKey } from "../core/session-caller.js";
-import { createSessionLog, openNamed } from "../core/session-log.js";
+import { createSessionLog, openNamed } from "../agent-sessions/rows/session-log.js";
 import {
   type ChannelSurface,
   sessionSurfaceOf,
@@ -21,7 +21,7 @@ import {
 import type { ModelReasoningEffort } from "../core/agent-runner.js";
 import type { ModelSelectionId } from "../core/model-selector.js";
 import type { ThreadContext } from "../core/types.js";
-import type { SessionConversation } from "../core/session-conversation.js";
+import type { SessionConversation } from "../agent-sessions/rows/session-conversation.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 
 export interface StoredKey {
