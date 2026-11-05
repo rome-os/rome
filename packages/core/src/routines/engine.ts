@@ -361,6 +361,8 @@ export class RoutineEngine {
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
                           whenWorkersBusy: "queue",
+                          // A retry keeps the payload out of its record, as the first try did.
+                          ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
                         }),
                       );
                       if (retryResult.status === "error") {

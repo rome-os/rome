@@ -293,4 +293,42 @@ describe("RoutineEngine fire context", () => {
     const clean = { execution: undefined, replay: undefined, session: undefined };
     expect(seen).toEqual([clean, clean]);
   });
+
+  it("keeps the payload out of a retry's record too, when the routine keeps none", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const contexts: Record<string, unknown>[] = [];
+    const actionEngine = {
+      run: async (_name: string, _args: unknown, context: Record<string, unknown>) => {
+        contexts.push(context);
+        if (contexts.length === 1) throw new Error("worker crashed");
+        return { status: "success", result: null };
+      },
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 1, systemClock);
+    let fire: ((payload: Record<string, unknown>) => Promise<void>) | undefined;
+    engine.registerProvider("event-bus", {
+      activate: async (_routine: unknown, onFire: typeof fire) => {
+        fire = onFire;
+      },
+      deactivate: () => {},
+    } as unknown as TriggerProvider);
+    await routines.create({
+      name: "follow",
+      trigger: { type: "event-bus", eventName: "x.y" },
+      actionName: "noop",
+      args: {},
+      keepTriggerPayload: false,
+    });
+    await engine.start();
+    await fire?.({ body: "a whole mail" });
+    for (let i = 0; i < 100 && contexts.length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(contexts).toHaveLength(2);
+    expect(contexts.map((context) => context.omitFromRecord)).toEqual([
+      ["__triggerPayload"],
+      ["__triggerPayload"],
+    ]);
+  });
 });

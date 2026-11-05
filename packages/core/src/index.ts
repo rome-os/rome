@@ -1114,7 +1114,7 @@ async function main() {
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
-    runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
+    runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
   });
   const agentSessionManager = createAgentSessionManager(
     {

@@ -65,6 +65,41 @@ describe("normalizeGithub", () => {
     expect(theirs).toMatchObject({ keep: true, event: { addressedTo: "other" } });
   });
 
+  it("tells a second request, a re-close or a re-assign apart, and keeps a redelivery's id", async () => {
+    const idOf = async (type: string, payload: Record<string, unknown>) => {
+      const result = await normalizeGithub(type, payload, ctx());
+      return result.keep ? result.event.id : undefined;
+    };
+    const at = (updatedAt: string) => ({ ...pr(), updated_at: updatedAt });
+    const request = (updatedAt: string) =>
+      reviewRequest({ requested_reviewer: { login: "octo-me" }, pull_request: at(updatedAt) });
+    const first = await idOf("pull_request", request("2026-11-04T10:00:00Z"));
+    // The same webhook delivered again keeps its id, so it is dropped as a repeat.
+    expect(await idOf("pull_request", request("2026-11-04T10:00:00Z"))).toBe(first);
+    // A second request on the same pull request is a new event.
+    expect(await idOf("pull_request", request("2026-11-05T09:00:00Z"))).not.toBe(first);
+
+    const close = (updatedAt: string) => ({
+      action: "closed",
+      repository,
+      sender: { login: "bob" },
+      pull_request: { ...at(updatedAt), merged: false },
+    });
+    expect(await idOf("pull_request", close("2026-11-04T11:00:00Z"))).not.toBe(
+      await idOf("pull_request", close("2026-11-04T12:00:00Z")),
+    );
+    const assign = (updatedAt: string) => ({
+      action: "assigned",
+      repository,
+      sender: { login: "bob" },
+      assignee: { login: "octo-me" },
+      issue: { number: 3, title: "Bug", user: { login: "alice" }, updated_at: updatedAt },
+    });
+    expect(await idOf("issues", assign("2026-11-04T11:00:00Z"))).not.toBe(
+      await idOf("issues", assign("2026-11-04T13:00:00Z")),
+    );
+  });
+
   it("makes a request of a team the guardian is on direct", async () => {
     const result = await normalizeGithub(
       "pull_request",

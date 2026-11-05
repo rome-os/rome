@@ -88,10 +88,11 @@ export interface ConciergeDeps {
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
+  /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
   runBackendTurn: (
     params: BackendTurnParams,
     options?: { quiet?: boolean; inputLabel?: string },
-  ) => Promise<void>;
+  ) => Promise<"completed" | "failed" | void>;
 }
 
 export class ConciergeService {
@@ -214,15 +215,19 @@ export class ConciergeService {
     return row?.id ?? null;
   }
 
-  /** Runs `prompt` as a system turn in the Concierge chat. A no-op before its first turn. */
+  /**
+   * Runs `prompt` as a system turn in the Concierge chat. Answers whether a
+   * turn ran to its end: false before the chat's first turn, and when the turn
+   * errored or was stopped.
+   */
   async runSystemTurn(
     chatId: string,
     prompt: string,
     options: { quiet?: boolean; inputLabel?: string } = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
     const sessionId = await this.runtimeSessionId(chatId);
-    if (!sessionId) return;
-    await this.deps.runBackendTurn(
+    if (!sessionId) return false;
+    const outcome = await this.deps.runBackendTurn(
       {
         agentName: CONCIERGE_AGENT_ID,
         sessionId,
@@ -232,6 +237,7 @@ export class ConciergeService {
       },
       options,
     );
+    return outcome === "completed";
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */

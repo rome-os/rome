@@ -1390,6 +1390,33 @@ describe("Concierge reminder", () => {
   });
 });
 
+describe("Concierge system turns", () => {
+  const serviceWith = (session: { id: string } | null, outcome: "completed" | "failed") => {
+    const turns: BackendTurnParams[] = [];
+    const service = new ConciergeService({
+      sessionManager: { findReusableSession: async () => session },
+      runBackendTurn: async (params: BackendTurnParams) => {
+        turns.push(params);
+        return outcome;
+      },
+    } as unknown as ConciergeDeps);
+    return { service, turns };
+  };
+
+  it("answers whether the turn ran to its end", async () => {
+    const done = serviceWith({ id: "runtime-1" }, "completed");
+    expect(await done.service.runSystemTurn(CONCIERGE_CHAT_ID, "lines")).toBe(true);
+    const failed = serviceWith({ id: "runtime-1" }, "failed");
+    expect(await failed.service.runSystemTurn(CONCIERGE_CHAT_ID, "lines")).toBe(false);
+  });
+
+  it("answers false, running nothing, before the chat's first turn", async () => {
+    const none = serviceWith(null, "completed");
+    expect(await none.service.runSystemTurn(CONCIERGE_CHAT_ID, "lines")).toBe(false);
+    expect(none.turns).toEqual([]);
+  });
+});
+
 describe("Concierge chat", () => {
   const serviceWith = (state: Record<string, unknown>, exists: boolean) => {
     const createSession = rs.fn(async () => {});

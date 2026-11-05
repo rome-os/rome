@@ -450,17 +450,17 @@ export function startConciergeFollowing(
       ),
     send: async (items, held) => {
       const chatId = await service.findChatId();
-      if (!chatId) {
-        log.info("following important", { items: items.length, held, delivered: false });
-        return;
-      }
       // The Concierge decides whether to tell each item now. Either way every
       // item also goes into the next digest.
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
-      await service.runSystemTurn(chatId, renderImportantTurn(items, held), {
-        quiet: true,
-        inputLabel: `Following · important (${items.length})`,
-      });
+      const ran =
+        chatId !== null &&
+        (await service.runSystemTurn(chatId, renderImportantTurn(items, held), {
+          quiet: true,
+          inputLabel: `Following · important (${items.length})`,
+        }));
+      // Items the Concierge never had stay owed, and the delivery tries again.
+      if (!ran) throw new Error("the Concierge's important turn did not run to its end");
       await deps.items.markOffered(
         items.map((item) => item.id),
         new Date(now()),
@@ -564,14 +564,17 @@ export function startConciergeFollowing(
     const owed = await deps.items.owedToDigest();
     if (owed.length === 0) return { items: 0 };
     const chatId = await service.findChatId();
-    log.info("following digest", { items: owed.length, delivered: chatId !== null });
-    if (!chatId) return { items: 0 };
-    await outsideAction(() =>
-      service.runSystemTurn(chatId, renderDigestTurn(owed), {
-        quiet: true,
-        inputLabel: `Following · digest (${owed.length})`,
-      }),
-    );
+    const ran =
+      chatId !== null &&
+      (await outsideAction(() =>
+        service.runSystemTurn(chatId, renderDigestTurn(owed), {
+          quiet: true,
+          inputLabel: `Following · digest (${owed.length})`,
+        }),
+      ));
+    log.info("following digest", { items: owed.length, delivered: ran });
+    // A digest that did not run to its end leaves its items for the next one.
+    if (!ran) return { items: 0 };
     await deps.items.markDigested(
       owed.map((item) => item.id),
       new Date(now()),

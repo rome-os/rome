@@ -62,6 +62,64 @@ describe("backend turn delivery", () => {
     });
   });
 
+  it.each([
+    ["completed", "completed"],
+    ["error", "failed"],
+    ["interrupted", "failed"],
+  ] as const)("reports a turn that ended %s as %s", async (status, outcome) => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+        { type: "result", content: "" },
+        { type: "turn_end", turnId: "turn-1", status, durationMs: 5 },
+      ],
+    ]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => undefined });
+      },
+    });
+    const params = {
+      agentName: "core:concierge",
+      sessionId: "s",
+      channel: "webchat",
+      threadId: "concierge",
+      prompt: "<external_events/>",
+    };
+    expect(await runner.runAndReport(params)).toBe(outcome);
+  });
+
+  it("reports a turn that never ran as failed", async () => {
+    const agentRunner = createMockAgentRunner([[]]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+    });
+    // The session queue drops the task without running it.
+    runner.setWebchatRuntime({ enqueueSessionTask: async () => undefined });
+    expect(
+      await runner.runAndReport({
+        agentName: "core:concierge",
+        sessionId: "s",
+        channel: "webchat",
+        threadId: "concierge",
+        prompt: "x",
+      }),
+    ).toBe("failed");
+  });
+
   it("asks the runner to keep a turn's input only when the caller labels it", async () => {
     const run = async (options?: { inputLabel?: string }) => {
       const agentRunner = createMockAgentRunner([

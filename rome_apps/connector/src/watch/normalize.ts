@@ -126,20 +126,29 @@ export async function normalizeGithub(
       const on = type === "pull_request" ? "pull-request" : "issue";
       const yours = same(loginOf(item.user), login);
       const shared = { subject: str(item.title), url: str(item.html_url) };
+      // One pull request or issue sees the same action again (a second review
+      // request, a close after a reopen, a re-assign). Its `updated_at` tells
+      // those apart, and stays the same when GitHub redelivers one webhook.
+      const at = str(item.updated_at);
+      const when = at ? `:${at}` : "";
       if (type === "pull_request" && payload.action === "review_requested") {
         const reviewer = loginOf(payload.requested_reviewer);
         const team = str(obj(payload.requested_team).slug);
         const org = str(obj(payload.organization).login) ?? repo.split("/")[0] ?? "";
         const ofYou =
           same(reviewer, login) || (team !== undefined && (await ctx.isTeamMember(org, team)));
-        return event("review_requested", `pr:${number}:review_requested:${reviewer ?? team}`, {
-          ...shared,
-          addressedTo: ofYou || yours ? "direct" : "other",
-          labels: [on, "review-requested", team && "team-review"],
-        });
+        return event(
+          "review_requested",
+          `pr:${number}:review_requested:${reviewer ?? team}${when}`,
+          {
+            ...shared,
+            addressedTo: ofYou || yours ? "direct" : "other",
+            labels: [on, "review-requested", team && "team-review"],
+          },
+        );
       }
       if (type === "pull_request" && payload.action === "closed") {
-        return event("your_pr_closed", `pr:${number}:closed`, {
+        return event("your_pr_closed", `pr:${number}:closed${when}`, {
           ...shared,
           addressedTo: yours ? "direct" : "other",
           labels: [on, item.merged === true ? "merged" : "closed"],
@@ -147,11 +156,15 @@ export async function normalizeGithub(
       }
       if (payload.action === "assigned") {
         const toYou = same(loginOf(payload.assignee), login);
-        return event("assigned_to_you", `${on}:${number}:assigned:${loginOf(payload.assignee)}`, {
-          ...shared,
-          addressedTo: toYou ? "direct" : "other",
-          labels: [on, "assigned"],
-        });
+        return event(
+          "assigned_to_you",
+          `${on}:${number}:assigned:${loginOf(payload.assignee)}${when}`,
+          {
+            ...shared,
+            addressedTo: toYou ? "direct" : "other",
+            labels: [on, "assigned"],
+          },
+        );
       }
       if (payload.action === "opened") {
         return event("new_pr_or_issue", `${on}:${number}:opened`, {

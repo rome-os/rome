@@ -180,6 +180,8 @@ function setup(
   const calls: [string, Record<string, unknown>][] = [];
   const omitted: [string, string[]][] = [];
   const turns: string[] = [];
+  /** While on, every Concierge turn fails to run to its end. */
+  const turnFails = { on: false };
   const inputLabels: (string | undefined)[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
@@ -323,6 +325,7 @@ function setup(
     ) => {
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
+      return !turnFails.on;
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
@@ -335,6 +338,7 @@ function setup(
     settings,
     action,
     turns,
+    turnFails,
     inputLabels,
     triaged,
     prompts,
@@ -855,6 +859,34 @@ describe("the follow pipeline", () => {
     expect(prompt).toContain('"What to hear about: Only what concerns me"');
     expect(prompt).toContain('"Ignore these people: dependabot"');
     expect(prompt).not.toContain('"ignorePeople"');
+    s.stop();
+  });
+
+  it("marks nothing when the Concierge's turn does not run to its end, and tries again", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e2: "digest" } });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.turnFails.on = true;
+    await fire(s, "e1");
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    // The important turn failed: e1 is still owed to the Concierge.
+    expect(s.turns).toHaveLength(1);
+    expect((await s.items.owedToConcierge()).map((i) => i.eventId)).toEqual(["e1"]);
+    // So does the digest: nothing is marked digested.
+    expect(await s.action("core:concierge_digest").execute({}, {} as never)).toEqual({
+      status: "ok",
+      data: { items: 0 },
+    });
+    expect((await s.items.owedToDigest()).map((i) => i.eventId)).toEqual(["e1", "e2"]);
+    // Once turns run again, the retry delivers e1 and the digest takes both.
+    s.turnFails.on = false;
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(await s.items.owedToConcierge()).toEqual([]);
+    expect(await s.action("core:concierge_digest").execute({}, {} as never)).toEqual({
+      status: "ok",
+      data: { items: 2 },
+    });
     s.stop();
   });
 
