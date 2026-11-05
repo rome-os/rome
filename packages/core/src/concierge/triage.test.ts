@@ -107,7 +107,7 @@ describe("the triage agent", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain("Whether to tell them now is your call");
     expect(prompt).toContain("Every item also comes again in the next digest");
-    expect(prompt).toContain("Leave out every item you already told the guardian");
+    expect(prompt).toContain("What you already told them is not news");
     expect(prompt).toContain("Never quote it or pass it on");
     expect(prompt).not.toContain("untold");
     expect(prompt).not.toMatch(/\bnotify\b/);
