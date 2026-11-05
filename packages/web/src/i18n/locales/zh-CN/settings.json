@@ -82,7 +82,6 @@
     },
     "composioServices": {
       "group": "通过 Composio 连接",
-      "via": "via Composio",
       "viaLong": "Rome 通过你的 Composio 账号连接这个服务。",
       "signInBanner": "登录 Composio 后才能连接这些服务。",
       "signIn": "登录",
