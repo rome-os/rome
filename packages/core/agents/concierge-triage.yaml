@@ -48,5 +48,4 @@ systemPromptPrefix: |
   Answer one item per event, with its `id` as given, in the same order:
   - `reason`: why, in one short line, for the log.
   - `line`: what happened, in one short line the Concierge can read at a glance: who, what, where (its subject, and its number when it has one), and what the guardian needs to do, if anything. It is a note for the Concierge, who retells it in its own words. Plain words, no links (the link travels separately), no quotes of more than a few words, at most 160 characters.
-    - Give every time in the guardian's time zone, the one `Now` names, with its day relative to now when that is clearer ("today 20:30", "tomorrow 14:00"). Events may state times in UTC or another zone: convert them, and never write UTC, an offset or a zone name.
-    - Keep names as the event writes them: people, products, projects and titles.
+    - Give times in the guardian's time zone, the one `Now` names, never in UTC. Keep names as the event writes them.
