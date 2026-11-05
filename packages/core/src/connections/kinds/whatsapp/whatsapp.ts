@@ -46,6 +46,9 @@ import {
  */
 const ROME_ID_PREFIX = "3EB0524F4D45";
 
+/** How many ids of live messages an adapter keeps, to leave out of a history sync. */
+const HEARD_IDS_KEPT = 5000;
+
 /** A new id for a message the adapter sends. */
 function romeMessageId(): string {
   return `${ROME_ID_PREFIX}${randomBytes(8).toString("hex").toUpperCase()}`;
@@ -103,6 +106,11 @@ export class WhatsAppAdapter {
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
   private qrCallback?: (qr: string) => void;
   private syncSink?: WhatsAppSyncSink;
+  /** When the current socket connected, or null before it has. */
+  private openedAt: Date | null = null;
+  /** Ids of messages from others heard live, which a history sync may
+   *  report again. */
+  private readonly heardLive = new Set<string>();
   private reconnectDelay = 1_000;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -194,6 +202,7 @@ export class WhatsAppAdapter {
       if (connection === "open") {
         this.reconnectDelay = 1_000; // reset on successful connection
         this.connectionStatus = "open";
+        this.openedAt = new Date();
         this.currentQr = null;
         log.info("connected");
 
@@ -266,6 +275,9 @@ export class WhatsAppAdapter {
 
       if (!this.handler) return;
       for (const waMsg of messages) {
+        if (!waMsg.key.fromMe) this.rememberHeard(waMsg.key.id);
+      }
+      for (const waMsg of messages) {
         if (!waMsg.message || waMsg.key.fromMe) continue;
         // A reaction is an emoji pinned to another message, not an inbound turn —
         // it is mirrored into the store above, but the agent should not answer it.
@@ -307,7 +319,14 @@ export class WhatsAppAdapter {
       this.persistContacts(contacts ?? []);
       this.persistChats(chats ?? []);
       this.persistMessages(messages ?? []);
-      this.recordHistory(messages ?? []);
+      // A message someone else said that is also delivered inbound is
+      // inbound recording's to record and raise: one recorded here first would
+      // never wake anything.
+      this.recordHistory(
+        this.handler
+          ? (messages ?? []).filter((m) => m.key.fromMe || !this.deliveredInbound(m))
+          : (messages ?? []),
+      );
     });
 
     this.sock.ev.on("contacts.upsert", (contacts) => {
@@ -383,6 +402,27 @@ export class WhatsAppAdapter {
     void this.syncSink.upsertMessages(inputs).catch((err) => {
       log.error("failed to persist whatsapp messages", { error: errMsg(err) });
     });
+  }
+
+  /**
+   * Whether `message`, from someone else, is or will be delivered inbound:
+   * heard live on this socket, or said since it connected, which WhatsApp
+   * delivers live as well as in a history sync.
+   */
+  private deliveredInbound(message: WAMessage): boolean {
+    if (message.key.id && this.heardLive.has(message.key.id)) return true;
+    const seconds = toSeconds(message.messageTimestamp);
+    return this.openedAt !== null && seconds != null && seconds * 1000 >= this.openedAt.getTime();
+  }
+
+  /** Remember that message `id` was heard live, keeping the latest few thousand. */
+  private rememberHeard(id: string | null | undefined): void {
+    if (!id) return;
+    this.heardLive.add(id);
+    if (this.heardLive.size > HEARD_IDS_KEPT) {
+      const oldest = this.heardLive.values().next().value;
+      if (oldest !== undefined) this.heardLive.delete(oldest);
+    }
   }
 
   /** Hand `messages`, which nothing delivers inbound, to Chats as history. */

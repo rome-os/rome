@@ -330,6 +330,33 @@ describe("WhatsAppAdapter", () => {
         expect(recorded).toEqual([{ ids: ["h1", "h2"], self: "1234567890@s.whatsapp.net" }]);
       });
 
+      it("leaves out of a history sync what someone else said that is delivered inbound", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        eventHandlers["connection.update"]({ connection: "open" });
+        const now = Math.floor(Date.now() / 1000) + 1;
+        const from = (id: string, fromMe: boolean, messageTimestamp: number) =>
+          makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe }, messageTimestamp });
+
+        await eventHandlers["messages.upsert"]({ messages: [from("heard", false, 1700000000)] });
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            from("heard", false, 1700000000),
+            from("since-connect", false, now),
+            from("before-connect", false, 1700000001),
+            from("guardian-since-connect", true, now),
+          ],
+        });
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([
+          ["before-connect", "guardian-since-connect"],
+        ]);
+      });
+
       it("hands over only what the guardian said while messages are delivered inbound", async () => {
         const { sink, recorded } = recordingSink();
         const delivered: string[] = [];
