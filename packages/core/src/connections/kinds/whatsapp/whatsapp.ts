@@ -36,6 +36,8 @@ import {
   textToSend,
 } from "../../outbound/send-refusals.js";
 
+/** How many sent message ids an adapter keeps, for telling its echoes apart. */
+const SENT_IDS_KEPT = 500;
 const log = createLogger("whatsapp");
 
 const MAX_RECONNECT_DELAY_MS = 60_000;
@@ -84,6 +86,11 @@ export class WhatsAppAdapter {
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
   private qrCallback?: (qr: string) => void;
   private syncSink?: WhatsAppSyncSink;
+  /** Ids of messages this adapter sent, so their echoes are not taken for
+   *  ones the guardian sent. */
+  private readonly sentIds = new Set<string>();
+  /** Sends in flight, by chat. */
+  private readonly sending = new Map<string, number>();
   private reconnectDelay = 1_000;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
@@ -243,7 +250,9 @@ export class WhatsAppAdapter {
       // What the guardian said on the account themselves is never delivered
       // below, so Chats records it here. With nothing listening below, nothing
       // is delivered at all, and every message is recorded here instead.
-      this.recordHistory(this.handler ? messages.filter((m) => m.key.fromMe) : messages);
+      this.recordHistory(
+        this.handler ? messages.filter((m) => m.key.fromMe && !this.isOwnSend(m)) : messages,
+      );
 
       if (!this.handler) return;
       for (const waMsg of messages) {
@@ -366,6 +375,30 @@ export class WhatsAppAdapter {
     });
   }
 
+  /**
+   * Whether `message` is the platform's echo of one this adapter sent. Chats
+   * records a send itself, and a send with attachments goes out as several
+   * messages whose ids it never learns. The echo may arrive while the send is
+   * still running, before its id is known, so a chat with a send in flight
+   * counts too.
+   */
+  private isOwnSend(message: WAMessage): boolean {
+    const id = message.key.id;
+    if (id && this.sentIds.has(id)) return true;
+    const chat = message.key.remoteJid;
+    return chat ? (this.sending.get(this.canonicalJid(chat)) ?? 0) > 0 : false;
+  }
+
+  /** Remember that this adapter sent the message `id`, keeping the latest few hundred. */
+  private rememberSent(id: string | null | undefined): void {
+    if (!id) return;
+    this.sentIds.add(id);
+    if (this.sentIds.size > SENT_IDS_KEPT) {
+      const oldest = this.sentIds.values().next().value;
+      if (oldest !== undefined) this.sentIds.delete(oldest);
+    }
+  }
+
   /** Hand `messages`, which nothing delivers inbound, to Chats as history. */
   private recordHistory(messages: WAMessage[]): void {
     const self = this.selfPnJid();
@@ -456,11 +489,18 @@ export class WhatsAppAdapter {
     });
     const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
+    const sock = this.sock;
+    const sendOne: typeof sock.sendMessage = async (...args) => {
+      const sent = await sock.sendMessage(...args);
+      this.rememberSent(sent?.key.id);
+      return sent;
+    };
 
+    this.sending.set(jid, (this.sending.get(jid) ?? 0) + 1);
     try {
       let messageId: string | undefined;
       if (text) {
-        const sent = await this.sock.sendMessage(jid, { text });
+        const sent = await sendOne(jid, { text });
         messageId = sent?.key.id ?? undefined;
       }
 
@@ -469,22 +509,22 @@ export class WhatsAppAdapter {
         const media = await readFile(att.source);
         switch (att.type) {
           case "image":
-            await this.sock.sendMessage(jid, {
+            await sendOne(jid, {
               image: media,
               caption: att.caption,
             });
             break;
           case "video":
-            await this.sock.sendMessage(jid, {
+            await sendOne(jid, {
               video: media,
               caption: att.caption,
             });
             break;
           case "audio":
-            await this.sock.sendMessage(jid, { audio: media, mimetype: "audio/mpeg" });
+            await sendOne(jid, { audio: media, mimetype: "audio/mpeg" });
             break;
           case "document":
-            await this.sock.sendMessage(jid, {
+            await sendOne(jid, {
               document: media,
               mimetype: "application/octet-stream",
               fileName: att.source.split("/").pop() ?? "file",
@@ -503,6 +543,10 @@ export class WhatsAppAdapter {
         error: err instanceof Error ? err.message : String(err),
       });
       throw err;
+    } finally {
+      const left = (this.sending.get(jid) ?? 1) - 1;
+      if (left > 0) this.sending.set(jid, left);
+      else this.sending.delete(jid);
     }
   }
 

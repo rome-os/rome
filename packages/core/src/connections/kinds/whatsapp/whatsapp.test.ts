@@ -348,6 +348,31 @@ describe("WhatsAppAdapter", () => {
         expect(recorded.map((batch) => batch.ids)).toEqual([["own1"]]);
       });
 
+      it("keeps the echoes of Rome's own sends out, whether they come during the send or after", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        const echo = (id: string) =>
+          eventHandlers["messages.upsert"]({
+            messages: [
+              makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id, fromMe: true } }),
+            ],
+          });
+        mockSendMessage.mockImplementationOnce(async () => {
+          await echo("during");
+          return { key: { id: "during" } };
+        });
+        mockSendMessage.mockImplementationOnce(async () => ({ key: { id: "after" } }));
+
+        await adapter.send("111@s.whatsapp.net" as ChatId, { text: "first" });
+        await adapter.send("111@s.whatsapp.net" as ChatId, { text: "second" });
+        await echo("after");
+        await echo("typed-on-phone");
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["typed-on-phone"]]);
+      });
+
       it("hands over every live message while nothing is delivered inbound", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);
