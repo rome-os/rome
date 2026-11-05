@@ -375,6 +375,9 @@
   },
   "modelSwitch": {
     "quota": "{{from}} quota ran out, switched to {{to}}",
+    "login": "{{from}} sign-in failed, switched to {{to}}",
+    "temporary": "{{from}} is temporarily unavailable, switched to {{to}}",
+    "model_limit": "{{fromModel}} limit reached, switched to {{toModel}}",
     "notice": "Switched to {{model}}"
   },
   "modelSelector": {
