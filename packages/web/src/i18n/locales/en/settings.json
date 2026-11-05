@@ -65,6 +65,7 @@
       "label": "Connections",
       "connected": "Connected",
       "available": "Available",
+      "needsAttention": "needs attention",
       "empty": {
         "connected": "Nothing is connected yet.",
         "available": "Everything here is connected."

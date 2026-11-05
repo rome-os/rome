@@ -35,7 +35,7 @@ import {
   type ConnectionCard,
   type ConnectionTab,
 } from "@/lib/connection-cards";
-import { connectionStatus, StatusIndicator } from "@/lib/connection-status";
+import { connectionStatus, StatusDot, StatusIndicator } from "@/lib/connection-status";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import type { ComposioServiceRow } from "@/lib/composio-services";
 import type { ApiConnection } from "@/lib/connections-api";
@@ -159,6 +159,9 @@ export function ConnectionsSection({
   const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
   const showAppKeys = tab === "connected" && matchesAppKeys;
   const needsAttention = (card: ConnectionCard) => connectionStatus(card).tone === "attention";
+  const connectedNeedsAttention =
+    connected.some(needsAttention) ||
+    composioServices.rows.connected.some((row) => row.needsAttention);
 
   const renderCard = (card: ConnectionCard) => (
     <Button
@@ -300,13 +303,19 @@ export function ConnectionsSection({
               aria-label={t("connections.tabs.label")}
               value={tab}
               onValueChange={chooseTab}
-              className="self-start"
+              className="self-start max-[360px]:[--control-px-center-md:var(--rome-space-1)]"
               options={(["available", "connected"] as const).map((value) => ({
                 value,
                 label: (
                   <span className="inline-flex items-center gap-2">
                     {t(`connections.tabs.${value}`)}
                     <span className="tabular-nums text-muted-foreground">{count(value)}</span>
+                    {value === "connected" && connectedNeedsAttention ? (
+                      <>
+                        <StatusDot tone="attention" />
+                        <span className="sr-only">{t("connections.tabs.needsAttention")}</span>
+                      </>
+                    ) : null}
                   </span>
                 ),
               }))}

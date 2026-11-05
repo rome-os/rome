@@ -65,6 +65,7 @@
       "label": "连接",
       "connected": "已连接",
       "available": "可添加",
+      "needsAttention": "需要关注",
       "empty": {
         "connected": "还没有任何连接。",
         "available": "这里的服务都已连接。"
