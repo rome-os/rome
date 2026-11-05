@@ -68,6 +68,8 @@
       "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
     },
     "messageDetails": "Message details",
+    "chooseFolder": "Choose folder…",
+    "removeFolder": "Remove folder",
     "composerMenu": "Add files or change the model",
     "placeholder": "Message",
     "empty": {

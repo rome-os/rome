@@ -24,7 +24,7 @@ const inputSchema = z.object({
     ),
 });
 
-export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps): Action {
+export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
     schema: inputSchema,
@@ -39,7 +39,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
         }
       }
 
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",

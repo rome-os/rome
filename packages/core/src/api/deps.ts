@@ -168,7 +168,8 @@ export interface ApiDeps {
     ReturnType<typeof createNodeDevicesService>,
     "getStatus" | "start" | "listFiles" | "listDevices" | "renameDevice" | "removeDevice"
   >;
-  provisionNodeCaller?: () => Promise<void>;
+  /** Starts what needs a linked instance: node caller, relay mailbox, favor sync. Never rejects. */
+  provisionAfterLink?: () => Promise<void>;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
    *  Never rejects. */
   autoConnectEmail?: () => Promise<void>;

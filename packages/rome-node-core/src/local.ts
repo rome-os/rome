@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { isRecord } from "./actions.js";
 import { cloudOrigin } from "./cloud.js";
+import { requestSignerToken } from "./signer.js";
 import { readPrivateJson } from "./storage.js";
 
 export interface NodeConfig {
@@ -35,9 +36,20 @@ export function nodeConfigFromEnvironment(env: Record<string, string | undefined
 export const callerCredentialPath = (config: NodeConfig) => join(config.directory, "caller.json");
 export const daemonStatePath = (config: NodeConfig) => join(config.directory, "daemon.json");
 
+/**
+ * Version 1 files hold a fixed `token`. Version 2 files hold `signerSocket` and no secret:
+ * each Cloud call and Gateway connection asks the signer for a fresh JWT.
+ */
 export interface CallerCredential {
   cloudUrl: string;
-  token: string;
+  token?: string;
+  signerSocket?: string;
+}
+
+/** Returns the token for a Cloud call or Gateway connection. Call it each time: v2 returns a fresh JWT. */
+export function callerToken(credential: CallerCredential): () => string | Promise<string> {
+  const { signerSocket, token } = credential;
+  return signerSocket ? () => requestSignerToken(signerSocket) : () => token as string;
 }
 
 export class CallerConfigurationError extends Error {
@@ -53,12 +65,12 @@ export async function readOptionalCallerCredential(
   config: NodeConfig,
 ): Promise<CallerCredential | null> {
   const value = await readPrivateJson(callerCredentialPath(config));
-  if (
-    !isRecord(value) ||
-    typeof value.cloudUrl !== "string" ||
-    typeof value.token !== "string" ||
-    !/^romedev_[A-Za-z0-9_-]{43}$/.test(value.token)
-  )
+  if (!isRecord(value) || typeof value.cloudUrl !== "string") return null;
+  if (value.version === 2)
+    return typeof value.signerSocket === "string" && isAbsolute(value.signerSocket)
+      ? { cloudUrl: cloudOrigin(value.cloudUrl), signerSocket: value.signerSocket }
+      : null;
+  if (typeof value.token !== "string" || !/^romedev_[A-Za-z0-9_-]{43}$/.test(value.token))
     return null;
   return { cloudUrl: cloudOrigin(value.cloudUrl), token: value.token };
 }

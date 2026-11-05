@@ -260,9 +260,7 @@ describe("ConnectionsSection — Connected attention dot", () => {
     renderSection([oauth("github", "authorized"), oauth("google")]);
     expect(dot()).toBeNull();
     expect(screen.queryByRole("radio", { name: /needs attention/ })).toBeNull();
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: /All/ }).getAttribute("aria-checked")).toBe("true");
     expect(within(connectedTab()).getByText("1")).toBeTruthy();
   });
 
@@ -294,7 +292,7 @@ describe("ConnectionsSection — Connected attention dot", () => {
           },
         }),
     },
-  ])("shows an attention dot for a $problem card without changing Available", ({ row }) => {
+  ])("shows an attention dot for a $problem card without changing All", ({ row }) => {
     renderSection([row(), oauth("google")]);
     expect(dot()).toBeTruthy();
     expect(dot()?.getAttribute("aria-hidden")).toBe("true");
@@ -305,10 +303,10 @@ describe("ConnectionsSection — Connected attention dot", () => {
     expect(within(connectedTab()).getByText("needs attention").className).toContain("sr-only");
     expect(within(connectedTab()).getByText("1")).toBeTruthy();
     expect(connectedTab().querySelector("svg")).toBeNull();
-    const available = screen.getByRole("radio", { name: /Available/ });
-    expect(available.getAttribute("aria-checked")).toBe("true");
-    expect(available.querySelector("span[aria-hidden]")).toBeNull();
-    expect(within(available).getByText("1")).toBeTruthy();
+    const all = screen.getByRole("radio", { name: /All/ });
+    expect(all.getAttribute("aria-checked")).toBe("true");
+    expect(all.querySelector("span[aria-hidden]")).toBeNull();
+    expect(within(all).getByText("2")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open Google" })).toBeTruthy();
   });
 
@@ -369,74 +367,105 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     // A broken connection stays connected and leads its group.
     expect(rowNames()).toEqual(["Open Telegram", "Open Slack", "Open GitHub"]);
     expect(within(tabRadio(/Connected/)).getByText("3")).toBeTruthy();
-    expect(within(tabRadio(/Available/)).getByText("2")).toBeTruthy();
+    expect(within(tabRadio(/All/)).getByText("5")).toBeTruthy();
   });
 
-  it("opens on Available when nothing is connected", () => {
+  it("opens on All when nothing is connected and includes App keys", () => {
     renderSection(minimalConnections());
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryAllByRole("link")).toEqual([]);
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
   });
 
-  it("shows what an available connection does, under its group", () => {
+  it("All mixes connected and unconnected rows with per-row anatomy", () => {
     renderSection(mixed());
-    fireEvent.click(tabRadio(/Available/));
-    expect(rowNames()).toEqual(["Open WhatsApp", "Open Google"]);
-    const accounts = screen.getByRole("region", { name: "Accounts and tools" });
-    expect(within(accounts).getByText("Work across your Google services as you")).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Messaging" })).toBeTruthy();
+    const github = screen.getByRole("button", { name: "Open GitHub" });
+    const google = screen.getByRole("button", { name: "Open Google" });
+    expect(within(github).getByText("Working")).toBeTruthy();
+    expect(within(github).queryByText("Connect")).toBeNull();
+    expect(github.querySelector("span.truncate.text-aux")).toBeNull();
+    expect(within(google).getByText("Connect")).toBeTruthy();
+    expect(within(google).getByText("Work across your Google services as you")).toBeTruthy();
+    expect(rowNames()).toEqual([
+      "Open Telegram",
+      "Open WhatsApp",
+      "Open Slack",
+      "Open GitHub",
+      "Open Google",
+    ]);
   });
 
-  it("lists Available first and opens there even with working and broken connections", () => {
+  it("All opens the connected detail and the unconnected connect ceremony", () => {
+    renderSection(mixed());
+    fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }),
+    ).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Google" }));
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Connect" }),
+    ).toBeTruthy();
+  });
+
+  it("All is first and default even with working and broken connections", () => {
     renderSection(mixed());
     expect(screen.getAllByRole("radio").map((tab) => tab.textContent)).toEqual([
-      "Available2",
+      "All5",
       "Connected3needs attention",
     ]);
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-    expect(rowNames()).toEqual(["Open WhatsApp", "Open Google"]);
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
+    expect(rowNames()).toEqual([
+      "Open Telegram",
+      "Open WhatsApp",
+      "Open Slack",
+      "Open GitHub",
+      "Open Google",
+    ]);
   });
 
-  it("jumps from Connected to Available when only Available matches", () => {
+  it("jumps from Connected to All when only All matches", () => {
     renderSection(mixed());
     fireEvent.click(tabRadio(/Connected/));
     fireEvent.change(screen.getByLabelText("Search connections"), {
       target: { value: "google" },
     });
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/All/).getAttribute("aria-checked")).toBe("true");
     expect(rowNames()).toEqual(["Open Google"]);
     expect(screen.queryByText("No connected service matches “google”.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("jumps from Available to Connected and clears back to Available", () => {
+  it("All search stays on All when only connected services match", () => {
     renderSection(mixed());
     const input = screen.getByLabelText("Search connections");
     fireEvent.change(input, { target: { value: "github" } });
-    expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
     expect(rowNames()).toEqual(["Open GitHub"]);
+    expect(within(tabRadio(/^All/)).getByText("1")).toBeTruthy();
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("respects a manual search tab until the query changes, including an empty tab", () => {
+  it("holds a manual empty Connected search tab until the query changes", () => {
     renderSection(mixed());
     const input = screen.getByLabelText("Search connections");
-    fireEvent.change(input, { target: { value: "github" } });
-    fireEvent.click(tabRadio(/Available/));
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByText("No available service matches “github”.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Show 1 in Connected" }));
-    expect(rowNames()).toEqual(["Open GitHub"]);
-    fireEvent.click(tabRadio(/Available/));
-    fireEvent.change(input, { target: { value: "git" } });
+    fireEvent.click(tabRadio(/Connected/));
+    fireEvent.change(input, { target: { value: "google" } });
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(tabRadio(/Connected/));
     expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("No connected service matches “google”.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 in All" }));
+    expect(rowNames()).toEqual(["Open Google"]);
+    fireEvent.click(tabRadio(/Connected/));
+    fireEvent.change(input, { target: { value: "goog" } });
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
     fireEvent.change(input, { target: { value: "" } });
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
   });
 
-  it.each([/Available/, /Connected/])("keeps the chosen tab when both tabs match", (chosen) => {
+  it.each([/All/, /Connected/])("keeps the chosen tab when both tabs match", (chosen) => {
     renderSection(mixed());
     fireEvent.click(tabRadio(chosen));
     fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "g" } });
@@ -456,7 +485,7 @@ describe("ConnectionsSection — tabs, search and groups", () => {
 
   it("matches what a connection does, not only its name", () => {
     renderSection(mixed());
-    fireEvent.click(tabRadio(/Available/));
+    fireEvent.click(tabRadio(/All/));
     fireEvent.change(screen.getByLabelText("Search connections"), {
       target: { value: "google services" },
     });
@@ -472,15 +501,15 @@ describe("ConnectionsSection — tabs, search and groups", () => {
       }),
     ]);
     const row = screen.getByRole("button", { name: "Open Shopify" });
-    expect(within(row).getByText("Unavailable")).toBeTruthy();
+    expect(within(row).getByText("Unavailable").getAttribute("title")).toBe("Not configured");
     expect(within(row).queryByText("Connect")).toBeNull();
   });
 
-  it("says nothing is connected and offers Available, above App keys", () => {
+  it("says nothing is connected and offers All, above App keys", () => {
     renderSection(minimalConnections());
     fireEvent.click(tabRadio(/Connected/));
     expect(screen.getByText("Nothing is connected yet.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show 2 in Available" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show 2 in All" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
   });
 
@@ -493,10 +522,10 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     expect(rowNames()).toEqual([]);
   });
 
-  it("stays on Available after the first service connects from it", () => {
+  it("stays on All after the first service connects from it", () => {
     const onRefresh = rs.fn(async () => null);
     const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/All/).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Open WhatsApp" }));
     rerender(
       sectionWith(
@@ -509,14 +538,14 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     );
     // The open dialog hides the page from the accessibility tree.
     expect(
-      screen.getByRole("radio", { name: /Available/, hidden: true }).getAttribute("aria-checked"),
+      screen.getByRole("radio", { name: /All/, hidden: true }).getAttribute("aria-checked"),
     ).toBe("true");
   });
 
   it("keeps the opening tab when a refresh brings the first connection", () => {
     const onRefresh = rs.fn(async () => null);
     const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/All/).getAttribute("aria-checked")).toBe("true");
     rerender(
       sectionWith(
         [
@@ -526,7 +555,7 @@ describe("ConnectionsSection — tabs, search and groups", () => {
         onRefresh,
       ),
     );
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/All/).getAttribute("aria-checked")).toBe("true");
   });
 
   it("keeps a manually chosen tab after a later refresh", () => {
@@ -537,32 +566,45 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("follows a service that connects during a search without changing the chosen tab", () => {
+  it("All keeps a service and the tab when it connects during search", () => {
     const onRefresh = rs.fn(async () => null);
     const { rerender } = render(sectionWith([oauth("google")], onRefresh));
     const input = screen.getByLabelText("Search connections");
     fireEvent.change(input, { target: { value: "google" } });
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/All/).getAttribute("aria-checked")).toBe("true");
     rerender(sectionWith([oauth("google", "authorized")], onRefresh));
-    expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
     expect(rowNames()).toEqual(["Open Google"]);
+    expect(
+      within(screen.getByRole("button", { name: "Open Google" })).getByText("Working"),
+    ).toBeTruthy();
     fireEvent.change(input, { target: { value: "" } });
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(/All/).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("shows App keys without a no-match message when only App keys matches", () => {
+  it.each([/^All/, /Connected/])("App keys is a matching row on both tabs", (chosen) => {
     renderSection(mixed());
+    fireEvent.click(tabRadio(chosen));
     fireEvent.change(screen.getByLabelText("Search connections"), {
       target: { value: "App keys" },
     });
-    expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
+    expect(tabRadio(chosen).getAttribute("aria-checked")).toBe("true");
+    expect(within(tabRadio(/^All/)).getByText("1")).toBeTruthy();
     expect(within(tabRadio(/Connected/)).getByText("1")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
-    expect(screen.queryByText("No connected service matches “App keys”.")).toBeNull();
-    expect(screen.queryByText("No available service matches “App keys”.")).toBeNull();
-    fireEvent.click(tabRadio(/Available/));
-    fireEvent.click(screen.getByRole("button", { name: "Show 1 in Connected" }));
-    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
+    expect(screen.queryByText(/No .*matches/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+  });
+
+  it("All searches descriptions only on unconnected rows", () => {
+    renderSection([oauth("google"), oauth("github", "authorized")]);
+    const input = screen.getByLabelText("Search connections");
+    fireEvent.change(input, { target: { value: "google services" } });
+    expect(rowNames()).toEqual(["Open Google"]);
+    fireEvent.change(input, { target: { value: "repositories" } });
+    expect(rowNames()).toEqual([]);
+    expect(screen.getByText("No service matches “repositories”.")).toBeTruthy();
+    expect(tabRadio(/^All/).getAttribute("aria-checked")).toBe("true");
   });
 
   it("clears the search on Escape", () => {
@@ -616,16 +658,14 @@ describe("ConnectionsSection — Composio row", () => {
     expect(screen.queryByText("Composio")).toBeNull();
   });
 
-  it("offers a Composio sign-in under Available while signed out", () => {
+  it("offers a Composio sign-in under All while signed out", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
     // The Via Composio group's banner stands in for the signed-out account row,
     // even before any Composio service is listed.
     expect(screen.queryByRole("button", { name: "Open Composio" })).toBeNull();
     const group = screen.getByRole("region", { name: "Via Composio" });
     expect(within(group).getByRole("button", { name: "Sign in" })).toBeTruthy();
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: /All/ }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("shows a connected Composio row when signed in", () => {
@@ -780,12 +820,14 @@ describe("ConnectionsSection — Composio services", () => {
   ];
   let failAccounts = false;
   let gmailGone = false;
+  let linearConnected = false;
   let calls: { url: string; method: string }[] = [];
 
   beforeEach(() => {
     calls = [];
     failAccounts = false;
     gmailGone = false;
+    linearConnected = false;
     rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -795,7 +837,12 @@ describe("ConnectionsSection — Composio services", () => {
         return failAccounts
           ? Response.json({ error: "composio_unavailable" }, { status: 502 })
           : Response.json({
-              items: accounts.filter((account) => !(gmailGone && account.toolkitSlug === "gmail")),
+              items: [
+                ...accounts.filter((account) => !(gmailGone && account.toolkitSlug === "gmail")),
+                ...(linearConnected
+                  ? [{ id: "linear-account", toolkitSlug: "linear", status: "ACTIVE" }]
+                  : []),
+              ],
             });
       if (url === "/api/apps/connector/connectors" && method === "POST")
         return Response.json({ authorizationUrl: "https://composio.example/auth/linear" });
@@ -809,8 +856,8 @@ describe("ConnectionsSection — Composio services", () => {
   const signedOut = () => composioStatus({ installed: true, loggedIn: false });
 
   it.each([
-    { chosen: /Available/, query: "gmail", result: /Connected/, row: "Open Gmail" },
-    { chosen: /Connected/, query: "linear", result: /Available/, row: "Connect Linear" },
+    { chosen: /^All/, query: "gmail", result: /^All/, row: "Open Gmail" },
+    { chosen: /Connected/, query: "linear", result: /All/, row: "Connect Linear" },
   ])("follows late Composio matches for $query", async ({ chosen, query, result, row }) => {
     let release: () => void = () => {};
     const loaded = new Promise<void>((resolve) => {
@@ -832,38 +879,33 @@ describe("ConnectionsSection — Composio services", () => {
     expect(screen.getByRole("radio", { name: chosen }).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("keeps a manual search tab through a Composio refresh until the query changes", async () => {
+  it("keeps a manual Connected search tab through refreshes until the query changes", async () => {
+    gmailGone = true;
     renderSection([oauth("github", "authorized")], signedIn());
     const input = screen.getByLabelText("Search connections");
+    fireEvent.click(screen.getByRole("radio", { name: /Connected/ }));
     fireEvent.change(input, { target: { value: "gmail" } });
-    await screen.findByRole("button", { name: "Open Gmail" });
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
-    const loads = calls.filter((call) => call.url === "/api/apps/connector/connectors").length;
-    gmailGone = true;
-    fireEvent(window, new Event("visibilitychange"));
     await screen.findByRole("button", { name: "Connect Gmail" });
-    expect(
-      calls.filter((call) => call.url === "/api/apps/connector/connectors").length,
-    ).toBeGreaterThan(loads);
+    fireEvent.click(screen.getByRole("radio", { name: /Connected/ }));
     gmailGone = false;
     fireEvent(window, new Event("visibilitychange"));
-    await screen.findByText("No available service matches “gmail”.");
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
+    await screen.findByRole("button", { name: "Open Gmail" });
+    gmailGone = true;
+    fireEvent(window, new Event("visibilitychange"));
+    await screen.findByText("No connected service matches “gmail”.");
+    expect(screen.getByRole("radio", { name: /Connected/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
     fireEvent.change(input, { target: { value: "gmai" } });
-    expect(await screen.findByRole("button", { name: "Open Gmail" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Connect Gmail" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /^All/ }).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("keeps Available as the opening tab after Composio finishes loading", async () => {
+  it("keeps All as the opening tab after Composio finishes loading", async () => {
     renderSection([oauth("github", "authorized")], signedIn());
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: /All/ }).getAttribute("aria-checked")).toBe("true");
     await screen.findByRole("button", { name: "Connect Linear" });
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: /All/ }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("shows an attention dot for an unfiltered Composio row that needs attention", async () => {
@@ -873,9 +915,82 @@ describe("ConnectionsSection — Composio services", () => {
     fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "google" } });
     expect(within(tab).getByText("0")).toBeTruthy();
     expect(tab.querySelector("span[aria-hidden]")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: /All/ }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("All groups connected and unconnected Composio rows together, attention first", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    const group = await screen.findByRole("region", { name: "Via Composio" });
+    await within(group).findByRole("button", { name: "Open Gmail" });
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((row) => row.getAttribute("aria-label")),
+    ).toEqual(["Open Notion", "Open Gmail", "Connect Linear"]);
+    const gmail = within(group).getByRole("button", { name: "Open Gmail" });
+    expect(within(gmail).getByText("Working")).toBeTruthy();
+    expect(within(gmail).queryByText("Reads and sends your email.")).toBeNull();
+    fireEvent.click(gmail);
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "Rome reaches this service through your Composio account.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("All matches Composio scopes only for unconnected rows", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    await screen.findByRole("button", { name: "Open Gmail" });
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "your email" },
+    });
+    expect(screen.queryByRole("button", { name: "Open Gmail" })).toBeNull();
+    expect(screen.getByText("No service matches “your email”.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "issues" } });
+    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeTruthy();
+  });
+
+  it("All keeps a Composio row after connecting during a name search", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    renderSection([oauth("github", "authorized")], signedIn());
+    await screen.findByRole("button", { name: "Connect Linear" });
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "linear" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect Linear" }));
+    await waitFor(() => expect(open).toHaveBeenCalled());
+    linearConnected = true;
+    fireEvent(window, new Event("visibilitychange"));
+    const row = await screen.findByRole("button", { name: "Open Linear" });
+    expect(within(row).getByText("Working")).toBeTruthy();
+    expect(within(row).queryByText("Tracks issues and projects.")).toBeNull();
+    expect(screen.getByRole("radio", { name: /^All/ }).getAttribute("aria-checked")).toBe("true");
+    expect(within(screen.getByRole("radio", { name: /^All/ })).getByText("1")).toBeTruthy();
+    expect(within(screen.getByRole("radio", { name: /Connected/ })).getByText("1")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Via Composio" }).contains(row)).toBe(true);
+    fireEvent.click(row);
+    expect(
+      within(screen.getByRole("dialog")).getByText("Tracks issues and projects."),
+    ).toBeTruthy();
+  });
+
+  it("All keeps an unconnected Composio row busy until connect resolves", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = rs.mocked(globalThis.fetch).getMockImplementation()!;
+    rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/apps/connector/connectors" && init?.method === "POST")
+        await pending;
+      return fetch(input, init);
+    });
+    renderSection([oauth("github", "authorized")], signedIn());
+    const row = await screen.findByRole("button", { name: "Connect Linear" });
+    fireEvent.click(row);
+    expect(row.hasAttribute("disabled")).toBe(true);
+    release();
+    await waitFor(() => expect(open).toHaveBeenCalled());
+    await waitFor(() => expect(row.hasAttribute("disabled")).toBe(false));
   });
 
   it("lists connected services under Accounts without per-row route labels, broken ones leading", async () => {
@@ -903,7 +1018,7 @@ describe("ConnectionsSection — Composio services", () => {
   it("offers the rest under Via Composio, and starts a connect in a new tab", async () => {
     const open = rs.spyOn(window, "open").mockReturnValue(null);
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /All/ }));
     const group = await screen.findByRole("region", { name: "Via Composio" });
     expect(within(group).queryByText("Sign in to Composio to connect these services.")).toBeNull();
     fireEvent.click(await within(group).findByRole("button", { name: "Connect Linear" }));
@@ -919,7 +1034,7 @@ describe("ConnectionsSection — Composio services", () => {
 
   it("asks for a Composio sign-in first, and lists no connected services while signed out", async () => {
     renderSection([oauth("github", "authorized")], signedOut());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /All/ }));
     const group = await screen.findByRole("region", { name: "Via Composio" });
     expect(within(group).getByText("Sign in to Composio to connect these services.")).toBeTruthy();
     const gmail = await within(group).findByRole("button", { name: "Connect Gmail" });
@@ -953,9 +1068,9 @@ describe("ConnectionsSection — Composio services", () => {
     );
   });
 
-  it("finds a Composio service by what it does on Available", async () => {
+  it("finds a Composio service by what it does on All", async () => {
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /All/ }));
     await screen.findByRole("button", { name: "Connect Linear" });
     fireEvent.change(screen.getByLabelText("Search connections"), {
       target: { value: "issues" },
@@ -993,7 +1108,7 @@ describe("ConnectionsSection — Composio services", () => {
     const open = rs.spyOn(window, "open").mockReturnValue(null);
     rs.mocked(toast).mockClear();
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /All/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Connect Linear" }));
     await waitFor(() => expect(toast).toHaveBeenCalled());
     const options = rs.mocked(toast).mock.calls[0]?.[1] as {
@@ -1096,7 +1211,7 @@ describe("ConnectionsSection — Composio services", () => {
       return new Response(url === "/api/approvals" ? "[]" : "{}", { status: 200 });
     });
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /All/ }));
     await waitFor(() =>
       expect(calls.some((call) => call.url === "/api/apps/connector/catalog")).toBe(true),
     );

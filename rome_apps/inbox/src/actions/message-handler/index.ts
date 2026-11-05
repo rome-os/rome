@@ -14,7 +14,6 @@ import type {
   PersonMappingRepository,
   PersonRecord,
   PolicyEngine,
-  ReplyDeliveryReport,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -63,7 +62,7 @@ export interface SentinelDecision {
 }
 
 type CollectedAgentResult =
-  | { success: true; content: string; turnId?: string; replyDelivery?: ReplyDeliveryReport }
+  | { success: true; content: string; turnId?: string }
   | { success: false; error: string };
 
 // ---------------------------------------------------------------------------
@@ -288,12 +287,10 @@ async function collectAgentResult(
   let response = "";
   let lastError = "";
   let turnId: string | undefined;
-  let replyDelivery: ReplyDeliveryReport | undefined;
   for await (const msg of runner.run(params)) {
     if (msg.type === "turn_start") {
       turnId = msg.turnId;
     }
-    if (msg.type === "turn_end" && msg.replyDelivery) replyDelivery = msg.replyDelivery;
     if (msg.type === "result") response = msg.content;
     if (msg.type === "error") lastError = msg.error;
     emitAgentMessage?.({ ...msg, agent: agentName });
@@ -302,7 +299,7 @@ async function collectAgentResult(
     log.warn("agent returned error instead of result", { agentName, error: lastError });
     return { success: false, error: lastError };
   }
-  return { success: true, content: response, turnId, ...(replyDelivery ? { replyDelivery } : {}) };
+  return { success: true, content: response, turnId };
 }
 
 function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
@@ -387,10 +384,6 @@ async function handleTrustedMessage(
       romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
-      // The guardian can see the reply as it is written in a direct
-      // conversation. Everyone else's reply passes Envoy whole first. The host
-      // streams only when reply streaming is on and the channel can.
-      ...(bondLevel === "guardian" && args.threadType === "private" ? { streamReply: true } : {}),
       threadContext: {
         connectionId,
         channel,
@@ -432,19 +425,6 @@ async function handleTrustedMessage(
   // Skip envoy for guardian — send directly
   if (bondLevel === "guardian") {
     log.info("skipping envoy (guardian)", { channel, channelUserId });
-    // The host streamed the reply. Only a stream that sent nothing at all may
-    // be sent again: any other outcome may already show on the platform.
-    const streamed = mainResult.replyDelivery;
-    if (streamed && streamed.status !== "failed") {
-      await deps.approvalsRepo.create({
-        type: "outgoing_message",
-        requestedBy: targetAgent,
-        description: `Skipped envoy (guardian), streamed: ${streamed.status}`,
-        payload: { response, channel, threadId, messageId, channelUserId, streamed },
-        status: "auto_approved",
-      });
-      return { status: "ok", data: { action: "streamed", response, streamed } };
-    }
     await sendAnswer(deps, {
       channel,
       threadId,

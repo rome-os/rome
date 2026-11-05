@@ -35,7 +35,7 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
     let exhaustCredits = false;
     const gatewayTurnIds: unknown[] = [];
     const gateway = createServer((request, response) => {
-      if (request.method !== "POST" || request.url !== "/v1/responses") {
+      if (request.method !== "POST" || request.url !== "/_internal/rome-credits/v1/responses") {
         response.writeHead(404).end();
         return;
       }
@@ -109,6 +109,9 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
     };
     const previousOrigin = process.env.PANTHEON_BASE_ORIGIN;
     process.env.PANTHEON_BASE_ORIGIN = `http://127.0.0.1:${address.port}`;
+    // This mock listens where core's credits proxy would.
+    const previousPort = process.env.INTERNAL_API_PORT;
+    process.env.INTERNAL_API_PORT = String(address.port);
     const newManager = () =>
       new CodexAppServerManager({
         cwd: home,
@@ -187,6 +190,8 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
       manager.close();
       if (previousOrigin === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
       else process.env.PANTHEON_BASE_ORIGIN = previousOrigin;
+      if (previousPort === undefined) delete process.env.INTERNAL_API_PORT;
+      else process.env.INTERNAL_API_PORT = previousPort;
       await new Promise<void>((resolve) => gateway.close(() => resolve()));
       await new Promise((resolve) => setTimeout(resolve, 100));
       await rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

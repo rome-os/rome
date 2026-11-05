@@ -84,7 +84,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -131,15 +130,10 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
-/** How a reply streams to Feishu: edited messages, or streaming cards. */
-type FeishuStreamingStyle = "message" | "card";
-
 interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableImpersonation?: boolean;
-  enableReplyStreaming?: boolean;
-  feishuReplyStreamingStyle?: FeishuStreamingStyle;
   experimentalConcierge?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
@@ -1518,10 +1512,6 @@ function ImpersonationAdvancedSection({
 }
 
 /** Features still being tried out, each off until a guardian switches it on.
- *  Reply streaming is the first: with it off, Rome sends each reply whole. The
- *  setting is `enableReplyStreaming`, read by the host on every reply.
- *  `feishuReplyStreamingStyle` chooses how a reply streams to Feishu, cards
- *  unless it says messages, read for each message a reply creates.
  *  `experimentalConcierge` shows the Concierge chat under Chats. */
 function ExperimentalFeaturesSection({
   settings,
@@ -1533,21 +1523,7 @@ function ExperimentalFeaturesSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
-  const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
-    settings.feishuReplyStreamingStyle === "message" ? "message" : "card",
-  );
   const [concierge, setConcierge] = useState(settings.experimentalConcierge ?? false);
-
-  function toggleReplyStreaming(next: boolean) {
-    setReplyStreaming(next);
-    void onSave({ enableReplyStreaming: next });
-  }
-
-  function chooseFeishuStyle(next: FeishuStreamingStyle) {
-    setFeishuStyle(next);
-    void onSave({ feishuReplyStreamingStyle: next });
-  }
 
   function toggleConcierge(next: boolean) {
     setConcierge(next);
@@ -1563,38 +1539,6 @@ function ExperimentalFeaturesSection({
         </SectionHeading>
       </SectionHeader>
       <FormRows>
-        <SettingsToggleRow
-          title={t("advanced.experimental.replyStreaming.title")}
-          description={t("advanced.experimental.replyStreaming.description")}
-          label={t("advanced.experimental.replyStreaming.toggleLabel")}
-          checked={replyStreaming}
-          onChange={toggleReplyStreaming}
-          disabled={saving}
-        />
-        <FormRow>
-          <FormRowHeading>
-            <FormRowLabel>{t("advanced.experimental.feishuStreamingStyle.title")}</FormRowLabel>
-            <FormRowDescription>
-              {t("advanced.experimental.feishuStreamingStyle.description")}
-            </FormRowDescription>
-          </FormRowHeading>
-          <FormRowControl>
-            <SegmentedControl
-              aria-label={t("advanced.experimental.feishuStreamingStyle.title")}
-              size="sm"
-              value={feishuStyle}
-              onValueChange={chooseFeishuStyle}
-              disabled={saving || !replyStreaming}
-              options={[
-                {
-                  value: "message",
-                  label: t("advanced.experimental.feishuStreamingStyle.message"),
-                },
-                { value: "card", label: t("advanced.experimental.feishuStreamingStyle.card") },
-              ]}
-            />
-          </FormRowControl>
-        </FormRow>
         <SettingsToggleRow
           title={t("advanced.experimental.concierge.title")}
           description={t("advanced.experimental.concierge.description")}

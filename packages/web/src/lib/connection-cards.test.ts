@@ -567,6 +567,18 @@ describe("Connections tabs and groups", () => {
     ).toEqual(["slack", "github"]);
   });
 
+  it("orders All groups by attention, connected, then unconnected, otherwise stably", () => {
+    const cards = buildConnectionCards([
+      conn({ connectionKind: "github", grants: { user: "unauthorized" } }),
+      conn({ connectionKind: "google", grants: { user: "authorized" } }),
+      conn({ connectionKind: "slack", grants: { workspace: "degraded" } }),
+      conn({ connectionKind: "shopify", grants: { store: "authorized" } }),
+    ]);
+    expect(
+      groupConnectionCards(cards, needsAttention)[0]?.cards.map((card) => card.service),
+    ).toEqual(["slack", "google", "shopify", "github"]);
+  });
+
   it("drops an empty group unless the caller keeps it", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "telegram", grants: { bot: "authorized" } }),

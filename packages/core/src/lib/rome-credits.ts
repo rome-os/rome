@@ -1,5 +1,5 @@
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -32,7 +32,7 @@ function isStringArray(value: unknown): value is string[] {
 export async function fetchRomeCredits(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<RomeCreditsView | null> {
-  const token = getInstanceToken();
+  const token = await cloudBearer();
   const origin = getRomeCloudOrigin();
   if (!token || !origin) return null;
 

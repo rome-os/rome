@@ -104,12 +104,31 @@ export function composioAdapter(parts: ComposioAdapterParts): WatchAdapter {
     source: catalog.source,
     catalog,
     events: [...byEvent.keys()],
+    viaComposioWebhook: true,
     async connected(env) {
       if (!(await env.composio.signedIn().catch(() => false))) return false;
       const accounts = await env.composio.accounts().catch(() => []);
       return accounts.some((a) => a.toolkit === catalog.source && a.status === "ACTIVE");
     },
     account: (env) => parts.account(env, service),
+    // A kind is unarmed when any trigger it listens on is not active for the connected account.
+    async unarmedKinds(env) {
+      const [active, accountId] = await Promise.all([
+        env.composio.activeTriggers(),
+        env.composio.accountId(service),
+      ]);
+      return catalog.kinds
+        .filter((kind) =>
+          kind.triggers
+            .map((trigger) => byEvent.get(eventNameOf(trigger)))
+            .some(
+              (spec) =>
+                spec !== undefined &&
+                !active.some((trigger) => armsWatch(trigger, spec, accountId)),
+            ),
+        )
+        .map((kind) => kind.kind);
+    },
     async ensure(env, { kinds, dryRun }) {
       const specs = [
         ...new Set(

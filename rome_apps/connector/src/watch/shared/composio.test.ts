@@ -1,3 +1,4 @@
+import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { describe, expect, it } from "@rstest/core";
 import type { ActiveTrigger } from "../../api/composio-client.js";
 import {
@@ -6,8 +7,9 @@ import {
   CALENDAR_STARTING_SOON,
   calendarAdapter,
 } from "../adapters/googlecalendar/index.js";
-import { GMAIL_TRIGGER_CONFIG, GMAIL_TRIGGER_SLUG } from "../adapters/gmail/index.js";
+import { GMAIL_TRIGGER_CONFIG, GMAIL_TRIGGER_SLUG, gmailAdapter } from "../adapters/gmail/index.js";
 import { LINEAR_COMMENT_CREATED } from "../adapters/linear/index.js";
+import type { WatchEnv } from "../types.js";
 import { armsWatch } from "./composio.js";
 
 const gmail = { toolkit: "gmail", slug: GMAIL_TRIGGER_SLUG, config: GMAIL_TRIGGER_CONFIG };
@@ -74,5 +76,40 @@ describe("armsWatch for a workspace-wide trigger", () => {
         "ca_me",
       ),
     ).toBe(false);
+  });
+});
+
+describe("unarmedKinds", () => {
+  const env = (active: () => Promise<ActiveTrigger[]>): WatchEnv => ({
+    app: {} as AppActionRuntimeDeps,
+    relayDepositUrl: async () => "https://relay.example/h/mbox",
+    composio: {
+      signedIn: async () => true,
+      accounts: async () => [],
+      accountId: async () => "ca_me",
+      read: async () => ({}),
+      activeTriggers: active,
+      webhookTarget: async () => "ours",
+      ensureTriggers: async () => ({ ok: true, subscription: "active" }),
+    },
+  });
+
+  it("names no kind when every trigger is armed for the connected account", async () => {
+    await expect(gmailAdapter.unarmedKinds?.(env(async () => [trigger()]))).resolves.toEqual([]);
+  });
+
+  it("names a kind whose trigger is missing, or armed only for another account", async () => {
+    await expect(gmailAdapter.unarmedKinds?.(env(async () => []))).resolves.toEqual(["new_mail"]);
+    await expect(
+      gmailAdapter.unarmedKinds?.(
+        env(async () => [trigger({ connectedAccountIds: ["ca_other"] })]),
+      ),
+    ).resolves.toEqual(["new_mail"]);
+  });
+
+  it("throws when Composio cannot list the triggers", async () => {
+    await expect(
+      gmailAdapter.unarmedKinds?.(env(async () => Promise.reject(new Error("fetch failed")))),
+    ).rejects.toThrow("fetch failed");
   });
 });

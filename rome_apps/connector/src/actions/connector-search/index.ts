@@ -51,7 +51,7 @@ const inputSchema = z.object({
     .describe("Max tools to return (default 10)"),
 });
 
-export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps): Action {
+export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
     schema: inputSchema,
@@ -62,7 +62,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       if (toolkit && !isSupportedToolkit(toolkit)) {
         return { status: "error", error: unsupportedToolkitHint(toolkit) };
       }
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",

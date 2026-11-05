@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { getInstanceToken } from "../../lib/instance-identity.js";
+import { cloudBearer } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 
 // Dashboard/app-facing relay for Showcase preset cases (shareable agent-trace
@@ -31,8 +31,8 @@ function romeCloudOrigin(): string | null {
 // verifyInstanceRequest, an account/CLI token via the store session — so the
 // fallback lets a not-yet-enrolled instance (local dev / self-host) act as the
 // signed-in account. The token is presented only to Rome Cloud, never to the app.
-function cloudAuthToken(): string | null {
-  const instance = getInstanceToken();
+async function cloudAuthToken(): Promise<string | null> {
+  const instance = await cloudBearer();
   if (instance) return instance;
   const account = process.env.ROME_CLOUD_TOKEN?.trim();
   return account && account.length > 0 ? account : null;
@@ -88,7 +88,7 @@ export function showcasePresetRoutes(): Hono {
 
   app.get("/showcase-presets/can-publish", async (c) => {
     const origin = romeCloudOrigin();
-    const token = cloudAuthToken();
+    const token = await cloudAuthToken();
     if (!origin || !token) {
       c.header("Cache-Control", "no-store");
       return c.json({ canPublish: false });
@@ -110,7 +110,7 @@ export function showcasePresetRoutes(): Hono {
   app.post("/showcase-presets/publish", async (c) => {
     const origin = romeCloudOrigin();
     if (!origin) return c.json({ error: "unconfigured" }, 503);
-    const token = cloudAuthToken();
+    const token = await cloudAuthToken();
     if (!token) return c.json({ error: "no_token" }, 401);
 
     const payload = await c.req.json().catch(() => null);
@@ -138,7 +138,7 @@ export function showcasePresetRoutes(): Hono {
   app.delete("/showcase-presets/:id", async (c) => {
     const origin = romeCloudOrigin();
     if (!origin) return c.json({ error: "unconfigured" }, 503);
-    const token = cloudAuthToken();
+    const token = await cloudAuthToken();
     if (!token) return c.json({ error: "no_token" }, 401);
     const id = c.req.param("id");
     let upstream: Response;

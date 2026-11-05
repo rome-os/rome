@@ -58,21 +58,19 @@
       "clear": "清除搜索",
       "noMatch": {
         "connected": "没有与“{{query}}”匹配的已连接服务。",
-        "available": "没有与“{{query}}”匹配的可添加服务。"
+        "all": "没有与“{{query}}”匹配的服务。"
       }
     },
     "tabs": {
       "label": "连接",
       "connected": "已连接",
-      "available": "可添加",
+      "all": "全部",
       "needsAttention": "需要关注",
       "empty": {
-        "connected": "还没有任何连接。",
-        "available": "这里的服务都已连接。"
+        "connected": "还没有任何连接。"
       },
       "show": {
-        "connected": "在已连接中查看 {{count}} 个",
-        "available": "在可添加中查看 {{count}} 个"
+        "all": "在全部中查看 {{count}} 个"
       }
     },
     "groups": {
@@ -100,8 +98,15 @@
         "ready": "正常",
         "notReady": "需要设置",
         "unavailable": "此实例不可用",
+        "elsewhere": "正推送到另一个 Rome",
         "setUp": "重新设置",
         "done": "事件推送已设置。"
+      },
+      "project": {
+        "title": "项目",
+        "label": "Composio 项目",
+        "default": "{{name}}（默认）",
+        "switched": "请在这个项目里重新连接服务，然后让 Concierge 重新关注它们。"
       }
     },
     "loadFailedFallback": "加载连接失败。",
@@ -768,21 +773,10 @@
     "experimental": {
       "title": "实验性功能",
       "description": "仍在试用的功能。每项默认关闭，之后可能调整或移除。",
-      "replyStreaming": {
-        "title": "回复流式输出",
-        "description": "适用于守护者在 Telegram、飞书和 Discord 的私聊。在 Telegram 中，回复以纯文本显示。回复中途失败时不会重发，可能停在未完成的状态。",
-        "toggleLabel": "边生成边发送回复"
-      },
       "concierge": {
         "title": "Concierge",
         "description": "在对话列表里增加一个对话：代理像发消息一样用短消息和你聊天，较长的工作交给可以打开查看的任务对话。",
         "toggleLabel": "在对话中显示 Concierge"
-      },
-      "feishuStreamingStyle": {
-        "title": "飞书流式样式",
-        "description": "消息每条最多编辑 20 次，之后回复在新消息里继续。卡片以打字效果显示文字。",
-        "message": "消息",
-        "card": "卡片"
       }
     },
     "developerSettings": {

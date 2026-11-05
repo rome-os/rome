@@ -81,3 +81,32 @@ describe("runInstanceIdentityHeartbeatTick", () => {
     expect(store.data.has(SETTING_KEY)).toBe(true);
   });
 });
+
+describe("runInstanceIdentityHeartbeatTick in signer mode", () => {
+  afterEach(() => {
+    rs.unstubAllEnvs();
+    setInstanceTokenInMemory(null);
+  });
+
+  it("runs the check without an instance token and leaves clearing to it", async () => {
+    rs.stubEnv("ROME_SIGNER_SOCKET", "/run/rome-signer/signer.sock");
+    const store = memoryStore({ instanceToken: TOKEN });
+    setInstanceTokenInMemory(TOKEN);
+    const proveFn = prove("unknown");
+
+    await runInstanceIdentityHeartbeatTick({ store, prove: proveFn });
+
+    expect(proveFn).toHaveBeenCalledTimes(1);
+    expect(getInstanceToken()).toBe(TOKEN);
+    expect(store.data.has(SETTING_KEY)).toBe(true);
+  });
+
+  it("checks even when no token is stored", async () => {
+    rs.stubEnv("ROME_SIGNER_SOCKET", "/run/rome-signer/signer.sock");
+    const proveFn = prove("signer_unavailable");
+
+    await runInstanceIdentityHeartbeatTick({ store: memoryStore(), prove: proveFn });
+
+    expect(proveFn).toHaveBeenCalledTimes(1);
+  });
+});

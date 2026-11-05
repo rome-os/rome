@@ -16,7 +16,11 @@ function renderCreateForm() {
   render(
     <ProjectSelector
       t={i18n.getFixedT("en", "chat")}
-      projectCatalog={{ rootPath: "/projects", defaultPath: "/projects", projects: [] }}
+      projectCatalog={{
+        rootPath: "/projects",
+        defaultPath: "/projects",
+        projects: [],
+      }}
       projectsLoading={false}
       projectsError={null}
       draftProjectName="general"
@@ -164,6 +168,29 @@ describe("project selector list", () => {
   });
 });
 
+describe("project selector without a trigger or new-project props", () => {
+  it("shows no trigger button, and opens through menuOpen", async () => {
+    const props = baseProps();
+    const { rerender } = render(<ProjectSelector {...props} hideTrigger menuOpen={false} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+
+    rerender(<ProjectSelector {...props} hideTrigger menuOpen />);
+    expect(await screen.findByRole("combobox")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Project" })).toBeNull();
+  });
+
+  it("leaves out the new-project row without onCreateProject", () => {
+    const { onCreateProject: _omitted, ...props } = baseProps();
+    const { unmount } = render(<ProjectSelector {...props} />);
+    expect(screen.getByRole("option", { name: /alpha/ })).toBeTruthy();
+    expect(screen.queryByText("Create project")).toBeNull();
+    unmount();
+    render(<ProjectSelector {...baseProps()} />);
+    expect(screen.getByText("Create project")).toBeTruthy();
+  });
+});
+
 describe("project selector create form", () => {
   it("submits on Enter even though the form sits inside the popover", async () => {
     // The form is deliberately outside <Command>, whose root would otherwise
@@ -199,7 +226,10 @@ describe("project selector devices", () => {
         { name: ".zshrc", type: "file" },
       ],
     },
-    "/Users/ray/code": { parent: "/Users/ray", entries: [{ name: "rome", type: "dir" }] },
+    "/Users/ray/code": {
+      parent: "/Users/ray",
+      entries: [{ name: "rome", type: "dir" }],
+    },
     "/Users": { parent: "/", entries: [{ name: "ray", type: "dir" }] },
   };
 
@@ -371,7 +401,11 @@ describe("project selector devices", () => {
       await screen.findByText("Update rome-node on this device to browse its folders."),
     ).toBeTruthy();
     expect(
-      (screen.getByRole("button", { name: "Use this folder" }) as HTMLButtonElement).disabled,
+      (
+        screen.getByRole("button", {
+          name: "Use this folder",
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
     await user.click(screen.getByRole("button", { name: "Back" }));
     const old = await screen.findByRole("option", { name: /old-linux/ });
@@ -410,7 +444,11 @@ describe("project selector devices", () => {
       };
       return (window.rome as { device: { pickFolder?: ReturnType<typeof rs.fn> } }).device;
     }
-    const connectedMac = { state: "connected", deviceId: "mac", name: "macbook" };
+    const connectedMac = {
+      state: "connected",
+      deviceId: "mac",
+      name: "macbook",
+    };
     const filesCalls = (fetchSpy: ReturnType<typeof stubDevices>) =>
       fetchSpy.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/files"));
 

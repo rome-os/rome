@@ -8,7 +8,7 @@ import {
   sanitizeDrainUrl,
   type RelayDrainSetting,
 } from "../relay/settings.js";
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 
@@ -59,7 +59,7 @@ interface MintResponse {
 export async function ensureRelayMailbox(
   deps: EnsureRelayMailboxDeps,
 ): Promise<EnsureRelayMailboxResult> {
-  const token = getInstanceToken();
+  const token = await cloudBearer();
   if (!token) return { status: "not_enrolled" };
 
   const origin = getRomeCloudOrigin();

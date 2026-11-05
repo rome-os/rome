@@ -29,7 +29,6 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
-import type { FeishuStreamingStyle } from "../../participation/reply-delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
@@ -140,8 +139,6 @@ export interface FeishuDescriptorDeps {
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
-  /** How a streamed reply shows, read for each message it creates. */
-  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
@@ -563,7 +560,6 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
-            replyStreamingStyle: deps.replyStreamingStyle,
             onFault: routeFault,
           };
           const adapter = new FeishuAdapter(config, createChannel);
@@ -616,7 +612,6 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,
-            replyDelivery: adapter.replyDelivery(),
           };
           return {
             start(deliver, fault): void {

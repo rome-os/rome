@@ -16,9 +16,6 @@ import type { Accounts } from "../accounts/accounts.js";
 import { AccountNotConnected } from "./connected-account.js";
 import { channelList, joinLaterChannel } from "./connected-account-list.js";
 import type { ConnectionPortsDeps } from "./connection-ports.js";
-import { ConnectionPacing } from "../../participation/reply-delivery/connection-pacing.js";
-import { type DeliveryTransport, plainText } from "../../connections/sending.js";
-import { systemClock } from "../../lib/clock.js";
 
 const noAccounts: Accounts = {
   listAccounts: async () => ({ accounts: [] }),
@@ -46,7 +43,6 @@ function talkKind(
   direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
   activity: ChannelActivity | null = null,
   directory: TalkDirectory | null = null,
-  replyDelivery: DeliveryTransport | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
   return {
@@ -72,7 +68,6 @@ function talkKind(
               ...(direct && { directMessaging: direct }),
               ...(activity && { activity }),
               ...(directory && { directory }),
-              ...(replyDelivery && { replyDelivery }),
             };
           },
         },
@@ -564,35 +559,5 @@ describe("joinLaterChannel", () => {
       expect(heard.map((event) => event.message.messageId)).toEqual(["to the second bot", "next"]),
     );
     expect(channels.filter((channel) => channel.name === `later-${second.id}`)).toHaveLength(1);
-  });
-
-  it("paces a later channel's writes with its Connection's pacer, so its replies can stream", async () => {
-    testDb = createTestDb();
-    const service = talkKind("telegram", {}, null, null, null, {
-      capabilities: {
-        maxPartLength: 10,
-        edit: false,
-        budget: { burst: 1, refillMs: 1, conversationSpacingMs: 0 },
-      },
-      codec: plainText,
-      create: async () => ({ messageId: "m", chatId: "c" }),
-    });
-    const registry = new ConnectionRegistry({
-      repository: new DrizzleConnectionsRepository(testDb.db),
-    });
-    registry.register(service.descriptor);
-    const connection = await registry.connect("telegram");
-    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
-      material: { token: "t" },
-      expiresAt: "never",
-    });
-    const pacing = new ConnectionPacing(systemClock, async () => true);
-
-    const channel = joinLaterChannel(
-      { registry, admit: async () => true, channelOf: () => "later", pacing, channels: [] },
-      connection,
-    );
-
-    expect(channel?.send?.replies?.pacer).toBe(pacing.pacerFor(connection));
   });
 });

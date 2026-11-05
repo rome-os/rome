@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { ROME_CREDITS_PROXY_KEY } from "./rome-credits-provider.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
 import { SharedCodexAccountService } from "./account-service.js";
 import {
@@ -371,16 +372,23 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     return { clients, manager };
   };
 
-  it("passes the instance credential and credits provider definition to the app-server", async () => {
+  it("gives the app-server the proxy key and credits provider, and no Rome Cloud credential", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     setInstanceTokenInMemory("romeinst_wiring_test");
     const { clients, manager } = capture();
     try {
       await manager.warmup();
-      expect(clients[0].options.env.ROME_CREDITS_TOKEN).toBe("romeinst_wiring_test");
+      const env = clients[0].options.env;
+      expect(env.ROME_CREDITS_TOKEN).toBe(ROME_CREDITS_PROXY_KEY);
+      expect(Object.values(env)).not.toContain("romeinst_wiring_test");
       const args = clients[0].options.configArgs ?? [];
-      expect(args.some((arg) => arg.includes('base_url="https://cloud.example/v1"'))).toBe(true);
+      expect(
+        args.some((arg) =>
+          arg.includes('base_url="http://127.0.0.1:4141/_internal/rome-credits/v1"'),
+        ),
+      ).toBe(true);
       expect(args.join(" ")).not.toContain("romeinst_wiring_test");
+      expect(args.join(" ")).not.toContain("cloud.example");
     } finally {
       manager.close();
       setInstanceTokenInMemory(null);

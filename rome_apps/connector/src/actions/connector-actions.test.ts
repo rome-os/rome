@@ -36,9 +36,9 @@ afterEach(() => {
   rmSync(homeDir, { recursive: true, force: true });
 });
 
-// The actions ignore their deps before the credential check, so a bare stub is
-// enough to construct them.
-const deps = {} as unknown as AppActionRuntimeDeps;
+// The actions read only their database from deps before the credential check,
+// so a stub that carries one is enough to construct them.
+const deps = { appContext: { db: {} } } as unknown as AppActionRuntimeDeps;
 
 const config = (name: string): ActionConfig => ({
   name,

@@ -3,7 +3,7 @@ import { RenewalUnavailable } from "../connections/errors.js";
 import { eq, lt } from "drizzle-orm";
 import { type OAuthAttemptIntent, oauthPendingAttempts } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { isOAuthProvider, SHOPIFY_INSTALL_URL, type OAuthProvider } from "./oauth-providers.js";
 import type { OAuthTokenBundle } from "./oauth-token-bundle.js";
@@ -142,7 +142,7 @@ export async function redeemRomeCloudOAuthHandoff(
   // The instance authenticates the back-channel leg with its enrolled
   // token. Without an enrolled token there is no caller identity to broker
   // on behalf of.
-  const instanceToken = getInstanceToken();
+  const instanceToken = await cloudBearer();
   if (!instanceToken) {
     throw new Error("This instance is not enrolled with Rome Cloud.");
   }
@@ -249,7 +249,7 @@ export async function refreshRomeCloudOAuthGrant(
   if (!romeCloudOrigin) {
     throw new RenewalUnavailable("Rome Cloud origin is not configured for OAuth refresh.");
   }
-  const instanceToken = getInstanceToken();
+  const instanceToken = await cloudBearer();
   if (!instanceToken) {
     throw new RenewalUnavailable("This instance is not enrolled with Rome Cloud.");
   }

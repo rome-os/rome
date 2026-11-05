@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DeviceConnector } from "./connector.js";
 import type { GatewayClientOptions } from "./client.js";
 import type { OutboundEnvelope } from "./protocol.js";
@@ -254,5 +258,35 @@ describe("CLI device connector", () => {
     }
     await rs.waitFor(() => expect(busy).toBe(72));
     expect(f.sent.length + f.frames.length + channels).toBe(128);
+  });
+});
+
+describe("signer credential", () => {
+  it("sends a fresh JWT with every Cloud call", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rome-connector-signer-"));
+    const socketPath = join(directory, "signer.sock");
+    let issued = 0;
+    const signer = createServer((_req, res) => {
+      res.end(JSON.stringify({ token: `eyJ${++issued}.e30.sig` }));
+    });
+    await new Promise<void>((resolve) => signer.listen(socketPath, resolve));
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json({ items: [] }));
+    const connector = new DeviceConnector({
+      credential: { cloudUrl: "https://cloud.example", signerSocket: socketPath },
+    });
+    try {
+      await connector.list();
+      await connector.list();
+      const bearers = fetch.mock.calls.map(
+        ([, init]) => (init?.headers as Record<string, string>).Authorization,
+      );
+      expect(bearers).toEqual(["Bearer eyJ1.e30.sig", "Bearer eyJ2.e30.sig"]);
+    } finally {
+      connector.stop();
+      signer.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

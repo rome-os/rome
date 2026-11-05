@@ -40,7 +40,7 @@ function creditsPayer(
   const payer = createRomeCreditsPayer({
     aiToolState: { get: () => value },
     appServerManager: fakeManager(hooks.onSet, hooks.onRestart),
-    getInstanceToken: () => token,
+    getCredentialId: () => token,
     hasRomeCloud: () => romeCloud,
     fetchRomeCredits,
   });
@@ -353,7 +353,7 @@ describe("Rome credits payer", () => {
         setDefaultProvider,
         restart: () => {},
       },
-      getInstanceToken: () => "romeinst_123",
+      getCredentialId: () => "romeinst_123",
       hasRomeCloud: () => true,
       fetchRomeCredits: async () => view(),
     });

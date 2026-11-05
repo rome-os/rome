@@ -1,6 +1,7 @@
 import { APIError } from "@composio/client";
 import type { Action, ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { ComposioProjectUnconfirmedError } from "../api/composio-client.js";
 import * as composioWebhookModule from "../api/composio-webhook.js" with { rstest: "importActual" };
 import * as sharedModule from "../shared.js" with { rstest: "importActual" };
 
@@ -12,12 +13,14 @@ import * as sharedModule from "../shared.js" with { rstest: "importActual" };
 
 const mocks = rs.hoisted(() => ({
   loadConnectorClient: rs.fn(),
+  loadCredentialClient: rs.fn(),
   ensureWebhookRegistered: rs.fn(),
 }));
 
 rs.mock("../shared.js", () => ({
   ...sharedModule,
   loadConnectorClient: mocks.loadConnectorClient,
+  loadCredentialClient: mocks.loadCredentialClient,
 }));
 
 rs.mock("../api/composio-webhook.js", () => ({
@@ -97,12 +100,23 @@ describe("connector_login with a saved key", () => {
   const login = () => createConnectorLogin(config("connector_login"), deps).execute({});
 
   it("reports signed_in when the saved key pings OK", async () => {
-    mocks.loadConnectorClient.mockResolvedValue({ ping: async () => ({ ok: true }) });
+    mocks.loadCredentialClient.mockResolvedValue({ ping: async () => ({ ok: true }) });
     expect(await login()).toEqual({ status: "ok", data: { status: "signed_in" } });
   });
 
+  it("shows the sign-in card for a revoked key before the project is confirmed", async () => {
+    mocks.loadConnectorClient.mockRejectedValue(new ComposioProjectUnconfirmedError());
+    mocks.loadCredentialClient.mockResolvedValue({
+      ping: async () => ({ ok: false, status: 401, message: "revoked" }),
+    });
+    expect(await login()).toMatchObject({
+      status: "pending_interaction",
+      interaction: { render: { componentId: "login-card" } },
+    });
+  });
+
   it("shows the sign-in card again when Composio rejects the saved key", async () => {
-    mocks.loadConnectorClient.mockResolvedValue({
+    mocks.loadCredentialClient.mockResolvedValue({
       ping: async () => ({ ok: false, status: 401, message: "revoked" }),
     });
     const result = await login();
@@ -120,7 +134,7 @@ describe("connector_login with a saved key", () => {
     [0, "fetch failed"],
     [503, "Service Unavailable"],
   ])("reports an error, not a verdict, when the ping fails with %i", async (status, message) => {
-    mocks.loadConnectorClient.mockResolvedValue({
+    mocks.loadCredentialClient.mockResolvedValue({
       ping: async () => ({ ok: false, status, message }),
     });
     const result = await login();
