@@ -15,7 +15,7 @@ The first plan for this feature was several independent Concierges, each with it
 
 ## Decision
 
-Rome has one Concierge per owner, with a main chat and any number of other Concierge chats. Memory, follows, tasks, digest times and quiet hours are shared. Each chat has its own transcript and agent session, and each follow sends its alerts to exactly one chat. The digest goes to the main chat, grouped by chat.
+Rome has one Concierge per owner, with a main chat and any number of topic chats. Memory, follows, tasks, digest times and quiet hours are shared. Each chat has its own transcript and agent session, and the Concierge reads another of its chats only when a question needs it. Each follow sends its alerts to exactly one chat. The digest goes to the main chat, grouped by chat.
 
 ## Alternatives
 

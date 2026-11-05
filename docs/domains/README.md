@@ -103,4 +103,4 @@ Diffs still owed to the model, each a change of its own:
 - The channel record goes.
 - Email and WhatsApp accounts lose Rome's reach at disconnect like every other, and connecting again reaches the same connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
-- The guardian can start Concierge chats besides the main one, and each follow and task names its Concierge chat. Today the Concierge has one chat.
+- The guardian can start topic chats besides the main chat, and each follow and task names its Concierge chat. Today the Concierge has one chat.

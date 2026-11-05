@@ -64,16 +64,36 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 
 ## Concierge chat
 
-A dashboard chat where its owner talks with the Concierge. Each owner has one main Concierge chat and may start others, each for one topic such as the calendar or a project.
+A dashboard chat where its owner talks with the Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat talks to the same Concierge, with one memory, one list of follows and one list of tasks.
 
-- A Concierge chat is a chat of its own, not a thread: what is said in one does not show in another. Every Concierge chat talks to the same Concierge, with one memory, one list of follows and one list of tasks.
+- A Concierge chat is a chat of its own, not a thread. What is said in one does not show in another, and each has its own agent session.
+- The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
 - A Concierge chat belongs to its owner, as every dashboard chat does. Today the guardian is the only owner.
-- The main chat exists while the Concierge is on, and it is never archived or deleted. Another Concierge chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. Its owner can **rename**, **archive** and **delete** it.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One thing is followed once, whatever chat asks for it.
-- A task's result comes back to the Concierge chat the task started from.
+- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it.
+
+## Main chat
+
+The one Concierge chat each owner always has.
+
+- The main chat exists while the Concierge is on, and it is never archived or deleted.
 - The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
-- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to the main chat, and the Concierge says so there.
-- The dashboard's word for a Concierge chat other than the main one is not settled.
+- Alerts and tasks whose Concierge chat is archived or deleted come here.
+
+## Topic chat
+
+A Concierge chat its owner starts for one topic, such as the calendar or a project. It stands beside the main chat, not under it.
+
+- A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
+- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and unfinished tasks to the main chat, and the Concierge says so there.
+- An owner may have any number of topic chats.
+
+## Task chat
+
+A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
+
+- A task chat has a row in the Concierge's task list. The owner of the Concierge chat that started it can open it and write in it.
+- A task chat carries one piece of work. It gets no alerts and no digest.
 
 ## Reply rule
 
@@ -187,9 +207,10 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **"Agent" for a Dot or Muse.** Agent means one of Rome's own agents, which the guardian defines and runs. A Dot or Muse runs elsewhere and answers to someone else's rules, so one word for both would need context to tell them apart.
 - **Assistants' chats mixed into the dashboard's own chats.** The guardian talks to Rome in one and watches Rome talk to another agent in the other. Mixed together, a chat with Muse reads as a chat with Rome.
 - **The guardian's line in an assistant's chat going to main.** It would put two conversations in one place: the guardian with main, and Rome with the assistant. Talking about an assistant with main belongs in the dashboard's own chat.
-- **"Side chat" for a Concierge chat other than the main one.** Muse uses the word, but in Rome a side chat is a fork of a chat from one of its turns, carrying that chat's history. A Concierge chat starts empty and belongs to no other chat.
-- **"Channel" for a Concierge chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
-- **A Concierge chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.
+- **"Side chat" for a topic chat.** Muse uses the word, but in Rome a side chat is a fork of a chat from one of its turns, carrying that chat's history. A Concierge chat starts empty and belongs to no other chat.
+- **"Channel" for a topic chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
+- **"Sub chat" for a topic chat.** It reads as a chat under another, which is what a task chat is. A topic chat stands beside the main chat.
+- **A topic chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.
 - **Several Concierges, each with its own memory, follows and tasks.** One event would be triaged and told once per Concierge, and the isolation it promises does not exist inside one Rome. The reasons are in [One Concierge with several chats](../adrs/one-concierge-with-several-chats.md).
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
