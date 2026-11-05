@@ -12,6 +12,7 @@ import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import type { LoggedTurn, SessionLog } from "./agent-session.js";
+import { turnFacts, withTurnExecution } from "./turn-context.js";
 import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
 import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
@@ -249,6 +250,21 @@ describe("AgentSession turn usage", () => {
     const next = await manager.open(AGENT, caller, surface);
     expect(stale.sessionId).toBe(first.sessionId);
     expect(next.sessionId).not.toBe(first.sessionId);
+  });
+
+  it("runs a turn without the facts its caller set, so a turn its tools send reads its own", async () => {
+    let seen: ReturnType<typeof turnFacts> | undefined;
+    nextRun = async function* () {
+      seen = turnFacts();
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.open(AGENT, "place:test:facts", { cards: false });
+    const handle = withTurnExecution({ executionId: "outer" }, () =>
+      session.sendTurn({ prompt: "hello" }),
+    );
+    await drain(handle.events);
+
+    expect(seen).toEqual({});
   });
 
   it("records each finished turn once with its accounting, funding, and provider turn id", async () => {

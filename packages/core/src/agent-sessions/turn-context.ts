@@ -33,3 +33,9 @@ export function withTurnLinks<T>(links: Link[] | undefined, fn: () => T): T {
 export function withTurnExecution<T>(execution: CurrentActionContext | undefined, fn: () => T): T {
   return execution ? facts.run({ ...facts.getStore(), execution }, fn) : fn();
 }
+
+/** Runs `fn` with no turn facts set, so the work of a turn already sent, and
+ *  any turn its tools send, does not take the facts its caller set. */
+export function outsideTurnFacts<T>(fn: () => T): T {
+  return facts.exit(fn);
+}

@@ -43,7 +43,7 @@ import type {
   CurrentActionContext,
 } from "@rome-os/app-runtime";
 import { getCurrentActionContext } from "@rome-os/app-runtime";
-import { turnFacts } from "./turn-context.js";
+import { outsideTurnFacts, turnFacts } from "./turn-context.js";
 import { createNullModelSession } from "../core/agent-runner.js";
 import { runDefer, type DeferInput } from "../core/defer.js";
 import type { EventSources } from "../events/event-sources.js";
@@ -3451,9 +3451,11 @@ class AgentSessionImpl implements AgentSession {
     // asynchronously in `runOneTurn`; the events iterable above stays empty
     // until then. Caller can already read `turnId` synchronously. The callback
     // swallows its own failures, so `runExclusive` never rejects here — the
-    // fire-and-forget promise is intentionally discarded.
-    void this.turnMutex
-      .runExclusive(
+    // fire-and-forget promise is intentionally discarded. The facts the
+    // caller set were read above; the turn's work runs without them, so a
+    // turn a tool sends reads its own.
+    void outsideTurnFacts(() =>
+      this.turnMutex.runExclusive(
         async () => {
           sink.providerTurnIdAtStart = this.modelSession.lastProviderTurnId;
           try {
@@ -3479,8 +3481,8 @@ class AgentSessionImpl implements AgentSession {
           }
         },
         input.inputId ? 1 : 0,
-      )
-      .finally(() => this.emitStatus());
+      ),
+    ).finally(() => this.emitStatus());
 
     return {
       turnId,
