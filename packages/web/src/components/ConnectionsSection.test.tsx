@@ -878,7 +878,7 @@ describe("ConnectionsSection — Composio services", () => {
     );
   });
 
-  it("lists connected services under Accounts, marked via Composio, broken ones leading", async () => {
+  it("lists connected services under Accounts without per-row route labels, broken ones leading", async () => {
     renderSection([oauth("github", "authorized")], signedIn());
     fireEvent.click(screen.getByRole("radio", { name: /Connected/ }));
     const accountsGroup = screen.getByRole("region", { name: "Accounts and tools" });
@@ -890,8 +890,14 @@ describe("ConnectionsSection — Composio services", () => {
     // bridged GitHub account never shows as a Composio row.
     expect(names).toEqual(["Open Notion", "Open GitHub", "Open Composio", "Open Gmail"]);
     const notion = within(accountsGroup).getByRole("button", { name: "Open Notion" });
-    expect(within(notion).getByText("via Composio")).toBeTruthy();
+    expect(within(accountsGroup).queryByText("via Composio")).toBeNull();
     expect(within(notion).getByText("Broken")).toBeTruthy();
+    fireEvent.click(notion);
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "Rome reaches this service through your Composio account.",
+      ),
+    ).toBeTruthy();
   });
 
   it("offers the rest under Via Composio, and starts a connect in a new tab", async () => {
@@ -931,6 +937,9 @@ describe("ConnectionsSection — Composio services", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Reads and sends your email.")).toBeTruthy();
+    expect(
+      within(dialog).getByText("Rome reaches this service through your Composio account."),
+    ).toBeTruthy();
     // Gmail works, so there is nothing to reconnect.
     expect(within(dialog).queryByRole("button", { name: "Reconnect" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));

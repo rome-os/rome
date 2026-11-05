@@ -82,7 +82,6 @@
     },
     "composioServices": {
       "group": "Via Composio",
-      "via": "via Composio",
       "viaLong": "Rome reaches this service through your Composio account.",
       "signInBanner": "Sign in to Composio to connect these services.",
       "signIn": "Sign in",

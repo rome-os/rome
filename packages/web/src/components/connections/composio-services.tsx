@@ -183,15 +183,7 @@ export function ComposioServiceRowButton({
       <span className="flex min-w-0 items-center gap-3">
         <ComposioServiceBadge glyph={row.glyph} />
         <span className="flex min-w-0 flex-col">
-          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-            <span className="truncate text-ui text-foreground">{row.name}</span>
-            {/* On Available the Via Composio heading already says so. */}
-            {connected ? (
-              <span className="text-aux text-muted-foreground">
-                {t("connections.composioServices.via")}
-              </span>
-            ) : null}
-          </span>
+          <span className="truncate text-ui text-foreground">{row.name}</span>
           {!connected && row.scope ? (
             <span className="truncate text-aux text-muted-foreground">{row.scope}</span>
           ) : null}
