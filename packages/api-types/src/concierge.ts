@@ -137,8 +137,13 @@ export interface ConciergeFollowOptionDto {
 /** One thing the Concierge follows at a source, with its settings as they are now. */
 export interface ConciergeFollowDto {
   target: string;
-  /** `active`, `off` when every kind is off, or `unavailable` while its source is not ready. */
+  /**
+   * `active`, `off` when every kind is off, or `unavailable` while its source
+   * is not ready or a kind on is not delivered.
+   */
   state: "active" | "off" | "unavailable";
+  /** Which kinds on are not delivered and what to do, when that makes it unavailable. */
+  reason?: string;
   kinds: { kind: string; on: boolean }[];
   /** Every option of the source, with the value the follow uses. */
   options: Record<string, string | boolean | string[]>;

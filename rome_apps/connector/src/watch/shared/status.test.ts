@@ -2,8 +2,10 @@ import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { describe, expect, it, rs } from "@rstest/core";
 import { createGithubAdapter } from "../adapters/github/index.js";
 import { ADAPTERS } from "../registry.js";
+import type { ActiveTrigger } from "../../api/composio-client.js";
 import type { WatchEnv } from "../types.js";
 import {
+  COMPOSIO_TRIGGER_MISSING_REASON,
   COMPOSIO_WEBHOOK_ELSEWHERE_REASON,
   composioServices,
   listWatchSources as listWith,
@@ -19,6 +21,7 @@ interface WatchSourceDeps {
   composioAccounts(): Promise<{ toolkit: string; status: string }[]>;
   composioAccount(service: string): Promise<string>;
   composioWebhookTarget(): Promise<"ours" | "elsewhere" | "none" | "unknown">;
+  composioActiveTriggers(): Promise<ActiveTrigger[]>;
 }
 
 /** The registry's adapters over the fakes: GitHub's deps injected, each Composio account read from them. */
@@ -42,6 +45,7 @@ const listWatchSources = (d: WatchSourceDeps) => {
       accountId: async () => "ca_test",
       read: async () => ({}),
       webhookTarget: d.composioWebhookTarget,
+      activeTriggers: d.composioActiveTriggers,
       ensureTriggers: async () => ({ ok: true, subscription: "active" }),
     },
   };
@@ -63,6 +67,8 @@ const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
   ],
   composioAccount: async (service) => (service === "stripe" ? "Acme Inc" : "me@example.com"),
   composioWebhookTarget: async () => "ours",
+  // Unknown unless a case says otherwise, so no kind is flagged.
+  composioActiveTriggers: async () => Promise.reject(new Error("not read in this case")),
   ...extra,
 });
 
@@ -165,6 +171,35 @@ describe("listWatchSources", () => {
       deps({ composioWebhookTarget: async () => Promise.reject(new Error("fetch failed")) }),
     );
     expect(failing.watch.filter((w) => w.status === "error")).toEqual([]);
+  });
+
+  it("says which kinds of a ready Composio source have no active trigger, and leaves GitHub alone", async () => {
+    const active = rs.fn(async (): Promise<ActiveTrigger[]> => []);
+    const { watch } = await listWatchSources(deps({ composioActiveTriggers: active }));
+    const byService = new Map(watch.map((w) => [w.service, w]));
+    expect(byService.get("gmail")).toMatchObject({
+      status: "ready",
+      undelivered: { kinds: ["new_mail"], reason: COMPOSIO_TRIGGER_MISSING_REASON },
+    });
+    expect(byService.get("github")?.undelivered).toBeUndefined();
+    expect(byService.get("notion")?.undelivered).toBeUndefined();
+    expect(active).toHaveBeenCalledTimes(1);
+  });
+
+  it("flags no kind when the triggers cannot be read, and the webhook going elsewhere wins", async () => {
+    const unknown = await listWatchSources(deps());
+    expect(unknown.watch.filter((w) => w.undelivered)).toEqual([]);
+    const elsewhere = await listWatchSources(
+      deps({
+        composioWebhookTarget: async () => "elsewhere",
+        composioActiveTriggers: async () => [],
+      }),
+    );
+    expect(elsewhere.watch.find((w) => w.service === "gmail")).toMatchObject({
+      status: "error",
+      statusReason: COMPOSIO_WEBHOOK_ELSEWHERE_REASON,
+    });
+    expect(elsewhere.watch.filter((w) => w.undelivered)).toEqual([]);
   });
 
   it("reads the Calendar account on its own, so a Gmail-only Rome cannot watch Calendar", async () => {

@@ -8,8 +8,9 @@ description: |
   connecting it). `watch`: for each service this app can watch, its status
   (ready, not_connected, no_relay, error) with a reason saying what is
   missing, the account events concern, the target format, the kinds of
-  event in guardian-readable words with the raw events behind each, and the
-  options that tune them. Reads only; changes nothing.
+  event in guardian-readable words with the raw events behind each, the
+  options that tune them, and `undelivered`: the kinds whose subscription at
+  the source is missing, with what to do. Reads only; changes nothing.
 entry: ./index.ts
 visibility: explicit
 complexity: simple

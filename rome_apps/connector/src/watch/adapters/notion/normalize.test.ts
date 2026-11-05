@@ -251,6 +251,7 @@ describe("a Notion integration the workspace owns", () => {
         accountId: async () => "ca_ws",
         read: async () => workspaceBot,
         webhookTarget: async () => "ours" as const,
+        activeTriggers: async () => [],
         ensureTriggers: async () => ({ ok: true as const, subscription: "active" }),
       },
     } as unknown as WatchEnv;

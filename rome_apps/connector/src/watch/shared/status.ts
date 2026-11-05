@@ -38,6 +38,12 @@ export interface WatchSection {
   status: WatchStatus;
   /** What is missing and how to fix it, when the status is not ready. */
   statusReason?: string;
+  /**
+   * The kinds whose events are not arriving because their subscription at the
+   * source is missing, with what to do. A follow with one of them on cannot
+   * receive those events.
+   */
+  undelivered?: { kinds: string[]; reason: string };
   /** Whose account the events concern: the GitHub login, the mailbox address. */
   account?: string;
   target: Watchable["target"];
@@ -51,6 +57,9 @@ export const NO_RELAY_REASON =
 
 export const COMPOSIO_WEBHOOK_ELSEWHERE_REASON =
   "Events for this Composio project go to another Rome. To bring them here, choose Set up again under Event delivery in Settings → Connections; the other Rome then stops getting them. Or give each Rome its own Composio project.";
+
+export const COMPOSIO_TRIGGER_MISSING_REASON =
+  "Composio is not sending these events: their trigger is missing or turned off there. Ask me to follow it again to fix it.";
 
 const COMPOSIO_LOGIN = { method: "POST" as const, path: "/api/apps/connector/login/start" };
 
@@ -119,7 +128,16 @@ async function watchSection(
   }
   try {
     const account = await adapter.account(env);
-    return { ...base, status: "ready", account };
+    // Only Composio sources say which kinds are unarmed. When Composio cannot say, nothing is flagged.
+    const unarmed = await adapter.unarmedKinds?.(env).catch(() => []);
+    return {
+      ...base,
+      status: "ready",
+      account,
+      ...(unarmed && unarmed.length > 0
+        ? { undelivered: { kinds: unarmed, reason: COMPOSIO_TRIGGER_MISSING_REASON } }
+        : {}),
+    };
   } catch (error) {
     return {
       ...base,
@@ -137,14 +155,19 @@ export async function listWatchSources(
   const signedIn = await env.composio.signedIn().catch(() => false);
   const accounts = signedIn ? await env.composio.accounts().catch(() => []) : [];
   const services = composioServices(accounts, signedIn);
-  // One read of Composio's sign-in, accounts and webhook serves every adapter.
+  // One read of Composio's sign-in, accounts, webhook and triggers serves every adapter.
   let target: ReturnType<WatchEnv["composio"]["webhookTarget"]> | undefined;
+  let active: ReturnType<WatchEnv["composio"]["activeTriggers"]> | undefined;
   const once: WatchEnv = {
     ...env,
     composio: {
       ...env.composio,
       signedIn: async () => signedIn,
       accounts: async () => accounts,
+      activeTriggers: () => {
+        active ??= env.composio.activeTriggers();
+        return active;
+      },
       webhookTarget: () => {
         target ??= env.composio.webhookTarget().catch(() => "unknown" as const);
         return target;

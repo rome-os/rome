@@ -58,6 +58,27 @@ describe("Composio credential rejection", () => {
     for (const call of fetch.mock.calls) expect(call[1]).toMatchObject({ method: "GET" });
   });
 
+  it("leaves a disabled trigger out of the active ones", async () => {
+    const client = new ComposioClient({ apiKey: "uak_test" });
+    const row = (id: string, disabled_at: string | null) => ({
+      id,
+      trigger_name: "SOME_TRIGGER",
+      connected_account_id: "ca_1",
+      trigger_config: {},
+      updated_at: "2026-11-04T00:00:00Z",
+      disabled_at,
+    });
+    const listActive = rs.fn().mockResolvedValue({
+      items: [row("ti_on", null), row("ti_off", "2026-11-04T01:00:00Z")],
+      next_cursor: null,
+    });
+    (client as unknown as { rest: { triggerInstances: { listActive: unknown } } }).rest = {
+      triggerInstances: { listActive },
+    };
+    const active = await client.listActiveTriggers();
+    expect(active.map((t) => t.triggerInstanceId)).toEqual(["ti_on"]);
+  });
+
   it.each([401, 403, 500])("preserves webhook write status %i", async (status) => {
     rs.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ items: [] }))

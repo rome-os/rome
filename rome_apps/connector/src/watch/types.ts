@@ -4,6 +4,7 @@
 // through its adapter, found in the registry, and never name one.
 
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
+import type { ActiveTrigger } from "../api/composio-client.js";
 
 /**
  * One raw event a kind listens on, by the provider and event type this app
@@ -116,6 +117,8 @@ export interface ComposioEnv {
   read(service: ComposioToolkit, request: ComposioRequest): Promise<Json>;
   /** Where the Composio project's one webhook delivers: here, elsewhere, nowhere, or unknown. */
   webhookTarget(): Promise<"ours" | "elsewhere" | "none" | "unknown">;
+  /** The project's active triggers, read at most once per few minutes. It throws when Composio cannot be read. */
+  activeTriggers(): Promise<ActiveTrigger[]>;
   /** Checks, or arms, the triggers for the connected account. */
   ensureTriggers(
     service: ComposioToolkit,
@@ -143,6 +146,11 @@ export interface WatchAdapter {
   connected(env: WatchEnv): Promise<boolean>;
   /** Whose account the events concern, or why that cannot be read. */
   account(env: WatchEnv): Promise<string>;
+  /**
+   * The kinds whose subscription at the source is missing now, read without
+   * arming anything. It throws when the source cannot say.
+   */
+  unarmedKinds?(env: WatchEnv): Promise<string[]>;
   /** Checks, or creates, the subscription a follow of these kinds needs. */
   ensure(
     env: WatchEnv,

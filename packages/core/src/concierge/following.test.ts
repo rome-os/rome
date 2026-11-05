@@ -73,7 +73,10 @@ const connectionViews = (): ConnectionView[] =>
   ] as unknown as ConnectionView[];
 
 /** What the connector's `sources` answers, trimmed to what the tests need. */
-const sources = (gmailStatus: WatchSource["status"] = "ready"): ProviderSources => ({
+const sources = (
+  gmailStatus: WatchSource["status"] = "ready",
+  undelivered?: WatchSource["undelivered"],
+): ProviderSources => ({
   services: [
     composio("gmail", "Gmail", gmailStatus !== "not_connected"),
     composio("notion", "Notion", true),
@@ -138,6 +141,7 @@ const sources = (gmailStatus: WatchSource["status"] = "ready"): ProviderSources 
       ...(gmailStatus === "ready"
         ? { account: "me@example.com" }
         : { statusReason: "Gmail is not connected." }),
+      ...(undelivered ? { undelivered } : {}),
       target: null,
       kinds: [
         {
@@ -167,6 +171,8 @@ function setup(
   options: {
     refuse?: string;
     gmailStatus?: WatchSource["status"];
+    /** The Gmail kinds the connector says are not delivered. */
+    gmailUndelivered?: WatchSource["undelivered"];
     /** The connectors a second provider app lists. */
     second?: ProviderSources;
     /** Triage's decision per event id; important when not named. */
@@ -270,7 +276,7 @@ function setup(
       const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
-        return { status: "ok", data: sources(options.gmailStatus) };
+        return { status: "ok", data: sources(options.gmailStatus, options.gmailUndelivered) };
       }
       if (name === "connector_watch_ensure") {
         return options.refuse && args.source === "github"
@@ -478,6 +484,39 @@ describe("follow", () => {
     await expect(
       s.following().follow({ source: "gmail", target: "boss@example.com" }),
     ).rejects.toThrow(/connected to Rome, me@example.com, not boss@example.com/);
+  });
+
+  it("says a follow whose kind on is not delivered is unavailable, with the kind and what to do", async () => {
+    const reason = "Its trigger is missing. Ask me to follow it again to fix it.";
+    const options: Parameters<typeof setup>[0] = {};
+    const s = setup(options);
+    await s.following().follow({ source: "gmail" });
+    const followOf = async () => watchIn(await s.following().list(), "gmail")?.follows?.[0];
+    expect(await followOf()).toMatchObject({ state: "active" });
+    expect((await followOf())?.reason).toBeUndefined();
+
+    options.gmailUndelivered = { kinds: ["new_mail"], reason };
+    expect(await followOf()).toMatchObject({
+      state: "unavailable",
+      reason: `New mail from people: ${reason}`,
+    });
+    // Following again subscribes, so its answer is no longer held back by the old list.
+    const again = await s.following().follow({ source: "gmail" });
+    expect(again.state).toBe("active");
+    expect(again.reason).toBeUndefined();
+
+    // A source that is not ready says why itself; the follow adds nothing.
+    options.gmailStatus = "error";
+    const notReady = await followOf();
+    expect(notReady?.state).toBe("unavailable");
+    expect(notReady?.reason).toBeUndefined();
+  });
+
+  it("leaves a follow active when only a kind it has off is not delivered", async () => {
+    const s = setup({ gmailUndelivered: { kinds: ["other_kind"], reason: "missing" } });
+    const follow = await s.following().follow({ source: "gmail" });
+    expect(follow.state).toBe("active");
+    expect(follow.reason).toBeUndefined();
   });
 
   it("says what a source needs, and leaves nothing behind on a refusal", async () => {

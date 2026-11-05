@@ -798,6 +798,8 @@ export class ComposioClient {
     do {
       const page = await this.rest.triggerInstances.listActive(cursor ? { cursor } : {});
       for (const row of page.items) {
+        // The active list leaves disabled triggers out; a row that says otherwise still is not active.
+        if (row.disabled_at) continue;
         out.push({
           triggerInstanceId: row.id,
           triggerName: row.trigger_name,

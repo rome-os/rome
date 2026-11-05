@@ -29,6 +29,8 @@ export interface ProviderWatchSection {
   label: string;
   status: "ready" | "not_connected" | "no_relay" | "error";
   statusReason?: string;
+  /** The kinds whose events are not arriving because their subscription at the source is missing, with what to do. */
+  undelivered?: { kinds: string[]; reason: string };
   account?: string;
   target: { format: string; example: string } | null;
   kinds: ConciergeFollowKindDto[];
