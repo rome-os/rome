@@ -434,9 +434,7 @@ export class WhatsAppAdapter {
   /** Hand what someone else said in `messages` to the inbound handler. */
   private async deliverInbound(messages: WAMessage[]): Promise<void> {
     if (!this.handler) return;
-    for (const waMsg of messages) {
-      if (!waMsg.key.fromMe) this.rememberHeard(waMsg.key.id);
-    }
+    const deliverable: ChannelMessage[] = [];
     for (const waMsg of messages) {
       if (!waMsg.message || waMsg.key.fromMe) continue;
       // A reaction is an emoji pinned to another message, not an inbound turn —
@@ -448,6 +446,13 @@ export class WhatsAppAdapter {
       // history-sync notifications) carry no text or attachments — they are
       // mirrored for completeness but are not an inbound turn.
       if (!msg.text && msg.attachments.length === 0) continue;
+      // Only what is delivered counts as heard, so a stub that failed to
+      // decrypt leaves its history copy to be recorded. All of a batch is
+      // remembered before any of it is handled, since handling waits.
+      this.rememberHeard(waMsg.key.id);
+      deliverable.push(msg);
+    }
+    for (const msg of deliverable) {
       log.info("message received", {
         from: msg.senderId,
         chatId: msg.chatId,

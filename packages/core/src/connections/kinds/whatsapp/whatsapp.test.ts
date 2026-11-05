@@ -391,6 +391,35 @@ describe("WhatsAppAdapter", () => {
         }
       });
 
+      it("records the history copy of a message whose live copy could not be read", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+
+        // A stub that failed to decrypt carries no content.
+        await eventHandlers["messages.upsert"]({
+          messages: [
+            {
+              ...makeWAMessage({
+                key: { remoteJid: "111@s.whatsapp.net", id: "stub", fromMe: false },
+              }),
+              message: null,
+            },
+          ],
+        });
+        eventHandlers["messaging-history.set"]({
+          contacts: [],
+          chats: [],
+          messages: [
+            makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "stub", fromMe: false } }),
+          ],
+        });
+        await adapter.stop();
+
+        expect(recorded.map((batch) => batch.ids)).toEqual([["stub"]]);
+      });
+
       it("records what it still holds when it stops", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);
