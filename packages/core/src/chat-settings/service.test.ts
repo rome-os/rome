@@ -167,6 +167,64 @@ describe("ChatSettingsService", () => {
     };
   }
 
+  it("places what it stores in chats, and leaves the legacy source columns empty", async () => {
+    const { repository, service, parent, childDescriptor } = await setup();
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian", id: "guardian-1" },
+    });
+    repository.mutate(childDescriptor, childDescriptor.connectionKind, {
+      settings: null,
+      agentName: undefined,
+    });
+
+    const rows = testDb!.db.all<{
+      thread_id: string | null;
+      chat_id: number | null;
+      source_channel: string | null;
+      source_thread_id: string | null;
+      source_thread_name: string | null;
+      source_thread_type: string | null;
+    }>(sql`SELECT thread_id, chat_id, source_channel, source_thread_id, source_thread_name,
+             source_thread_type FROM rome_sessions ORDER BY thread_id IS NOT NULL`);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.thread_id).toBe("child");
+    for (const row of rows) {
+      expect(row.chat_id).not.toBeNull();
+      expect(row).toMatchObject({
+        source_channel: null,
+        source_thread_id: null,
+        source_thread_name: null,
+        source_thread_type: null,
+      });
+    }
+  });
+
+  it("keeps the legacy source columns on a thread whose parent Rome holds no speaker for", async () => {
+    const { repository, childDescriptor } = await setup();
+    repository.mutate(childDescriptor, childDescriptor.connectionKind, {
+      settings: null,
+      agentName: undefined,
+    });
+
+    // The legacy chats backfill places this row by its source columns.
+    expect(
+      testDb!.db.all(
+        sql`SELECT chat_id, parent_session_id, source_channel, source_thread_id
+            FROM rome_sessions WHERE thread_id = 'child'`,
+      ),
+    ).toEqual([
+      {
+        chat_id: null,
+        parent_session_id: null,
+        source_channel: "discord",
+        source_thread_id: "child",
+      },
+    ]);
+  });
+
   it("keeps settings on the parent while threads inherit without overrides", async () => {
     const { repository, service, changed, parent, child, childDescriptor, listed } = await setup();
 
