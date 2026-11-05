@@ -1,7 +1,8 @@
 // Stripe's webhooks in the common shape. A payload is Stripe's event: the
 // resource on `data.object`, `livemode`, and `account` when it came from a
-// connected account. Every event concerns the guardian's own business, so
-// it is addressed to them, and none is said to be by them.
+// connected account. A payload that is the resource itself is read the same.
+// Every event concerns the guardian's own business, so it is addressed to
+// them, and none is said to be by them.
 
 import { drop, KIND_OFF, keep, obj, str } from "../../shared/event.js";
 import type { Json, Normalized } from "../../types.js";
@@ -39,6 +40,18 @@ const KINDS: Record<string, string> = {
 const word = (value: string | undefined) =>
   value && /^[a-z0-9_]+$/.test(value) ? value.replaceAll("_", "-") : undefined;
 
+/**
+ * The Stripe object an event is about: Stripe's event wraps it in
+ * `data.object`, and a payload that is the object itself names its own
+ * `object` type and `id`.
+ */
+function objectOf(payload: Json): Json {
+  const wrapped = obj(obj(payload.data).object);
+  if (str(wrapped.id)) return wrapped;
+  if (typeof payload.object === "string" && str(payload.id)) return payload;
+  return wrapped;
+}
+
 /** A raw Stripe event of `type` in the common shape, or why it is not one. */
 export function normalizeStripe(
   type: string,
@@ -48,7 +61,7 @@ export function normalizeStripe(
   const kind = KINDS[type];
   if (!kind) return drop(`Stripe ${type} is not a kind follows describe`);
   if (!ctx.kinds.has(kind)) return drop(KIND_OFF);
-  const object = obj(obj(payload.data).object);
+  const object = objectOf(payload);
   const id = str(object.id);
   if (!id) return drop("no Stripe object id");
   const test = payload.livemode === false || object.livemode === false;

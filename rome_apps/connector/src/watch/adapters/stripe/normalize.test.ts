@@ -286,3 +286,33 @@ describe("normalizeStripe, refunds in a row", () => {
     expect(idOf(charge(2000))).not.toBe(idOf(charge(3000)));
   });
 });
+
+describe("normalizeStripe, a payload that is the object itself", () => {
+  it("reads a failed charge the same whether it comes wrapped in Stripe's event or not", () => {
+    const charge = {
+      id: "ch_7",
+      object: "charge",
+      amount: 4900,
+      currency: "usd",
+      livemode: false,
+      billing_details: { name: "Ana Lima" },
+      failure_code: "card_declined",
+      failure_message: "Your card was declined.",
+    };
+    const wrapped = normalizeStripe(
+      "stripe_charge_failed",
+      event(charge, { livemode: false }),
+      ctx,
+    );
+    const bare = normalizeStripe("stripe_charge_failed", charge, ctx);
+    expect(wrapped).toMatchObject({ keep: true, event: { id: "stripe:Acme Inc:ch_7:failed" } });
+    expect(bare).toEqual(wrapped);
+  });
+
+  it("still drops a payload that is neither an event nor an object", () => {
+    expect(normalizeStripe("stripe_charge_failed", { id: "x" }, ctx)).toEqual({
+      keep: false,
+      reason: "no Stripe object id",
+    });
+  });
+});
