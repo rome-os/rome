@@ -58,21 +58,19 @@
       "clear": "清除搜索",
       "noMatch": {
         "connected": "没有与“{{query}}”匹配的已连接服务。",
-        "available": "没有与“{{query}}”匹配的可添加服务。"
+        "all": "没有与“{{query}}”匹配的服务。"
       }
     },
     "tabs": {
       "label": "连接",
       "connected": "已连接",
-      "available": "可添加",
+      "all": "全部",
       "needsAttention": "需要关注",
       "empty": {
-        "connected": "还没有任何连接。",
-        "available": "这里的服务都已连接。"
+        "connected": "还没有任何连接。"
       },
       "show": {
-        "connected": "在已连接中查看 {{count}} 个",
-        "available": "在可添加中查看 {{count}} 个"
+        "all": "在全部中查看 {{count}} 个"
       }
     },
     "groups": {

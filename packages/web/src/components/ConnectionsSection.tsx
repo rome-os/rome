@@ -44,23 +44,20 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
 /**
  * Unified Connections list (list of rows).
  *
- * Renders every service the registry reports — Talk channels, OAuth services,
- * and the Composio broker account — over `GET /api/connections`, split into an
- * Available tab first and a Connected tab second, with Available as the default.
- * One search box covers both tabs and follows matches without changing the
- * guardian's chosen tab. Rows are grouped into Messaging and Accounts.
- * Each row is a full-width button: a connected
- * row shows the brand badge + label on the left and a dot+text
- * `StatusIndicator` on the right; an available row shows what the connection
- * does and a Connect cue. Clicking either opens the `ConnectionDetailDialog`
- * over the list, where the connect ceremony lives. The list itself performs NO
- * ceremony — no inline connect/disconnect, no expand-in-place cards, no
- * accordion.
+ * All is the default and lists every service, while Connected lists only
+ * services that give Rome access. Search covers both tabs without changing
+ * the guardian's chosen tab. Only a search on Connected can fall back to All.
  *
- * The Connected tab closes with the `AppKeysRow` — the app-keys vault is not a
- * registry service, but it lives on this surface, so it renders in the same
- * row anatomy and navigates to its own page. It self-loads and stays up
- * whatever state the registry request is in.
+ * Messaging and Accounts group Rome's own rows. All groups connected and
+ * unconnected Composio services under Via Composio. Connected puts Composio
+ * services under Accounts. Attention leads each group, then connected services,
+ * then unconnected services, with stable order within each state.
+ *
+ * Every connected row shows its status and opens its detail dialog. An
+ * unconnected row describes what it enables and opens its connect ceremony.
+ * Composio authorization opens in a separate tab. App keys is last under Other
+ * on both tabs and navigates to its own page. It also stays visible while the
+ * registry loads or fails.
  */
 export function ConnectionsSection({
   connections,
@@ -94,9 +91,9 @@ export function ConnectionsSection({
   };
   const selected = cards.find((card) => card.route === selectedRoute) ?? null;
 
-  // Available is the opening choice even while Composio services load.
+  // All is the opening choice even while Composio services load.
   // Refreshes never change the guardian's chosen tab.
-  const [chosenTab, setChosenTab] = useState<ConnectionTab>("available");
+  const [chosenTab, setChosenTab] = useState<ConnectionTab>("all");
   const [query, setQuery] = useState("");
   const [searchTab, setSearchTab] = useState<ConnectionTab | null>(null);
   const changeQuery = (value: string) => {
@@ -111,18 +108,18 @@ export function ConnectionsSection({
       : null;
     return bullet ? t(bullet.key, bullet.params) : "";
   };
-  // Search matches what a row shows: the name, plus what the service does on
-  // Available, the only tab that shows it.
+  // Search matches what each row shows: connected names only, plus the
+  // description for unconnected rows.
   const matches = (card: ConnectionCard, withDescription: boolean) =>
     !needle ||
     `${card.label} ${withDescription ? describe(card) : ""}`.toLocaleLowerCase().includes(needle);
   const connected = cards.filter(isConnectedCard);
   // Signed out, the Composio group's sign-in banner stands in for the
   // Composio account row.
-  const available = cards.filter((card) => !isConnectedCard(card) && card.kind !== "composio");
+  const all = cards.filter((card) => card.kind !== "composio" || isConnectedCard(card));
   const shown: Record<ConnectionTab, ConnectionCard[]> = {
     connected: connected.filter((card) => matches(card, false)),
-    available: available.filter((card) => matches(card, true)),
+    all: all.filter((card) => matches(card, !isConnectedCard(card))),
   };
 
   // The services Rome reaches through Composio, from the Connector app.
@@ -134,64 +131,72 @@ export function ConnectionsSection({
   });
   const { connect: connectComposio, busySlug } = useComposioConnect(onFlash);
   const [openService, setOpenService] = useState<string | null>(null);
+  const connectedServiceSlugs = new Set(composioServices.rows.connected.map((row) => row.slug));
+  const isConnectedService = (row: ComposioServiceRow) => connectedServiceSlugs.has(row.slug);
   const matchesService = (row: ComposioServiceRow, withScope: boolean) =>
     !needle || `${row.name} ${withScope ? row.scope : ""}`.toLocaleLowerCase().includes(needle);
+  const allServices = [
+    ...composioServices.rows.connected.filter((row) => row.needsAttention),
+    ...composioServices.rows.connected.filter((row) => !row.needsAttention),
+    ...composioServices.rows.available,
+  ];
   const shownServices: Record<ConnectionTab, ComposioServiceRow[]> = {
     connected: composioServices.rows.connected.filter((row) => matchesService(row, false)),
-    available: composioServices.rows.available.filter((row) => matchesService(row, true)),
+    all: allServices.filter((row) => matchesService(row, !isConnectedService(row))),
   };
   const matchesAppKeys = !needle || t("appKeys.title").toLocaleLowerCase().includes(needle);
   const count = (value: ConnectionTab) =>
-    shown[value].length +
-    shownServices[value].length +
-    (value === "connected" && needle && matchesAppKeys ? 1 : 0);
-  const otherChosenTab: ConnectionTab = chosenTab === "connected" ? "available" : "connected";
+    shown[value].length + shownServices[value].length + (needle && matchesAppKeys ? 1 : 0);
   // Derive search navigation so late Composio results can change the tab.
-  // A manual search choice lasts until the query changes, not until a refresh.
+  // All is a superset and never navigates away. A manual search choice lasts
+  // until the query changes, not until a refresh.
   const tab: ConnectionTab = needle
     ? (searchTab ??
-      (count(chosenTab) === 0 && count(otherChosenTab) > 0 ? otherChosenTab : chosenTab))
+      (chosenTab === "connected" && count("connected") === 0 && count("all") > 0
+        ? "all"
+        : chosenTab))
     : chosenTab;
   const chooseTab = (value: ConnectionTab) => {
     if (needle) setSearchTab(value);
     else setChosenTab(value);
   };
-  const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
-  const showAppKeys = tab === "connected" && matchesAppKeys;
   const needsAttention = (card: ConnectionCard) => connectionStatus(card).tone === "attention";
   const connectedNeedsAttention =
     connected.some(needsAttention) ||
     composioServices.rows.connected.some((row) => row.needsAttention);
 
-  const renderCard = (card: ConnectionCard) => (
-    <Button
-      key={card.route}
-      type="button"
-      variant="outline"
-      size="default"
-      align="between"
-      onClick={() => select(card.route)}
-      className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
-      aria-label={`Open ${card.label}`}
-    >
-      <span className="flex min-w-0 items-center gap-3">
-        <ConnectionBrandBadge connection={card.service} />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-ui text-foreground">{card.label}</span>
-          {tab === "available" && describe(card) ? (
-            <span className="truncate text-aux text-muted-foreground">{describe(card)}</span>
-          ) : null}
+  const renderCard = (card: ConnectionCard) => {
+    const connected = isConnectedCard(card);
+    return (
+      <Button
+        key={card.route}
+        type="button"
+        variant="outline"
+        size="default"
+        align="between"
+        onClick={() => select(card.route)}
+        className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
+        aria-label={`Open ${card.label}`}
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <ConnectionBrandBadge connection={card.service} />
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-ui text-foreground">{card.label}</span>
+            {!connected && describe(card) ? (
+              <span className="truncate text-aux text-muted-foreground">{describe(card)}</span>
+            ) : null}
+          </span>
         </span>
-      </span>
-      {/* A service the host cannot offer keeps its Unavailable
+        {/* A service the host cannot offer keeps its Unavailable
           status and reason instead of a Connect cue. */}
-      {tab === "connected" || card.connect?.available === false ? (
-        <StatusIndicator card={card} />
-      ) : (
-        <span className="shrink-0 text-ui text-primary">{t("connections.connect")}</span>
-      )}
-    </Button>
-  );
+        {connected || card.connect?.available === false ? (
+          <StatusIndicator card={card} />
+        ) : (
+          <span className="shrink-0 text-ui text-primary">{t("connections.connect")}</span>
+        )}
+      </Button>
+    );
+  };
   // On Connected, Composio services join the Accounts group, and whatever
   // needs attention leads it, Rome's own or Composio's.
   const ordered = (
@@ -304,7 +309,7 @@ export function ConnectionsSection({
               value={tab}
               onValueChange={chooseTab}
               className="self-start max-[360px]:[--control-px-center-md:var(--rome-space-1)]"
-              options={(["available", "connected"] as const).map((value) => ({
+              options={(["all", "connected"] as const).map((value) => ({
                 value,
                 label: (
                   <span className="inline-flex items-center gap-2">
@@ -330,21 +335,21 @@ export function ConnectionsSection({
                 </Button>
               </div>
             ) : null}
-            {count(tab) === 0 ? (
+            {count(tab) === 0 && (needle || tab === "connected") ? (
               <div className="flex flex-col items-center gap-3 rounded-8 border border-dashed border-border px-4 py-6 text-center text-ui text-muted-foreground">
                 <p>
                   {needle
                     ? t(`connections.search.noMatch.${tab}`, { query: query.trim() })
-                    : t(`connections.tabs.empty.${tab}`)}
+                    : t("connections.tabs.empty.connected")}
                 </p>
-                {count(otherTab) > 0 ? (
+                {tab === "connected" && count("all") > 0 ? (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => chooseTab(otherTab)}
+                    onClick={() => chooseTab("all")}
                   >
-                    {t(`connections.tabs.show.${otherTab}`, { count: count(otherTab) })}
+                    {t("connections.tabs.show.all", { count: count("all") })}
                   </Button>
                 ) : null}
               </div>
@@ -380,9 +385,9 @@ export function ConnectionsSection({
             ))}
             {/* Signed out, the group always shows, since its banner is where
                 the guardian signs in to Composio. */}
-            {tab === "available" &&
+            {tab === "all" &&
             composioInstalled &&
-            (!composioSignedIn || shownServices.available.length > 0) ? (
+            (!composioSignedIn || shownServices.all.length > 0) ? (
               <section className="flex flex-col gap-2" aria-labelledby="composio-heading">
                 <h3 id="composio-heading" className="text-aux text-muted-foreground">
                   {t("connections.composioServices.group")}
@@ -391,20 +396,25 @@ export function ConnectionsSection({
                   <ComposioSignInBanner onSignIn={() => select("composio")} />
                 ) : null}
                 <ListCollection className="flex flex-col gap-2">
-                  {shownServices.available.map((row) => (
-                    <ComposioServiceRowButton
-                      key={`composio:${row.slug}`}
-                      row={row}
-                      connected={false}
-                      disabled={!composioSignedIn}
-                      busy={busySlug === row.slug}
-                      onClick={() => void connectComposio(row)}
-                    />
-                  ))}
+                  {shownServices.all.map((row) => {
+                    const connected = isConnectedService(row);
+                    return (
+                      <ComposioServiceRowButton
+                        key={`composio:${row.slug}`}
+                        row={row}
+                        connected={connected}
+                        disabled={!composioSignedIn}
+                        busy={busySlug === row.slug}
+                        onClick={() =>
+                          connected ? setOpenService(row.slug) : void connectComposio(row)
+                        }
+                      />
+                    );
+                  })}
                 </ListCollection>
               </section>
             ) : null}
-            {showAppKeys ? (
+            {matchesAppKeys ? (
               <section className="flex flex-col gap-2" aria-labelledby="other-heading">
                 <h3 id="other-heading" className="text-aux text-muted-foreground">
                   {t("connections.groups.other")}
