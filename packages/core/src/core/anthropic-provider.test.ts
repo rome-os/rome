@@ -1313,6 +1313,27 @@ describe("AnthropicProvider", () => {
       duration_ms: 1,
     });
 
+    it("drops an SDK error kind that a later top-level message moved past", async () => {
+      mockQuery([
+        { ...syntheticApiError(apiErrorText), user_message_uuid: SENT },
+        {
+          type: "assistant",
+          uuid: "assistant-after-error",
+          session_id: "sdk-session",
+          parent_tool_use_id: null,
+          message: { role: "assistant", content: [] },
+        },
+        apiErrorResult(apiErrorText),
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "hi", inputId: SENT });
+      const messages = await collectEvents(session);
+
+      expect(messages.at(-1)).toMatchObject({ type: "error", error: apiErrorText });
+      expect(messages.at(-1)).not.toHaveProperty("providerError");
+    });
+
     it("ends the turn with an error terminal and publishes none of its text as the answer", async () => {
       // The turn's first frame carries the echo of the send it answers.
       mockQuery([
@@ -1326,7 +1347,12 @@ describe("AnthropicProvider", () => {
 
       expect(messages.filter((m) => m.type === "text")).toEqual([]);
       expect(messages.filter((m) => m.type === "result")).toEqual([]);
-      expect(messages.at(-1)).toMatchObject({ type: "error", error: apiErrorText });
+      expect(messages.at(-1)).toMatchObject({
+        type: "error",
+        error: apiErrorText,
+        httpStatus: 500,
+        providerError: "server_error",
+      });
       expect(messages.at(-1)).not.toHaveProperty("code");
       // A failed turn is no fork point and proves nothing about the credential.
       expect(session.lastCompletedTurnCheckpoint).toBeUndefined();

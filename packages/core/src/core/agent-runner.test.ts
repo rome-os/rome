@@ -3722,6 +3722,50 @@ describe("AgentRunner", () => {
       expect(childFinished[1].metrics).toEqual({ toolCallCount: 1, skillWritten: true });
     });
 
+    it.each([
+      ["anthropic", "Repeated 529 Overloaded errors", undefined, 529, "overloaded"],
+      [
+        "openai",
+        "exceeded retry limit, last status: 429 Too Many Requests",
+        "transient",
+        429,
+        undefined,
+      ],
+    ] as const)("carries %s failure details without replacing the output error", async (id, message, code, httpStatus, providerError) => {
+      const lifecycle = createLifecycleRecorder();
+      const provider: ModelProvider = {
+        id,
+        displayName: id,
+        builtinTools: new Set(),
+        openSession: makeOpenSessionFromRun(id, async function* () {
+          yield { type: "error", error: message, code, httpStatus, providerError };
+        }),
+      };
+      await collectMessages(
+        createRunner(provider, lifecycle).run({ agentName: "test-main", prompt: "Continue" }),
+      );
+      expect(lifecycle.finished[0].output).toMatchObject({
+        error: message,
+        failure: {
+          message,
+          provider: id,
+          ...(code ? { code } : {}),
+          httpStatus,
+          ...(providerError ? { providerError } : {}),
+        },
+      });
+    });
+
+    it("omits failure information on a successful turn", async () => {
+      const lifecycle = createLifecycleRecorder();
+      await collectMessages(
+        createRunner(new MockModelProvider([[{ type: "result", content: "done" }]]), lifecycle).run(
+          { agentName: "test-main", prompt: "Continue" },
+        ),
+      );
+      expect(lifecycle.finished[0].output).not.toHaveProperty("failure");
+    });
+
     it("classifies provider-interrupted terminal results separately from completions", async () => {
       const lifecycle = createLifecycleRecorder();
       const provider = new MockModelProvider([

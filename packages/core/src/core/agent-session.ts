@@ -2830,7 +2830,21 @@ class AgentSessionImpl implements AgentSession {
         finishedAt,
         durationMs,
       }),
-      output: buildLifecycleOutput(terminal, status, stop, stopReason),
+      output: {
+        ...buildLifecycleOutput(terminal, status, stop, stopReason),
+        ...(terminal?.type === "error"
+          ? {
+              failure: {
+                message: terminal.error,
+                provider: this.modelSession.providerId,
+                ...(terminal.code ? { code: terminal.code } : {}),
+                ...(terminal.reason ? { reason: terminal.reason } : {}),
+                ...(terminal.httpStatus ? { httpStatus: terminal.httpStatus } : {}),
+                ...(terminal.providerError ? { providerError: terminal.providerError } : {}),
+              },
+            }
+          : {}),
+      },
       metrics: {
         toolCallCount: this.currentTurnToolCallCount,
         skillWritten: this.currentTurnSkillWritten,
