@@ -177,7 +177,14 @@ export class TaskEventCoalescer {
         for (const [taskId] of taken) this.dirty.delete(taskId);
         return;
       }
-      for (const delivery of deliveries) await this.deps.deliver(delivery);
+      // One chat's turn failing leaves the other chats' turns to run.
+      for (const delivery of deliveries) {
+        await this.deps.deliver(delivery).catch((error: unknown) =>
+          log.warn("task event delivery to one chat failed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
     } catch (error) {
       log.warn("task event flush failed", {
         error: error instanceof Error ? error.message : String(error),

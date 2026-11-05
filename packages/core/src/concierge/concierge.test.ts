@@ -167,6 +167,7 @@ function setup(
       await storedChats.createSession(id, "New Chat");
       return id;
     }),
+    openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
     isRunning: rs.fn(() => false),
     activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
@@ -2085,6 +2086,68 @@ describe("Concierge provider recovery", () => {
 });
 
 describe("Concierge chats", () => {
+  it("opens a topic chat's runtime before its first background turn, as its first message would", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.sessionManager.findReusableSession = (async (key: string) =>
+      key === `webchat:${TOPIC_CHAT}` ? null : { id: "runtime-1" }) as never;
+    expect(await s.service.runSystemTurn(TOPIC_CHAT, "<task_events/>")).toBe(false);
+    expect(s.chats.openSession).toHaveBeenCalledWith(TOPIC_CHAT);
+    expect(s.backendTurns.at(-1)).toMatchObject({
+      sessionId: `opened-${TOPIC_CHAT}`,
+      threadId: TOPIC_CHAT,
+    });
+    // A chat with a runtime keeps it.
+    await s.service.runSystemTurn(CONCIERGE_CHAT, "<task_events/>");
+    expect(s.chats.openSession).toHaveBeenCalledTimes(1);
+    expect(s.backendTurns.at(-1)).toMatchObject({ sessionId: "runtime-1" });
+  });
+
+  it("moves a retired topic chat's wake-ups to the main chat's session, and no other chat's", async () => {
+    const s = setup({ startEvents: false });
+    const wake = (id: string, threadId: string, agentName = CONCIERGE_AGENT_ID) => ({
+      id,
+      name: `Watch task:${id}`,
+      enabled: true,
+      actionName: "resume_session",
+      trigger: { type: "schedule" },
+      args: {
+        sessionId: `runtime-${threadId}`,
+        channel: "webchat",
+        threadId,
+        agentName,
+        text: "⏰",
+      },
+    });
+    const rows = new Map(
+      [wake("r1", TOPIC_CHAT), wake("r2", "other-chat"), wake("r3", TOPIC_CHAT, "main")].map(
+        (row) => [row.id, row],
+      ),
+    );
+    const activated: string[] = [];
+    (s.deps as { routines?: unknown }).routines = {
+      repo: {
+        listRoutines: async () => [...rows.values()],
+        update: async (id: string, data: { args: Record<string, unknown> }) => {
+          rows.set(id, { ...rows.get(id)!, args: data.args as never });
+        },
+        findById: async (id: string) => ({ ...rows.get(id)!, key: null, createdAt: new Date() }),
+      },
+      engine: {
+        deactivate: async () => {},
+        activate: async (routine: { id: string }) => void activated.push(routine.id),
+      },
+    };
+    await s.service.retireChat(TOPIC_CHAT, "archived");
+    expect(rows.get("r1")?.args).toMatchObject({
+      threadId: CONCIERGE_CHAT,
+      sessionId: "runtime-1",
+    });
+    expect(rows.get("r2")?.args).toMatchObject({ threadId: "other-chat" });
+    // A task chat's own wake-up in that chat is not the Concierge's.
+    expect(rows.get("r3")?.args).toMatchObject({ threadId: TOPIC_CHAT });
+    expect(activated).toEqual(["r1"]);
+  });
+
   it("lists the main chat first, then the topic chats", async () => {
     const s = setup({ startEvents: false });
     expect(await s.service.listChats()).toEqual([

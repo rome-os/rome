@@ -201,6 +201,26 @@ describe("TaskEventCoalescer", () => {
     expect(coalescer.pending).toEqual([]);
   });
 
+  it("still delivers the other chats' turns when one chat's turn fails", async () => {
+    const delivered: Array<string | null> = [];
+    const coalescer = new TaskEventCoalescer({
+      now: () => Date.now(),
+      isEnabled: async () => true,
+      render: async () => [
+        { chatId: "topic-1", prompt: "a", quiet: false },
+        { chatId: null, prompt: "b", quiet: false },
+      ],
+      deliver: async ({ chatId }) => {
+        if (chatId === "topic-1") throw new Error("no runtime");
+        delivered.push(chatId);
+      },
+      giveUp: () => {},
+    });
+    coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(delivered).toEqual([null]);
+  });
+
   it("delivers one turn per Concierge chat the rows came from, in one flush", async () => {
     const delivered: Array<{ chatId: string | null; prompt: string; quiet: boolean }> = [];
     const coalescer = new TaskEventCoalescer({

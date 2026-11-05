@@ -256,6 +256,7 @@ export class ConciergeTasksRepository {
         task: conciergeTasks,
         chatName: romeSessions.name,
         originName: origin.name,
+        originArchivedAt: origin.archivedAt,
       })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
@@ -271,22 +272,33 @@ export class ConciergeTasksRepository {
               .where(eq(romeSessions.id, CONCIERGE_CHAT_ID))
           )[0]?.name ?? "Concierge")
         : "Concierge";
-    const conciergeChatOf = (task: ConciergeTaskRow, originName: string | null) =>
-      task.chatId && originName !== null
+    // A row whose chat is archived or gone belongs to the main chat, so its
+    // buttons and results reach a chat the guardian can write in.
+    const conciergeChatOf = (
+      task: ConciergeTaskRow,
+      originName: string | null,
+      originArchivedAt: Date | null,
+    ) =>
+      task.chatId && originName !== null && originArchivedAt === null
         ? { id: task.chatId, name: originName, main: false }
         : { id: CONCIERGE_CHAT_ID, name: mainName, main: true };
     // Only a message the row's Concierge chat still holds counts as a source.
     const sources = this.sources.keysOf(
-      rows.flatMap(({ task, originName }) =>
+      rows.flatMap(({ task, originName, originArchivedAt }) =>
         task.sourceMessageId
-          ? [{ id: task.sourceMessageId, chatId: conciergeChatOf(task, originName).id }]
+          ? [
+              {
+                id: task.sourceMessageId,
+                chatId: conciergeChatOf(task, originName, originArchivedAt).id,
+              },
+            ]
           : [],
       ),
     );
-    return rows.map(({ task, chatName, originName }) => ({
+    return rows.map(({ task, chatName, originName, originArchivedAt }) => ({
       row: task,
       chat: task.sessionId && chatName !== null ? { id: task.sessionId, name: chatName } : null,
-      conciergeChat: conciergeChatOf(task, originName),
+      conciergeChat: conciergeChatOf(task, originName, originArchivedAt),
       sourceMessageId: (task.sourceMessageId && sources.get(task.sourceMessageId)) || null,
     }));
   }

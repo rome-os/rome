@@ -760,6 +760,8 @@ export interface WebchatRuntime {
   /** Start a chat for the guardian, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
   startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
+  openSession(chatId: string): Promise<string>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -4321,6 +4323,46 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const id = started.body.id;
       if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
       return id;
+    },
+    async openSession(chatId) {
+      // A chat that has had no turn yet: its runtime opens as the guardian's
+      // first message would open it, in its project, on its model, with the
+      // guardian's context, so a background turn can run in it.
+      const session = await deps.webchatRepo.getSession(chatId);
+      if (!session) throw new Error(`No chat ${chatId}`);
+      const projectPath = normalizeSelectedWebchatProjectPath(
+        session.projectPath ?? session.projectName,
+      );
+      const project = await ensureStoredProjectSelection(projectPath);
+      const workingDir = resolveWebchatProjectPath(project.path, getWebchatProjectsRoot());
+      const guardian = (await deps.peopleRepo.byBondLevel("guardian"))[0];
+      const modelSelection = await resolveSessionModelSelectionForTurn(
+        { id: chatId, largeModelSelection: session.largeModelSelection },
+        await deps.webchatRepo.getMessageCount(chatId),
+        undefined,
+      );
+      const opened = await deps.agentSessionManager.acquire(
+        { agentName: session.agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) },
+        {
+          workingDir,
+          threadContext: {
+            channel: "webchat",
+            threadId: chatId,
+            romeSessionId: chatId,
+            threadPath: join(workingDir, ".threads", chatId),
+            channelUserId: guardian?.id ?? "guardian",
+            threadType: "private",
+            projectName: project.name,
+            projectPath,
+            ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
+            senderBondLevel: "guardian",
+          },
+          romeSessionId: chatId,
+          contextSuffix: buildWebchatContextSuffix(),
+          selectionId: modelSelection?.id ?? null,
+        },
+      );
+      return opened.sessionId;
     },
     isRunning: isSessionRunning,
     activeTurns: (sessionId) =>

@@ -1420,6 +1420,31 @@ describe("RecentChats", () => {
     expect(screen.queryByRole("button", { name: /Load \d+ more/ })).toBeNull();
   });
 
+  it("lists an archived topic chat with the archived chats, and no active one", async () => {
+    const topic = (id: string, name: string, archivedAt?: string) => ({
+      id,
+      name,
+      agentName: "core:concierge",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-08T10:00:00.000Z",
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+      ...(archivedAt ? { archivedAt } : {}),
+    });
+    mockSessions([
+      topic("topic-1", "Live topic"),
+      topic("topic-2", "Old topic", "2026-07-08T12:00:00.000Z"),
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+    await user.click(await screen.findByRole("button", { name: "List settings" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archived" }));
+    await waitFor(() => expect(screen.getByText("Old topic")).toBeTruthy());
+    expect(screen.queryByText("Live topic")).toBeNull();
+  });
+
   it("refetches with a status query when the status filter changes", async () => {
     const spy = mockSessions([
       {

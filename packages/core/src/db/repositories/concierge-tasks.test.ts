@@ -211,6 +211,29 @@ describe("ConciergeTasksRepository", () => {
       expect((await repo.getWithChat(topic.id))?.conciergeChat.main).toBe(true);
     });
 
+    it("gives a finished row of an archived chat to the main chat, where its buttons can write", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [done] = await repo.upsertMany([{ title: "Old", chatId: "topic-1", state: "done" }]);
+      expect((await repo.getWithChat(done.id))?.conciergeChat.id).toBe("topic-1");
+      await chats.archiveSession("topic-1");
+      expect((await repo.getWithChat(done.id))?.conciergeChat).toEqual({
+        id: "concierge",
+        name: "Concierge",
+        main: true,
+      });
+      // The row still names its chat, so unarchiving gives it back.
+      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
+    });
+
     it("moves only the unfinished rows of a chat to the main chat, and announces each", async () => {
       await chats.createSession(
         "topic-1",

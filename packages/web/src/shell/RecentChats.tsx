@@ -368,11 +368,13 @@ export function RecentChats({
   // while it was in flight. Per mount, since events stop while unmounted; the
   // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // The Concierge chats have their own entries above the list.
+  // The Concierge chats have their own entries above the list. An archived
+  // topic chat has none there, so it stays in the list with the other
+  // archived chats, where it can be found and unarchived.
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
-        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID)
+        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID || s.archivedAt)
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );

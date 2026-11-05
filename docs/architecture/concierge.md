@@ -47,14 +47,15 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 - **A follow reports to one Concierge chat.** A new follow reports to the chat that asked for it. It moves only when a change names another chat, so following the same thing from a second chat answers where it reports and leaves it there.
 - **A task row reports to the Concierge chat it was written in.** Its task chat's results, questions and approvals go there as task events, and the panel's buttons for the row send there.
 - **A Concierge chat's task panel and its pill show that chat's rows only,** the main chat's included. There is no view of every chat's rows. A row moves to the main chat's panel when its chat is archived or deleted.
-- **Something that reports to a chat that is archived or gone goes to the main chat.** No alert, task event or result waits on a chat the guardian closed.
+- **Something that reports to a chat that is archived or gone goes to the main chat.** No alert, task event, result, wake-up or panel button waits on a chat the guardian closed, and a chat that never had a turn gets its runtime before its first delivery.
+- **One chat's failed delivery never holds back another's.** Each chat's turn is kept owed and tried again on its own.
 - **One delivery is one Concierge turn per chat.** A batch of important items or task events that spans chats becomes one turn in each, and each turn counts against the hourly cap of important turns.
 - **The digest goes to the main chat only,** with every chat's items grouped under the chat they report to, so an item in a topic chat the guardian does not open is still read.
 
 ### The main chat stays
 
 - **Each owner has exactly one main chat, and it is never archived or deleted.** The dashboard refuses both.
-- **Archiving or deleting a topic chat moves its follows, its unfinished task rows and the events still owed to it to the main chat,** and the Concierge says so there. Restoring the chat moves nothing back.
+- **Archiving or deleting a topic chat moves its follows, its unfinished task rows and the events still owed to it to the main chat,** and the Concierge says so there. Restoring the chat moves nothing back. An archived topic chat is listed with the other archived chats, where it can be restored.
 - **A topic chat starts on the model the main chat uses,** and keeps its own selection after that.
 - **A topic chat is named from its first message, as an ordinary chat is.** The main chat keeps its fixed name.
 

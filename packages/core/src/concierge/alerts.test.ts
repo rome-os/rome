@@ -175,6 +175,33 @@ describe("ImportantDelivery", () => {
     ]);
   });
 
+  it("delivers the other chats' items when one chat's turn fails, and retries only that chat's later", async () => {
+    let topicFails = true;
+    let owed: ConciergeFollowItemRow[] = [];
+    const sent: string[][] = [];
+    const delivery = new ImportantDelivery({
+      now: () => Date.now(),
+      isEnabled: async () => true,
+      quietUntil: async () => null,
+      owed: async () => owed,
+      skip: async () => undefined,
+      send: async (items) => {
+        if (items[0]?.chatId === "topic-1" && topicFails) throw new Error("no runtime");
+        sent.push(items.map((i) => i.id));
+        owed = owed.filter((o) => !items.includes(o));
+      },
+      groupOf: (i) => i.chatId ?? "",
+    });
+    const [topic, main] = [item({ chatId: "topic-1" }), item()];
+    owed = [topic!, main!];
+    await delivery.deliver();
+    expect(sent).toEqual([[main!.id]]);
+    expect(owed).toEqual([topic]);
+    topicFails = false;
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(sent).toEqual([[main!.id], [topic!.id]]);
+  });
+
   it("counts each chat's turn against the hourly cap", async () => {
     const s = setup();
     for (let i = 0; i < IMPORTANT_TURNS_PER_HOUR - 1; i++) {

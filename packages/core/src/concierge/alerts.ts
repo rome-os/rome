@@ -224,6 +224,9 @@ export class ImportantDelivery {
     }
     const held = this.held;
     this.held = false;
+    // Each chat's turn stands alone: one that fails leaves its own items owed
+    // and tried again later, and the other chats still get theirs now.
+    let failed = false;
     for (const group of groups.values()) {
       if (this.turns.length >= IMPORTANT_TURNS_PER_HOUR) {
         log.warn("important breaker open: items wait for the digest", {
@@ -235,10 +238,20 @@ export class ImportantDelivery {
       }
       const items = group.slice(0, MAX_IMPORTANT_LINES);
       this.turns.push(now);
-      await this.deps.send(items, held);
+      try {
+        await this.deps.send(items, held);
+      } catch (error) {
+        failed = true;
+        log.warn("important delivery to one chat failed; trying it again later", {
+          items: items.length,
+          error: message(error),
+        });
+        continue;
+      }
       // More than one turn holds waits for the next run.
       if (group.length > items.length) this.again = true;
     }
+    if (failed) this.schedule(this.deps.now() + RETRY_MS);
   }
 }
 

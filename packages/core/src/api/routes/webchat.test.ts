@@ -2461,6 +2461,37 @@ describe("Webchat API", () => {
     expect((await deps.webchatRepo.getSession(session.id))?.name).toBe("Q4 Launch Plan");
   });
 
+  it("opens a chat's runtime for a background turn as its first message would", async () => {
+    const acquired: Array<[unknown, Record<string, unknown> | undefined]> = [];
+    deps.agentSessionManager = {
+      acquire: rs.fn(async (key: unknown, init?: Record<string, unknown>) => {
+        acquired.push([key, init]);
+        return { sessionId: "runtime-topic" };
+      }),
+      peek: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    await deps.webchatRepo.createSession(
+      "topic-1",
+      "Calendar",
+      undefined,
+      undefined,
+      "claude-sonnet",
+      undefined,
+      "core:concierge",
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    expect(await runtime.openSession("topic-1")).toBe("runtime-topic");
+    const [key, init] = acquired[0]!;
+    expect(key).toEqual({ agentName: "core:concierge", channelThreadKey: "webchat:topic-1" });
+    expect(init).toMatchObject({
+      romeSessionId: "topic-1",
+      selectionId: "claude-sonnet",
+      threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
+    });
+    expect(String(init?.contextSuffix)).toContain("## Guardian");
+  });
+
   it("names a topic chat from its first message, and never the main Concierge chat", async () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {
