@@ -1,12 +1,26 @@
 // Shared build settings for the Rome iOS app.
-ROME_BUNDLE_IDENTIFIER = cc.romeos.mobile.dev
 SWIFT_VERSION = 6.0
 IPHONEOS_DEPLOYMENT_TARGET = 17.0
 SWIFT_STRICT_CONCURRENCY = complete
+MACOSX_DEPLOYMENT_TARGET = 14.0
 
-// Rome Cloud signs the app in. Release builds always use romeos.cc.
+// Debug and TestFlight builds sit side by side on one phone: each has its
+// own bundle id, name and Keychain items.
+ROME_BUNDLE_IDENTIFIER = cc.romeos.mobile.dev
+ROME_BUNDLE_IDENTIFIER[config=Release] = cc.romeos.mobile
+ROME_DISPLAY_NAME = Rome Dev
+ROME_DISPLAY_NAME[config=Release] = Rome
+
+// The version testers see. The build number is 1 for local builds; an
+// archive sets it to a UTC timestamp (see README.md, "Release to TestFlight").
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+// Rome Cloud signs the app in. Debug builds may point elsewhere from Local.xcconfig.
 ROME_CLOUD_ORIGIN = https:/$()/romeos.cc
 
 // Local signing for device builds: copy Local.xcconfig.example to Local.xcconfig.
 #include? "Local.xcconfig"
-MACOSX_DEPLOYMENT_TARGET = 14.0
+
+// Release always signs in with romeos.cc, whatever Local.xcconfig says.
+ROME_CLOUD_ORIGIN[config=Release] = https:/$()/romeos.cc
