@@ -45,9 +45,11 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
  * Unified Connections list (list of rows).
  *
  * Renders every service the registry reports — Talk channels, OAuth services,
- * and the Composio broker account — over `GET /api/connections`, split into a
- * Connected and an Available tab with one search box over both, and grouped
- * into Messaging and Accounts. Each row is a full-width button: a connected
+ * and the Composio broker account — over `GET /api/connections`, split into an
+ * Available tab first and a Connected tab second, with Available as the default.
+ * One search box covers both tabs and follows matches without changing the
+ * guardian's chosen tab. Rows are grouped into Messaging and Accounts.
+ * Each row is a full-width button: a connected
  * row shows the brand badge + label on the left and a dot+text
  * `StatusIndicator` on the right; an available row shows what the connection
  * does and a Connect cue. Clicking either opens the `ConnectionDetailDialog`
@@ -92,11 +94,15 @@ export function ConnectionsSection({
   };
   const selected = cards.find((card) => card.route === selectedRoute) ?? null;
 
-  // The page opens on Connected when anything is connected, otherwise on
-  // Available. The choice is made once, when the list first loads, so a later
-  // refresh never moves the guardian to the other tab.
-  const [chosenTab, setChosenTab] = useState<ConnectionTab | null>(null);
+  // Available is the opening choice even while Composio services load.
+  // Refreshes never change the guardian's chosen tab.
+  const [chosenTab, setChosenTab] = useState<ConnectionTab>("available");
   const [query, setQuery] = useState("");
+  const [searchTab, setSearchTab] = useState<ConnectionTab | null>(null);
+  const changeQuery = (value: string) => {
+    setQuery(value);
+    setSearchTab(null);
+  };
   const needle = query.trim().toLocaleLowerCase();
   const describe = (card: ConnectionCard): string => {
     const slot = card.slots[0];
@@ -134,12 +140,24 @@ export function ConnectionsSection({
     connected: composioServices.rows.connected.filter((row) => matchesService(row, false)),
     available: composioServices.rows.available.filter((row) => matchesService(row, true)),
   };
-  const count = (value: ConnectionTab) => shown[value].length + shownServices[value].length;
-  const tab: ConnectionTab = chosenTab ?? (connected.length > 0 ? "connected" : "available");
-  if (chosenTab === null && !loading && !error && cards.length > 0) setChosenTab(tab);
+  const matchesAppKeys = !needle || t("appKeys.title").toLocaleLowerCase().includes(needle);
+  const count = (value: ConnectionTab) =>
+    shown[value].length +
+    shownServices[value].length +
+    (value === "connected" && needle && matchesAppKeys ? 1 : 0);
+  const otherChosenTab: ConnectionTab = chosenTab === "connected" ? "available" : "connected";
+  // Derive search navigation so late Composio results can change the tab.
+  // A manual search choice lasts until the query changes, not until a refresh.
+  const tab: ConnectionTab = needle
+    ? (searchTab ??
+      (count(chosenTab) === 0 && count(otherChosenTab) > 0 ? otherChosenTab : chosenTab))
+    : chosenTab;
+  const chooseTab = (value: ConnectionTab) => {
+    if (needle) setSearchTab(value);
+    else setChosenTab(value);
+  };
   const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
-  const showAppKeys =
-    tab === "connected" && (!needle || t("appKeys.title").toLocaleLowerCase().includes(needle));
+  const showAppKeys = tab === "connected" && matchesAppKeys;
   const needsAttention = (card: ConnectionCard) => connectionStatus(card).tone === "attention";
 
   const renderCard = (card: ConnectionCard) => (
@@ -254,11 +272,11 @@ export function ConnectionsSection({
               <Input
                 type="text"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => changeQuery(event.target.value)}
                 onKeyDown={(event) => {
                   // Escape clears, but not mid-IME-composition, where it cancels
                   // the candidate buffer instead.
-                  if (event.key === "Escape" && !isImeCompositionEvent(event)) setQuery("");
+                  if (event.key === "Escape" && !isImeCompositionEvent(event)) changeQuery("");
                 }}
                 placeholder={t("connections.search.placeholder")}
                 aria-label={t("connections.search.placeholder")}
@@ -269,7 +287,7 @@ export function ConnectionsSection({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => setQuery("")}
+                  onClick={() => changeQuery("")}
                   aria-label={t("connections.search.clear")}
                   title={t("connections.search.clear")}
                   className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
@@ -281,9 +299,9 @@ export function ConnectionsSection({
             <SegmentedControl
               aria-label={t("connections.tabs.label")}
               value={tab}
-              onValueChange={setChosenTab}
+              onValueChange={chooseTab}
               className="self-start"
-              options={(["connected", "available"] as const).map((value) => ({
+              options={(["available", "connected"] as const).map((value) => ({
                 value,
                 label: (
                   <span className="inline-flex items-center gap-2">
@@ -303,9 +321,7 @@ export function ConnectionsSection({
                 </Button>
               </div>
             ) : null}
-            {/* A search that matches only App keys shows that row, not a
-                no-match message above it. */}
-            {count(tab) === 0 && !(needle && showAppKeys) ? (
+            {count(tab) === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-8 border border-dashed border-border px-4 py-6 text-center text-ui text-muted-foreground">
                 <p>
                   {needle
@@ -317,7 +333,7 @@ export function ConnectionsSection({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setChosenTab(otherTab)}
+                    onClick={() => chooseTab(otherTab)}
                   >
                     {t(`connections.tabs.show.${otherTab}`, { count: count(otherTab) })}
                   </Button>
