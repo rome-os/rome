@@ -96,8 +96,12 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import {
+  ConciergeEmptyState,
+  ConciergeTopicEmptyState,
+} from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
+import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -2118,7 +2122,16 @@ export function Chat({
               )}
             >
               {conciergeEmpty ? (
-                <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
+                mainSessionId === CONCIERGE_CHAT_ID ? (
+                  <ConciergeEmptyState
+                    onPick={(prompt) => composerRef.current?.insertText(prompt)}
+                  />
+                ) : (
+                  // A topic chat: its starters send themselves as its first message.
+                  <ConciergeTopicEmptyState
+                    onStart={(prompt) => composerRef.current?.submit(prompt)}
+                  />
+                )
               ) : mainSessionId ? (
                 <>
                   {hasOlder(mainSessionId) ? (

@@ -345,8 +345,11 @@ describe("ChatComponent topic chat draft", () => {
       }
       return original(input, init);
     }) as typeof fetch);
-    // The Concierge's empty state, not the home greeting.
-    expect(await screen.findByRole("region")).toBeTruthy();
+    // The topic chat's own empty state, not the home greeting or the main chat's.
+    expect(await screen.findByRole("region", { name: "Start an ongoing topic" })).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Just tell me what you want to get done" }),
+    ).toBeNull();
     const composer = await screen.findByRole("textbox");
     await waitFor(() => expect(document.activeElement).toBe(composer));
     expect(posted).toEqual([]);
@@ -456,6 +459,18 @@ describe("ChatComponent Concierge", () => {
 
     await waitFor(() => expect(messageFetches(fetchSpy)).toHaveLength(2));
     expect(screen.getByTestId("chat-location").textContent).toBe("/chat/concierge POP");
+  });
+
+  it("shows the main chat its own empty state, not a topic chat's", async () => {
+    renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      "/chat/concierge",
+    );
+    expect(
+      await screen.findByRole("region", { name: "Just tell me what you want to get done" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Start an ongoing topic" })).toBeNull();
   });
 
   it("leaves for a new chat when the instance has Concierge off", async () => {
