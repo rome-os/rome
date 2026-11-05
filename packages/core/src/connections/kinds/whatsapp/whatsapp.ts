@@ -113,7 +113,10 @@ export class WhatsAppAdapter {
   private syncSink?: WhatsAppSyncSink;
   /** A history sync's messages from others, by id, waiting to see whether
    *  they also arrive live. */
-  private readonly heldHistory = new Map<string, { message: WAMessage; until: number }>();
+  private readonly heldHistory = new Map<
+    string,
+    { message: WAMessage; self: string; until: number }
+  >();
   private historyHoldTimer?: ReturnType<typeof setTimeout>;
   /** Ids of messages from others heard live, which a history sync may
    *  report again. */
@@ -384,12 +387,16 @@ export class WhatsAppAdapter {
     });
   }
 
-  /** Hold `messages` until their live copies have had time to arrive. */
+  /** Hold `messages` until their live copies have had time to arrive. Each
+   *  keeps the account that heard it, since the socket may be gone or
+   *  replaced by the time it is recorded. */
   private holdHistory(messages: WAMessage[]): void {
+    const self = this.selfPnJid();
+    if (!self) return;
     const until = Date.now() + HISTORY_HOLD_MS;
     for (const message of messages) {
       if (!this.heldHistory.has(message.key.id!)) {
-        this.heldHistory.set(message.key.id!, { message, until });
+        this.heldHistory.set(message.key.id!, { message, self, until });
       }
     }
     this.scheduleRelease();
@@ -412,13 +419,14 @@ export class WhatsAppAdapter {
   /** Record as history what has been held until `now`, leaving out what has
    *  since arrived live. */
   private releaseHistory(now: number): void {
-    const due: WAMessage[] = [];
+    const due = new Map<string, WAMessage[]>();
     for (const [id, held] of this.heldHistory) {
       if (held.until > now) break;
       this.heldHistory.delete(id);
-      if (!this.heardLive.has(id)) due.push(held.message);
+      if (this.heardLive.has(id)) continue;
+      due.set(held.self, [...(due.get(held.self) ?? []), held.message]);
     }
-    this.recordHistory(due);
+    for (const [self, messages] of due) this.recordHistory(messages, self);
   }
 
   /** Hand what someone else said in `messages` to the inbound handler. */
@@ -465,9 +473,9 @@ export class WhatsAppAdapter {
     }
   }
 
-  /** Hand `messages`, which nothing delivers inbound, to Chats as history. */
-  private recordHistory(messages: WAMessage[]): void {
-    const self = this.selfPnJid();
+  /** Hand `messages`, which nothing delivers inbound and Rome's account `self`
+   *  heard, to Chats as history. */
+  private recordHistory(messages: WAMessage[], self = this.selfPnJid()): void {
     if (!this.syncSink?.recordHistory || !self || messages.length === 0) return;
     // Chats records what Rome sends when it sends it. An edit or a deletion
     // answers a message rather than being one, as a reaction does.

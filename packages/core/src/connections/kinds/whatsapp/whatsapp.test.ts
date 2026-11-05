@@ -366,6 +366,31 @@ describe("WhatsAppAdapter", () => {
         }
       });
 
+      it("records what it held as the account that heard it, while the socket is being replaced", async () => {
+        const { sink, recorded } = recordingSink();
+        adapter.onSync(sink);
+        adapter.onInbound(async () => {});
+        await adapter.start();
+        rs.useFakeTimers();
+        const user = mockSock.user;
+        try {
+          eventHandlers["messaging-history.set"]({
+            contacts: [],
+            chats: [],
+            messages: [
+              makeWAMessage({ key: { remoteJid: "111@s.whatsapp.net", id: "old", fromMe: false } }),
+            ],
+          });
+          mockSock.user = undefined as unknown as typeof user;
+          rs.advanceTimersByTime(30_000);
+
+          expect(recorded).toEqual([{ ids: ["old"], self: "1234567890@s.whatsapp.net" }]);
+        } finally {
+          mockSock.user = user;
+          rs.useRealTimers();
+        }
+      });
+
       it("records what it still holds when it stops", async () => {
         const { sink, recorded } = recordingSink();
         adapter.onSync(sink);
