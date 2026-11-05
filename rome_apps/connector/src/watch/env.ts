@@ -4,7 +4,6 @@
 
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { composioWebhookTarget, ensureComposioWebhookRegistered } from "../api/composio-webhook.js";
-import { keptActiveTriggers } from "../api/active-triggers.js";
 import { resolveRelayDepositUrl } from "../api/relay-webhook.js";
 import { SettingsStore } from "../api/settings-store.js";
 import { loadConnectorClient, ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
@@ -54,7 +53,7 @@ function composioEnv(deps: AppActionRuntimeDeps): ComposioEnv {
     activeTriggers: async () => {
       const client = await loadConnectorClient(deps.appContext.db);
       if (!client) throw new Error("Rome is not signed in to Composio.");
-      return keptActiveTriggers(client);
+      return client.listActiveTriggers();
     },
     webhookTarget: async () =>
       composioWebhookTarget({

@@ -1,6 +1,5 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { describe, expect, it } from "@rstest/core";
 
-import { keptActiveTriggers } from "./api/active-triggers.js";
 import type { ComposioClient } from "./api/composio-client.js";
 import {
   buildProxyEndpoint,
@@ -224,18 +223,6 @@ function fakeClient(overrides: {
 }
 
 describe("subscribeTriggerFeed", () => {
-  it("drops the kept active triggers once it arms one", async () => {
-    const listActiveTriggers = rs.fn().mockResolvedValue([]);
-    await keptActiveTriggers({ listActiveTriggers }, Date.now());
-    const result = await subscribeTriggerFeed(fakeClient({}), {
-      slug: "GMAIL_NEW_GMAIL_MESSAGE",
-      config: {},
-    });
-    expect(result).toMatchObject({ ok: true });
-    await keptActiveTriggers({ listActiveTriggers }, Date.now());
-    expect(listActiveTriggers).toHaveBeenCalledTimes(2);
-  });
-
   it("rejects a slug Composio does not recognize", async () => {
     const client = fakeClient({ triggerType: { throw: { status: 404 } } });
     const result = await subscribeTriggerFeed(client, {

@@ -114,8 +114,9 @@ export async function fetchComposioProjects(): Promise<ComposioProjects> {
   });
 }
 
-export async function selectComposioProject(projectId: string): Promise<void> {
-  await fetchJson(`${CONNECTOR_API}/projects/select`, {
+/** Switches the pinned project; `webhookError` says why event delivery could not be moved there. */
+export async function selectComposioProject(projectId: string): Promise<{ webhookError?: string }> {
+  return await fetchJson<{ webhookError?: string }>(`${CONNECTOR_API}/projects/select`, {
     method: "POST",
     json: { projectId },
     fallback: "Couldn't switch the Composio project. Try again.",

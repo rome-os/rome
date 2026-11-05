@@ -404,8 +404,9 @@ export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => 
   });
   const select = useMutation({
     mutationFn: selectComposioProject,
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setSwitched(true);
+      if (result.webhookError) onFlash(result.webhookError);
       await Promise.all(
         [
           COMPOSIO_PROJECTS_QUERY_KEY,

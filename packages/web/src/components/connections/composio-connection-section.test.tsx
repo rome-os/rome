@@ -146,7 +146,7 @@ describe("ComposioConnectionSection", () => {
       const url = String(input);
       if (url === "/api/apps/connector/projects/select" && init?.method === "POST") {
         selected = JSON.parse(String(init.body)).projectId;
-        return Response.json({ ok: true });
+        return Response.json({ ok: true, webhookError: "Relay is not configured." });
       }
       if (url === "/api/apps/connector/projects") {
         return Response.json({
@@ -170,7 +170,11 @@ describe("ComposioConnectionSection", () => {
       return Response.json({ webhookRegistered: true, relayConfigured: true });
     });
     const user = userEvent.setup();
-    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+    const onFlash = rs.fn();
+    renderSection(status({ loggedIn: true }), {
+      card: composioCard(status({ loggedIn: true })),
+      onFlash,
+    });
 
     const picker = await screen.findByRole("combobox", { name: "Composio project" });
     expect(within(picker).getByText("Second")).toBeTruthy();
@@ -182,6 +186,7 @@ describe("ComposioConnectionSection", () => {
         "Services connected in the previous project need connecting again here.",
       ),
     ).toBeTruthy();
+    expect(onFlash).toHaveBeenCalledWith("Relay is not configured.");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/apps/connector/projects/select",
       expect.objectContaining({

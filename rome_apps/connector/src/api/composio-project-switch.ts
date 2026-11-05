@@ -1,7 +1,5 @@
-import { forgetActiveTriggers } from "./active-triggers.js";
 import type { ComposioClient } from "./composio-client.js";
 import type { CliProject } from "./composio-login.js";
-import { forgetComposioWebhookTarget } from "./composio-webhook.js";
 import { type PinnedProject, pinProject, readPinnedProject } from "./composio-project.js";
 import type { SettingsStore } from "./settings-store.js";
 import { subscribeTriggerFeed } from "../shared.js";
@@ -20,7 +18,7 @@ type SwitchClient = Pick<
 >;
 
 export interface SwitchDeps {
-  store: Pick<SettingsStore, "get" | "set">;
+  store: Pick<SettingsStore, "get" | "set" | "delete">;
   orgId(): Promise<string | null>;
   listProjects(): Promise<CliProject[]>;
   clientFor(project: { orgId: string; projectId: string }): SwitchClient;
@@ -44,10 +42,11 @@ const sameConfig = (a: Record<string, unknown>, b: Record<string, unknown>) =>
 
 /**
  * Pins another project of the account and moves this Rome's Composio events
- * there: its webhook points here with a new signing secret, the kept webhook
- * and trigger reads are dropped, and every trigger active in the previous
- * project is armed again in the new one wherever its service is connected
- * there. The previous project is left as it was.
+ * there: its webhook points here with a new signing secret, and every trigger
+ * active in the previous project is armed again in the new one wherever its
+ * service is connected there. The previous project is left as it was. When
+ * the webhook cannot be pointed here, the stored signing material is dropped,
+ * so Event delivery says it needs setup.
  */
 export async function switchProject(deps: SwitchDeps, projectId: string): Promise<SwitchResult> {
   const project = (await deps.listProjects()).find((p) => p.id === projectId);
@@ -73,9 +72,11 @@ export async function switchProject(deps: SwitchDeps, projectId: string): Promis
     await deps.registerWebhook(next);
   } catch (err) {
     webhookError = err instanceof Error ? err.message : String(err);
+    // The stored signing material belongs to the previous project. Without it,
+    // Event delivery says it needs setup instead of looking ready.
+    await deps.store.delete("webhookSecret");
+    await deps.store.delete("webhookEndpointId");
   }
-  forgetComposioWebhookTarget();
-  forgetActiveTriggers();
 
   let rearmed = 0;
   let notRearmed = 0;

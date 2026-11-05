@@ -1,9 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 
-import { keptActiveTriggers } from "./active-triggers.js";
 import type { ActiveTrigger } from "./composio-client.js";
 import { PROJECT_SWITCH_NOTE, switchProject, type SwitchDeps } from "./composio-project-switch.js";
-import { composioWebhookTarget } from "./composio-webhook.js";
 
 const trigger = (name: string, config: Record<string, unknown> = {}): ActiveTrigger => ({
   triggerInstanceId: `ti_${name}`,
@@ -14,7 +12,7 @@ const trigger = (name: string, config: Record<string, unknown> = {}): ActiveTrig
 });
 
 describe("switchProject", () => {
-  it("re-pins, points the webhook here, drops kept reads, and arms the previous triggers again", async () => {
+  it("re-pins, points the webhook here, and arms the previous triggers again", async () => {
     const store = new Map<string, string>([
       [
         "composioProject",
@@ -40,19 +38,15 @@ describe("switchProject", () => {
       setWebhookUrl: async () => ({ id: "ws_new", secret: "whsec_new" }),
     });
 
-    // Reads kept before the switch.
-    const listActiveTriggers = rs.fn(async () => []);
-    await keptActiveTriggers({ listActiveTriggers }, Date.now());
-    const getWebhookUrl = rs.fn(async () => "https://relay.example/h/other");
-    const relay = { get: async () => ({ depositUrl: "https://relay.example/h/switch" }) };
-    await composioWebhookTarget({ client: { getWebhookUrl }, settings: relay });
-
     const result = await switchProject(
       {
         store: {
           get: async (key) => store.get(key) ?? null,
           set: async (key, value) => {
             store.set(key, value);
+          },
+          delete: async (key) => {
+            store.delete(key);
           },
         },
         orgId: async () => "ok_org",
@@ -75,10 +69,37 @@ describe("switchProject", () => {
     expect(JSON.parse(store.get("composioProject") ?? "null").projectId).toBe("pr_new");
     expect(registerWebhook).toHaveBeenCalledTimes(1);
     expect(created).toEqual([{ slug: "MAIL_NEW", account: "ca_new" }]);
-    await keptActiveTriggers({ listActiveTriggers }, Date.now());
-    expect(listActiveTriggers).toHaveBeenCalledTimes(2);
-    await composioWebhookTarget({ client: { getWebhookUrl }, settings: relay });
-    expect(getWebhookUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops the stored signing material when the new project's webhook cannot point here", async () => {
+    const store = new Map<string, string>([
+      ["webhookSecret", "whsec_old"],
+      ["webhookEndpointId", "ws_old"],
+    ]);
+    const result = await switchProject(
+      {
+        store: {
+          get: async (key) => store.get(key) ?? null,
+          set: async (key, value) => {
+            store.set(key, value);
+          },
+          delete: async (key) => {
+            store.delete(key);
+          },
+        },
+        orgId: async () => "ok_org",
+        listProjects: async () => [{ id: "pr_new", name: "New" }],
+        clientFor: () => ({ listActiveTriggers: async () => [] }) as never,
+        registerWebhook: async () => {
+          throw new Error("relay unavailable");
+        },
+      },
+      "pr_new",
+    );
+    expect(result.webhookError).toBe("relay unavailable");
+    expect(store.has("webhookSecret")).toBe(false);
+    expect(store.has("webhookEndpointId")).toBe(false);
+    expect(JSON.parse(store.get("composioProject") ?? "null").projectId).toBe("pr_new");
   });
 
   it("refuses a project the account does not have, and changes nothing", async () => {
@@ -86,7 +107,7 @@ describe("switchProject", () => {
     await expect(
       switchProject(
         {
-          store: { get: async () => null, set },
+          store: { get: async () => null, set, delete: rs.fn() },
           orgId: async () => "ok_org",
           listProjects: async () => [{ id: "pr_old", name: "Old" }],
           clientFor: () => ({}) as never,

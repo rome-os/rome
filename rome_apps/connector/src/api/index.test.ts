@@ -423,12 +423,15 @@ describe("connector API Composio project pin", () => {
     expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_second");
   });
 
-  it("drops the pin at logout", async () => {
+  it("keeps the pin across logout, so signing in again stays on the same project", async () => {
     stored.set("composioProject", pinned("pr_second"));
 
     await createApiHandler(context()).handle(request("logout", "POST"));
+    await createApiHandler(context()).handle(
+      request("login/complete", "POST", { cliKey: "cli_test_session" }),
+    );
 
-    expect(stored.has("composioProject")).toBe(false);
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_second");
   });
 
   it("lists the projects with the pinned one selected and Composio's default marked", async () => {

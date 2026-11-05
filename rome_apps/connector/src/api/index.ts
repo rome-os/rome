@@ -4,9 +4,7 @@ import {
   isComposioAuthenticationError,
   isComposioNotFoundError,
 } from "./composio-client.js";
-import { forgetActiveTriggers } from "./active-triggers.js";
 import {
-  clearPinnedProject,
   ensurePinnedProject,
   livePinDeps,
   type PinnedProject,
@@ -16,7 +14,6 @@ import { switchProject } from "./composio-project-switch.js";
 import {
   composioWebhookTarget,
   ensureComposioWebhookRegistered,
-  forgetComposioWebhookTarget,
   RelayWebhookUnavailableError,
 } from "./composio-webhook.js";
 import {
@@ -375,19 +372,13 @@ class ComposioApiHandler implements RomeAppApiHandler {
   }
 
   /**
-   * Pins a project at login when none is pinned, without asking: the one that
-   * holds this Rome's webhook endpoint, or else the key's default. A pin from
-   * another Composio organization (a different account signed in) is replaced.
-   * When pinning fails, the login still succeeds, unpinned, and the next client
-   * tries again.
+   * Pins a project at login when none is pinned, without asking
+   * (`ensurePinnedProject`). When pinning fails, the login still succeeds,
+   * unpinned, and the next client tries again.
    */
   private async pinAtLogin(apiKey: string): Promise<PinnedProject | null> {
-    const deps = livePinDeps(this.ctx.db, apiKey);
     try {
-      const pinned = await readPinnedProject(deps.store);
-      const orgId = await deps.orgId();
-      if (pinned && orgId && pinned.orgId !== orgId) await clearPinnedProject(deps.store);
-      return await ensurePinnedProject(deps);
+      return await ensurePinnedProject(livePinDeps(this.ctx.db, apiKey));
     } catch (err) {
       this.ctx.log.warn("login: composio project pin failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -438,9 +429,6 @@ class ComposioApiHandler implements RomeAppApiHandler {
     }
     await this.settings.delete("webhookSecret");
     await this.settings.delete("webhookEndpointId");
-    await clearPinnedProject(this.settings);
-    forgetComposioWebhookTarget();
-    forgetActiveTriggers();
     try {
       await logoutCliSession();
     } catch (err) {

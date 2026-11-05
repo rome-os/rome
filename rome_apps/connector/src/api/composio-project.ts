@@ -59,10 +59,6 @@ export async function pinProject(
   return project;
 }
 
-export async function clearPinnedProject(store: Pick<SettingsStore, "delete">): Promise<void> {
-  await store.delete("composioProject");
-}
-
 /** Pins the key's default project, as Composio's session info names it. */
 export async function pinDefaultProject(deps: PinDeps): Promise<PinnedProject> {
   const fallback = await deps.clientFor(null).defaultProject();
@@ -76,16 +72,19 @@ export async function pinDefaultProject(deps: PinDeps): Promise<PinnedProject> {
 }
 
 /**
- * The pinned project, pinning one first when there is none: the project that
- * holds this Rome's stored webhook endpoint, so a Rome that already uses a
- * project stays on it, and otherwise the default. Null for a project key.
+ * The pinned project, pinning one first when there is none, or when the pin
+ * belongs to another Composio organization than the signed-in one: the
+ * project that holds this Rome's stored webhook endpoint, so a Rome that
+ * already uses a project stays on it, and otherwise the default. The pin
+ * outlives signing out, so signing in again keeps the same project. Null for
+ * a project key.
  */
 export async function ensurePinnedProject(deps: PinDeps): Promise<PinnedProject | null> {
   if (!deps.apiKey.startsWith("uak_")) return null;
   const pinned = await readPinnedProject(deps.store);
-  if (pinned) return pinned;
-  const endpointId = await deps.store.get("webhookEndpointId");
   const orgId = await deps.orgId();
+  if (pinned && (!orgId || pinned.orgId === orgId)) return pinned;
+  const endpointId = await deps.store.get("webhookEndpointId");
   if (endpointId && orgId) {
     for (const project of await deps.listProjects()) {
       const client = deps.clientFor({ orgId, projectId: project.id });

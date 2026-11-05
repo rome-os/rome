@@ -5,7 +5,6 @@ import {
   isComposioAuthenticationError,
   isComposioNotFoundError,
 } from "./api/composio-client.js";
-import { forgetActiveTriggers } from "./api/active-triggers.js";
 import { readSessionApiKey } from "./api/composio-login.js";
 import { pinnedProjectFor } from "./api/composio-project.js";
 import { buildTopic } from "./api/topic.js";
@@ -363,7 +362,6 @@ export async function subscribeTriggerFeed(
     connectedAccountId,
     triggerConfig: input.config,
   });
-  forgetActiveTriggers();
   return {
     ok: true,
     eventName: buildTopic(provider, input.slug.toLowerCase()),

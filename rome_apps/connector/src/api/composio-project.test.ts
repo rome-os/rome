@@ -3,7 +3,9 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { ensurePinnedProject, type PinDeps, readPinnedProject } from "./composio-project.js";
 
 /** The pin's dependencies over fakes: an in-memory store, two projects, and which one holds an endpoint. */
-function deps(over: { endpointIn?: string; storedEndpoint?: string; apiKey?: string } = {}) {
+function deps(
+  over: { endpointIn?: string; storedEndpoint?: string; apiKey?: string; orgId?: string } = {},
+) {
   const store = new Map<string, string>();
   if (over.storedEndpoint) store.set("webhookEndpointId", over.storedEndpoint);
   const listProjects = rs.fn(async () => [
@@ -18,7 +20,7 @@ function deps(over: { endpointIn?: string; storedEndpoint?: string; apiKey?: str
       },
     },
     apiKey: over.apiKey ?? "uak_test",
-    orgId: async () => "ok_org",
+    orgId: async () => over.orgId ?? "ok_org",
     listProjects,
     clientFor: (project) => ({
       defaultProject: async () => ({
@@ -68,5 +70,18 @@ describe("ensurePinnedProject", () => {
     const project = deps({ apiKey: "ak_test" });
     await expect(ensurePinnedProject(project.value)).resolves.toBeNull();
     expect(project.store.has("composioProject")).toBe(false);
+  });
+
+  it("pins again when the pin belongs to another organization than the signed-in one", async () => {
+    const d = deps({ orgId: "ok_new_account", storedEndpoint: "ws_1", endpointIn: "pr_used" });
+    d.store.set(
+      "composioProject",
+      JSON.stringify({ orgId: "ok_old_account", projectId: "pr_kept", projectName: "Kept" }),
+    );
+    await expect(ensurePinnedProject(d.value)).resolves.toEqual({
+      orgId: "ok_new_account",
+      projectId: "pr_used",
+      projectName: "Used",
+    });
   });
 });

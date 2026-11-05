@@ -44,7 +44,6 @@ export async function ensureComposioWebhookRegistered(input: {
   assertHttpsRelayDepositUrl(webhookUrl);
 
   const endpoint = await input.client.setWebhookUrl(webhookUrl);
-  lastTarget = null;
   await input.appSettings.set("webhookSecret", endpoint.secret);
   await input.appSettings.set("webhookEndpointId", endpoint.id);
   return { webhookUrl };
@@ -58,17 +57,6 @@ export async function ensureComposioWebhookRegistered(input: {
  */
 export type ComposioWebhookTarget = "ours" | "elsewhere" | "none" | "unknown";
 
-const TARGET_TTL_MS = 5 * 60_000;
-
-// One answer per relay mailbox, kept briefly so listing sources does not ask
-// Composio each time. Registering drops it, since that re-points the URL.
-let lastTarget: { url: string; target: ComposioWebhookTarget; at: number } | null = null;
-
-/** Drops the kept answer, when this Rome signs out or moves to another project. */
-export function forgetComposioWebhookTarget(): void {
-  lastTarget = null;
-}
-
 const sameUrl = (a: string, b: string) => {
   try {
     return new URL(a).href === new URL(b).href;
@@ -77,18 +65,13 @@ const sameUrl = (a: string, b: string) => {
   }
 };
 
-/** Reads where the project's webhook delivers, without changing it. `unknown` is not kept. */
+/** Reads where the project's webhook delivers, without changing it. */
 export async function composioWebhookTarget(input: {
   client: Pick<ComposioClient, "getWebhookUrl"> | null;
   settings: Pick<AppSettingsRepository, "get">;
-  now?: number;
 }): Promise<ComposioWebhookTarget> {
-  const now = input.now ?? Date.now();
   const ours = await resolveRelayDepositUrl(input.settings);
   if (!input.client || !ours) return "unknown";
-  if (lastTarget && lastTarget.url === ours && now - lastTarget.at < TARGET_TTL_MS) {
-    return lastTarget.target;
-  }
   let current: string | null | undefined;
   try {
     current = await input.client.getWebhookUrl();
@@ -96,7 +79,5 @@ export async function composioWebhookTarget(input: {
     return "unknown";
   }
   if (current === undefined) return "unknown";
-  const target = current === null ? "none" : sameUrl(current, ours) ? "ours" : "elsewhere";
-  lastTarget = { url: ours, target, at: now };
-  return target;
+  return current === null ? "none" : sameUrl(current, ours) ? "ours" : "elsewhere";
 }
