@@ -140,9 +140,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // A run that opens a session by its caller always names one.
         const opener = caller ?? adhocCaller(req.key.agentName);
         const callerId = callerKey(opener);
-        // The conversation the turn is kept in where it replies.
+        // The conversation the turn is kept in where it replies. A resume by
+        // id keeps the conversation its session recorded, so the caller it
+        // names picks none, as in the runner.
         const romeSessionId =
-          (caller ? callerChatId(caller) : undefined) ??
+          (caller && !req.sessionId ? callerChatId(caller) : undefined) ??
           thread?.romeSessionId ??
           (thread ? channelChatId(thread.channel, thread.threadId) : undefined);
         const stands = romeSessionId ? !!this.runLineDeps?.lines.stands(romeSessionId) : false;
@@ -206,6 +208,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // events drain in the background as the turn runs.
         const briefing = catchUpBriefing(this.wake?.catchUp ?? {}, {
           threadContext: thread,
+          ...(romeSessionId ? { romeSessionId } : {}),
           replyTo: req.replyTo,
           quoted: lines?.quoted ?? null,
         });

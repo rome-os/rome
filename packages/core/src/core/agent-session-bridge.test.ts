@@ -1,5 +1,5 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
-import { callerFromKey } from "./session-caller.js";
+import { callerFromKey, type SessionCaller } from "./session-caller.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -14,7 +14,9 @@ import type {
   SessionSurface,
   AgentSessionManager,
   AgentTurnHandle,
+  TurnBriefing,
 } from "../agent-sessions/agent-session.js";
+import type { WakeDeps } from "./agent-runner.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -475,6 +477,9 @@ describe("AgentSessionBridge answer recording", () => {
       streamReply,
       repo,
       runLineDeps,
+      caller = callerFromKey("telegram:chat-1"),
+      sessionId,
+      wake,
     }: {
       /** The deprecated ask to stream the reply, which the bridge ignores. */
       streamReply?: boolean;
@@ -482,21 +487,32 @@ describe("AgentSessionBridge answer recording", () => {
       repo?: WebChatRepository;
       /** Chats' messages, given once Chats records what the caller sends. */
       runLineDeps?: RunLineDeps;
+      /** The caller the worker's run names. */
+      caller?: SessionCaller;
+      /** The session the run resumes by id, when it names one. */
+      sessionId?: string;
+      /** What a wake on a connection adds to the run. */
+      wake?: WakeDeps;
     } = {},
   ) {
-    const caller = callerFromKey("telegram:chat-1");
+    let briefing: TurnBriefing | undefined;
     const session = {
       key: { agentName: "main", caller },
       caller,
       sessionId: "session-1",
-      sendTurn: () => ({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
+      sendTurn: (_input: unknown, options?: { briefing?: TurnBriefing }) => {
+        briefing = options?.briefing;
+        return { turnId: "turn-1", events } as unknown as AgentTurnHandle;
+      },
     } as unknown as AgentSession;
     let lent: SessionSurface | undefined;
+    const lend = async (surface: SessionSurface) => {
+      lent = surface;
+      return session;
+    };
     const manager = {
-      open: async (_agent: string, _caller: string, surface: SessionSurface) => {
-        lent = surface;
-        return session;
-      },
+      open: async (_agent: string, _caller: string, surface: SessionSurface) => lend(surface),
+      session: async (_id: string, _agent: string, surface: SessionSurface) => lend(surface),
     } as unknown as AgentSessionManager;
     // Whether the session's log leaves the answer to the caller, as the
     // session asks once the answer arrives.
@@ -506,7 +522,7 @@ describe("AgentSessionBridge answer recording", () => {
     };
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(
+    new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps, wake).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -518,6 +534,7 @@ describe("AgentSessionBridge answer recording", () => {
         key: session.key,
         input: { prompt: "hi" },
         platformMessageId: "msg-1",
+        ...(sessionId ? { sessionId } : {}),
         ...(streamReply === undefined ? {} : { streamReply }),
         init: {
           threadContext: {
@@ -531,7 +548,7 @@ describe("AgentSessionBridge answer recording", () => {
     });
     const turnEnd = () =>
       child.sent.find((message) => JSON.stringify(message).includes('"type":"turn_end"'));
-    return { turnEnd, keepsAnswer };
+    return { turnEnd, keepsAnswer, briefing: () => briefing };
   }
 
   const turnStart: StreamAgentEvent = {
@@ -594,6 +611,61 @@ describe("AgentSessionBridge answer recording", () => {
   it("reads the run's messages in the conversation its connection thread names", async () => {
     const asked: string[] = [];
     const { turnEnd } = run(turnEvents(...answer), {
+      runLineDeps: {
+        lines: {
+          recorded: async (sessionId) => {
+            asked.push(sessionId);
+            return null;
+          },
+          stands: () => false,
+        },
+        links: { prompt: () => {} },
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(asked).toEqual([channelChatId("telegram", "chat-1")]);
+  });
+
+  it("reads the run's messages and catches up in the conversation its caller names", async () => {
+    const asked: string[] = [];
+    const caughtUp: string[] = [];
+    const { turnEnd, briefing } = run(turnEvents(...answer), {
+      caller: { kind: "place", connection: "telegram", place: "chat-1", chatId: "named-chat" },
+      runLineDeps: {
+        lines: {
+          recorded: async (sessionId) => {
+            asked.push(sessionId);
+            return null;
+          },
+          stands: () => false,
+        },
+        links: { prompt: () => {} },
+      },
+      wake: {
+        catchUp: {
+          turnLinks: {
+            unseen: (sessionId) => {
+              caughtUp.push(sessionId);
+              return [];
+            },
+            seen: () => {},
+          },
+        },
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    briefing()?.compose("hi", { turnId: "turn-1" });
+    expect(asked).toEqual(["named-chat"]);
+    expect(caughtUp).toEqual(["named-chat"]);
+  });
+
+  it("reads a resumed run's messages where it replies, not in the chat its caller names", async () => {
+    const asked: string[] = [];
+    const { turnEnd } = run(turnEvents(...answer), {
+      caller: { kind: "chat", chatId: "dashboard-chat" },
+      sessionId: "session-1",
       runLineDeps: {
         lines: {
           recorded: async (sessionId) => {
