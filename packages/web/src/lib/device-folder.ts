@@ -54,3 +54,34 @@ export function pathSegments(path: string): { key: string; text: string }[] {
     return { key: prefix, text };
   });
 }
+
+/** A folder chosen in the Concierge composer: on a linked device, or a Rome project. */
+export type FolderSelection =
+  | { kind: "device"; folder: DraftDeviceFolder }
+  | { kind: "project"; name: string; path: string };
+
+/** Quoted as is, or as a JSON string when it holds a `"` or a control character. */
+function quoted(value: string): string {
+  return /["\u0000-\u001f\u007f]/.test(value) ? JSON.stringify(value) : `"${value}"`;
+}
+
+/**
+ * The one line that tells the Concierge where the guardian pointed. It is fixed
+ * English text for the model, and only text: it grants nothing.
+ */
+export function folderLine(selection: FolderSelection): string {
+  if (selection.kind === "project") {
+    return `- Folder: ${quoted(selection.path)} (Rome project ${quoted(selection.name)})`;
+  }
+  const { path, deviceName, deviceId } = selection.folder;
+  return `- Folder: ${quoted(path)} on Rome node device ${quoted(deviceName)} (id ${deviceId})`;
+}
+
+/**
+ * `text` followed by the folder line, set apart by a blank line as the server
+ * sets apart its `- File N:` lines. Without text it is the line alone.
+ */
+export function appendFolderLine(text: string, selection: FolderSelection | null): string {
+  if (!selection) return text;
+  return [text.trim(), folderLine(selection)].filter(Boolean).join("\n\n");
+}
