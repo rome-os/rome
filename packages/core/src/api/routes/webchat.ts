@@ -1577,8 +1577,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       await deps.webchatRepo.promoteForkToChat(forkSessionId);
     }
     void (async () => {
-      while (!(await iterator.next()).done) {
-        // AgentRunner persists every fork message; this caller only has to drain.
+      // The session keeps the fork's turn. A fork that became a chat while
+      // its first turn ran gets Chats' copy of the answer here, as any caller
+      // of a chat puts on record what it said.
+      for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
+        const event = next.value;
+        if (input.continuable && event.type === "result" && event.content.trim()) {
+          await deps.webchatRepo.recordAnswerInChat(forkSessionId, forkTurnId, event.content);
+        }
       }
     })().catch((err) => {
       log.warn("turn fork failed", {
