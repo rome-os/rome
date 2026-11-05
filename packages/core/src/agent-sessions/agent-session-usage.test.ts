@@ -11,8 +11,10 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { sessionBehind, type LoggedTurn, type SessionLog } from "./agent-session.js";
+import { turnFacts, withTurnExecution } from "./turn-context.js";
 import { createSessionFromRun, type ModelProvider } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
@@ -35,7 +37,7 @@ async function drain(events: AsyncIterable<unknown>): Promise<void> {
 describe("AgentSession turn usage", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: TestSessionManager;
   let recorded: TurnUsageFacts[];
   // Each run decides whether it reaches the provider. One that does mints a
   // provider turn id, like Codex does on turn/start.
@@ -48,6 +50,8 @@ describe("AgentSession turn usage", () => {
   let resolverUsesRomeCredits: boolean;
   let state: AIToolStateValue;
   let providerCalls: number;
+  let deps: Parameters<typeof createTestSessionManager>[0];
+  let beforeOpen: (() => Promise<void>) | undefined;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -74,11 +78,13 @@ describe("AgentSession turn usage", () => {
     beforeModelDispatch = undefined;
     resolverUsesRomeCredits = false;
     providerCalls = 0;
+    beforeOpen = undefined;
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
+        await beforeOpen?.();
         const session = createSessionFromRun(
           "openai",
           () => {
@@ -118,28 +124,26 @@ describe("AgentSession turn usage", () => {
       },
       size: () => 1,
     };
-    manager = createAgentSessionManager(
-      {
-        agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
-        sessionsRepo,
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
-        modelResolver: createModelResolver({
-          providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
-          romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
-        }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
-        turnMiddleware,
-        usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
-      },
-      { keepAliveAcrossTurns: true },
-    );
+    deps = {
+      agentLoader: loader,
+      sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
+      sessionsRepo,
+      promptBuilder,
+      actionRegistry,
+      actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+      modelResolver: createModelResolver({
+        providers: [provider],
+        aiToolState: { get: () => state, refresh: async () => state },
+        romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
+      }),
+      capabilityDiscovery: new CapabilityDiscovery(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
+      lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      channelSurface: testChannelSurface,
+      turnMiddleware,
+      usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+    };
+    manager = createTestSessionManager(deps, { keepAliveAcrossTurns: true });
   });
 
   afterEach(async () => {
@@ -147,6 +151,184 @@ describe("AgentSession turn usage", () => {
     testDb.close();
     await rm(directory, { recursive: true, force: true });
     rs.restoreAllMocks();
+  });
+
+  it("replies to the surface its own opener lent, when another opener of the session came after", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const logged: LoggedTurn[] = [];
+    const log: SessionLog = {
+      turn: (turn) => {
+        logged.push(turn);
+        return { conversation: { romeSessionId: turn.sessionId, romeSessionType: "action" } };
+      },
+    };
+    const shared = createTestSessionManager({ ...deps, log }, { keepAliveAcrossTurns: true });
+    try {
+      const caller = "place:test:one";
+      const inbox = await shared.open(AGENT, caller, {
+        cards: false,
+        replies: { channel: "inbox", threadId: "t-1" },
+      });
+      // A second opener of the same caller lends its own surface before the
+      // first one starts its turn.
+      const wake = await shared.open(AGENT, caller, {
+        cards: false,
+        replies: { channel: "wake", threadId: "t-1" },
+      });
+      expect(wake.sessionId).toBe(inbox.sessionId);
+
+      await drain(inbox.sendTurn({ prompt: "from the inbox" }).events);
+      await drain(wake.sendTurn({ prompt: "from the wake" }).events);
+
+      expect(logged.map((turn) => [turn.prompt, turn.replies?.channel])).toEqual([
+        ["from the inbox", "inbox"],
+        ["from the wake", "wake"],
+      ]);
+    } finally {
+      await shared.shutdown();
+    }
+  });
+
+  it("asks the caller's owner for the model it remembers when a session resumes by id without one", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const asked: string[] = [];
+    const resumer = createTestSessionManager(
+      {
+        ...deps,
+        rememberedModel: async (caller) => {
+          asked.push(caller);
+          return undefined;
+        },
+      },
+      { keepAliveAcrossTurns: true },
+    );
+    try {
+      const first = await resumer.open(AGENT, "chat:remembered", { cards: false });
+      await drain(first.sendTurn({ prompt: "hello" }).events);
+      await first.close("user");
+      expect(asked).toEqual([]);
+
+      await resumer.session(first.sessionId, AGENT, { cards: false });
+      expect(asked).toEqual(["chat:remembered"]);
+    } finally {
+      await resumer.shutdown();
+    }
+  });
+
+  it("retires a generation whose open was still in flight when a reset came due", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const caller = "place:test:reset";
+    const surface = { cards: false };
+    const first = await manager.open(AGENT, caller, surface);
+    await drain(first.sendTurn({ prompt: "hello" }).events);
+    await first.close("user");
+
+    // A cold open of the same caller waits on the provider while the reset
+    // comes due.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    beforeOpen = () => gate;
+    const pending = manager.open(AGENT, caller, surface);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const reset = manager.reset(AGENT, caller, {
+      policy: "test",
+      when: () => ({ due: true, reason: "test", elapsedMinutes: 1 }),
+    });
+    release();
+    beforeOpen = undefined;
+    const stale = await pending;
+    await reset;
+
+    const next = await manager.open(AGENT, caller, surface);
+    expect(stale.sessionId).toBe(first.sessionId);
+    expect(next.sessionId).not.toBe(first.sessionId);
+  });
+
+  it("runs a turn without the facts its caller set, so a turn its tools send reads its own", async () => {
+    let seen: ReturnType<typeof turnFacts> | undefined;
+    nextRun = async function* () {
+      seen = turnFacts();
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.open(AGENT, "place:test:facts", { cards: false });
+    const handle = withTurnExecution({ executionId: "outer" }, () =>
+      session.sendTurn({ prompt: "hello" }),
+    );
+    await drain(handle.events);
+
+    expect(seen).toEqual({});
+  });
+
+  it("keeps a turn with no reply address without one, when a later opener lent an address", async () => {
+    let seen: unknown = "unread";
+    const shared = createTestSessionManager(deps, { keepAliveAcrossTurns: true });
+    try {
+      const caller = "place:test:no-replies";
+      const quiet = await shared.open(AGENT, caller, { cards: false });
+      await shared.open(AGENT, caller, {
+        cards: false,
+        replies: { channel: "wake", threadId: "t-1" },
+      });
+      const behind = sessionBehind(quiet) as unknown as {
+        currentTurnThreadContextRef: unknown;
+      };
+      nextRun = async function* () {
+        seen = behind.currentTurnThreadContextRef;
+        yield { type: "result", content: "done" };
+      };
+
+      await drain(quiet.sendTurn({ prompt: "no address" }).events);
+
+      expect(seen).toBeUndefined();
+    } finally {
+      await shared.shutdown();
+    }
+  });
+
+  it("keeps a running turn's inherited shared context when a turn queued behind it names another", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.open(AGENT, "place:test:shared", { cards: false });
+    await drain(session.sendTurn({ prompt: "first", sharedContext: { who: "first" } }).events);
+
+    const behind = sessionBehind(session) as unknown as {
+      currentTurnSharedContextRef: unknown;
+    };
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    nextRun = async function* () {
+      started();
+      await gate;
+      yield { type: "result", content: "done" };
+    };
+    const paused = session.sendTurn({ prompt: "inherits" });
+    const pausedDone = drain(paused.events);
+    await running;
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const queued = session.sendTurn({ prompt: "names its own", sharedContext: { who: "queued" } });
+
+    expect(behind.currentTurnSharedContextRef).toEqual({ who: "first" });
+    release();
+    await pausedDone;
+    await drain(queued.events);
+    expect(behind.currentTurnSharedContextRef).toEqual({ who: "queued" });
   });
 
   it("records each finished turn once with its accounting, funding, and provider turn id", async () => {

@@ -232,8 +232,10 @@ function setup(
       before: async (place: Place, cursor: { id: string }, limit: number) =>
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
-    sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
-    agentSessionManager: { peek: rs.fn(() => ({ selectModel: rs.fn() })) },
+    agentSessionManager: {
+      live: rs.fn(() => ({ selectModel: rs.fn() })),
+      find: async () => ({ sessionId: "runtime-1" }) as never,
+    },
     aiToolState: {
       get: () => ({
         claude: { loggedIn: true, quotaExhausted: false },
@@ -1394,7 +1396,9 @@ describe("Concierge system turns", () => {
   const serviceWith = (session: { id: string } | null, outcome: "completed" | "failed") => {
     const turns: BackendTurnParams[] = [];
     const service = new ConciergeService({
-      sessionManager: { findReusableSession: async () => session },
+      agentSessionManager: {
+        find: async () => (session ? ({ sessionId: session.id } as never) : undefined),
+      },
       runBackendTurn: async (params: BackendTurnParams) => {
         turns.push(params);
         return outcome;
@@ -1471,11 +1475,9 @@ describe("Concierge quota failover", () => {
     s.service.deps.webchatRepo = s.storedChats;
     const raw = state();
     s.deps.aiToolState.get = () => raw;
-    s.deps.sessionManager.findReusableSession = rs.fn(
-      async () => ({ provider: "openai" }) as never,
-    );
+    s.deps.agentSessionManager.find = rs.fn(async () => ({ provider: "openai" }) as never);
     const selectModel = rs.fn();
-    s.deps.agentSessionManager.peek = rs.fn(() => ({ selectModel }) as never);
+    s.deps.agentSessionManager.live = rs.fn(() => ({ selectModel }) as never);
     const inserted = rs.fn();
     s.storedChats.onMessageInserted(inserted);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toEqual({
@@ -1523,11 +1525,9 @@ describe("Concierge quota failover", () => {
   it("uses the runtime provider before the sole-exhausted fallback", async () => {
     const s = setup({ startEvents: false });
     s.deps.aiToolState.get = state;
-    s.deps.sessionManager.findReusableSession = rs.fn(
-      async () => ({ provider: "openai" }) as never,
-    );
+    s.deps.agentSessionManager.find = rs.fn(async () => ({ provider: "openai" }) as never);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-    s.deps.sessionManager.findReusableSession = rs.fn(async () => undefined);
+    s.deps.agentSessionManager.find = rs.fn(async () => undefined);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
       from: "anthropic",
       to: "openai",

@@ -1,3 +1,4 @@
+import { createSessionLog } from "./rows/session-log.js";
 import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
@@ -31,7 +32,8 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   });
   const session: AgentSession = {
     selectModel: () => {},
-    key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
+    key: { agentName: "researcher", caller: `webchat:parent-1:subagent:${sessionId}` },
+    caller: `webchat:parent-1:subagent:${sessionId}`,
     sessionId,
     status: "idle",
     sendTurn(input, options) {
@@ -102,21 +104,19 @@ describe("SubagentExecutionService", () => {
 
   afterEach(() => db.close());
 
-  it("returns stable IDs before completion, creates fresh sessions, and persists Child-owned text", async () => {
+  it("returns stable IDs before completion and creates fresh sessions under their own records", async () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
-    const recordConversation = rs.fn(async () => undefined);
     const childManager = {
-      acquire: rs.fn(async () => children.shift()!),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
-      recordConversation,
+      open: rs.fn(async () => children.shift()!),
+      session: rs.fn(),
+      live: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const registry = createActiveSubagentRegistry();
     const service = createSubagentExecutionService({
-      webchatRepo: repo,
+      log: createSessionLog(repo),
       activeRegistry: registry,
       turnStreams: createAgentTurnStreamRegistry(),
     });
@@ -126,7 +126,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "parent-turn-1",
       parentToolUseId: "tool-1",
       parentAgentName: "main",
-      parentChannelThreadKey: "webchat:parent-1",
+      childCaller: "webchat:parent-1:subagent:child",
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -138,10 +138,12 @@ describe("SubagentExecutionService", () => {
       turnId: "child-turn-1",
       agentName: "researcher",
     });
-    expect(first.calls[0].options?.lifecycleParent).toEqual({
-      sessionId: "parent-runtime-1",
-      turnId: "parent-turn-1",
-      agentName: "main",
+    expect(first.calls[0].options?.initiatedBy).toEqual({
+      parentTurn: {
+        sessionId: "parent-runtime-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
     });
     expect(registry.getLinkByParent(parentRef)?.child).toEqual({
       sessionId: "child-1",
@@ -177,61 +179,11 @@ describe("SubagentExecutionService", () => {
     second.releases[0].resolve();
     await execution2.completion;
 
-    const childMessages = await repo.getMessages("child-1");
-    expect(childMessages.filter((message) => message.role === "user")).toHaveLength(1);
-    expect(childMessages.filter((message) => message.role === "assistant")).toHaveLength(1);
-    expect(childMessages.filter((message) => message.role === "trace")).toHaveLength(1);
-    const childTrace = await repo.getTraceContents("child-1");
-    expect(childTrace.some((message) => message.content.includes("working"))).toBe(true);
     await expect(repo.getSession("child-1")).resolves.toMatchObject({ type: "subagent" });
     await expect(repo.getSession("child-2")).resolves.toMatchObject({ type: "subagent" });
-    expect(recordConversation.mock.calls).toEqual([
-      ["child-1", "child-1"],
-      ["child-2", "child-2"],
-    ]);
     const homeChats = await repo.listSessions();
     expect(homeChats.map((session) => session.id)).not.toContain("child-1");
     expect(homeChats.map((session) => session.id)).not.toContain("child-2");
-  });
-
-  it("still runs a fresh Child when recording its conversation fails", async () => {
-    const child = fakeChildSession("child-unrecorded", ["child-turn"]);
-    const childManager = {
-      acquire: rs.fn(async () => child.session),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
-      recordConversation: rs.fn(async () => {
-        throw new Error("database is locked");
-      }),
-      shutdown: rs.fn(async () => undefined),
-    } as unknown as AgentSessionManager;
-    const service = createSubagentExecutionService({
-      webchatRepo: repo,
-      activeRegistry: createActiveSubagentRegistry(),
-      turnStreams: createAgentTurnStreamRegistry(),
-    });
-
-    const execution = await service.startSubagent(
-      "researcher",
-      { prompt: "one" },
-      {
-        parentSessionId: "parent-1",
-        parentAgentSessionId: "parent-runtime-1",
-        parentTurnId: "parent-turn-1",
-        parentToolUseId: "tool-1",
-        parentAgentName: "main",
-        parentChannelThreadKey: "webchat:parent-1",
-        childManager,
-        workingDir: "/tmp/project-a",
-      },
-    );
-    child.releases[0].resolve();
-
-    await expect(execution.completion).resolves.toMatchObject({
-      status: "completed",
-      sessionId: "child-unrecorded",
-      output: "answer:one",
-    });
   });
 
   it("resumes only an existing Child owned by the same Parent", async () => {
@@ -247,14 +199,13 @@ describe("SubagentExecutionService", () => {
     });
     const resumed = fakeChildSession("child-resume", ["resumed-turn"]);
     const childManager = {
-      acquire: rs.fn(),
-      acquireBySessionId: rs.fn(async () => resumed.session),
-      peek: rs.fn(),
-      recordConversation: rs.fn(async () => undefined),
+      open: rs.fn(),
+      session: rs.fn(async () => resumed.session),
+      live: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
-      webchatRepo: repo,
+      log: createSessionLog(repo),
       activeRegistry: createActiveSubagentRegistry(),
       turnStreams: createAgentTurnStreamRegistry(),
     });
@@ -264,7 +215,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "new-parent-turn",
       parentToolUseId: "tool-resume",
       parentAgentName: "main",
-      parentChannelThreadKey: "webchat:parent-1",
+      childCaller: "webchat:parent-1:subagent:child",
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -275,10 +226,11 @@ describe("SubagentExecutionService", () => {
       context,
     );
     expect(execution).toMatchObject({ sessionId: "child-resume", turnId: "resumed-turn" });
-    expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
+    expect(childManager.session).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
-      expect.objectContaining({ romeSessionId: "child-resume" }),
+      { cards: false },
+      expect.objectContaining({ workingDir: "/tmp/project-a" }),
     );
     resumed.releases[0].resolve();
     await execution.completion;

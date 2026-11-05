@@ -392,8 +392,10 @@ export const actionWorkerStartupMetric = lazyDurationHistogram(
 export const sessionAcquireMetric = lazyCounter(
   "rome.session.acquire",
   'Agent-session acquire outcomes, labelled by outcome ("reuse"|"cold"|' +
-    '"reopen"|"coalesced"), agent, and is_subagent. A high cold rate for ' +
-    "subagents means the keep-alive cache is being defeated by a fresh key.",
+    '"reopen"|"coalesced"), agent, and is_subagent, which marks a subagent ' +
+    "manager's opens. A worker's run over the bridge opens on the top-level " +
+    "manager, so it counts as is_subagent=false. A high cold rate means the " +
+    "keep-alive cache is being defeated by a fresh key.",
 );
 
 export const modelSessionOpenMetric = lazyDurationHistogram(

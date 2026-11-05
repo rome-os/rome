@@ -6,6 +6,7 @@
 // Nothing calls this yet: the Chats switch moves the SDK's message ids onto it.
 
 import type { SaidMessage } from "../chats/storage/message.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speaker, Speakers } from "../sessions/speakers.js";
@@ -91,4 +92,34 @@ export interface RunLineDeps {
   links: Pick<TurnLinks, "prompt">;
   /** Told the agent each turn runs, so its replies are said by it. */
   replies?: Pick<SpeakerReplies, "runs">;
+}
+
+/**
+ * Makes the run's prompt line its turn's, where Chats keeps it: through the
+ * turn links when Chats holds the line, else on the conversation's own
+ * message row.
+ */
+export async function linkPromptToTurn(
+  deps: {
+    webchatRepo?: Pick<WebChatRepository, "assignConversationMessageTurn">;
+    runLineDeps?: RunLineDeps;
+  },
+  run: {
+    romeSessionId: string;
+    turnId: string;
+    lines: { prompt: number | null } | null;
+    platformMessageId?: string;
+  },
+): Promise<void> {
+  if (run.lines && deps.runLineDeps) {
+    if (run.lines.prompt !== null) {
+      deps.runLineDeps.links.prompt(run.lines.prompt, run.romeSessionId, run.turnId);
+    }
+  } else if (deps.webchatRepo && run.platformMessageId) {
+    await deps.webchatRepo.assignConversationMessageTurn(
+      run.romeSessionId,
+      run.platformMessageId,
+      run.turnId,
+    );
+  }
 }

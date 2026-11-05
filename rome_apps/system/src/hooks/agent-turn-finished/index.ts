@@ -104,7 +104,7 @@ function shouldRecapTurnShape(event: AgentTurnFinishedEvent): boolean {
     event.status === "completed" &&
     isCoreMainAgentId(event.turn.agentName) &&
     event.turn.parent === undefined &&
-    event.turn.channelThreadKey?.startsWith("webchat:") === true &&
+    event.turn.caller?.kind === "chat" &&
     context?.channel === "webchat" &&
     context.threadType === "private" &&
     event.output.state === "final"
@@ -126,11 +126,8 @@ export function resolveWebchatSessionId(event: AgentTurnFinishedEvent): string {
   const threadId = event.turn.threadContext?.threadId?.trim();
   if (threadId) return threadId;
 
-  const channelThreadKey = event.turn.channelThreadKey;
-  if (channelThreadKey?.startsWith("webchat:")) {
-    const [, sessionId] = channelThreadKey.split(":");
-    if (sessionId) return sessionId;
-  }
+  const caller = event.turn.caller;
+  if (caller?.kind === "chat") return caller.chatId;
 
   return event.turn.sessionId;
 }
@@ -141,8 +138,8 @@ export async function runForkedRecapTurn(
 ): Promise<string> {
   let result = "";
 
-  if (!event.turn.channelThreadKey) {
-    throw new Error("Cannot fork recap turn without a channelThreadKey");
+  if (!event.turn.caller) {
+    throw new Error("Cannot fork recap turn without its session's caller");
   }
   if (!agentRunner.runForked) {
     throw new Error("Recap hook requires an agent runner with fork support");
@@ -153,7 +150,7 @@ export async function runForkedRecapTurn(
     sourceSessionId: event.turn.sessionId,
     prompt: RECAP_PROMPT,
     tier: "small",
-    channelThreadKey: event.turn.channelThreadKey,
+    caller: event.turn.caller,
     threadContext: event.turn.threadContext,
     workingDir: resolveProjectRoot(event),
     parentTurnId: event.turn.turnId,

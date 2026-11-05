@@ -9,33 +9,33 @@ import type {
   ChatId,
   CurrentActionContext,
   MessageReplyReference,
-  RomeSessionRef,
   StreamAgentEvent,
 } from "@rome-os/app-runtime";
 import type {
-  AgentSessionInit,
-  AgentSessionKey,
   AgentSessionManager,
   AgentSession,
   AgentTurnHandle,
   AgentTurnInput,
 } from "../agent-sessions/index.js";
+import { withTurnExecution } from "../agent-sessions/index.js";
 import { createLogger } from "../logger.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import {
-  AgentTraceRecorder,
-  recordAgentTraceBestEffort,
-  resolveTurnConversation,
-  shouldPersistAgentTrace,
-} from "../agent-sessions/index.js";
 import {
   type ActionWorkerCoordinator,
   registerActionSubprocessHost,
 } from "../actions/action-subprocess.js";
 import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
-import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import { sessionSurfaceOf, surfaceKeepsLines } from "../connections/session-surface.js";
+import { adhocCaller, callerKey, chatOfCaller, type SessionCaller } from "./session-caller.js";
+import { openNamed } from "../agent-sessions/index.js";
+import type { ThreadContext } from "./types.js";
+import { channelChatId } from "../db/session-kind.js";
+import { catchUpBriefing } from "./connection-briefing.js";
+import { resetWhenDue } from "./connection-reset.js";
+import type { WakeDeps } from "./agent-runner.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -44,9 +44,24 @@ const WORKER_DISCONNECTED_REASON = "action worker disconnected";
 /** The one action whose agent runs inherit the calling session's project. */
 const SUMMON_ACTION = "system:summon";
 
+/** The session a worker's run names: the agent and the caller, as the
+ *  worker holds it. */
+export interface RunTurnKey {
+  agentName: string;
+  caller: SessionCaller;
+}
+
 export interface RunTurnRequest {
-  key: AgentSessionKey;
-  init?: AgentSessionInit;
+  /** A run that resumes a session by its id may name no caller. */
+  key: { agentName: string; caller?: SessionCaller };
+  init?: {
+    workingDir?: string;
+    threadContext?: ThreadContext;
+    /** The conversation the run's turns are recorded in, when it names one. */
+    romeSessionId?: string;
+    contextSuffix?: string;
+  };
+  sharedContext?: Record<string, unknown>;
   input: AgentTurnInput;
   platformMessageId?: string;
   replyTo?: MessageReplyReference;
@@ -58,7 +73,6 @@ export interface RunTurnRequest {
 export interface RunTurnResponse {
   turnId: string;
   sessionId: string;
-  romeSession: RomeSessionRef;
 }
 
 export const AGENT_SESSION_RUN_TURN_TIMEOUT_MS = 10 * 60_000;
@@ -93,6 +107,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
     private runLineDeps?: RunLineDeps,
+    /** What a wake on a connection adds to a run. */
+    private wake?: WakeDeps,
   ) {}
 
   attach(rpc: IpcRpc, child: ChildProcess): void {
@@ -106,7 +122,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const acquireMode = req.sessionId ? "sessionId" : "key";
         const baseLogFields = {
           agent: req.key.agentName,
-          channelThreadKey: req.key.channelThreadKey,
+          channelThreadKey: req.key.caller ? callerKey(req.key.caller) : undefined,
           requestedSessionId: req.sessionId,
           acquireMode,
         };
@@ -125,24 +141,57 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           throw err;
         }
 
-        // Every run over this bridge is a forked action worker asking main to
-        // run an agent — a nested subagent run (e.g. blocking `summon`) by
-        // construction. Mark it so `rome.session.acquire` labels these opens
-        // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
-        const init = {
-          ...req.init,
-          workingDir,
-          isSubagent: true,
-          applyProviderSessionReset: Boolean(req.platformMessageId),
-        };
+        const thread = req.init?.threadContext;
+        const caller = req.key.caller;
+        // A run that opens a session by its caller always names one.
+        const opener = caller ?? adhocCaller(req.key.agentName);
+        const callerId = callerKey(opener);
+        // The conversation the run names. A resume by id keeps the
+        // conversation its session recorded unless the run names one, so the
+        // caller it names picks none, as in the runner.
+        const named =
+          req.init?.romeSessionId ?? (caller && !req.sessionId ? chatOfCaller(caller) : undefined);
+        // The conversation the turn is kept in where it replies.
+        const romeSessionId =
+          named ??
+          thread?.romeSessionId ??
+          (thread ? channelChatId(thread.channel, thread.threadId) : undefined);
+        const stands = romeSessionId ? !!this.runLineDeps?.lines.stands(romeSessionId) : false;
+        const surface = sessionSurfaceOf(this.wake?.surface ?? {}, caller, thread, {
+          keeps: {
+            prompt: surfaceKeepsLines(thread),
+            // Where the session stands in a chat, the caller records the
+            // answer as it sends it, so the log writing it too would say it
+            // twice, or say one that never went out.
+            answer: stands || surfaceKeepsLines(thread),
+          },
+          ...(req.init?.contextSuffix ? { about: req.init.contextSuffix } : {}),
+        });
         const acquireStartedAt = Date.now();
         log.info("agent.session.manager.acquire started", baseLogFields);
 
         let session: AgentSession;
         try {
-          session = req.sessionId
-            ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
-            : await this.manager.acquire(req.key, init);
+          if (req.sessionId) {
+            const sessionId = req.sessionId;
+            session = await openNamed(sessionId, named, () =>
+              this.manager.session(sessionId, req.key.agentName, surface, { workingDir }),
+            );
+          } else {
+            // A wake by a message on a connection applies the place's reset setting.
+            if (req.platformMessageId) {
+              await resetWhenDue(
+                this.manager,
+                this.wake?.resolveReset,
+                req.key.agentName,
+                opener,
+                thread,
+              );
+            }
+            session = await openNamed(callerId, named, () =>
+              this.manager.open(req.key.agentName, callerId, surface, { workingDir }),
+            );
+          }
         } catch (err) {
           log.warn("agent.session.manager.acquire failed", {
             ...baseLogFields,
@@ -158,37 +207,28 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           durationMs: Date.now() - acquireStartedAt,
         });
 
-        const conversation = resolveTurnConversation({
-          agentName: req.key.agentName,
-          agentSessionId: session.sessionId,
-          romeSessionId: req.init?.romeSessionId,
-          sessionConversation: session.conversation,
-          channelThreadKey: req.key.channelThreadKey,
-          threadContext: req.init?.threadContext,
-          actionContext: req.actionContext,
-        });
-        const { romeSessionId, romeSessionType } = conversation;
-        const romeSession: RomeSessionRef = {
-          _romeSessionId: romeSessionId,
-          _type: romeSessionType,
-        };
-
         // The line the run names by its platform id, which the turn answers,
         // and the one its reply quotes, as Chats holds them.
-        const lines = this.runLineDeps
-          ? await runLines(this.runLineDeps.lines, romeSessionId, req)
-          : null;
+        const lines =
+          this.runLineDeps && romeSessionId
+            ? await runLines(this.runLineDeps.lines, romeSessionId, req)
+            : null;
 
         // sendTurn is sync — turnId returned immediately,
         // events drain in the background as the turn runs.
-        const handle = session.sendTurn(req.input, {
-          threadContext: req.init?.threadContext,
-          sharedContext: req.init?.sharedContext,
-          romeSessionId,
-          romeSessionType,
+        const briefing = catchUpBriefing(this.wake?.catchUp ?? {}, {
+          threadContext: thread,
+          ...(romeSessionId ? { romeSessionId } : {}),
           replyTo: req.replyTo,
-          ...(lines ? { quoted: lines.quoted } : {}),
+          quoted: lines?.quoted ?? null,
         });
+        // The worker's action is the execution the turn runs under.
+        const handle = withTurnExecution(req.actionContext, () =>
+          session.sendTurn(
+            { ...req.input, ...(req.sharedContext ? { sharedContext: req.sharedContext } : {}) },
+            briefing ? { briefing } : undefined,
+          ),
+        );
         const turnLogFields = {
           ...baseLogFields,
           sessionId: session.sessionId,
@@ -197,15 +237,16 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const workerWatch = interruptTurnOnWorkerDisconnect(rpc, session, handle, turnLogFields);
         try {
           this.runLineDeps?.replies?.runs(handle.turnId, req.key.agentName);
-          if (lines && this.runLineDeps) {
-            if (conversation.promptPersisted && lines.prompt !== null) {
-              this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
-            }
-          } else if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
-            await this.webchatRepo.assignConversationMessageTurn(
-              romeSessionId,
-              req.platformMessageId,
-              handle.turnId,
+          // Chats wrote the prompt of a run that names its conversation.
+          if (named) {
+            await linkPromptToTurn(
+              { webchatRepo: this.webchatRepo, runLineDeps: this.runLineDeps },
+              {
+                romeSessionId: named,
+                turnId: handle.turnId,
+                lines,
+                platformMessageId: req.platformMessageId,
+              },
             );
           }
         } catch (err) {
@@ -214,29 +255,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           workerWatch.interrupt("agent turn setup failed");
           throw err;
         }
-
-        const thread = req.init?.threadContext;
-
-        const recorder =
-          this.webchatRepo && shouldPersistAgentTrace(req.init?.threadContext)
-            ? new AgentTraceRecorder({
-                webchatRepo: this.webchatRepo,
-                agentName: req.key.agentName,
-                agentSessionId: session.sessionId,
-                romeSessionId,
-                existingSessionId: conversation.existing ? romeSessionId : undefined,
-                channelThreadKey: req.key.channelThreadKey,
-                turnId: handle.turnId,
-                threadContext: req.init?.threadContext,
-                actionContext: req.actionContext,
-                persistTranscript: true,
-                persistUserTranscript: !conversation.promptPersisted,
-                // Where the session stands in a chat, the caller records the
-                // answer as it sends it, so the recorder writing it too would
-                // say it twice, or say one that never went out.
-                persistAssistantTranscript: !this.runLineDeps?.lines.stands(romeSessionId),
-              })
-            : null;
 
         log.info("agent.session.runTurn response ready", {
           ...baseLogFields,
@@ -278,12 +296,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 }
               }
               liveStream?.publish(msg);
-              if (recorder) {
-                await recordAgentTraceBestEffort(recorder, msg, log, {
-                  turnId: handle.turnId,
-                  source: "agent-session-bridge",
-                });
-              }
               stream.send(msg);
             }
             stream.close();
@@ -299,14 +311,14 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           }
         })();
 
-        return { turnId: handle.turnId, sessionId: session.sessionId, romeSession };
+        return { turnId: handle.turnId, sessionId: session.sessionId };
       });
     });
 
-    rpc.handle<{ key: AgentSessionKey; reason?: string }, { ok: true }>(
+    rpc.handle<{ key: RunTurnKey; reason?: string }, { ok: true }>(
       "agent.session.interrupt",
       async (req) => {
-        const sess = this.manager.peek(req.key);
+        const sess = this.manager.live(req.key.agentName, callerKey(req.key.caller));
         if (sess) {
           await sess.interrupt(req.reason);
         }

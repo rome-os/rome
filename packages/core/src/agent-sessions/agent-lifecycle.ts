@@ -9,6 +9,7 @@ import type {
   AgentTurnStatus,
   AgentTurnTiming,
   LifecycleThreadContext,
+  SessionCaller,
 } from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactRef } from "../apps/state.js";
@@ -65,6 +66,8 @@ export interface AgentLifecycleDispatcher {
 
 export interface AgentLifecycleDispatcherOptions {
   appRuntimeServices?: RomeAppRuntimeServices;
+  /** How hooks read a turn's caller. Absent, they get only the stored string. */
+  describeCaller?: (caller: string) => SessionCaller;
 }
 
 export function toLifecycleThreadContext(
@@ -87,7 +90,8 @@ export function createAgentTurnRef(params: {
   sessionId: string;
   turnId: string;
   agentName: string;
-  channelThreadKey?: string;
+  /** The session's caller as Sessions holds it. Apps read it decoded. */
+  caller?: string;
   threadContext?: ThreadContext;
   parent?: AgentTurnParentRef;
 }): AgentTurnRef {
@@ -95,7 +99,7 @@ export function createAgentTurnRef(params: {
     sessionId: params.sessionId,
     turnId: params.turnId,
     agentName: params.agentName,
-    channelThreadKey: params.channelThreadKey,
+    channelThreadKey: params.caller,
     threadContext: toLifecycleThreadContext(params.threadContext),
     parent: params.parent,
   };
@@ -124,6 +128,12 @@ export function createAgentLifecycleDispatcher(
   let startedHooks: LoadedLifecycleHook[] = [];
   let finishedHooks: LoadedLifecycleHook[] = [];
   const finishedListeners = new Map<string, (event: AgentTurnFinishedEvent) => void>();
+  // Sessions hands over the caller as it holds it; apps read it described.
+  const described = (turn: AgentTurnRef) => {
+    if (!turn.caller && turn.channelThreadKey && options.describeCaller) {
+      turn.caller = options.describeCaller(turn.channelThreadKey);
+    }
+  };
 
   return {
     async loadFromCatalog(catalog) {
@@ -158,11 +168,13 @@ export function createAgentLifecycleDispatcher(
     },
 
     dispatchStarted(event) {
+      described(event.turn);
       const parentContext = getCurrentOrCreateHookInvocationContext();
       return dispatchToAppHooks(startedHooks, event, parentContext);
     },
 
     dispatchFinished(event) {
+      described(event.turn);
       const parentContext = getCurrentOrCreateHookInvocationContext();
       for (const listener of finishedListeners.values()) {
         try {

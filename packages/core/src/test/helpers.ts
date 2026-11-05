@@ -1,4 +1,6 @@
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
+import { createSessionLog } from "../agent-sessions/rows/session-log.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -530,6 +532,8 @@ export interface TestDeps extends ApiDeps {
   whatsAppAccounts: WhatsAppAccounts;
   linkedInAccounts: LinkedInAccounts;
   sessionsRepo: SessionsRepository;
+  /** The row reader behind `agentSessionManager.find`. No route reads it. */
+  sessionManager: SessionManager;
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
   /** The platform end of each channel `connections` backs, by channel name. */
@@ -742,7 +746,7 @@ export async function buildTestDeps(
   const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const subagentExecutionService = createSubagentExecutionService({
-    webchatRepo,
+    log: createSessionLog(webchatRepo),
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });
@@ -757,7 +761,8 @@ export async function buildTestDeps(
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
-    channelSurface: testChannelSurface,
+    log: createSessionLog(webchatRepo),
+    routineKeyFor: chatRoutineKeyForToolUse,
     subagentExecutionService,
     activeSubagentRegistry,
   });
@@ -1032,7 +1037,6 @@ import {
   setTelemetryBridge as setTelemetryBridgeOnSdk,
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
-import { testChannelSurface } from "./channel-surface.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;

@@ -43,5 +43,5 @@ export async function findRecordedConversation(
  * still exists.
  */
 export type SessionConversation =
-  | { origin: "named"; id: string }
+  | { origin: "named"; id: string; type?: RomeSessionType }
   | ({ origin: "recorded" } & RecordedConversation);

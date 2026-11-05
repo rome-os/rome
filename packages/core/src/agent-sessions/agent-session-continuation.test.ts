@@ -25,11 +25,8 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "../core/agent-runner.js";
-import {
-  createAgentSessionManager,
-  type AgentSession,
-  type AgentSessionManager,
-} from "./agent-session.js";
+import { type AgentSession, sessionBehind } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import type { ModelSelectionId } from "../core/model-selector.js";
 import { createModelResolver } from "../core/model-resolver.js";
@@ -93,7 +90,7 @@ function continuationOf(prompt: string | undefined): string | null {
   return prompt?.match(/<continuation[\s\S]*?<\/continuation>/)?.[0] ?? null;
 }
 
-describe("continuation notice through AgentSessionManager", () => {
+describe("continuation notice through TestSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -104,14 +101,14 @@ describe("continuation notice through AgentSessionManager", () => {
   let anthropic: ReturnType<typeof createProvider>;
   let artifactIdentity: ArtifactIdentityContext;
   let now: number;
-  const managers: AgentSessionManager[] = [];
+  const managers: TestSessionManager[] = [];
 
   function at(seconds: number) {
     now = START + seconds * 1000;
     rs.setSystemTime(new Date(now));
   }
 
-  function createManager(): AgentSessionManager {
+  function createManager(): TestSessionManager {
     const actionRegistry = new ActionRegistryImpl();
     actionRegistry.register({
       config: {
@@ -124,7 +121,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       {
         agentLoader: loader,
         sessionManager,
@@ -149,7 +146,7 @@ describe("continuation notice through AgentSessionManager", () => {
     return manager;
   }
 
-  function acquire(manager: AgentSessionManager, selectionId?: ModelSelectionId | null) {
+  function acquire(manager: TestSessionManager, selectionId?: ModelSelectionId | null) {
     return manager.acquire(key, {
       workingDir: directory,
       threadContext,
@@ -168,10 +165,7 @@ describe("continuation notice through AgentSessionManager", () => {
       JSON.stringify([{ type: "text", content: text }]),
     );
     at((now - START) / 1000 + 1);
-    const handle = session.sendTurn(
-      { prompt: text, inputId },
-      { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
-    );
+    const handle = session.sendTurn({ prompt: text, inputId });
     for await (const _event of handle.events) {
       // drain
     }
@@ -230,7 +224,7 @@ describe("continuation notice through AgentSessionManager", () => {
 
     // The guardian picks a Codex model in the open chat: the same live session
     // takes it from its next turn.
-    expect(await acquire(manager, "gpt-6-luna")).toBe(session);
+    expect(sessionBehind(await acquire(manager, "gpt-6-luna"))).toBe(sessionBehind(session));
     await chatTurn(session, "Which animal was it, and what was my worry?");
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna"]);
@@ -377,10 +371,7 @@ describe("continuation notice through AgentSessionManager", () => {
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, romeSessionId: chatId, selectionId: from },
     );
-    for await (const _ of session.sendTurn(
-      { prompt: "first" },
-      { threadContext: context, romeSessionId: chatId },
-    ).events) {
+    for await (const _ of session.sendTurn({ prompt: "first" }).events) {
     }
     if (concierge) {
       const raw = healthyState();
@@ -396,7 +387,7 @@ describe("continuation notice through AgentSessionManager", () => {
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);
     await manager.shutdown();
-    const runner = new AgentRunner(createManager(), loader);
+    const runner = new AgentRunner(createManager(), loader, webchatRepo);
     for await (const _ of runner.run({
       agentName,
       sessionId: session.sessionId,

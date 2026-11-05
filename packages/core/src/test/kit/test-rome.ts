@@ -51,7 +51,6 @@ import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
-import { testChannelSurface } from "../channel-surface.js";
 
 // createTestRome — boot the real runtime wiring over an in-memory DB and a
 // temp profile, faking only genuine process edges (model provider, channel
@@ -294,7 +293,6 @@ async function buildHarness(
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: createAgentLifecycleDispatcher(),
-      channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );

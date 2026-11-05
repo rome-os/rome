@@ -1,4 +1,6 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
+import { callerFromKey } from "./core/session-caller.js";
+import { chatModelSelection } from "./core/chat-model-selection.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -164,7 +166,10 @@ import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager, talkerChannelSurface } from "./agent-sessions/index.js";
+import { createAgentSessionManager } from "./agent-sessions/index.js";
+import { createSessionLog } from "./agent-sessions/index.js";
+import { talkerChannelSurface } from "./connections/session-surface.js";
+import type { WakeDeps } from "./core/agent-runner.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -188,6 +193,7 @@ import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
+import { chatRoutineKeyForToolUse } from "./routines/chat-routine-key.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -933,6 +939,7 @@ async function main() {
   };
   const lifecycleDispatcher = createAgentLifecycleDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
+    describeCaller: callerFromKey,
   });
   // Turn-middleware onion. Shares the same app-runtime services as the
   // lifecycle dispatcher (the `agentRunner` field is filled in below, before
@@ -940,6 +947,7 @@ async function main() {
   // agents and reach its own app DB.
   const turnMiddlewareChain = createTurnMiddlewareChain({
     appRuntimeServices: lifecycleAppRuntimeServices,
+    describeCaller: callerFromKey,
   });
   const appStartedDispatcher = createAppStartedDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
@@ -1044,8 +1052,9 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
+  const sessionLog = createSessionLog(webchatRepo);
   const subagentExecutionService = createSubagentExecutionService({
-    webchatRepo,
+    log: sessionLog,
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });
@@ -1089,15 +1098,30 @@ async function main() {
   const concierge = new ConciergeService({
     settingsRepo,
     webchatRepo,
-    sessionManager,
     aiToolState,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
-    agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
+    agentSessionManager: {
+      live: (agentName, caller) => agentSessionManager.live(agentName, caller),
+      find: (agentName, caller) => agentSessionManager.find(agentName, caller),
+    },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
   });
+  const channelSurface = (channel: string) => {
+    if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
+    const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
+      .talker;
+    return talker ? talkerChannelSurface(talker) : null;
+  };
+  // A wake on a connection briefs the agent with what it has not seen there,
+  // read from Chats, and applies the place's reset setting first.
+  const wake: WakeDeps = {
+    catchUp: { turnLinks: chatsWired.links, surface: channelSurface },
+    surface: { channelSurface, connectionKindOfChannel },
+    resolveReset: async (ref) => (await chatSettings.get(ref)).effective.session.reset,
+  };
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -1111,22 +1135,14 @@ async function main() {
       capabilityDiscovery,
       skillCatalog,
       lifecycleDispatcher,
-      webchatRepo,
-      // Catch-up reads what was said where the session stands from Chats.
-      turnLinks: chatsWired.links,
+      log: sessionLog,
+      routineKeyFor: chatRoutineKeyForToolUse,
+      rememberedModel: (caller, agentName, pinned) =>
+        chatModelSelection(webchatRepo)(callerFromKey(caller), agentName, pinned),
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
-      resolveProviderSessionReset: async (ref) =>
-        (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
-      channelSurface: (channel) => {
-        if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
-        const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
-          ?.capabilities.talker;
-        return talker ? talkerChannelSurface(talker) : null;
-      },
-      connectionKindOfChannel,
       eventSources,
       sessionTools: (context) => buildConciergeTools(concierge, context),
     },
@@ -1141,6 +1157,7 @@ async function main() {
     agentTurnStreamRegistry,
     undefined,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    wake,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1151,6 +1168,7 @@ async function main() {
     agentTurnStreamRegistry,
     actionRegistry,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    wake,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
@@ -2029,8 +2047,6 @@ async function main() {
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,
-      sessionManager,
-      sessionsRepo,
       agentSessionManager,
       conversationTitleGenerator,
       agentRunner,

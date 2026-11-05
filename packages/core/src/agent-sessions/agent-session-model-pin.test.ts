@@ -16,7 +16,7 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createTestSessionManager, type TestSessionManager } from "../test/session-compat.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
@@ -77,7 +77,7 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
   return messages;
 }
 
-describe("agent model pins through AgentSessionManager", () => {
+describe("agent model pins through TestSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -86,7 +86,7 @@ describe("agent model pins through AgentSessionManager", () => {
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
-  const managers: AgentSessionManager[] = [];
+  const managers: TestSessionManager[] = [];
   let artifactIdentity: ArtifactIdentityContext;
 
   async function writeConfig(overrides: Record<string, unknown> = {}): Promise<void> {
@@ -99,11 +99,11 @@ describe("agent model pins through AgentSessionManager", () => {
   function createManager(
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
-  ): AgentSessionManager {
+  ): TestSessionManager {
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
-    const manager = createAgentSessionManager(
+    const manager = createTestSessionManager(
       {
         agentLoader: loader,
         sessionManager,
