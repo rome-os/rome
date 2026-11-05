@@ -60,21 +60,31 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
   };
 }
 
+const MAX_WRITE_ATTEMPTS = 3;
+
 function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string): TurnLogWriter {
   // Events a write failed to keep. Each write tries them again ahead of its
   // own, at the sequence the failed one would have taken, so a transient
-  // failure drops no block and the turn goes on either way.
+  // failure drops no block and the turn goes on either way. After
+  // MAX_WRITE_ATTEMPTS failures in a row the oldest is given up, so one block
+  // that can never be written does not hold back the rest of the turn.
   let pending: StreamAgentEvent[] = [];
+  let failures = 0;
   const record = async (event: StreamAgentEvent) => {
     pending.push(event);
     try {
       await recorder.recordBatch(pending);
       pending = [];
+      failures = 0;
     } catch (err) {
+      failures += 1;
+      const dropped = failures >= MAX_WRITE_ATTEMPTS ? pending.shift() : undefined;
+      if (dropped) failures = 0;
       log.warn("failed to persist agent trace", {
         turnId,
         source,
         pending: pending.length,
+        ...(dropped ? { dropped: dropped.type } : {}),
         error: err instanceof Error ? err.message : String(err),
       });
     }
