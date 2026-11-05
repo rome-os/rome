@@ -1703,15 +1703,17 @@ describe("Concierge provider recovery", () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
     s.service.deps.webchatRepo = s.storedChats;
-    // No turn has succeeded, so the runtime row records no provider yet.
-    s.deps.sessionManager.findReusableSession = rs.fn(async () => ({
-      provider: null,
-      model: null,
-    })) as never;
-    s.deps.aiToolState.get = () => ({
-      claude: { loggedIn: true, quotaExhausted: false },
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-    });
+    // No turn has succeeded, so the runtime row records no provider, and
+    // neither provider is marked: only the failed turn names its provider.
+    s.service.deps.sessionManager = {
+      findReusableSession: rs.fn(async () => ({ provider: null, model: null })),
+    } as never;
+    s.service.deps.aiToolState = {
+      get: () => ({
+        claude: { loggedIn: true, quotaExhausted: false },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      }),
+    };
     expect(
       await s.service.switchForFailure(
         CONCIERGE_CHAT,
