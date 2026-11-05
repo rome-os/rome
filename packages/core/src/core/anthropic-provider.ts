@@ -824,10 +824,10 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
           } else if (isAssistantMessage(message)) {
-            if (message.parent_tool_use_id === null && message.error) {
-              providerError = message.error;
-            }
             if (message.parent_tool_use_id === null) {
+              // The latest top-level message decides, so an error the SDK
+              // recovered from does not describe a later failure.
+              providerError = message.error;
               activeTurnLastAssistantMessageId = message.uuid;
             }
             const apiMessageId = (message.message as { id?: unknown }).id;

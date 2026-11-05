@@ -557,9 +557,11 @@ export interface AgentTurnOutput {
   accounting?: AgentAccounting;
 }
 
+/** Why a turn ended with an error, as far as its provider reported it. */
 export interface AgentTurnFailure
   extends Pick<TurnErrorEvent, "code" | "reason" | "httpStatus" | "providerError"> {
   message: string;
+  /** The provider of the model session that ran the turn. */
   provider: string;
 }
 
@@ -965,6 +967,11 @@ export interface TurnErrorEvent {
   code?: AgentErrorCode;
   /** HTTP status of the failed provider request, when the provider reports it. */
   httpStatus?: number;
+  /**
+   * The provider's own error kind, as reported and not normalized across
+   * providers: for Claude, the Agent SDK's assistant error such as `rate_limit`.
+   * Best effort. Use `code` and `reason` for provider-independent handling.
+   */
   providerError?: string;
   /** Provider and cause used by interactive clients to offer recovery UI. */
   provider?: AgentErrorProvider;
