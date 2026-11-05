@@ -288,15 +288,10 @@ describe("AgentSessionBridge worker disconnect", () => {
     options: {
       beforeAcquire?: () => Promise<void>;
       webchatRepo?: WebChatRepository;
-      romeSessionId?: string;
     } = {},
   ) {
     const queue = [...handles];
-    // A run that names its conversation names it on its caller.
-    const caller = {
-      ...callerFromKey("discord:channel-1"),
-      ...(options.romeSessionId ? { chatId: options.romeSessionId } : {}),
-    } as SessionCaller;
+    const caller = callerFromKey("discord:channel-1");
     const session = {
       key: { agentName: "main", caller },
       caller,
@@ -448,15 +443,15 @@ describe("AgentSessionBridge worker disconnect", () => {
         throw new Error("db down");
       },
     } as unknown as WebChatRepository;
-    const { sent, requestTurn, response, workerGone } = setup([turn.handle], {
-      webchatRepo,
-      romeSessionId: "channel:discord:channel-1",
-    });
+    const { sent, requestTurn, response, workerGone } = setup([turn.handle], { webchatRepo });
 
     const result = await response(
       requestTurn({
         platformMessageId: "message-1",
-        init: { threadContext: { channel: "discord", threadId: "channel-1" } },
+        init: {
+          threadContext: { channel: "discord", threadId: "channel-1" },
+          romeSessionId: "channel:discord:channel-1",
+        },
       }),
     );
 
@@ -480,6 +475,7 @@ describe("AgentSessionBridge answer recording", () => {
       repo,
       runLineDeps,
       caller = callerFromKey("telegram:chat-1"),
+      romeSessionId,
       sessionId,
       wake,
     }: {
@@ -491,6 +487,8 @@ describe("AgentSessionBridge answer recording", () => {
       runLineDeps?: RunLineDeps;
       /** The caller the worker's run names. */
       caller?: SessionCaller;
+      /** The conversation the worker's run names, when it names one. */
+      romeSessionId?: string;
       /** The session the run resumes by id, when it names one. */
       sessionId?: string;
       /** What a wake on a connection adds to the run. */
@@ -545,6 +543,7 @@ describe("AgentSessionBridge answer recording", () => {
             threadId: "chat-1",
             channelUserId: "user-1",
           },
+          ...(romeSessionId ? { romeSessionId } : {}),
         },
       },
     });
@@ -629,11 +628,11 @@ describe("AgentSessionBridge answer recording", () => {
     expect(asked).toEqual([channelChatId("telegram", "chat-1")]);
   });
 
-  it("reads the run's messages and catches up in the conversation its caller names", async () => {
+  it("reads the run's messages and catches up in the conversation it names", async () => {
     const asked: string[] = [];
     const caughtUp: string[] = [];
     const { turnEnd, briefing } = run(turnEvents(...answer), {
-      caller: { kind: "place", connection: "telegram", place: "chat-1", chatId: "named-chat" },
+      romeSessionId: "named-chat",
       runLineDeps: {
         lines: {
           recorded: async (sessionId) => {
@@ -682,6 +681,28 @@ describe("AgentSessionBridge answer recording", () => {
 
     await rs.waitFor(() => expect(turnEnd()).toBeDefined());
     expect(asked).toEqual([channelChatId("telegram", "chat-1")]);
+  });
+
+  it("reads a resumed run's messages in the conversation it names", async () => {
+    const asked: string[] = [];
+    const { turnEnd } = run(turnEvents(...answer), {
+      caller: { kind: "chat", chatId: "dashboard-chat" },
+      romeSessionId: "named-chat",
+      sessionId: "session-1",
+      runLineDeps: {
+        lines: {
+          recorded: async (sessionId) => {
+            asked.push(sessionId);
+            return null;
+          },
+          stands: () => false,
+        },
+        links: { prompt: () => {} },
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(asked).toEqual(["named-chat"]);
   });
 
   it("leaves the reply to its caller even when the run asks to stream it", async () => {

@@ -1,6 +1,6 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { type KeyedInit, type StoredKey } from "../../test/session-compat.js";
-import { callerChatId, callerKey, type SessionCaller } from "../../core/session-caller.js";
+import { callerKey, chatOfCaller, type SessionCaller } from "../../core/session-caller.js";
 import { callerFromKey } from "../../core/session-caller.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6624,7 +6624,7 @@ function fakeSessionManager(
               ...(options?.effort !== undefined ? { reasoningEffort: options.effort } : {}),
               ...(surface.replies ? { threadContext: surface.replies } : {}),
               ...(surface.about ? { contextSuffix: surface.about } : {}),
-              romeSessionId: callerChatId(callerFromKey(caller)),
+              romeSessionId: chatOfCaller(callerFromKey(caller)),
             },
           ),
         ),

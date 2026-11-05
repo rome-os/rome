@@ -254,9 +254,9 @@ export interface TurnLogWriter {
 export interface SessionLog {
   /** The conversation a session's row recorded, when it still exists. */
   findConversation?(id: string): Promise<RecordedConversation | undefined>;
-  /** The conversation today's rows keep a caller's turns in, when its
-   *  context names one. */
-  conversationOf?(caller: CallerId): string | undefined;
+  /** The conversation today's rows keep a session's turns in, when its
+   *  opener names one: by its caller, or by its id on a resume. */
+  conversationOf?(opener: string): string | undefined;
   /** Where one turn is kept, and its writer. The log decides the
    *  conversation and what of the turn it writes. */
   turn?(turn: LoggedTurn): TurnLogEntry;
@@ -973,15 +973,14 @@ async function openSession(
   // without the agent filter a subagent could inherit its parent's provider
   // thread and system prompt/history.
   const storedKey = key.caller;
-  // The conversation today's rows keep this caller's turns in. A child's is
+  // The conversation today's rows keep this session's turns in. A child's is
   // its own session, which a resume fills in when the record failed at mint.
-  // A resume by id keeps the conversation its row recorded: the caller it
-  // reads back from the row names no conversation of its opener's.
+  // A resume by id asks by that id, not by the caller it reads back from the
+  // row, so it keeps the conversation its row recorded unless its opener
+  // names one.
   const requestedRomeSessionId = opts.isSubagent
     ? init.resumeSessionId
-    : init.resumeSessionId
-      ? undefined
-      : deps.log?.conversationOf?.(key.caller);
+    : deps.log?.conversationOf?.(init.resumeSessionId ?? key.caller);
   let resumeResult:
     | {
         id: string;

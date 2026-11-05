@@ -385,7 +385,8 @@ async function handleTrustedMessage(
       agentName: targetAgent,
       prompt: text,
       // The place on the connection, recording its turns in the inbox chat.
-      caller: { ...place, chatId },
+      caller: place,
+      romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
       threadContext: {
