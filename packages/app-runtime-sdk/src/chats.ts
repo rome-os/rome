@@ -251,9 +251,9 @@ export function chatsOver(port: ChatsPort): Chats {
 export interface ConnectedAccount {
   /** The account, by its platform and the platform's own id. */
   readonly account: Account;
-  /** What the account is called, from its profile, else its id: never
-   *  empty, so an app always has something to show. */
-  readonly name: string;
+  /** What the account is called, from its profile: its display name, else
+   *  its handle, or null where the profile holds neither. */
+  readonly name: string | null;
   /** The agent that answers as the account, or null for none. */
   readonly agent: string | null;
   /** Whether a connection reaches the account now. A disconnected account

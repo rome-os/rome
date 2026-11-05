@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { createConnectedAccounts } from "./connected-accounts.js";
 
 describe("createConnectedAccounts", () => {
-  it("lists every account with its profile name and agent, a disconnected one as disconnected", async () => {
+  it("lists every account with its profile name or none, its agent, and a disconnected one as disconnected", async () => {
     const accounts = createConnectedAccounts({
       rows: () => [
         {
@@ -10,18 +10,16 @@ describe("createConnectedAccounts", () => {
           accountId: "bot-1",
           agent: "core:main",
           connectionId: "c1",
-          name: "Rome",
+          name: "Rome bot",
         },
         {
           platform: "slack",
           accountId: "U1",
           agent: "app:helper",
           connectionId: null,
-          name: "stale",
+          name: null,
         },
       ],
-      names: async (listed) =>
-        listed.map((account) => (account.id === "bot-1" ? "Rome bot" : account.id)),
     });
 
     expect(await accounts.list()).toEqual([
@@ -33,7 +31,7 @@ describe("createConnectedAccounts", () => {
       },
       {
         account: { platform: "slack", id: "U1" },
-        name: "U1",
+        name: null,
         agent: "app:helper",
         connected: false,
       },

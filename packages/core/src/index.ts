@@ -625,7 +625,6 @@ async function main() {
   // down; a list runs after boot.
   const appConnectedAccounts = createConnectedAccounts({
     rows: () => connectedAccounts.all(),
-    names: (listed) => accountNames.displayNames(listed),
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.

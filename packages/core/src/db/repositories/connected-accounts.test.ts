@@ -176,6 +176,23 @@ describe("ConnectedAccountsRepository", () => {
     ]);
   });
 
+  it("names an account by its profile's handle when the profile holds no display name", () => {
+    const { db, accounts, connect } = setup();
+    connect("c1", "bot-1");
+    accounts.add(db, "c1");
+    db.insert(accountProfiles)
+      .values({
+        platform: "telegram",
+        accountId: "bot-1",
+        handle: "sales_bot",
+        source: "address_book",
+        updatedAt: NOW,
+      })
+      .run();
+
+    expect(accounts.all()).toMatchObject([{ accountId: "bot-1", name: "sales_bot" }]);
+  });
+
   it("unlinks a disconnected account's agent, and reports an account it has no record of", () => {
     const { db, accounts, connect, ledger } = setup();
     connect("c1", "bot-1");
