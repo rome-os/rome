@@ -53,6 +53,8 @@ type TraceRepo = Pick<
   | "getTraceContentByTurn"
   | "getTraceContentsByTurns"
   | "getMessageContentForDisplay"
+  | "getUsageTotals"
+  | "getProjectUsageTotals"
 >;
 
 export interface TurnReads {
@@ -90,6 +92,12 @@ export interface TurnReads {
    * a message outside any turn is a turn of its own.
    */
   keptTurns(sessionId: string, page?: KeptTurnsPage): Promise<KeptTurns>;
+  /** What the turns used, from their traces: today, this month and each of
+   *  `options.dayRanges`, over every session or those of project `projectPath`. */
+  usageTotals(
+    options: Parameters<WebChatRepository["getUsageTotals"]>[0],
+    projectPath?: string,
+  ): ReturnType<WebChatRepository["getUsageTotals"]>;
 }
 
 /** Sessions' reads of its turns. A reader built without `repo` reads only
@@ -128,6 +136,10 @@ export function createTurnReads(db: DrizzleDb, traceRepo?: TraceRepo): TurnReads
       return stubs.map((stub) => ({ ...stub, content: contents.get(stub.id) ?? "[]" }));
     },
     keptTurns: (sessionId, page) => keptTurns(db, sessionId, page),
+    usageTotals: (options, projectPath) =>
+      projectPath === undefined
+        ? repo.getUsageTotals(options)
+        : repo.getProjectUsageTotals(projectPath, options),
   };
 }
 
@@ -139,6 +151,8 @@ const noTraceRepo: TraceRepo = {
   getTraceContentByTurn: noTrace,
   getTraceContentsByTurns: noTrace,
   getMessageContentForDisplay: noTrace,
+  getUsageTotals: noTrace,
+  getProjectUsageTotals: noTrace,
 };
 
 async function traceHeadsOf(db: DrizzleDb, refs: readonly TurnRef[]): Promise<TraceHead[]> {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
-import { SessionQueryRepository } from "../db/repositories/session-query.js";
+import { SessionQueryRepository } from "../agent-sessions/rows/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SessionQueryService } from "./query-service.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";

@@ -543,25 +543,85 @@ const productFiles = [...coreFiles, ...appFiles];
 const outsideSessions = productFiles.filter((file) => !file.startsWith(`${SESSIONS}/`));
 
 // --- C19 Code outside Sessions reads no turn or trace from storage ----------
-// A turn's trace lives in `rome_agent_messages` (role 'trace') and
-// `rome_agent_trace_blocks`. Only Sessions reads it; everything else asks
-// Sessions' public module. The repositories that still hold the readers are
-// left out, so a reader counts where it is called, not where it is defined.
-const TURN_STORES = [/^db\//, /^webchat\/[\w-]*repository\.ts$/];
+// A session keeps its turns in `rome_agent_messages` and the trace blocks in
+// `rome_agent_trace_blocks`. Only Sessions names those tables; everything else
+// asks Sessions' public module, or joins the rows it hands out as SQL
+// (`turnRowsOf`). Left out: the schema and migrations, which define the
+// tables, and the repository that still holds their readers and writers while
+// storage is unchanged. That one is counted, so a reader counts where it is
+// called, not where it is defined.
+const TURN_SCHEMA = [/^db\/schema(\.ts$|\/)/, /^db\/migrate\.ts$/, /^db\/chats-backfill\.ts$/];
+const TURN_STORE = /^db\/repositories\/webchat\.ts$/;
 // Not reads of a turn: the health check's schema probe and the dev seed
 // script, which writes example traces.
 const NOT_TURN_READS = [/^api\/routes\/health\.ts$/, /^bin\//];
+const inSrc = (file: string, patterns: RegExp[]) =>
+  file.startsWith(`${SRC}/`) && patterns.some((pattern) => pattern.test(relative(SRC, file)));
 const turnReaders = outsideSessions.filter(
-  (file) =>
-    !(
-      file.startsWith(`${SRC}/`) &&
-      [...TURN_STORES, ...NOT_TURN_READS].some((store) => store.test(relative(SRC, file)))
-    ),
+  (file) => !inSrc(file, [...TURN_SCHEMA, TURN_STORE, ...NOT_TURN_READS]),
 );
-// The repositories' trace readers. `getMessageContent` and
-// `getMessageContentForDisplay` merge a trace row with its blocks.
-const TRACE_READERS =
-  /^(getTraceContents|getTraceContentByTurn|getTraceContentsByTurns|getMessageContentForDisplay|getMessageContent)$/;
+const TURN_TABLES =
+  /\b(rome_agent_messages|romeAgentMessages|rome_agent_trace_blocks|romeAgentTraceBlocks)\b/;
+quantities.turnStoreLines = places(
+  outsideSessions
+    .filter((file) => inSrc(file, [TURN_STORE]))
+    .flatMap((file) => tokenHits(file, TURN_TABLES)),
+).length;
+/** The bodies of the methods of every class in `file`, by name. */
+function methodBodies(file: string): Map<string, string> {
+  const sf = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
+  const bodies = new Map<string, string>();
+  const visit = (node: ts.Node) => {
+    if (ts.isClassDeclaration(node)) {
+      for (const member of node.members) {
+        if ((ts.isMethodDeclaration(member) || ts.isPropertyDeclaration(member)) && member.name) {
+          bodies.set(member.name.getText(sf), member.getText(sf));
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return bodies;
+}
+// The turn store's reads: each of its methods that selects from a turn table,
+// or calls one that does.
+const storeMethods = [...outsideSessions.filter((file) => inSrc(file, [TURN_STORE]))].flatMap(
+  (file) => [...methodBodies(file)],
+);
+const SELECTS_TURNS =
+  /\.from\(\s*(romeAgentMessages|romeAgentTraceBlocks|\w*TraceBlocks)\b|\bFROM\s+(\$\{\s*)?(rome_agent_messages|rome_agent_trace_blocks|romeAgentMessages|romeAgentTraceBlocks)\b/i;
+// The store Rome runs is Chats' subclass. A read it answers itself, never
+// falling back to the store's, reads no turn; any turn rows it joins come
+// from Sessions' `turnRowsOf`.
+const liveStore = join(SRC, "webchat/chats-webchat-repository.ts");
+const answeredByChats = existsSync(liveStore) ? methodBodies(liveStore) : new Map<string, string>();
+const answered = (name: string) => {
+  const override = answeredByChats.get(name);
+  return override !== undefined && !override.includes(`super.${name}(`);
+};
+const liveStoreReads = new Set(
+  storeMethods
+    .filter(([name, body]) => SELECTS_TURNS.test(body) && !answered(name))
+    .map(([name]) => name),
+);
+for (let grew = true; grew; ) {
+  grew = false;
+  for (const [name, body] of storeMethods) {
+    if (liveStoreReads.has(name) || answered(name)) continue;
+    if ([...liveStoreReads].some((reader) => body.includes(`this.${reader}(`))) {
+      liveStoreReads.add(name);
+      grew = true;
+    }
+  }
+}
+quantities.turnStoreReads = liveStoreReads.size;
+// The store's trace readers by name, so a reader that stops naming a table
+// still counts. `getMessageContent` and `getMessageContentForDisplay` merge a
+// trace row with its blocks.
+const TRACE_READERS = new RegExp(
+  `^(getTraceContents|getTraceContentByTurn|getTraceContentsByTurns|getMessageContentForDisplay|getMessageContent${[...liveStoreReads].map((name) => `|${name}`).join("")})$`,
+);
 const isCallee = (node: ts.Node) =>
   ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
 // A trace row read straight from storage: SQL that names the role, or a
@@ -575,14 +635,14 @@ const isTraceRole = (node: ts.Node) =>
 const traceReads = places(
   turnReaders.flatMap((file) => [
     ...tokenHits(file, TRACE_READERS, isCallee),
-    ...tokenHits(file, /\b(rome_agent_trace_blocks|romeAgentTraceBlocks)\b/),
+    ...tokenHits(file, TURN_TABLES),
     ...tokenHits(file, /\brole\s*=\s*'trace'|^["']trace["']$/, isTraceRole),
   ]),
 );
 quantities.callerTraceReads = traceReads.length;
 checks.push({
   id: "C19",
-  name: "Code outside Sessions reads no turn or trace from storage; it reads them through Sessions' public module",
+  name: "Code outside Sessions names no turn table: it reads turns and traces through Sessions' public module",
   measured: `${traceReads.length} reads outside Sessions`,
   pass: traceReads.length === 0,
   detail: traceReads,

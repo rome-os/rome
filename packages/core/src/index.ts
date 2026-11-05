@@ -434,9 +434,10 @@ async function main() {
     links: chatsWired.links,
   });
   await webchatRepo.recoverInterruptedInputs();
+  const sessionLog = createSessionLog(webchatRepo);
   // Only turns within a day of the newest one, so the stopped process's turns
   // end however long Rome was down, and traces older crashes left open stay.
-  const endedTurns = await webchatRepo.endInterruptedTurns(24 * 60 * 60 * 1000);
+  const endedTurns = (await sessionLog.endInterrupted?.(24 * 60 * 60 * 1000)) ?? 0;
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
@@ -1051,7 +1052,6 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
-  const sessionLog = createSessionLog(webchatRepo);
   const subagentExecutionService = createSubagentExecutionService({
     log: sessionLog,
     activeRegistry: activeSubagentRegistry,

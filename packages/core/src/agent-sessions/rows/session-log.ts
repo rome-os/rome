@@ -61,6 +61,9 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
     fork: webchatRepo ? (fork) => forkWriter(webchatRepo, fork) : undefined,
     resumableChild: webchatRepo ? (child) => resumableChild(webchatRepo, child) : undefined,
     childStarted: webchatRepo ? (child) => childStarted(webchatRepo, child) : undefined,
+    endInterrupted: webchatRepo
+      ? (windowMs) => webchatRepo.endInterruptedTurns(windowMs)
+      : undefined,
   };
 }
 

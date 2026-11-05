@@ -258,6 +258,9 @@ export interface SessionLog {
     parentAgentName: string;
     parentTurnId: string;
   }): Promise<void>;
+  /** Ends the turns a stopped process left running, within `windowMs` of the
+   *  newest one. Returns how many it ended. */
+  endInterrupted?(windowMs: number): Promise<number>;
 }
 
 /** When a reset is due, decided by the caller from the context's age. */

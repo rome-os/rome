@@ -38,6 +38,20 @@ export {
   type TurnReads,
   type TurnRef,
 } from "./rows/turn-reads.js";
+// Chats joins a session's rows into its own transcript queries.
+export {
+  keptInputOf,
+  type KeptTurnMessage,
+  keptTurnMessagesOf,
+  turnRowsOf,
+} from "./rows/turn-rows.js";
+// The Sessions explorer's read model of runs.
+export {
+  type RawSessionRunAggregate,
+  type RawSessionStats,
+  SessionQueryRepository,
+  type SessionQueryStorageScope,
+} from "./rows/session-query.js";
 
 // What the wiring builds once and hands to the manager.
 export { SessionManager } from "./session-manager.js";
