@@ -47,7 +47,7 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
 - [ ] TestFlight: Apple Team ID, signing, and upload steps (needs the user; nothing uploaded without a go)
     - [ ] Rome's own Apple Developer organization account, not the user's personal team B2U93L2LK4 (user, 2026-11-04). The user checks whether the company already has one; otherwise enrolls (D-U-N-S, company domain Apple ID).
     - [ ] App Store Connect app record under that team, bundle id `cc.romeos.mobile`
-    - [ ] Release prep that needs no account: export compliance key, version and build number rule, icon check, Release build without demo and debug entries, archive and export steps in `ios/README.md`
+    - [x] Release prep that needs no account: export compliance key, version and build number rule, icon check, Release build without demo and debug entries, archive and export steps in `ios/README.md` (`c3f8f893`, `3491a51c`, `f7dd2dee`: Release is `cc.romeos.mobile` "Rome", Debug `cc.romeos.mobile.dev` "Rome Dev"; build number is the UTC archive time; privacy manifest added; icon already fine. Result: [`mobile-app-mvp-release-prep.md`](mobile-app-mvp-release-prep.md))
     - [ ] Switch signing to the new team, archive, upload (needs the user's go); team members join as internal testers
 
 ## Small changes (batched)
