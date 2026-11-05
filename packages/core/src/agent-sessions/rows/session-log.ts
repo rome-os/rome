@@ -11,11 +11,7 @@ import type {
   TurnLogEntry,
   TurnLogWriter,
 } from "../agent-session.js";
-import {
-  AgentTraceRecorder,
-  recordAgentTraceBestEffort,
-  resolveTurnConversation,
-} from "./agent-trace-recorder.js";
+import { AgentTraceRecorder, resolveTurnConversation } from "./agent-trace-recorder.js";
 import { findRecordedConversation } from "./session-conversation.js";
 import { callerChatId, callerFromKey } from "../../core/session-caller.js";
 
@@ -68,8 +64,24 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
 }
 
 function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string): TurnLogWriter {
-  const record = (event: StreamAgentEvent) =>
-    recordAgentTraceBestEffort(recorder, event, log, { turnId, source });
+  // Events a write failed to keep. Each write tries them again ahead of its
+  // own, at the sequence the failed one would have taken, so a transient
+  // failure drops no block and the turn goes on either way.
+  let pending: StreamAgentEvent[] = [];
+  const record = async (event: StreamAgentEvent) => {
+    pending.push(event);
+    try {
+      await recorder.recordBatch(pending);
+      pending = [];
+    } catch (err) {
+      log.warn("failed to persist agent trace", {
+        turnId,
+        source,
+        pending: pending.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
   // Text streamed since the last complete text block. A turn that ends before
   // that block completes, an interrupt mid-answer, keeps what was streamed as
   // its final text, so the trace shows what the guardian saw.

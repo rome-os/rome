@@ -291,13 +291,15 @@ describe("AgentSessionBridge worker disconnect", () => {
     } = {},
   ) {
     const queue = [...handles];
+    // A run that names its conversation names it on its caller.
+    const caller = {
+      ...callerFromKey("discord:channel-1"),
+      ...(options.romeSessionId ? { chatId: options.romeSessionId } : {}),
+    } as SessionCaller;
     const session = {
-      key: { agentName: "main", caller: callerFromKey("discord:channel-1") },
-      caller: callerFromKey("discord:channel-1"),
+      key: { agentName: "main", caller },
+      caller,
       sessionId: "session-1",
-      conversation: options.romeSessionId
-        ? { origin: "named", id: options.romeSessionId }
-        : undefined,
       sendTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
