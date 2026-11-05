@@ -56,10 +56,8 @@ export interface WatchSourceDeps {
   composioSignedIn(): Promise<boolean>;
   /** Composio's connected accounts, as this app's `GET /connectors` lists them. */
   composioAccounts(): Promise<{ toolkit: string; status: string }[]>;
-  /** The connected Gmail account's address. */
-  gmailAddress(): Promise<string>;
-  /** The connected Google Calendar account's address. */
-  calendarAddress(): Promise<string>;
+  /** Whose account a connected Composio service is: the mailbox address, the Linear user, the Stripe account. */
+  composioAccount(service: string): Promise<string>;
 }
 
 export const NO_RELAY_REASON =
@@ -101,11 +99,10 @@ export function composioServices(
   });
 }
 
-/** Whose account a source's events concern: the GitHub login, or the Google account's address. */
+/** Whose account a source's events concern: the GitHub login, or the Composio service's account. */
 async function accountOf(deps: WatchSourceDeps, source: string): Promise<string> {
   if (source === "github") return deps.githubLogin((await deps.githubToken()) ?? "");
-  if (source === "googlecalendar") return deps.calendarAddress();
-  return deps.gmailAddress();
+  return deps.composioAccount(source);
 }
 
 async function watchSection(

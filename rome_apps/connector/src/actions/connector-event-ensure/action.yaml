@@ -10,8 +10,9 @@ description: |
   `dryRun: true` only checks and returns `subscription: active | inactive`;
   otherwise it subscribes when needed and returns `existing | created`. A
   GitHub subscription merges the event into Rome's existing webhook on that
-  repo or org. Gmail's new-mail event and the Google Calendar events follow
-  the connected account and need no filter: each arms its Composio trigger. Fails with a readable reason: GitHub not connected, no target
+  repo or org. The Composio events (Gmail, Google Calendar, Linear, Outlook,
+  Notion, Stripe) follow the connected account and need no filter: each arms
+  its Composio trigger. Fails with a readable reason: GitHub not connected, no target
   in the filter, a repo or org name whose case differs from GitHub's (the
   error gives the exact spelling), or GitHub refusing the webhook (admin
   access needed).

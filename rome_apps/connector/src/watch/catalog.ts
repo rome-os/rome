@@ -185,6 +185,8 @@ export interface ComposioTriggerSpec {
   toolkit: string;
   slug: string;
   config: Record<string, unknown>;
+  /** Config keys that narrow the trigger, which an armed one must leave unset to count. */
+  unscoped?: string[];
 }
 
 export const CALENDAR_STARTING_SOON: ComposioTriggerSpec = {
@@ -251,10 +253,226 @@ export const CALENDAR_WATCHABLE: Watchable = {
   ],
 };
 
+// Linear: the public-team webhooks, which fire workspace-wide when no team is
+// set. Private teams have only polling triggers that each name one team.
+const linear = (slug: string): ComposioTriggerSpec => ({
+  toolkit: "linear",
+  slug,
+  config: {},
+  unscoped: ["team_id"],
+});
+export const LINEAR_ISSUE_CREATED = linear("LINEAR_PUBLIC_TEAM_ISSUE_CREATED");
+export const LINEAR_ISSUE_UPDATED = linear("LINEAR_PUBLIC_TEAM_ISSUE_PROPERTIES_UPDATED");
+export const LINEAR_COMMENT_CREATED = linear("LINEAR_PUBLIC_TEAM_COMMENT_CREATED");
+
+export const LINEAR_WATCHABLE: Watchable = {
+  source: "linear",
+  label: "Linear",
+  target: null,
+  kinds: [
+    {
+      kind: "assigned_to_you",
+      label: "Issues assigned to me",
+      default: true,
+      triggers: [fromComposio(LINEAR_ISSUE_CREATED), fromComposio(LINEAR_ISSUE_UPDATED)],
+    },
+    {
+      kind: "comment_or_mention",
+      label: "Comments on my issues, and mentions",
+      default: true,
+      triggers: [fromComposio(LINEAR_COMMENT_CREATED)],
+    },
+    {
+      kind: "status_changed",
+      label: "Status changes on my issues",
+      default: true,
+      triggers: [fromComposio(LINEAR_ISSUE_UPDATED)],
+    },
+    {
+      kind: "new_issue",
+      label: "New issues in my teams",
+      default: false,
+      triggers: [fromComposio(LINEAR_ISSUE_CREATED)],
+    },
+  ],
+  options: [
+    {
+      key: "teams",
+      label: "Teams to hear about",
+      type: "list",
+      default: [],
+      itemHint: "Team keys such as ENG; empty means every team",
+    },
+  ],
+};
+
+// Outlook: new mail in the inbox. The trigger may carry only the message id,
+// so its normalizer reads the message itself.
+export const OUTLOOK_NEW_MAIL: ComposioTriggerSpec = {
+  toolkit: "outlook",
+  slug: "OUTLOOK_MESSAGE_TRIGGER",
+  config: {},
+  unscoped: [
+    "folder_id",
+    "from_email",
+    "to_email",
+    "subject_contains",
+    "has_attachments",
+    "importance",
+  ],
+};
+
+export const OUTLOOK_WATCHABLE: Watchable = {
+  source: "outlook",
+  label: "Outlook",
+  target: null,
+  kinds: [
+    {
+      kind: "new_mail",
+      label: "New mail",
+      default: true,
+      triggers: [fromComposio(OUTLOOK_NEW_MAIL)],
+    },
+  ],
+  options: GMAIL_WATCHABLE.options,
+};
+
+// Notion: workspace-wide webhooks. Their payloads carry ids only, so the
+// normalizer reads the comment and the page.
+const notion = (slug: string, unscoped: string[]): ComposioTriggerSpec => ({
+  toolkit: "notion",
+  slug,
+  config: {},
+  unscoped,
+});
+export const NOTION_COMMENT_CREATED = notion("NOTION_COMMENT_CREATED", ["page_id"]);
+export const NOTION_PAGE_CONTENT_UPDATED = notion("NOTION_PAGE_CONTENT_UPDATED", [
+  "data_source_id",
+  "page_id",
+  "parent_page_id",
+]);
+export const NOTION_PAGE_PROPERTIES_UPDATED = notion("NOTION_PAGE_PROPERTIES_UPDATED", [
+  "data_source_id",
+  "page_id",
+  "parent_page_id",
+]);
+export const NOTION_PAGE_CREATED = notion("NOTION_PAGE_CREATED", [
+  "data_source_id",
+  "parent_page_id",
+]);
+
+export const NOTION_WATCHABLE: Watchable = {
+  source: "notion",
+  label: "Notion",
+  target: null,
+  kinds: [
+    {
+      kind: "comment_or_mention",
+      label: "Comments that mention or reply to me",
+      default: true,
+      triggers: [fromComposio(NOTION_COMMENT_CREATED)],
+    },
+    {
+      kind: "page_changed",
+      label: "Changes to my pages",
+      default: true,
+      triggers: [
+        fromComposio(NOTION_PAGE_CONTENT_UPDATED),
+        fromComposio(NOTION_PAGE_PROPERTIES_UPDATED),
+      ],
+    },
+    {
+      kind: "new_page",
+      label: "New pages",
+      default: false,
+      triggers: [fromComposio(NOTION_PAGE_CREATED)],
+    },
+  ],
+  options: [
+    {
+      key: "pages",
+      label: "Pages to hear about",
+      type: "enum",
+      values: [
+        { value: "mine", label: "Pages I created" },
+        { value: "all", label: "Any page Rome can see" },
+      ],
+      default: "mine",
+    },
+  ],
+};
+
+// Stripe: the connected account's own events.
+const stripe = (slug: string): ComposioTriggerSpec => ({ toolkit: "stripe", slug, config: {} });
+export const STRIPE_CHARGE_FAILED = stripe("STRIPE_CHARGE_FAILED");
+export const STRIPE_INVOICE_PAYMENT_FAILED = stripe("STRIPE_INVOICE_PAYMENT_FAILED");
+export const STRIPE_DISPUTE_CREATED = stripe("STRIPE_CHARGE_DISPUTE_CREATED");
+export const STRIPE_DISPUTE_CLOSED = stripe("STRIPE_CHARGE_DISPUTE_CLOSED");
+export const STRIPE_CHARGE_REFUNDED = stripe("STRIPE_CHARGE_REFUNDED");
+export const STRIPE_SUBSCRIPTION_DELETED = stripe("STRIPE_CUSTOMER_SUBSCRIPTION_DELETED");
+export const STRIPE_PAYOUT_FAILED = stripe("STRIPE_PAYOUT_FAILED");
+export const STRIPE_CHARGE_SUCCEEDED = stripe("STRIPE_CHARGE_SUCCEEDED");
+
+export const STRIPE_WATCHABLE: Watchable = {
+  source: "stripe",
+  label: "Stripe",
+  target: null,
+  kinds: [
+    {
+      kind: "payment_failed",
+      label: "Failed payments",
+      default: true,
+      triggers: [fromComposio(STRIPE_CHARGE_FAILED), fromComposio(STRIPE_INVOICE_PAYMENT_FAILED)],
+    },
+    {
+      kind: "dispute",
+      label: "Disputes",
+      default: true,
+      triggers: [fromComposio(STRIPE_DISPUTE_CREATED), fromComposio(STRIPE_DISPUTE_CLOSED)],
+    },
+    {
+      kind: "refund",
+      label: "Refunds",
+      default: true,
+      triggers: [fromComposio(STRIPE_CHARGE_REFUNDED)],
+    },
+    {
+      kind: "subscription_canceled",
+      label: "Canceled subscriptions",
+      default: true,
+      triggers: [fromComposio(STRIPE_SUBSCRIPTION_DELETED)],
+    },
+    {
+      kind: "payout_failed",
+      label: "Failed payouts",
+      default: true,
+      triggers: [fromComposio(STRIPE_PAYOUT_FAILED)],
+    },
+    {
+      kind: "payment_succeeded",
+      label: "Successful payments",
+      default: false,
+      triggers: [fromComposio(STRIPE_CHARGE_SUCCEEDED)],
+    },
+  ],
+  options: [
+    {
+      key: "includeTestMode",
+      label: "Include test-mode events",
+      type: "boolean",
+      default: false,
+    },
+  ],
+};
+
 export const WATCHABLES: readonly Watchable[] = [
   GITHUB_WATCHABLE,
   GMAIL_WATCHABLE,
   CALENDAR_WATCHABLE,
+  LINEAR_WATCHABLE,
+  OUTLOOK_WATCHABLE,
+  NOTION_WATCHABLE,
+  STRIPE_WATCHABLE,
 ];
 
 /** The Composio triggers watching arms, by the bus name of the event each publishes. */
@@ -264,6 +482,22 @@ export const COMPOSIO_TRIGGERS: ReadonlyMap<string, ComposioTriggerSpec> = new M
     CALENDAR_STARTING_SOON,
     CALENDAR_EVENT_SYNC,
     CALENDAR_RSVP,
+    LINEAR_ISSUE_CREATED,
+    LINEAR_ISSUE_UPDATED,
+    LINEAR_COMMENT_CREATED,
+    OUTLOOK_NEW_MAIL,
+    NOTION_COMMENT_CREATED,
+    NOTION_PAGE_CONTENT_UPDATED,
+    NOTION_PAGE_PROPERTIES_UPDATED,
+    NOTION_PAGE_CREATED,
+    STRIPE_CHARGE_FAILED,
+    STRIPE_INVOICE_PAYMENT_FAILED,
+    STRIPE_DISPUTE_CREATED,
+    STRIPE_DISPUTE_CLOSED,
+    STRIPE_CHARGE_REFUNDED,
+    STRIPE_SUBSCRIPTION_DELETED,
+    STRIPE_PAYOUT_FAILED,
+    STRIPE_CHARGE_SUCCEEDED,
   ].map((spec) => [eventNameOf(fromComposio(spec)), spec]),
 );
 

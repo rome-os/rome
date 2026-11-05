@@ -3,13 +3,16 @@ type: custom
 description: |
   Put one raw event from a watched source into the common shape a follower
   reads: its kind, who did it, a link, a short excerpt, and plain facts (from
-  a bot, by or about the guardian, sent to them or in cc, Gmail's tab, a meeting's
-  time and the guardian's reply to it). It
-  does not decide whether the event matters; it drops only spam, trash and
-  events of a kind the follow has off. Changes nothing.
+  a bot, by or about the guardian, sent to them or in cc, Gmail's tab, a
+  meeting's time and the guardian's reply to it, a failed payment's amount).
+  When an event names only ids (an Outlook message, a Notion comment), it
+  reads what it needs through the connected account, and fails when that
+  read fails, so the follower can try again. It does not decide whether the
+  event matters; it drops only spam, trash and events of a kind the follow
+  has off. Changes nothing.
 entry: ./index.ts
 visibility: explicit
 complexity: simple
-speed: fast
-reliability: high
+speed: moderate
+reliability: medium
 sideEffects: read-only

@@ -11,12 +11,11 @@ import { resolveRelayDepositUrl } from "../api/relay-webhook.js";
 import { SettingsStore } from "../api/settings-store.js";
 import { loadConnectorClient, ROME_USER_ID, subscribeTriggerFeed } from "../shared.js";
 import { type ComposioTriggerSpec, watchableOf } from "./catalog.js";
+import type { LinearViewer, NotionMe, WatchReads } from "./reads.js";
 import type { WatchSourceDeps } from "./sources.js";
 
-/** Identities change only with the connection, so one read per token or account is enough. */
+/** A GitHub login changes only with the token, so one read per token is enough. */
 const githubLogins = new Map<string, string>();
-const gmailAddresses = new Map<string, string>();
-const calendarAddresses = new Map<string, string>();
 const teamMembers = new Map<string, { member: boolean; at: number }>();
 const TEAM_CACHE_MS = 10 * 60_000;
 
@@ -67,8 +66,9 @@ async function composioAccountId(toolkit: string): Promise<{ client: ComposioCli
 
 /**
  * Whether an active Composio trigger already delivers what a follow needs:
- * the spec's trigger, for the connected account, with this app's config. One
- * for another account or another config does not.
+ * the spec's trigger, for the connected account, with this app's config and
+ * none of the keys that would narrow it. One for another account, another
+ * config, or one narrowed to a team or a page does not.
  */
 export function armsWatch(
   trigger: ActiveTrigger,
@@ -77,50 +77,199 @@ export function armsWatch(
 ): boolean {
   if (trigger.triggerName.toUpperCase() !== spec.slug) return false;
   if (!trigger.connectedAccountIds.includes(accountId)) return false;
+  const narrowed = (spec.unscoped ?? []).some(
+    (key) =>
+      trigger.triggerConfig[key] !== undefined &&
+      trigger.triggerConfig[key] !== null &&
+      trigger.triggerConfig[key] !== "",
+  );
+  if (narrowed) return false;
   return Object.entries(spec.config).every(
     ([key, value]) => JSON.stringify(trigger.triggerConfig[key]) === JSON.stringify(value),
   );
 }
 
-/** Reads one value from a Google API through the connected account, cached per account. */
-async function googleIdentity(
-  toolkit: string,
-  endpoint: string,
-  read: (data: Record<string, unknown>) => unknown,
-  cache: Map<string, string>,
-): Promise<string> {
-  const { client, id } = await composioAccountId(toolkit);
-  const cached = cache.get(id);
-  if (cached) return cached;
-  const res = await client.proxyTool({ connectedAccountId: id, endpoint, method: "GET" });
-  const value =
-    res.data && typeof res.data === "object"
-      ? read(res.data as Record<string, unknown>)
-      : undefined;
-  if (res.status < 200 || res.status >= 300 || typeof value !== "string" || !value) {
-    throw new Error(`${labelOf(toolkit)} answered ${res.status}`);
-  }
-  const lowered = value.toLowerCase();
-  cache.set(id, lowered);
-  return lowered;
+/** A request to a connected service's own API, made through Composio with its account. */
+export interface ComposioRequest {
+  endpoint: string;
+  method?: "GET" | "POST";
+  body?: unknown;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
 }
 
+/** One read from a connected service's API, or why it failed. */
+export async function composioRead(
+  toolkit: string,
+  request: ComposioRequest,
+): Promise<Record<string, unknown>> {
+  const { client, id } = await composioAccountId(toolkit);
+  const res = await client.proxyTool({
+    connectedAccountId: id,
+    endpoint: request.endpoint,
+    method: request.method ?? "GET",
+    ...(request.body !== undefined ? { body: request.body } : {}),
+    ...(request.headers ? { headers: request.headers } : {}),
+    ...(request.query ? { query: request.query } : {}),
+  });
+  if (res.status < 200 || res.status >= 300 || !res.data || typeof res.data !== "object") {
+    throw new Error(`${labelOf(toolkit)} answered ${res.status}`);
+  }
+  return res.data as Record<string, unknown>;
+}
+
+/** Identities change only with the connection, so one read per account is enough. */
+const identities = new Map<string, unknown>();
+
+async function identityOf<T>(toolkit: string, read: () => Promise<T>): Promise<T> {
+  const { id } = await composioAccountId(toolkit);
+  const key = `${toolkit}:${id}`;
+  if (identities.has(key)) return identities.get(key) as T;
+  const value = await read();
+  identities.set(key, value);
+  return value;
+}
+
+const text = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+/** A value the identity read must find, lower-cased when it is an address. */
+const required = (toolkit: string, value: string | undefined): string => {
+  if (!value) throw new Error(`${labelOf(toolkit)} did not say who is connected`);
+  return value;
+};
+
 export const gmailAddress = () =>
-  googleIdentity(
-    "gmail",
-    "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-    (data) => data.emailAddress,
-    gmailAddresses,
-  );
+  identityOf("gmail", async () => {
+    const data = await composioRead("gmail", {
+      endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+    });
+    return required("gmail", text(data.emailAddress)?.toLowerCase());
+  });
 
 /** The primary calendar's id, which Google sets to the account's address. */
 export const calendarAddress = () =>
-  googleIdentity(
-    "googlecalendar",
-    "https://www.googleapis.com/calendar/v3/calendars/primary",
-    (data) => data.id,
-    calendarAddresses,
-  );
+  identityOf("googlecalendar", async () => {
+    const data = await composioRead("googlecalendar", {
+      endpoint: "https://www.googleapis.com/calendar/v3/calendars/primary",
+    });
+    return required("googlecalendar", text(data.id)?.toLowerCase());
+  });
+
+export const outlookAddress = () =>
+  identityOf("outlook", async () => {
+    const data = await composioRead("outlook", { endpoint: "https://graph.microsoft.com/v1.0/me" });
+    return required("outlook", (text(data.mail) ?? text(data.userPrincipalName))?.toLowerCase());
+  });
+
+/** Linear answers GraphQL errors with a 200, so the errors are read here. */
+async function linearQuery(
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const res = await composioRead("linear", {
+    endpoint: "https://api.linear.app/graphql",
+    method: "POST",
+    body: { query, variables },
+  });
+  const errors = Array.isArray(res.errors) ? res.errors : [];
+  if (errors.length > 0) {
+    throw new Error(`Linear answered: ${text(record(errors[0]).message) ?? "an error"}`);
+  }
+  return record(res.data);
+}
+
+export const linearViewer = (): Promise<LinearViewer> =>
+  identityOf("linear", async () => {
+    const viewer = record(
+      (await linearQuery("query { viewer { id name displayName email } }")).viewer,
+    );
+    return {
+      id: required("linear", text(viewer.id)),
+      ...(text(viewer.name) ? { name: text(viewer.name) } : {}),
+      ...(text(viewer.displayName) ? { displayName: text(viewer.displayName) } : {}),
+      ...(text(viewer.email) ? { email: text(viewer.email)?.toLowerCase() } : {}),
+    };
+  });
+
+const NOTION_HEADERS = { "Notion-Version": "2022-06-28" };
+const notionRead = (path: string, query?: Record<string, string>) =>
+  composioRead("notion", {
+    endpoint: `https://api.notion.com/v1/${path}`,
+    headers: NOTION_HEADERS,
+    ...(query ? { query } : {}),
+  });
+
+/** The person who connected Notion: the owner of Rome's integration in their workspace. */
+export const notionMe = (): Promise<NotionMe> =>
+  identityOf("notion", async () => {
+    const me = await notionRead("users/me");
+    const owner = record(record(record(me.bot).owner).user);
+    const id = text(owner.id) ?? (text(me.type) === "person" ? text(me.id) : undefined);
+    return {
+      id: required("notion", id),
+      ...(text(record(owner.person).email)
+        ? { email: text(record(owner.person).email)?.toLowerCase() }
+        : {}),
+      ...(text(owner.name) ? { name: text(owner.name) } : {}),
+      ...(text(record(me.bot).workspace_name)
+        ? { workspace: text(record(me.bot).workspace_name) }
+        : {}),
+    };
+  });
+
+/** The connected Stripe account, by the name its dashboard shows. */
+export const stripeAccountName = () =>
+  identityOf("stripe", async () => {
+    const account = await composioRead("stripe", { endpoint: "https://api.stripe.com/v1/account" });
+    return required(
+      "stripe",
+      text(record(record(account.settings).dashboard).display_name) ??
+        text(record(account.business_profile).name) ??
+        text(account.email) ??
+        text(account.id),
+    );
+  });
+
+/** The reads normalizing an event may need, bound to the connected accounts. */
+export const watchReads: WatchReads = {
+  linearViewer,
+  async linearIssue(id) {
+    const issue = record(
+      (
+        await linearQuery(
+          "query ($id: String!) { issue(id: $id) { assignee { id } creator { id } subscribers { nodes { id } } } }",
+          { id },
+        )
+      ).issue,
+    );
+    const nodes = record(issue.subscribers).nodes;
+    return {
+      ...(text(record(issue.assignee).id) ? { assigneeId: text(record(issue.assignee).id) } : {}),
+      ...(text(record(issue.creator).id) ? { creatorId: text(record(issue.creator).id) } : {}),
+      subscriberIds: (Array.isArray(nodes) ? nodes : [])
+        .map((node) => text(record(node).id))
+        .filter((id): id is string => id !== undefined),
+    };
+  },
+  outlookMessage: (id) =>
+    composioRead("outlook", {
+      endpoint: `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(id)}`,
+      query: {
+        $select:
+          "id,subject,bodyPreview,from,sender,toRecipients,ccRecipients,webLink,conversationId,inferenceClassification,importance,internetMessageHeaders",
+      },
+    }),
+  notionMe,
+  notionComment: (id) => notionRead(`comments/${encodeURIComponent(id)}`),
+  async notionComments(blockId) {
+    const list = await notionRead("comments", { block_id: blockId, page_size: "100" });
+    return (Array.isArray(list.results) ? list.results : []).map(record);
+  },
+  notionPage: (id) => notionRead(`pages/${encodeURIComponent(id)}`),
+};
 
 export function watchSourceDeps(deps: AppActionRuntimeDeps): WatchSourceDeps {
   return {
@@ -136,8 +285,28 @@ export function watchSourceDeps(deps: AppActionRuntimeDeps): WatchSourceDeps {
         status: account.status.toUpperCase(),
       }));
     },
-    gmailAddress,
-    calendarAddress,
+    composioAccount: async (service) => {
+      switch (service) {
+        case "gmail":
+          return gmailAddress();
+        case "googlecalendar":
+          return calendarAddress();
+        case "outlook":
+          return outlookAddress();
+        case "linear": {
+          const viewer = await linearViewer();
+          return viewer.email ?? viewer.name ?? viewer.id;
+        }
+        case "notion": {
+          const me = await notionMe();
+          return me.email ?? me.name ?? me.id;
+        }
+        case "stripe":
+          return stripeAccountName();
+        default:
+          throw new Error(`Rome does not know whose ${service} account is connected`);
+      }
+    },
   };
 }
 

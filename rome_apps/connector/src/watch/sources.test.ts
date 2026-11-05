@@ -14,10 +14,12 @@ const deps = (extra: Partial<WatchSourceDeps> = {}): WatchSourceDeps => ({
   composioAccounts: async () => [
     { toolkit: "gmail", status: "ACTIVE" },
     { toolkit: "googlecalendar", status: "ACTIVE" },
+    { toolkit: "linear", status: "ACTIVE" },
+    { toolkit: "outlook", status: "ACTIVE" },
     { toolkit: "notion", status: "EXPIRED" },
+    { toolkit: "stripe", status: "ACTIVE" },
   ],
-  gmailAddress: async () => "me@example.com",
-  calendarAddress: async () => "me@example.com",
+  composioAccount: async (service) => (service === "stripe" ? "Acme Inc" : "me@example.com"),
   ...extra,
 });
 
@@ -64,6 +66,10 @@ describe("listWatchSources", () => {
       ["github", "ready", "octo-me"],
       ["gmail", "ready", "me@example.com"],
       ["googlecalendar", "ready", "me@example.com"],
+      ["linear", "ready", "me@example.com"],
+      ["outlook", "ready", "me@example.com"],
+      ["notion", "not_connected", undefined],
+      ["stripe", "ready", "Acme Inc"],
     ]);
     expect(watch[1]?.kinds[0]?.triggers[0]?.eventName).toBe(
       "provider:event:gmail.gmail_new_gmail_message",
@@ -74,17 +80,14 @@ describe("listWatchSources", () => {
     const off = await listWatchSources(
       deps({ githubToken: async () => null, composioSignedIn: async () => false }),
     );
-    expect(off.watch.map((w) => w.status)).toEqual([
-      "not_connected",
-      "not_connected",
-      "not_connected",
-    ]);
+    expect(new Set(off.watch.map((w) => w.status))).toEqual(new Set(["not_connected"]));
     const noRelay = await listWatchSources(deps({ relayDepositUrl: async () => null }));
     expect(noRelay.watch[0]).toMatchObject({ status: "no_relay", statusReason: NO_RELAY_REASON });
     const broken = await listWatchSources(
       deps({
-        gmailAddress: async () => {
-          throw new Error("Gmail's profile answered 401");
+        composioAccount: async (service) => {
+          if (service === "gmail") throw new Error("Gmail answered 401");
+          return "me@example.com";
         },
       }),
     );
@@ -98,15 +101,16 @@ describe("listWatchSources", () => {
     const gmailOnly = await listWatchSources(
       deps({ composioAccounts: async () => [{ toolkit: "gmail", status: "ACTIVE" }] }),
     );
-    expect(gmailOnly.watch.map((w) => [w.service, w.status])).toEqual([
+    expect(gmailOnly.watch.map((w) => [w.service, w.status]).slice(0, 3)).toEqual([
       ["github", "ready"],
       ["gmail", "ready"],
       ["googlecalendar", "not_connected"],
     ]);
     const broken = await listWatchSources(
       deps({
-        calendarAddress: async () => {
-          throw new Error("Google Calendar answered 403");
+        composioAccount: async (service) => {
+          if (service === "googlecalendar") throw new Error("Google Calendar answered 403");
+          return "me@example.com";
         },
       }),
     );

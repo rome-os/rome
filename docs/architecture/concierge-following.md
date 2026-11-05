@@ -8,7 +8,7 @@ How an event from a service the guardian follows reaches the Concierge, and the 
 flowchart TD
     subgraph External["External services"]
         GH["GitHub<br/><i>webhook per repository</i>"]
-        CP["Composio<br/><i>Gmail and Calendar triggers, polled</i>"]
+        CP["Composio<br/><i>Gmail, Calendar, Linear, Outlook,<br/>Notion and Stripe triggers</i>"]
     end
     Relay["Relay mailbox<br/><i>Rome Cloud, one per instance</i>"]
     subgraph Conn["Connection: connector app"]
@@ -68,6 +68,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 - **Core never names a service.** Which events a service has, how to subscribe to them, what a raw event means, and how to reach the account all come from the connection's watch provider. Following, triage and delivery never branch on a service. A new service changes only its connection. [ADR](../adrs/watch-specifics-in-the-connection.md)
 - **Core finds watch providers from what apps declare, never by app name.** An app that declares no watch provider is not followed, and an app cannot declare another app's actions as its provider.
 - **The event bus carries the raw event.** The connection normalizes an event when a follow routine asks, with that follow's account and kinds. Other consumers of the same event, such as Code Review and `defer`, read it unchanged.
+- **An event that names only ids is read in full by the connection.** An Outlook message or a Notion comment arrives as an id, so the normalizer reads it through the connected account. When that read fails, the event fails, and its routine tries it once more and logs an error if that fails too.
 - **The connection drops only what is not an event for the follower:** spam, trash, a kind the follow has off, a repeat. It describes each event in generic fields (`byYou`, `addressedTo`) and labels, and never judges whether it matters. [ADR](../adrs/model-triage-over-code-filters.md)
 - **Nothing after the connection drops an event in code.** What the guardian did, who sent it and how it is addressed reach triage as fields. A follow's options are stored as structured values the connection's catalog declares, and reach triage as the guardian's wishes in words, rendered from the catalog's labels: guidance, never filters. Its free-text `preference` covers what no option does.
 

@@ -50,14 +50,28 @@ describe("the watch catalog", () => {
     ]);
   });
 
-  it("declares exactly the Calendar events its kinds listen on, each by name", async () => {
-    const calendar = (await declaredSources()).filter((s) => s.events.includes(":googlecalendar."));
-    const listened = WATCHABLES.find((w) => w.source === "googlecalendar")!
-      .kinds.flatMap((kind) => kind.triggers)
-      .map(eventNameOf);
-    expect(calendar.map((s) => s.events).sort()).toEqual([...new Set(listened)].sort());
-    for (const source of calendar) {
-      expect(source).toEqual({ events: source.events, ensureAction: "connector_event_ensure" });
+  it("declares exactly the Composio events each source's kinds listen on, each by name", async () => {
+    const sources = await declaredSources();
+    for (const watchable of WATCHABLES.filter((w) => w.source !== "github")) {
+      const declared = sources.filter((s) => s.events.includes(`:${watchable.source}.`));
+      const listened = watchable.kinds.flatMap((kind) => kind.triggers).map(eventNameOf);
+      expect({ source: watchable.source, events: declared.map((s) => s.events).sort() }).toEqual({
+        source: watchable.source,
+        events: [...new Set(listened)].sort(),
+      });
+      for (const source of declared) {
+        expect(source).toEqual({ events: source.events, ensureAction: "connector_event_ensure" });
+      }
+    }
+  });
+
+  it("gives every source's kinds and options unique names, and a default kind", () => {
+    for (const watchable of WATCHABLES) {
+      const kinds = watchable.kinds.map((k) => k.kind);
+      expect(new Set(kinds).size).toBe(kinds.length);
+      const options = watchable.options.map((o) => o.key);
+      expect(new Set(options).size).toBe(options.length);
+      expect(watchable.kinds.some((k) => k.default)).toBe(true);
     }
   });
 

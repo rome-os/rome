@@ -34,25 +34,60 @@ export interface WatchEvent {
 
 export type Normalized = { keep: true; event: WatchEvent } | { keep: false; reason: string };
 
-type Json = Record<string, unknown>;
+export type Json = Record<string, unknown>;
 
-const obj = (value: unknown): Json =>
+export const obj = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
-const str = (value: unknown): string | undefined =>
+export const str = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim()
     ? value.trim()
     : typeof value === "number"
       ? String(value)
       : undefined;
 const loginOf = (user: unknown) => str(obj(user).login);
-const same = (a: string | undefined, b: string | undefined) =>
+export const same = (a: string | undefined, b: string | undefined) =>
   a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
-const drop = (reason: string): Normalized => ({ keep: false, reason });
+export const drop = (reason: string): Normalized => ({ keep: false, reason });
 
 /** The labels that apply, each once. */
-const labelsOf = (...labels: (string | false | undefined)[]): string[] => [
+export const labelsOf = (...labels: (string | false | undefined)[]): string[] => [
   ...new Set(labels.filter((label): label is string => Boolean(label))),
 ];
+
+/** What a normalizer knows of one event, before its text is cleaned. */
+export interface EventFields {
+  actor?: string;
+  subject?: string;
+  url?: string;
+  /** The text an excerpt is cut from. */
+  text?: string;
+  byYou: boolean;
+  addressedTo: AddressedTo;
+  labels: (string | false | undefined)[];
+}
+
+/** An event kept in the common shape, its subject and excerpt cleaned. */
+export function keep(source: string, id: string, kind: string, fields: EventFields): Normalized {
+  const subject = subjectOf(fields.subject);
+  const excerpt = excerptOf(fields.text);
+  return {
+    keep: true,
+    event: {
+      id: `${source}:${id}`,
+      source,
+      kind,
+      ...(fields.actor ? { actor: fields.actor } : {}),
+      ...(subject ? { subject } : {}),
+      ...(fields.url ? { url: fields.url } : {}),
+      ...(excerpt ? { excerpt } : {}),
+      byYou: fields.byYou,
+      addressedTo: fields.addressedTo,
+      labels: labelsOf(...fields.labels),
+    },
+  };
+}
+
+export const KIND_OFF = "not a kind this follow has on";
 
 // ---------------------------------------------------------------------------
 // GitHub
@@ -255,7 +290,7 @@ export function isAutomatedSender(address: string): boolean {
     local,
   );
 }
-const BULK_PRECEDENCE = /^(bulk|list|junk)$/i;
+export const BULK_PRECEDENCE = /^(bulk|list|junk)$/i;
 
 /** Composio names a field in snake case in one place and camel case in another. */
 const field = (payload: Json, snake: string, camel: string) => payload[snake] ?? payload[camel];
@@ -381,7 +416,7 @@ export function whenOf(start: string | undefined, end: string | undefined): stri
 }
 
 /** Sentences joined into one excerpt, each ending in its own stop. */
-const sentences = (...parts: (string | undefined)[]) =>
+export const sentences = (...parts: (string | undefined)[]) =>
   parts
     .filter((part): part is string => Boolean(part))
     .map((part) => (/[.!?…]$/.test(part) ? part : `${part}.`))

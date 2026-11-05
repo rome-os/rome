@@ -4,11 +4,12 @@ description: |
   Check, or create, the subscription that brings a watched source's events to
   Rome's event bus, for the given kinds of a target. `dryRun: true` only
   checks: it answers `active | inactive`, or fails with what stands in the way
-  (GitHub needs admin rights on a repo to add its webhook; Gmail needs a
-  connected account and a relay mailbox, as does Google Calendar). Otherwise it subscribes when needed
+  (GitHub needs admin rights on a repo to add its webhook; a Composio service
+  such as Gmail, Google Calendar, Linear, Outlook, Notion or Stripe needs a
+  connected account and a relay mailbox). Otherwise it subscribes when needed
   and answers `existing | created`. A GitHub subscription merges into Rome's
-  one webhook per repo; a Gmail or Google
-  Calendar one arms the connector's Composio triggers for the kinds on.
+  one webhook per repo; a Composio one arms the service's triggers for the
+  kinds on.
 entry: ./index.ts
 visibility: explicit
 complexity: simple
