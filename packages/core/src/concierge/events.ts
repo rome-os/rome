@@ -2,12 +2,13 @@
 // coalesced per row (task-events.ts), and a Concierge turn that wrote text
 // without speaking gets one reminder turn.
 
-import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
+import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
   CONCIERGE_ACCOUNT,
+  CONCIERGE_CHAT_ID,
   type ConciergeService,
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
@@ -15,6 +16,8 @@ import {
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer } from "./task-events.js";
 import { openQuestion } from "./transcript.js";
+
+import { failoverReason } from "./failover-reason.js";
 
 const log = createLogger("concierge-events");
 
@@ -125,9 +128,10 @@ async function renderTaskEvents(
 export function startConciergeEvents(
   service: ConciergeService,
   dispatcher: Pick<AgentLifecycleDispatcher, "onFinished">,
+  options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
   const remindersRunning = new Set<string>();
-  const recoveriesRunning = new Set<string>();
+  const recoveriesRunning = new Map<string, { finished?: AgentTurnFinishedEvent }>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
   const coalescer = new TaskEventCoalescer({
@@ -146,24 +150,61 @@ export function startConciergeEvents(
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
     const reminderRunning = remindersRunning.has(chatId);
-    // Snapshot before awaiting settings: a recovery's finish must not recover
-    // again after the running recovery returns and clears its guard.
-    if (recoveriesRunning.has(chatId)) return;
-    if (!(await service.isEnabled())) return;
+    // Finish callbacks run before the backend promise settles. Capture them
+    // synchronously so a recovery cannot start a second chain or a reminder.
+    const active = recoveriesRunning.get(chatId);
+    if (active) {
+      active.finished = event;
+      return;
+    }
+    if (chatId !== CONCIERGE_CHAT_ID) return;
     if (event.status === "error") {
-      recoveriesRunning.add(chatId);
+      const failure = event.output.failure;
+      const reason = failoverReason(failure, service.deps.aiToolState.get());
+      if (!reason || !failure) return;
+      const chain: { finished?: AgentTurnFinishedEvent } = {};
+      recoveriesRunning.set(chatId, chain);
       try {
-        const switched = await service.switchIfExhausted(chatId);
-        if (switched)
+        if (!(await service.isEnabled())) return;
+        const recover = async (
+          input: AgentTurnFailure,
+          kind: typeof reason,
+          sameThread: boolean,
+        ): Promise<AgentTurnFinishedEvent | undefined> => {
+          chain.finished = undefined;
           await service.runSystemTurn(
             chatId,
-            quotaRecoveryPrompt(switched.from === "openai" ? "Codex" : "Claude"),
+            quotaRecoveryPrompt(input.provider === "openai" ? "Codex" : "Claude", kind, sameThread),
           );
+          return chain.finished;
+        };
+        let crossed = false;
+        let next: AgentTurnFinishedEvent | undefined;
+        if (reason === "temporary") {
+          await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
+            30_000,
+          );
+          // The wait may have ended Concierge or the subscription that paid for this turn.
+          if (!(await service.isEnabled())) return;
+          if (!failoverReason(failure, service.deps.aiToolState.get())) return;
+          next = await recover(failure, reason, true);
+        } else {
+          const moved = await service.switchForFailure(chatId, failure, reason);
+          if (!moved) return;
+          crossed = moved.from !== moved.to;
+          next = await recover(failure, reason, !crossed);
+        }
+        if (crossed || next?.status !== "error" || !next.output.failure) return;
+        const second = failoverReason(next.output.failure, service.deps.aiToolState.get());
+        if (!second) return;
+        const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
+        if (moved) await recover(next.output.failure, second, false);
       } finally {
         recoveriesRunning.delete(chatId);
       }
       return;
     }
+    if (!(await service.isEnabled())) return;
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,

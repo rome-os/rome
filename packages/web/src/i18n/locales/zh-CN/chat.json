@@ -377,6 +377,9 @@
   },
   "modelSwitch": {
     "quota": "{{from}} 额度已用完，已切换到 {{to}}",
+    "login": "{{from}} 登录失败，已切换到 {{to}}",
+    "temporary": "{{from}} 暂时无法使用，已切换到 {{to}}",
+    "model_limit": "{{fromModel}} 已达限制，已切换到 {{toModel}}",
     "notice": "已切换到 {{model}}"
   },
   "modelSelector": {

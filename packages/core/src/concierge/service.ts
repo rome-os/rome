@@ -2,11 +2,11 @@
 // chats. Design: rome-os/rome#1344.
 
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import type { Account, BackendTurnParams } from "@rome-os/app-runtime";
+import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
-import type { AIToolStateValue } from "../core/ai-tool-state.js";
+import { claudeUsesApiKey, type AIToolStateValue } from "../core/ai-tool-state.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -18,12 +18,18 @@ import {
   type ModelSelectionId,
 } from "../core/model-selector.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
-import { quotaSwitchTarget, soleExhaustedProvider } from "../core/quota-switch.js";
+import {
+  quotaSwitchTarget,
+  sameProviderTarget,
+  soleExhaustedProvider,
+} from "../core/quota-switch.js";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
+
+import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
 
 const log = createLogger("concierge");
 
@@ -96,6 +102,7 @@ export interface ConciergeDeps {
 }
 
 export class ConciergeService {
+  private readonly leftModels = new Map<string, number>();
   private creating: Promise<string> | null = null;
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
@@ -173,37 +180,84 @@ export class ConciergeService {
     return null;
   }
 
-  /**
-   * Moves the Concierge chat to the other subscription when its provider is
-   * flagged out of quota and the other is eligible, and records the notice.
-   * Null for any other chat, or when nothing moved.
-   */
+  /** Checks raw subscription availability before a Concierge turn. */
   async switchIfExhausted(chatId: string) {
+    return this.move(chatId);
+  }
+
+  async switchForFailure(
+    chatId: string,
+    failure: AgentTurnFailure,
+    reason: FailoverReason,
+    crossOnly = false,
+  ) {
+    return this.move(chatId, failure, reason, crossOnly);
+  }
+
+  private async move(
+    chatId: string,
+    failure?: AgentTurnFailure,
+    reason?: FailoverReason,
+    crossOnly = false,
+  ) {
     if (chatId !== CONCIERGE_CHAT_ID) return null;
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (!chat) return null;
     const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
-    const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection)?.providerId;
-    const pinned =
-      selected ??
-      (await this.deps.sessionManager.findReusableSession(key.channelThreadKey, key.agentName))
-        ?.provider;
+    const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection);
+    const runtime = selected
+      ? null
+      : await this.deps.sessionManager.findReusableSession(key.channelThreadKey, key.agentName);
     const state = this.deps.aiToolState.get();
-    const from = pinned ?? soleExhaustedProvider(state);
+    // An Auto chat whose first turn failed has no recorded provider yet.
+    const from =
+      selected?.providerId ??
+      runtime?.provider ??
+      failure?.provider ??
+      soleExhaustedProvider(state);
     if (from !== "openai" && from !== "anthropic") return null;
-    const target = quotaSwitchTarget(state, from);
+    if (failure && failure.provider !== from) return null;
+    const source = from === "openai" ? state.codex : state.claude;
+    if (from === "anthropic" ? claudeUsesApiKey(source) : source.accountType === "api_key")
+      return null;
+    reason ??= source.quotaExhausted
+      ? "quota"
+      : // Rome credits pay for Codex while its login is out, so that alone is no failure.
+        (from === "anthropic" && source.loggedIn === false) || source.needsReauth
+        ? "login"
+        : undefined;
+    if (!reason) return null;
+    const fromModel = selected?.model ?? runtime?.model ?? "";
+    const same =
+      !crossOnly &&
+      (reason === "model_limit" || (reason === "quota" && ambiguousQuota(failure?.message ?? "")))
+        ? sameProviderTarget(state, from, fromModel)
+        : null;
+    const cross = quotaSwitchTarget(state, from, true);
+    const candidates = reason === "model_limit" ? [same, cross] : [cross, same];
+    const modelKey = (model: string) => model.replace(/\[.*\]$/, "");
+    const target = candidates.find(
+      (candidate) =>
+        candidate &&
+        (this.leftModels.get(
+          modelKey(WEBCHAT_LARGE_MODEL_SELECTIONS[candidate.selectionId].model),
+        ) ?? 0) <= Date.now(),
+    );
     if (!target) return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
     this.deps.agentSessionManager.peek(key)?.selectModel(target.selectionId);
+    this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {
         type: "quota_switch",
         from,
         to: target.provider,
+        reason,
+        fromModel,
         model: WEBCHAT_LARGE_MODEL_SELECTIONS[target.selectionId].model,
       },
     ]);
-    return { from, to: target.provider, selectionId: target.selectionId };
+    return { from, to: target.provider, selectionId: target.selectionId, reason };
   }
 
   /** The runtime session id of the Concierge chat, or null before its first turn. */

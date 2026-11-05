@@ -3725,6 +3725,16 @@ describe("Webchat API", () => {
       expect((await pick(null)).status).toBe(400);
       await deps.settingsRepo.set("enableModelSelector", false);
       expect((await pick("gpt-6-luna")).status).toBe(409);
+      await deps.webchatRepo.createSession("concierge", "Concierge");
+      const conciergePick = await app.request("/chat/sessions/concierge/model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
+      });
+      expect(conciergePick.status).toBe(200);
+      expect((await deps.webchatRepo.getSession("concierge"))?.largeModelSelection).toBe(
+        "gpt-6-luna",
+      );
       expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
         largeModelSelection: null,
       });

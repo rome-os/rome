@@ -1,6 +1,6 @@
 # A session runs the model that produced it, and fails closed when that model cannot run
 
-- **Status**: Superseded for the Concierge chat by [Concierge quota failover](concierge-quota-failover.md)
+- **Status**: Superseded for the Concierge chat by [Concierge provider failover](concierge-provider-failover.md)
 - **Date**: 2026-08-11
 - **Concept**: [sessions — model pin](../concepts/sessions.md#model-pin)
 
@@ -39,8 +39,8 @@ A session does not pick up a new entitlement or setting. Fresh entitlements reac
 Future diffs must respect:
 
 - Every model resolution path — turn, resume, summon, webchat — reads the pin ahead of the agent tier. A new path is not exempt.
-- An explicit guardian selection is the one input that outranks the pin, and the successful turn re-pins the session to the model that ran. Apart from [Concierge quota failover](concierge-quota-failover.md), it is the only input that moves a session onto another model, so no diff may remove that precedence without a replacement.
+- An explicit guardian selection is the one input that outranks the pin, and the successful turn re-pins the session to the model that ran. Apart from [Concierge provider failover](concierge-provider-failover.md), it is the only input that moves a session onto another model, so no diff may remove that precedence without a replacement.
 - A caller that cannot supply a selection has no recovery path, and that is the intended shape rather than a gap. Webchat resolves a conversation's selection when the chat opens and keys the thread on it, so an open conversation reaches the precedence above only by starting a new one. A routine or resumable summon has no guardian to ask at all.
-- A pinned model that cannot run raises a structured resolution error. Outside [Concierge quota failover](concierge-quota-failover.md), no path substitutes another model, retries against a different provider, or clears the pin to make a turn succeed.
+- A pinned model that cannot run raises a structured resolution error. Outside [Concierge provider failover](concierge-provider-failover.md), no path substitutes another model, retries against a different provider, or clears the pin to make a turn succeed.
 - A fork opens on the caller's resolved model — the live session's model unless the caller passes a `tier` override — and writes no pin either way. A summoned or subagent session resolves from its own tier, because session lookup is agent-scoped and pins never cross agents.
 - A session with no pin resolves by tier and records one on its next successful turn.

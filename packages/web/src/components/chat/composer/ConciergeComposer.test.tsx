@@ -18,13 +18,17 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderComposer(props: Partial<ConciergeComposerProps> = {}, reply?: ReplyTarget) {
+function renderComposer(
+  props: Partial<ConciergeComposerProps> = {},
+  reply?: ReplyTarget,
+  selector = true,
+) {
   rs.spyOn(globalThis, "fetch").mockImplementation(
     (async (input: RequestInfo | URL) =>
       ({
         "/api/settings": () =>
           Response.json({
-            enableModelSelector: true,
+            enableModelSelector: selector,
             webchatReasoningEffort: "low",
           }),
         "/api/chat/locations": () =>
@@ -112,9 +116,9 @@ describe("ConciergeComposer", () => {
     expect((box as HTMLTextAreaElement).value).toBe("");
   });
 
-  it("opens a menu with file upload and a model submenu from +", async () => {
+  it.each([true, false])("opens the model submenu with selector=%s", async (selector) => {
     const onChange = rs.fn();
-    renderComposer({ modelSelection: { value: "claude-sonnet", onChange } });
+    renderComposer({ modelSelection: { value: "claude-sonnet", onChange } }, undefined, selector);
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     screen.getByRole("button", { name: "Add files or change the model" }).focus();
     await userEvent.keyboard("{Enter}");

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   Account,
   AgentTurnFinishedEvent,
+  AgentTurnFailure,
   BackendTurnParams,
   ChatId,
 } from "@rome-os/app-runtime";
@@ -87,6 +88,7 @@ function setup(
   options: {
     enabled?: boolean;
     settingsDelayMs?: number;
+    delay?: (ms: number) => Promise<void>;
     startEvents?: boolean;
     /** False: the turn has said nothing yet, so a new task row has no message to point to. */
     said?: boolean;
@@ -263,12 +265,16 @@ function setup(
   });
   const listeners: Array<(event: AgentTurnFinishedEvent) => void> = [];
   const startEvents = () =>
-    startConciergeEvents(service, {
-      onFinished: (listener) => {
-        listeners.push(listener);
-        return () => {};
+    startConciergeEvents(
+      service,
+      {
+        onFinished: (listener) => {
+          listeners.push(listener);
+          return () => {};
+        },
       },
-    });
+      { delay: options.delay },
+    );
   if (options.startEvents !== false) startEvents();
   /** Lets the event handlers run: real time, or fake time moved a little. */
   const settle = async () => {
@@ -281,6 +287,7 @@ function setup(
     chatId: string;
     text?: string;
     status?: AgentTurnFinishedEvent["status"];
+    failure?: AgentTurnFailure;
   }) => {
     for (const listener of listeners) {
       listener({
@@ -294,7 +301,11 @@ function setup(
         },
         status: event.status ?? "completed",
         timing: { startedAt: "", finishedAt: "", durationMs: 0 },
-        output: { text: event.text ?? "", state: "final" },
+        output: {
+          text: event.text ?? "",
+          state: "final",
+          ...(event.failure ? { failure: event.failure } : {}),
+        },
         metrics: { toolCallCount: 0, skillWritten: false },
       });
     }
@@ -1482,6 +1493,7 @@ describe("Concierge quota failover", () => {
       from: "anthropic",
       to: "openai",
       selectionId: "gpt-6-luna",
+      reason: "quota",
     });
     expect(selectModel).toHaveBeenCalledWith("gpt-6-luna");
     expect((await s.storedChats.getSession(CONCIERGE_CHAT))?.largeModelSelection).toBe(
@@ -1490,7 +1502,14 @@ describe("Concierge quota failover", () => {
     expect(inserted).toHaveBeenCalledTimes(1);
     const [notice] = await s.storedChats.getMessages(CONCIERGE_CHAT);
     expect(JSON.parse(notice.content)).toEqual([
-      { type: "quota_switch", from: "anthropic", to: "openai", model: "gpt-6-luna" },
+      {
+        type: "quota_switch",
+        from: "anthropic",
+        to: "openai",
+        model: "gpt-6-luna",
+        reason: "quota",
+        fromModel: "claude-sonnet-5-5",
+      },
     ]);
     // Transcript order breaks same-second ties by turn id, so it must sort by time.
     expect(notice.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
@@ -1550,6 +1569,7 @@ describe("Concierge quota failover", () => {
     });
     await s.finish({
       turnId: "quota",
+      failure: { provider: "anthropic", message: "usage limit", code: "usage_limit" },
       agentName: CONCIERGE_AGENT_ID,
       chatId: CONCIERGE_CHAT,
       status: "error",
@@ -1558,7 +1578,11 @@ describe("Concierge quota failover", () => {
     expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([quotaRecoveryPrompt("Claude")]);
     expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenCalledTimes(1);
   });
-  it.each(["no flag", "per-model limit", "task chat"])("does not recover %s", async (reason) => {
+  it.each([
+    "no failure",
+    "unrecognized error",
+    "task chat",
+  ])("does not recover %s", async (reason) => {
     const s = setup();
     const switchModel = rs.spyOn(s.service, "switchIfExhausted");
     await s.finish({
@@ -1570,5 +1594,357 @@ describe("Concierge quota failover", () => {
     expect(s.backendTurns).toEqual([]);
     expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
     if (reason === "task chat") expect(switchModel).not.toHaveBeenCalled();
+  });
+});
+
+describe("Concierge provider recovery", () => {
+  const healthy = () => ({
+    claude: { loggedIn: true, quotaExhausted: false },
+    codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+  });
+  const failure = (message: string, provider = "anthropic"): AgentTurnFailure => ({
+    message,
+    provider,
+  });
+  const finish = (s: ReturnType<typeof setup>, error?: AgentTurnFailure, turnId = "failed") =>
+    s.finish({
+      turnId,
+      agentName: CONCIERGE_AGENT_ID,
+      chatId: CONCIERGE_CHAT,
+      status: error ? "error" : "completed",
+      failure: error,
+      text: "done",
+    });
+  async function prepared(options: Parameters<typeof setup>[0] = {}) {
+    const s = setup(options);
+    const raw = healthy();
+    s.deps.aiToolState.get = () => raw;
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "claude-sonnet");
+    return { s, raw };
+  }
+  it.each([
+    [
+      "anthropic",
+      "claude-sonnet",
+      "You've hit your Sonnet limit",
+      "model_limit",
+      "claude-opus-5-5",
+    ],
+    ["openai", "gpt-6-luna", "Selected model is at capacity.", "model_limit", "gpt-5-6-terra"],
+    ["anthropic", "claude-sonnet", "monthly spend limit", "quota", "gpt-6-luna"],
+    ["openai", "gpt-6-luna", "Failed to authenticate", "login", "claude-sonnet"],
+  ] as const)("moves %s from %s on %s", async (provider, selection, message, reason, target) => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, selection);
+    expect(
+      await s.service.switchForFailure(CONCIERGE_CHAT, failure(message, provider), reason),
+    ).toMatchObject({ selectionId: target, reason });
+    expect(s.deps.agentSessionManager.peek).toHaveBeenCalled();
+  });
+  it("falls back on the same provider only for ambiguous quota, without marking it", async () => {
+    const { s, raw } = await prepared({ startEvents: false });
+    raw.codex.loggedIn = false;
+    expect(
+      await s.service.switchForFailure(CONCIERGE_CHAT, failure("You've hit your limit"), "quota"),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    expect(raw.claude.quotaExhausted).toBe(false);
+  });
+  it.each([
+    "api source",
+    "credits target",
+    "both out",
+    "other chat",
+  ])("refuses %s", async (kind) => {
+    const { s, raw } = await prepared({ startEvents: false });
+    if (kind === "api source") Object.assign(raw.claude, { authMethod: "environment" });
+    if (kind === "credits target") raw.codex.loggedIn = false;
+    if (kind === "both out") raw.claude.quotaExhausted = raw.codex.quotaExhausted = true;
+    expect(
+      await s.service.switchForFailure(
+        kind === "other chat" ? "task" : CONCIERGE_CHAT,
+        failure("monthly spend limit"),
+        "quota",
+      ),
+    ).toBeNull();
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+  it("blocks a return for ten minutes but permits it after the interval", async () => {
+    const { s } = await prepared({ startEvents: false });
+    const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
+    expect(
+      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sign-in failed"), "login"),
+    ).not.toBeNull();
+    expect(
+      await s.service.switchForFailure(
+        CONCIERGE_CHAT,
+        failure("Sign-in failed", "openai"),
+        "login",
+      ),
+    ).toBeNull();
+    now.mockReturnValue(1_600_001);
+    expect(
+      await s.service.switchForFailure(
+        CONCIERGE_CHAT,
+        failure("Sign-in failed", "openai"),
+        "login",
+      ),
+    ).not.toBeNull();
+  });
+  it.each(["loggedOut", "reauth"])("switches before a turn when %s", async (kind) => {
+    const { s, raw } = await prepared({ startEvents: false });
+    if (kind === "loggedOut") raw.claude.loggedIn = false;
+    else Object.assign(raw.claude, { needsReauth: true });
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
+      reason: "login",
+      to: "openai",
+    });
+  });
+  it("moves an Auto chat whose first turn failed before any provider was recorded", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
+    s.service.deps.webchatRepo = s.storedChats;
+    // No turn has succeeded, so the runtime row records no provider, and
+    // neither provider is marked: only the failed turn names its provider.
+    s.service.deps.sessionManager = {
+      findReusableSession: rs.fn(async () => ({ provider: null, model: null })),
+    } as never;
+    s.service.deps.aiToolState = {
+      get: () => ({
+        claude: { loggedIn: true, quotaExhausted: false },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      }),
+    };
+    expect(
+      await s.service.switchForFailure(
+        CONCIERGE_CHAT,
+        { message: "You've hit your limit", provider: "anthropic" },
+        "quota",
+      ),
+    ).toMatchObject({ from: "anthropic", to: "openai" });
+  });
+  it("keeps a Codex pick that Rome credits pay for, and still moves on a Codex reauth", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
+    await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");
+    s.service.deps.webchatRepo = s.storedChats;
+    const raw = {
+      claude: { loggedIn: true, quotaExhausted: false },
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    };
+    raw.codex = { ...raw.codex, loggedIn: false };
+    s.deps.aiToolState.get = () => raw;
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
+    Object.assign(raw.codex, { needsReauth: true });
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({ reason: "login" });
+  });
+  it("drops a pending retry when the failed subscription stops paying during the wait", async () => {
+    let release!: () => void;
+    const delay = rs.fn(
+      (_ms: number) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { s } = await prepared({ delay });
+    const raw = {
+      claude: { loggedIn: true, quotaExhausted: false },
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    };
+    s.deps.aiToolState.get = () => raw;
+    await finish(s, failure("Selected model is busy: API Error: 503", "openai"));
+    expect(delay).toHaveBeenCalledTimes(1);
+    raw.codex = { ...raw.codex, loggedIn: false };
+    release();
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(0);
+  });
+  it("drops a pending retry when Concierge is turned off during the wait", async () => {
+    let release!: () => void;
+    const delay = rs.fn(
+      (_ms: number) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { s } = await prepared({ delay });
+    await finish(s, failure("Repeated 529 Overloaded errors"));
+    expect(delay).toHaveBeenCalledTimes(1);
+    s.deps.settingsRepo.get = rs.fn(async () => false) as never;
+    release();
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(0);
+  });
+  it("waits about thirty seconds before one same-model retry, then stops on success", async () => {
+    let release!: () => void;
+    const delay = rs.fn(
+      (_ms: number) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { s } = await prepared({ delay });
+    s.onBackendTurn(() => {
+      void finish(s);
+    });
+    await finish(s, failure("Repeated 529 Overloaded errors"));
+    expect(delay).toHaveBeenCalledWith(30_000);
+    expect(s.backendTurns).toHaveLength(0);
+    release();
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+  it.each([
+    "temporary",
+    "model_limit",
+  ] as const)("tries one cross-provider recovery after %s recovery fails, then terminates", async (reason) => {
+    const { s } = await prepared({ delay: async () => {} });
+    s.onBackendTurn(() => {
+      void finish(
+        s,
+        failure("Connection error", s.backendTurns.length === 2 ? "openai" : "anthropic"),
+        "recovery",
+      );
+    });
+    await finish(
+      s,
+      failure(reason === "temporary" ? "Connection error" : "You've hit your Sonnet limit"),
+    );
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns.every((t) => t.prompt.includes("Do only what remains"))).toBe(true);
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(
+      reason === "temporary" ? 1 : 2,
+    );
+  });
+  it.each([
+    ["background failure", false],
+    ["background success", false],
+    ["guardian completion", false],
+    ["background failure", true],
+    ["background success", true],
+    ["guardian completion", true],
+  ] as const)("keeps one retry after %s during the wait (retry fails: %s)", async (during, retryFails) => {
+    let release!: () => void;
+    const delay = rs.fn(
+      (_ms: number) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { s } = await prepared({ delay });
+    let retries = 0;
+    s.onBackendTurn((turn) => {
+      if (turn.prompt.includes("<task_events>")) {
+        void finish(
+          s,
+          during === "background failure" ? failure("Connection error") : undefined,
+          "background",
+        );
+      } else {
+        retries++;
+        void finish(
+          s,
+          retryFails && retries === 1 ? failure("Connection error") : undefined,
+          "recovery",
+        );
+      }
+    });
+    await finish(s, failure("Connection error"));
+    if (during === "guardian completion") await finish(s, undefined, "guardian");
+    else await s.service.runSystemTurn(CONCIERGE_CHAT, "<task_events>Task changed</task_events>");
+    expect(retries).toBe(0);
+    expect(delay).toHaveBeenCalledTimes(1);
+    expect(delay).toHaveBeenCalledWith(30_000);
+    release();
+    await s.settle();
+    expect(retries).toBe(retryFails ? 2 : 1);
+    expect(s.backendTurns.filter((turn) => turn.prompt.includes("<quota_recovery>"))).toHaveLength(
+      retryFails ? 2 : 1,
+    );
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(retryFails ? 1 : 0);
+    expect(delay).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { code: "model_unavailable" },
+    { reason: "model_access_denied" },
+  ] as const)("moves a structured model refusal %j to another model on the same provider", async (fields) => {
+    const { s } = await prepared();
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");
+    s.onBackendTurn(() => {
+      void finish(s);
+    });
+    await finish(s, {
+      message: "Model not served",
+      provider: "openai",
+      httpStatus: 403,
+      ...fields,
+    });
+    await s.settle();
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
+      CONCIERGE_CHAT,
+      "gpt-5-6-terra",
+    );
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    "Prompt is too long",
+    "invalid_request",
+    "max_tokens",
+    "Content refusal",
+    "User stopped the turn",
+    "Reached maximum number of turns (2)",
+    "Claude Code process exited with code 1",
+    "Rome is shutting down",
+    "Credit balance is too low",
+    "structured output missing",
+  ])("does not recover %s", async (message) => {
+    const { s } = await prepared({ delay: async () => {} });
+    await finish(s, failure(message));
+    expect(s.backendTurns).toHaveLength(0);
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+  it("uses the runtime model for a same-provider move without a stored selection", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.aiToolState.get = healthy;
+    s.deps.sessionManager.findReusableSession = rs.fn(
+      async () => ({ provider: "anthropic", model: "claude-sonnet-5-5" }) as never,
+    );
+    expect(
+      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sonnet limit"), "model_limit"),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+  });
+  it("does not return to a same-provider model within the cooldown", async () => {
+    const { s, raw } = await prepared({ startEvents: false });
+    raw.codex.loggedIn = false;
+    expect(
+      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sonnet limit"), "model_limit"),
+    ).not.toBeNull();
+    expect(
+      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Opus limit"), "model_limit"),
+    ).toBeNull();
+  });
+  it("does not move again after an excluded retry failure", async () => {
+    const { s } = await prepared({ delay: async () => {} });
+    s.onBackendTurn(() => {
+      void finish(s, failure("Prompt is too long"));
+    });
+    await finish(s, failure("Connection error"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+  it("ignores a task chat's temporary failure", async () => {
+    const { s } = await prepared({ delay: async () => {} });
+    await s.finish({
+      turnId: "task",
+      agentName: "main",
+      chatId: "task-chat",
+      status: "error",
+      failure: failure("Connection error"),
+    });
+    expect(s.backendTurns).toHaveLength(0);
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
 });

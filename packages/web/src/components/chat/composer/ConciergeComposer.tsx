@@ -98,7 +98,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const replyDraft = useReplyDraft();
     const { data: settings } = useSettings();
     const coarsePointer = useCoarsePointer();
-    const modelSelectorEnabled = settings?.enableModelSelector === true;
     // Turns carry the dashboard's reasoning effort, as in every other chat.
     const reasoningEffort = isReasoningEffort(settings?.webchatReasoningEffort)
       ? settings.webchatReasoningEffort
@@ -271,7 +270,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
 
     const empty = !inputText.trim() && pendingUploads.length === 0 && !folder;
     const sendLabel = isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle");
-    const showModel = !!modelSelection && modelSelectorEnabled;
+    const showModel = !!modelSelection;
     const [showAllModels, setShowAllModels] = useState(false);
     // Like the model picker in other chats: the common models and the chat's
     // own pick first, every model after "show all".

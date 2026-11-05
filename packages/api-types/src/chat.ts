@@ -59,6 +59,8 @@ export interface ReplyToPart {
 /** Host-written notice of the Concierge chat's subscription quota failover. */
 export interface QuotaSwitchPart {
   type: "quota_switch";
+  reason?: "quota" | "login" | "temporary" | "model_limit";
+  fromModel?: string;
   from: "openai" | "anthropic";
   to: "openai" | "anthropic";
   model: string;
