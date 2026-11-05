@@ -48,6 +48,31 @@ struct TraceSummary: Codable, Hashable, Sendable {
     var terminalError: String?
 }
 
+/// `GET /system/upgrade/check`: the instance's release and the latest one,
+/// relayed from Rome Cloud.
+struct UpgradeCheck: Codable, Hashable, Sendable {
+    struct Release: Codable, Hashable, Sendable {
+        var version: String?
+        var sha: String?
+    }
+
+    var current: Release?
+    var latest: Release?
+    var upgradeAvailable: Bool?
+}
+
+/// `POST /system/upgrade`: Rome Cloud accepted an upgrade to `target`.
+struct UpgradeStarted: Codable, Hashable, Sendable {
+    var status: String?
+    var target: String?
+}
+
+/// `GET /build-info`: the release the running instance was built from.
+struct BuildInfo: Codable, Hashable, Sendable {
+    var version: String?
+    var sha: String?
+}
+
 /// `GET /chat/sessions/:id/messages?limit=&before=`.
 struct MessagePage: Codable, Sendable {
     var messages: [ChatMessage]

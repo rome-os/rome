@@ -43,13 +43,15 @@ final class DemoBackend: RomeBackend {
     private var running: [String: String] = [:]
     private var counter = 0
 
-    enum Variant { case full, empty, conciergeOff }
+    /// `updateRequired`: the full data on a Rome one release behind, so the
+    /// update page shows; "Update now" brings it up to date after a few seconds.
+    enum Variant { case full, empty, conciergeOff, updateRequired }
     private let variant: Variant
 
     init(variant: Variant = .full) {
         self.variant = variant
         seed()
-        if variant != .full {
+        if variant != .full && variant != .updateRequired {
             messages[conciergeChatID] = []
             tasks = []
         }
@@ -215,6 +217,38 @@ final class DemoBackend: RomeBackend {
     }
 
     // MARK: Helpers
+
+    // MARK: Updates
+
+    static let releasedVersion = "0.42.0"
+    private lazy var runningVersion = variant == .updateRequired ? "0.41.3" : Self.releasedVersion
+    private var upgradeDoneAt: Date?
+
+    func upgradeCheck() async throws -> UpgradeCheck {
+        try await pause(0.3)
+        return UpgradeCheck(
+            current: .init(version: runningVersion, sha: "demo"),
+            latest: .init(version: Self.releasedVersion),
+            upgradeAvailable: runningVersion != Self.releasedVersion
+        )
+    }
+
+    func startUpgrade(target: String) async throws -> UpgradeStarted {
+        try await pause(0.6)
+        upgradeDoneAt = .now.addingTimeInterval(8)
+        return UpgradeStarted(status: "started", target: target)
+    }
+
+    func buildInfo() async throws -> BuildInfo {
+        try await pause(0.2)
+        if let done = upgradeDoneAt {
+            // The instance restarts: no answer until it is back on the target.
+            guard Date.now >= done else { throw APIError.network }
+            runningVersion = Self.releasedVersion
+            upgradeDoneAt = nil
+        }
+        return BuildInfo(version: runningVersion, sha: "demo")
+    }
 
     private func pause(_ seconds: Double) async throws {
         try await Task.sleep(for: .seconds(seconds))

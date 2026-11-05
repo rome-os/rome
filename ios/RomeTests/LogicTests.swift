@@ -187,4 +187,7 @@ final class StubBackend: RomeBackend {
     func routines() async throws -> [Routine] { [] }
     func setRoutine(_ id: String, enabled: Bool) async throws {}
     func sendFeedback(_ text: String) async throws {}
+    func upgradeCheck() async throws -> UpgradeCheck { throw APIError.network }
+    func startUpgrade(target: String) async throws -> UpgradeStarted { throw APIError.network }
+    func buildInfo() async throws -> BuildInfo { throw APIError.network }
 }

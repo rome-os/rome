@@ -42,6 +42,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func routines() async throws -> [Routine]
     func setRoutine(_ id: String, enabled: Bool) async throws
     func sendFeedback(_ text: String) async throws
+    func upgradeCheck() async throws -> UpgradeCheck
+    func startUpgrade(target: String) async throws -> UpgradeStarted
+    func buildInfo() async throws -> BuildInfo
 }
 
 @MainActor
@@ -151,6 +154,18 @@ final class LiveBackend: RomeBackend {
             "body": .string(text),
             "client": .object(["app": .string("ios"), "version": .string(version)]),
         ]))
+    }
+
+    func upgradeCheck() async throws -> UpgradeCheck {
+        try await client.get("/system/upgrade/check")
+    }
+
+    func startUpgrade(target: String) async throws -> UpgradeStarted {
+        try await client.post("/system/upgrade", json: .object(["target": .string(target)]), as: UpgradeStarted.self)
+    }
+
+    func buildInfo() async throws -> BuildInfo {
+        try await client.get("/build-info")
     }
 
     private func escape(_ value: String) -> String {

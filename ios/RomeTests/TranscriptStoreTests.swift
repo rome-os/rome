@@ -52,6 +52,23 @@ final class FakeBackend: RomeBackend {
     func routines() async throws -> [Routine] { [] }
     func setRoutine(_ id: String, enabled: Bool) async throws {}
     func sendFeedback(_ text: String) async throws {}
+
+    var check: Result<UpgradeCheck, Error> = .success(UpgradeCheck(current: .init(version: "1.0.0"), latest: .init(version: "1.0.0"), upgradeAvailable: false))
+    var startResults: [Result<UpgradeStarted, Error>] = []
+    var started: [String] = []
+    var buildVersion: String?
+
+    func upgradeCheck() async throws -> UpgradeCheck { try check.get() }
+
+    func startUpgrade(target: String) async throws -> UpgradeStarted {
+        started.append(target)
+        return try (startResults.isEmpty ? .success(UpgradeStarted(status: "started", target: target)) : startResults.removeFirst()).get()
+    }
+
+    func buildInfo() async throws -> BuildInfo {
+        guard let buildVersion else { throw APIError.network }
+        return BuildInfo(version: buildVersion)
+    }
 }
 
 private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessage {
