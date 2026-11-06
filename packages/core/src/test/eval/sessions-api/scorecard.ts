@@ -756,6 +756,145 @@ checks.push({
   detail: conversationOnCaller,
 });
 
+// --- C23 Sessions mints no caller identity -------------------------------------
+// Whoever finds a session again by an identity mints that identity. Sessions
+// stores and compares what it is given. So nothing in the module spells a
+// child's, fork's or run's identity (`<parent>:subagent:<id>`, `<parent>#fork:<id>`,
+// `<agent>:<uuid>`), and no helper of the codec that builds one is called.
+const MINTED =
+  /:subagent:|#fork:|\b(childCaller|forkCaller|adhocCaller|callerOfRun|subagentSessionKey|forkSessionKey|adhocSessionKey)\b|`\$\{\w*[aA]gent\w*\}:\$\{(uuidv4|randomUUID)\(\)\}`/g;
+const minted = MODULE.flatMap((file) =>
+  (code(file).match(MINTED) ?? []).map((hit) => `${rel(file)}: ${hit}`),
+);
+quantities.mintedIdentities = minted.length;
+checks.push({
+  id: "C23",
+  name: "Sessions mints no caller identity: no child, fork or run identity is spelled or built inside the module",
+  measured: `${minted.length} places`,
+  pass: minted.length === 0,
+  detail: [...new Set(minted)],
+});
+
+// --- C24 Two doors: open(agent, caller) and create(agent) -----------------------
+// A caller that comes back by the same identity opens. One that is only ever
+// found again by session id creates, and hands over no caller. Subagents,
+// forks and runs that name no conversation are the second kind.
+const createCallerless = (() => {
+  const decl = declarations.get("AgentSessionManager");
+  if (!decl || !ts.isInterfaceDeclaration(decl)) return undefined;
+  const sf = decl.getSourceFile();
+  for (const member of decl.members) {
+    if (!ts.isMethodSignature(member) || member.name.getText(sf) !== "create") continue;
+    const types = member.parameters.map((param) => param.type?.getText(sf) ?? "");
+    return !types.some((type) => /\b(CallerId|SessionCaller)\b|^string$/.test(type));
+  }
+  return undefined;
+})();
+const CREATE_ONLY = [
+  "agent-sessions/subagent-execution.ts",
+  "actions/backend-turn.ts",
+  "concierge/triage.ts",
+].map((file) => join(SRC, file));
+const opensThatShouldCreate = CREATE_ONLY.filter(existsSync).flatMap((file) =>
+  (code(file).match(/\.open\(/g) ?? []).map(() => `${rel(file)}: .open(`),
+);
+// A fork is a session too; its door is `create`, not an identity built from its source.
+const forkOpens = MODULE.flatMap((file) =>
+  (code(file).match(/forkCaller|#fork:/g) ?? []).map((hit) => `${rel(file)}: ${hit}`),
+);
+quantities.opensThatShouldCreate = opensThatShouldCreate.length + forkOpens.length;
+checks.push({
+  id: "C24",
+  name: "Two doors: open(agent, caller, …) for callers that come back by identity, create(agent, …) with no caller for subagents, forks and runs",
+  measured: `create exists and takes no caller: ${createCallerless ?? "no create"}; opens where create belongs: ${opensThatShouldCreate.length + forkOpens.length}`,
+  pass: createCallerless === true && opensThatShouldCreate.length === 0 && forkOpens.length === 0,
+  detail: [...opensThatShouldCreate, ...forkOpens],
+});
+
+// --- C25 No side channel tells Sessions where to record ------------------------
+// The session knows the row it records into because it made it. Nothing hands
+// it a conversation beside `open` or `create`, in memory or otherwise.
+const SIDE_CHANNEL = /\b(openNamed|namedConversation|conversationFor|recordsTo|recordConversation)\b/g;
+const sideChannel = [...coreFiles, ...appFiles].flatMap((file) =>
+  (code(file).match(SIDE_CHANNEL) ?? []).map((hit) => `${rel(file)}: ${hit}`),
+);
+quantities.sideChannels = sideChannel.length;
+checks.push({
+  id: "C25",
+  name: "No side channel tells Sessions which conversation to record a turn in (openNamed and its kin are gone)",
+  measured: `${sideChannel.length} references`,
+  pass: sideChannel.length === 0,
+  detail: [...new Set(sideChannel)],
+});
+
+// --- C26 Sessions makes the row a session records into --------------------------
+// Chats and Participation take the session id back from `open` or `create` and
+// use it for their own rows. So no code outside Sessions makes a session's row
+// first: no `ensureRomeSession` call and no insert into `rome_sessions`, other
+// than the repository that defines them, the dev seed and tests. Chats' New
+// Chat (`createSession`) is counted, not failed: it must take Sessions' id.
+const ROW_MAKERS = /\bensureRomeSession\(|\.insert\(romeSessions\)/g;
+const ROW_DEFINERS = [
+  "db/repositories/webchat.ts",
+  "webchat/chats-webchat-repository.ts",
+  "bin/seed-sessions-explorer.ts",
+].map((file) => join(SRC, file));
+const outsideRowMakers = [...coreFiles, ...appFiles]
+  .filter((file) => !file.startsWith(`${SESSIONS}/`) && !ROW_DEFINERS.includes(file))
+  .flatMap((file) => (code(file).match(ROW_MAKERS) ?? []).map((hit) => `${rel(file)}: ${hit}`));
+quantities.outsideRowMakers = outsideRowMakers.length;
+quantities.newChatCreates = coreFiles
+  .filter((file) => !ROW_DEFINERS.includes(file))
+  .reduce((sum, file) => sum + (code(file).match(/\.createSession\(/g) ?? []).length, 0);
+checks.push({
+  id: "C26",
+  name: "Sessions makes the row a session records into; no code outside it makes a session's row first",
+  measured: `${outsideRowMakers.length} row makers outside Sessions; New Chat creates: ${quantities.newChatCreates}`,
+  pass: outsideRowMakers.length === 0,
+  detail: [...new Set(outsideRowMakers)],
+});
+
+// --- C27 The thread context and the connection parse left the session ------------
+// The thread context is prose about the chat, so the caller's briefing carries
+// it. The connection a reply goes to is read by Participation, so nothing under
+// actions/ parses a caller.
+const threadContextBuilt = MODULE.flatMap((file) =>
+  (code(file).match(/<thread_context|threadContextInjected|threadContextBlock/g) ?? []).map(
+    (hit) => `${rel(file)}: ${hit}`,
+  ),
+);
+const actionsParse = coreFiles
+  .filter((file) => file.startsWith(`${join(SRC, "actions")}/`))
+  .flatMap((file) =>
+    (code(file).match(/\b(callerFromKey|callerConnection|parseSessionKey|callerOfRun)\b/g) ?? []).map(
+      (hit) => `${rel(file)}: ${hit}`,
+    ),
+  );
+quantities.threadContextBuilt = threadContextBuilt.length;
+quantities.actionsCallerParses = actionsParse.length;
+checks.push({
+  id: "C27",
+  name: "The session builds no thread context block (the briefing carries it), and nothing under actions/ parses a caller",
+  measured: `thread context in session: ${threadContextBuilt.length}; caller parses under actions/: ${actionsParse.length}`,
+  pass: threadContextBuilt.length === 0 && actionsParse.length === 0,
+  detail: [...new Set([...threadContextBuilt, ...actionsParse])],
+});
+
+// --- C28 The surface answers four questions -------------------------------------
+// Can it show cards, where do replies go, can it be woken later, what to tell
+// the agent about who is there. Anything else is a caller's fact in disguise.
+const SURFACE_ANSWERS = ["cards", "replies", "wake", "about"];
+const surfaceMembers = members("SessionSurface");
+const surfaceExtras = surfaceMembers.filter((name) => !SURFACE_ANSWERS.includes(name));
+quantities.surfaceFields = surfaceMembers.length;
+checks.push({
+  id: "C28",
+  name: `The surface has at most ${SURFACE_ANSWERS.length} answers (${SURFACE_ANSWERS.join(", ")})`,
+  measured: `SessionSurface: ${surfaceMembers.join(", ") || "none"}`,
+  pass: surfaceMembers.length > 0 && surfaceExtras.length === 0,
+  detail: surfaceExtras.map((name) => `SessionSurface.${name}`),
+});
+
 // --- Quantities without a target -------------------------------------------
 quantities.moduleLines = MODULE.reduce((sum, file) => sum + read(file).split("\n").length, 0);
 const APP_KEY_PARSING =
