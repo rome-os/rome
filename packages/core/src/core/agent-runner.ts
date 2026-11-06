@@ -8,7 +8,7 @@ import type {
   ModelSessionFork,
   ModelSessionParams,
   ModelToolCallContext,
-  ModelToolDefinition,
+  RomeToolDefinition,
   ModelUserInput,
   ProviderId,
   RomeTools,
@@ -42,7 +42,7 @@ import type { ModelSessionEvent } from "../agent/index.js";
 export type {
   ProviderId,
   ModelTier,
-  ModelToolDefinition,
+  RomeToolDefinition,
   ModelToolCallContext,
   ActionMcpDefinition,
   SkillMcpDefinition,

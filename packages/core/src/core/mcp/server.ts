@@ -1,4 +1,4 @@
-import type { ModelToolDefinition, RomeToolGroup, RomeTools } from "../../agent/index.js";
+import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../agent/index.js";
 import {
   buildFacadeBundle,
   type FacadeBundle,
@@ -24,7 +24,7 @@ function toDefinition({
   description,
   inputSchema,
   endsTurn,
-}: FacadeToolDef): ModelToolDefinition {
+}: FacadeToolDef): RomeToolDefinition {
   return { name, description, inputSchema, ...(endsTurn !== undefined ? { endsTurn } : {}) };
 }
 

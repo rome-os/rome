@@ -39,7 +39,7 @@ export type {
 } from "./domain/model-port.js";
 export type {
   ModelToolCallContext,
-  ModelToolDefinition,
+  RomeToolDefinition,
   RomeToolGroup,
   RomeToolResult,
   RomeTools,

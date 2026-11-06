@@ -5,7 +5,7 @@ import { createRomeTools } from "../../../../core/mcp/server.js";
 import type {
   ActionMcpDefinition,
   ModelToolCallContext,
-  ModelToolDefinition,
+  RomeToolDefinition,
   SkillMcpDefinition,
 } from "../../../../core/agent-runner.js";
 
@@ -36,7 +36,7 @@ interface BuildArgs {
   getActionCatalog?: () => ActionMcpDefinition[];
   skillCatalog?: SkillMcpDefinition[];
   getSkillCatalog?: () => SkillMcpDefinition[];
-  subagentTools?: ModelToolDefinition[];
+  subagentTools?: RomeToolDefinition[];
   executeAction?: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent?: (
     name: string,

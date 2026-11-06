@@ -1,17 +1,11 @@
-import type {
-  ModelToolCallContext,
-  RomeToolGroup,
-  RomeToolResult,
-  RomeTools,
+import {
+  type ModelToolCallContext,
+  ROME_TOOL_GROUPS,
+  type RomeToolGroup,
+  type RomeToolResult,
+  type RomeTools,
 } from "../../../domain/rome-tools.js";
 import type { DynamicToolCallResponse, DynamicToolSpec } from "./app-server-protocol.js";
-
-const DYNAMIC_TOOL_GROUPS: readonly RomeToolGroup[] = [
-  "actions",
-  "subagents",
-  "skills",
-  "ask_user",
-];
 
 export interface RomeDynamicToolCallResult {
   response: DynamicToolCallResponse;
@@ -85,7 +79,7 @@ export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
   const groupByName = new Map<string, RomeToolGroup>();
   const definitions: DynamicToolSpec[] = [];
 
-  for (const group of DYNAMIC_TOOL_GROUPS) {
+  for (const group of ROME_TOOL_GROUPS) {
     for (const tool of tools.listTools(group)) {
       const previousGroup = groupByName.get(tool.name);
       if (previousGroup) {

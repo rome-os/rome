@@ -13,9 +13,11 @@
 export type ModelToolCallId = string;
 
 /** The groups Rome serves tools in. A provider mounts each group as one server. */
-export type RomeToolGroup = "actions" | "subagents" | "skills" | "ask_user";
+export const ROME_TOOL_GROUPS = ["actions", "subagents", "skills", "ask_user"] as const;
 
-export interface ModelToolDefinition {
+export type RomeToolGroup = (typeof ROME_TOOL_GROUPS)[number];
+
+export interface RomeToolDefinition {
   name: string;
   description: string;
   /** JSON Schema for the tool's arguments. Adapters translate as needed. */
@@ -40,7 +42,7 @@ export interface RomeToolResult {
 }
 
 export interface RomeTools {
-  listTools(group: RomeToolGroup): readonly ModelToolDefinition[];
+  listTools(group: RomeToolGroup): readonly RomeToolDefinition[];
   /**
    * Run one tool. An unknown name or a failing tool comes back as an error
    * result for the model, never as a thrown error. The context is absent only

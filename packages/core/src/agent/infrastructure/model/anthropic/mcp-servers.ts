@@ -16,7 +16,7 @@
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import { toMcpToolShape } from "../../../../core/mcp/json-schema-zod.js";
 import type { McpServerConfig } from "../../../../types.js";
-import type { ModelToolDefinition, RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
+import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
 
 interface BuildAnthropicMcpServersParams {
   tools: RomeTools;
@@ -29,7 +29,7 @@ export type AnthropicMcpServers = Record<
 >;
 
 /** The name Claude Code gives a Rome tool: `mcp__<group>__<tool>`. */
-export function anthropicToolName(group: RomeToolGroup, tool: ModelToolDefinition): string {
+export function anthropicToolName(group: RomeToolGroup, tool: RomeToolDefinition): string {
   return `mcp__${group}__${tool.name}`;
 }
 
@@ -37,7 +37,7 @@ export function anthropicToolName(group: RomeToolGroup, tool: ModelToolDefinitio
 // zod shape it's given, and its return type covers the full
 // `text/image/audio/resource` block union. Rome's tools always answer with
 // text blocks. Pipe through an `unknown`-cast `sdkTool` to skirt the inference.
-function wrapRomeTool(tools: RomeTools, group: RomeToolGroup, toolDef: ModelToolDefinition) {
+function wrapRomeTool(tools: RomeTools, group: RomeToolGroup, toolDef: RomeToolDefinition) {
   const wrappedSdkTool = sdkTool as unknown as (
     name: string,
     description: string,

@@ -24,7 +24,7 @@ import type { DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
   ModelToolCallContext,
-  ModelToolDefinition,
+  RomeToolDefinition,
   SkillMcpDefinition,
 } from "./agent-runner.js";
 
@@ -52,7 +52,7 @@ export type FacadeToolHandler = (
 ) => Promise<FacadeToolResult>;
 
 /** A Rome tool with the handler that runs it. */
-export interface FacadeToolDef extends ModelToolDefinition {
+export interface FacadeToolDef extends RomeToolDefinition {
   handler: FacadeToolHandler;
 }
 
@@ -87,7 +87,7 @@ export interface FacadeParams {
    * agents that legitimately have no skills exposed.
    */
   getSkillCatalog: () => SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
+  subagentTools: RomeToolDefinition[];
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
     name: string,
@@ -618,7 +618,7 @@ function buildActionFacadeTools(
 }
 
 function buildSubagentFacadeTools(
-  subagentTools: ModelToolDefinition[],
+  subagentTools: RomeToolDefinition[],
   executeSubagent: (
     name: string,
     input: unknown,

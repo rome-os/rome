@@ -63,7 +63,7 @@ import type {
   ModelSessionParams,
   ModelReasoningEffort,
   ModelTier,
-  ModelToolDefinition,
+  RomeToolDefinition,
   ModelToolCallContext,
   ProviderId,
   SkillMcpDefinition,
@@ -3874,7 +3874,7 @@ export function subagentToolName(subagentId: string): string {
 function buildSubagentTools(
   agentLoader: AgentLoader,
   config: ReturnType<AgentLoader["get"]>,
-): { tools: ModelToolDefinition[]; targets: Map<string, string> } {
+): { tools: RomeToolDefinition[]; targets: Map<string, string> } {
   if (!config.allowedSubagents || config.allowedSubagents.length === 0) {
     return { tools: [], targets: new Map() };
   }

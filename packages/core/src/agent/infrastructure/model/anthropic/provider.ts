@@ -26,7 +26,7 @@ import type {
   ModelTurnActivityEvent,
   ModelPosition,
 } from "../../../domain/model-port.js";
-import type { RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
+import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
 import { createLogger } from "../../../../logger.js";
@@ -90,7 +90,7 @@ export const CLAUDE_AGENT_SDK_SETTINGS = {
   },
 } as const;
 
-// Tools whose call ends the turn (`ModelToolDefinition.endsTurn`): the turn
+// Tools whose call ends the turn (`RomeToolDefinition.endsTurn`): the turn
 // parks on something the guardian answers next turn, so the model correctly
 // ends its response with no text after them. Claude Code treats tools listed
 // in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its no-visible-output guard
@@ -99,8 +99,6 @@ export const CLAUDE_AGENT_SDK_SETTINGS = {
 // ending in such a result as a finished turn, not an interrupted one, on
 // resume. Both behaviors are undocumented CLI internals checked against agent
 // SDK 0.3.293, so re-check them when bumping the SDK.
-const ROME_TOOL_GROUPS: readonly RomeToolGroup[] = ["actions", "subagents", "skills", "ask_user"];
-
 function endsTurnToolNames(tools: RomeTools): string[] {
   return ROME_TOOL_GROUPS.flatMap((group) =>
     tools
