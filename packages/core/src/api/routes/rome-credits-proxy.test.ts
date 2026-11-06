@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ROME_CREDITS_PROXY_KEY } from "../../agent/index.js";
+import { ROME_CREDITS_PROXY_SECRET } from "../../core/rome-credits-proxy.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import { romeCreditsProxyRoutes } from "./rome-credits-proxy.js";
 
 const CLOUD = "https://cloud.example";
 const INSTANCE_TOKEN = "romeinst_proxy_test";
 const URL_BASE = "http://127.0.0.1:4141/_internal/rome-credits";
-const authorized = { authorization: `Bearer ${ROME_CREDITS_PROXY_KEY}` };
+const authorized = { authorization: `Bearer ${ROME_CREDITS_PROXY_SECRET}` };
 
 beforeEach(() => {
   rs.stubEnv("PANTHEON_BASE_ORIGIN", CLOUD);

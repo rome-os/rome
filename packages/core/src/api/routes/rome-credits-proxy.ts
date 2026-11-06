@@ -1,6 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
-import { ROME_CREDITS_PROXY_KEY, ROME_CREDITS_PROXY_PATH } from "../../agent/index.js";
+import {
+  ROME_CREDITS_PROXY_PATH,
+  ROME_CREDITS_PROXY_SECRET,
+} from "../../core/rome-credits-proxy.js";
 import { cloudBearer } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { isLoopbackInternalApiHost } from "./discord-cli.js";
@@ -24,7 +27,7 @@ const DROP_RESPONSE_HEADERS = new Set([
 
 function hasProxyKey(authorization: string | undefined): boolean {
   const presented = Buffer.from(authorization ?? "");
-  const expected = Buffer.from(`Bearer ${ROME_CREDITS_PROXY_KEY}`);
+  const expected = Buffer.from(`Bearer ${ROME_CREDITS_PROXY_SECRET}`);
   return presented.length === expected.length && timingSafeEqual(presented, expected);
 }
 

@@ -23,7 +23,7 @@ import { AgentLoader } from "../core/agent-loader.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { createAIToolState } from "../core/ai-tool-state.js";
-import type { CodexAccountService } from "../agent/index.js";
+import type { CodexAccountService } from "../core/codex-account.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";

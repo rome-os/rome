@@ -1,11 +1,8 @@
 import { createLogger } from "../../../../logger.js";
 import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
-import {
-  codexAppServerConfigArgs,
-  ROME_CREDITS_PROXY_KEY,
-  ROME_CREDITS_TOKEN_ENV,
-} from "./rome-credits-provider.js";
+import { ROME_CREDITS_PROXY_SECRET } from "../../../../core/rome-credits-proxy.js";
+import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -82,7 +79,7 @@ function defaultCodexEnvironment(): Record<string, string> {
     const value = process.env[key];
     if (typeof value === "string") env[key] = value;
   }
-  env[ROME_CREDITS_TOKEN_ENV] = ROME_CREDITS_PROXY_KEY;
+  env[ROME_CREDITS_TOKEN_ENV] = ROME_CREDITS_PROXY_SECRET;
   return env;
 }
 

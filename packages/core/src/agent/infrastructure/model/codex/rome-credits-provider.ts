@@ -1,4 +1,7 @@
-import { randomBytes } from "node:crypto";
+import {
+  ROME_CREDITS_PROXY_PATH,
+  ROME_CREDITS_PROXY_SECRET,
+} from "../../../../core/rome-credits-proxy.js";
 import { getInternalApiBaseUrl } from "../../../../internal-api-url.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 
@@ -21,15 +24,6 @@ export const ROME_CREDITS_TOKEN_ENV = "ROME_CREDITS_TOKEN";
  * (app-server-provider.ts).
  */
 export const CODEX_SHELL_ENV_EXCLUDE: readonly string[] = [ROME_CREDITS_TOKEN_ENV];
-
-/** Path prefix of core's loopback proxy to the inference gateway. */
-export const ROME_CREDITS_PROXY_PATH = "/_internal/rome-credits/v1";
-
-/**
- * Secret the app-server presents to the proxy. It is random per process and
- * names no Rome Cloud credential.
- */
-export const ROME_CREDITS_PROXY_KEY = randomBytes(32).toString("base64url");
 
 function tomlString(value: string): string {
   // JSON string escapes are valid TOML basic-string escapes.

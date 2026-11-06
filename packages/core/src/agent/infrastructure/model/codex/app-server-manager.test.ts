@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { setInstanceTokenInMemory } from "../../../../lib/instance-identity.js";
-import { ROME_CREDITS_PROXY_KEY } from "./rome-credits-provider.js";
+import { ROME_CREDITS_PROXY_SECRET } from "../../../../core/rome-credits-proxy.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
 import { SharedCodexAccountService } from "./account-service.js";
 import {
@@ -379,7 +379,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     try {
       await manager.warmup();
       const env = clients[0].options.env;
-      expect(env.ROME_CREDITS_TOKEN).toBe(ROME_CREDITS_PROXY_KEY);
+      expect(env.ROME_CREDITS_TOKEN).toBe(ROME_CREDITS_PROXY_SECRET);
       expect(Object.values(env)).not.toContain("romeinst_wiring_test");
       const args = clients[0].options.configArgs ?? [];
       expect(

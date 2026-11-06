@@ -14,6 +14,13 @@ import {
   readLiveOrCachedUsage,
   type AIToolUsageStatus,
 } from "../../../../lib/provider-usage.js";
+import type {
+  CodexAccountService,
+  CodexBrowserLogin,
+  CodexDeviceLogin,
+  CodexLoginMode,
+  CodexLoginState,
+} from "../../../../core/codex-account.js";
 import { isCodexAuthRevokedError } from "./auth-revoked.js";
 import { Method, Notify } from "./app-server-protocol.js";
 import type {
@@ -29,11 +36,9 @@ const CODEX_USAGE_CACHE_PATHS = ["usage-limits.json", "rate-limits.json"].map((f
 );
 const DEFAULT_LOGIN_TIMEOUT_MS = 16 * 60 * 1000;
 
-type LoginMode = "browser" | "device";
-
 interface ActiveLogin {
   loginId: string;
-  mode: LoginMode;
+  mode: CodexLoginMode;
   userCode: string | null;
   verificationUrl: string | null;
   timeout: ReturnType<typeof setTimeout>;
@@ -61,37 +66,6 @@ interface LoginCompletedNotification {
   loginId?: unknown;
   success?: unknown;
   error?: unknown;
-}
-
-export interface CodexLoginState {
-  running: boolean;
-  mode: LoginMode | null;
-  userCode: string | null;
-  verificationUrl: string | null;
-  lastError: string | null;
-}
-
-export interface CodexBrowserLogin {
-  loginId: string;
-  authUrl: string;
-}
-
-export interface CodexDeviceLogin {
-  loginId: string;
-  userCode: string;
-  verificationUrl: string;
-}
-
-export interface CodexAccountService {
-  getStatus(): Promise<AIToolStatusProbeResult>;
-  getUsage(): Promise<AIToolUsageStatus | null>;
-  getLoginState(): CodexLoginState;
-  startBrowserLogin(): Promise<CodexBrowserLogin>;
-  startDeviceLogin(): Promise<CodexDeviceLogin>;
-  cancelLogin(): Promise<void>;
-  logout(): Promise<void>;
-  onAccountChanged(listener: () => void): () => void;
-  close(): void;
 }
 
 interface CodexAccountRpc {
@@ -415,7 +389,7 @@ export class SharedCodexAccountService implements CodexAccountService {
 
   private setActiveLogin(
     loginId: string,
-    mode: LoginMode,
+    mode: CodexLoginMode,
     userCode: string | null,
     verificationUrl: string | null,
   ): void {
