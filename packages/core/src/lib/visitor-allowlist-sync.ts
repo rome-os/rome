@@ -39,7 +39,7 @@ const DEFAULT_RETRY_DELAYS_MS = [5_000, 30_000, 120_000, 600_000, 1_800_000];
  */
 export class VisitorAllowListSync {
   private latest: VisitorAllowList | null = null;
-  // The revision Rome Cloud last accepted or permanently refused.
+  // The revision Rome Cloud last accepted.
   private settled = -1;
   private running: Promise<void> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -93,8 +93,9 @@ export class VisitorAllowListSync {
         this.scheduleRetry();
         return;
       }
-      // A skipped send stays unsettled, so the push after the instance links sends it.
-      if (outcome !== "skipped") this.settled = list.revision;
+      // Only an accepted list settles. A skipped or refused one is sent again
+      // on the next push: a save, a boot, or the instance linking.
+      if (outcome === "ok") this.settled = list.revision;
       return;
     }
   }

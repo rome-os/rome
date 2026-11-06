@@ -163,8 +163,8 @@ describe("VisitorAllowListSync", () => {
     expect(cloud.sent.map((s) => s.body.revision)).toEqual([4, 4, 4]);
   });
 
-  it("does not retry a list Rome Cloud refuses", async () => {
-    const cloud = fakeCloud([400]);
+  it("does not retry a list Rome Cloud refuses, but sends it again on the next push", async () => {
+    const cloud = fakeCloud([401]);
     const sync = new VisitorAllowListSync({
       getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
@@ -174,8 +174,11 @@ describe("VisitorAllowListSync", () => {
 
     sync.push({ emails: ["ada@example.com"], revision: 5 });
     await settle(sync);
-
     expect(cloud.sent).toHaveLength(1);
+
+    sync.push({ emails: ["ada@example.com"], revision: 5 });
+    await settle(sync);
+    expect(cloud.sent.map((s) => s.body.revision)).toEqual([5, 5]);
   });
 
   it("logs counts, revisions and outcomes, never an email", async () => {
