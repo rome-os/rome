@@ -702,6 +702,12 @@ export const conciergeTasks = sqliteTable(
      */
     chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
     /**
+     * Whose Concierge the row is: "visitor:<account>", or null for the
+     * guardian. Set when the row is made, from the chat it is made in, and
+     * never changed, so it outlives that chat.
+     */
+    ownerKey: text("owner_key"),
+    /**
      * The Concierge chat message the row points back to, in Chats. Cleared when
      * the message goes, and the panel then offers no jump. The text is never
      * copied.

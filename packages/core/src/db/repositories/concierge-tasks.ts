@@ -21,7 +21,7 @@ export interface ConciergeTaskWithChat {
   chat: { id: string; name: string } | null;
   /** The Concierge chat the row came from: its owner's main chat when the row names none or its chat is gone. */
   conciergeChat: { id: string; name: string; main: boolean };
-  /** Whose Concierge the row is: the owner of the chat it came from. Never sent to a client. */
+  /** Whose Concierge the row is, as the row records it. Never sent to a client. */
   owner: string;
   sourceMessageId: string | null;
 }
@@ -238,9 +238,18 @@ export class ConciergeTasksRepository {
           out.push(row);
         } else {
           if (!fields.title) throw new Error("A new task needs a title");
+          // A row is the owner's of the chat it is made in, for good: it stays
+          // theirs after that chat is archived or deleted.
+          const ownerKey = fields.chatId
+            ? (tx
+                .select({ ownerKey: romeSessions.ownerKey })
+                .from(romeSessions)
+                .where(eq(romeSessions.id, fields.chatId))
+                .get()?.ownerKey ?? null)
+            : null;
           const [row] = tx
             .insert(conciergeTasks)
-            .values({ id: randomUUID(), createdAt: now, ...fields })
+            .values({ id: randomUUID(), createdAt: now, ownerKey, ...fields })
             .returning()
             .all();
           out.push(row);
@@ -271,7 +280,6 @@ export class ConciergeTasksRepository {
         chatName: romeSessions.name,
         originName: origin.name,
         originArchivedAt: origin.archivedAt,
-        originOwner: origin.ownerKey,
       })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
@@ -279,18 +287,14 @@ export class ConciergeTasksRepository {
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
     // A row whose chat is archived or gone belongs to its owner's main chat,
-    // so its buttons and results reach a chat that owner can write in. A row
-    // that names no chat is the guardian's main chat's.
+    // so its buttons and results reach a chat that owner can write in. The
+    // owner is the row's own, never read from a chat that may be gone.
     type Origin = {
       originName: string | null;
       originArchivedAt: Date | null;
-      originOwner: string | null;
     };
-    const ownerOfRow = (task: ConciergeTaskRow, origin: Origin) =>
-      task.chatId && origin.originName !== null
-        ? ownerOf({ ownerKey: origin.originOwner })
-        : GUARDIAN_OWNER;
-    const mainIds = [...new Set(rows.map((row) => mainChatIdOf(ownerOfRow(row.task, row))))];
+    const ownerOfRow = (task: ConciergeTaskRow) => ownerOf(task);
+    const mainIds = [...new Set(rows.map((row) => mainChatIdOf(ownerOfRow(row.task))))];
     const mainNames = new Map(
       mainIds.length > 0
         ? (
@@ -302,7 +306,7 @@ export class ConciergeTasksRepository {
         : [],
     );
     const conciergeChatOf = (task: ConciergeTaskRow, origin: Origin) => {
-      const owner = ownerOfRow(task, origin);
+      const owner = ownerOfRow(task);
       const main = mainChatIdOf(owner);
       return task.chatId && origin.originName !== null && origin.originArchivedAt === null
         ? { id: task.chatId, name: origin.originName, main: task.chatId === main }
@@ -323,7 +327,7 @@ export class ConciergeTasksRepository {
           ? { id: origin.task.sessionId, name: origin.chatName }
           : null,
       conciergeChat: conciergeChatOf(origin.task, origin),
-      owner: ownerOfRow(origin.task, origin),
+      owner: ownerOfRow(origin.task),
       sourceMessageId:
         (origin.task.sourceMessageId && sources.get(origin.task.sourceMessageId)) || null,
     }));

@@ -77,14 +77,17 @@ export class ChatsWebChatRepository extends WebChatRepository {
   /** Searches the dashboard chats' messages in Chats, at most one match per
    *  chat, the most recent, most recent first. A dashboard notice is not in
    *  Chats yet (#1672), so search, like the transcript, leaves it out. */
-  override async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
-    return this.searchChats(query, Math.max(1, options.sessionLimit ?? 20));
+  override async searchSessionMessages(
+    query: string,
+    options: { sessionLimit?: number; excludeIds?: readonly string[] } = {},
+  ) {
+    return this.searchChats(query, Math.max(1, options.sessionLimit ?? 20), options.excludeIds);
   }
 
   /** The dashboard chats' messages in Chats that match `query`, at most one
    *  per chat, most recent first. */
-  private async searchChats(query: string, limit: number) {
-    const hits = await this.reads.search(query, limit);
+  private async searchChats(query: string, limit: number, excludeIds?: readonly string[]) {
+    const hits = await this.reads.search(query, limit, excludeIds);
     if (hits.length === 0) return [];
     const sessions = new Map(
       (

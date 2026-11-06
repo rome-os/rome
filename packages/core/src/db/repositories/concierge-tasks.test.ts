@@ -5,7 +5,9 @@ import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.j
 import { chatMessages } from "../schema.js";
 import type { WebChatRepository } from "./webchat.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
+import { renderTaskEvents } from "../../concierge/events.js";
 import { mainChatIdOf } from "../../concierge/owner.js";
+import type { ConciergeService } from "../../concierge/service.js";
 
 const DAY = 86_400_000;
 
@@ -256,6 +258,42 @@ describe("ConciergeTasksRepository", () => {
       expect((await repo.get(open.id))?.chatId).toBeNull();
       expect((await repo.get(done.id))?.chatId).toBeNull();
       expect(announced.sort()).toEqual([open.id, done.id].sort());
+    });
+
+    it("keeps a row its owner's when its chat is deleted without moving it", async () => {
+      const owner = "visitor:acct-ann";
+      const main = mainChatIdOf(owner);
+      for (const id of [main, "ann-topic"]) {
+        await chats.createSession(
+          id,
+          "Concierge",
+          undefined,
+          undefined,
+          null,
+          undefined,
+          "core:concierge",
+          "webchat",
+          null,
+          { ownerKey: owner },
+        );
+      }
+      const [row] = await repo.upsertMany([{ title: "A", chatId: "ann-topic", state: "doing" }]);
+      // Deleting the chat clears the row's link to it; the owner is the row's own.
+      await chats.deleteSession("ann-topic");
+      expect((await repo.get(row.id))?.chatId).toBeNull();
+      expect(await repo.getWithChat(row.id)).toMatchObject({
+        owner,
+        conciergeChat: { id: main, main: true },
+      });
+      // Its task events group under that owner's main chat, never the guardian's.
+      const service = {
+        deps: { tasks: { repo }, messages: { recent: async () => [], before: async () => [] } },
+        dashboard: { chats: { activeTurns: () => [] } },
+      } as unknown as ConciergeService;
+      const [delivery] = await renderTaskEvents(service, [
+        { taskId: row.id, changes: [{ kind: "summary" } as never], quiet: true },
+      ]);
+      expect(delivery).toMatchObject({ chatId: main, owner });
     });
 
     it("keeps a visitor's rows, finished ones too, theirs after their topic chat is deleted", async () => {

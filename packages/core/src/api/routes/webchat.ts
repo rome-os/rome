@@ -2236,7 +2236,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
     const access = await callerAccess();
-    const found = await deps.webchatRepo.searchSessionMessages(query, { sessionLimit: 20 });
+    // Hidden chats are left out before the limit, so all 20 are ones the caller may open.
+    const found = await deps.webchatRepo.searchSessionMessages(query, {
+      sessionLimit: 20,
+      excludeIds: await access.hiddenIds(),
+    });
     const open = await Promise.all(found.map((match) => access.canOpen(match.session.id)));
     const matches = found.filter((_, index) => open[index]);
     return c.json(

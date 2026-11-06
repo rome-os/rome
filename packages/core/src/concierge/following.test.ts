@@ -351,8 +351,8 @@ function setup(
     ownerOfChat,
     isServed: async (owner: string) => !dropped.has(owner),
     conciergeChat: async (id: string) => liveChats.get(id) ?? null,
-    deliveryChat: async (id: string | null | undefined) =>
-      id && liveChats.has(id) ? id : mainChatIdOf(await ownerOfChat(id)),
+    deliveryChat: async (id: string | null | undefined, owner?: string) =>
+      id && liveChats.has(id) ? id : mainChatIdOf(owner ?? (await ownerOfChat(id))),
     runSystemTurn: async (
       chatId: string,
       prompt: string,
@@ -1359,6 +1359,24 @@ describe("follows in several Concierge chats", () => {
       tzid: "Europe/Paris",
     });
     expect(triggerOf("concierge-digest:09:00")).toMatchObject({ tzMode: "floating" });
+    s.stop();
+  });
+
+  it("keeps a follow its owner's when its chat is gone and nothing else remembers whose it was", async () => {
+    rs.useFakeTimers();
+    const s = withAnn(setup({ triage: { e1: "important" } }));
+    s.liveChats.set("ann-topic", { id: "ann-topic", name: "Trips", main: false });
+    s.chatOwners.set("ann-topic", ANN);
+    s.calling.chat = "ann-topic";
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    s.calling.chat = null;
+    // The topic chat is gone, and with it every record of whose it was.
+    s.liveChats.delete("ann-topic");
+    s.chatOwners.delete("ann-topic");
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats).toEqual([annMain]);
+    expect(await s.items.owedToDigest()).toEqual([]);
     s.stop();
   });
 

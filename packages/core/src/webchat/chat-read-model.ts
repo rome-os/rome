@@ -411,7 +411,12 @@ export class ChatReadModel {
    * `query`, case-insensitive, each with its most recent matching line and a
    * snippet around the first hit, most recent first, at most `limit` chats.
    */
-  async search(query: string, limit: number): Promise<ChatSearchHit[]> {
+  /** `excludeIds` leaves those chats out before the limit, as a caller may not open them. */
+  async search(
+    query: string,
+    limit: number,
+    excludeIds: readonly string[] = [],
+  ): Promise<ChatSearchHit[]> {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
     const matchesEveryTerm = sql.join(
@@ -438,6 +443,14 @@ export class ChatReadModel {
       CROSS JOIN rome_sessions s ON s.chat_id = c.id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at
       WHERE ${matchesEveryTerm}
+      ${
+        excludeIds.length > 0
+          ? sql`AND s.id NOT IN (${sql.join(
+              excludeIds.map((id) => sql`${id}`),
+              sql`, `,
+            )})`
+          : sql``
+      }
       ORDER BY m.said_at DESC, m.id DESC
       LIMIT ${SEARCH_SCAN_LIMIT}
     `);

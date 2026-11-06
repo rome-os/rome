@@ -29,7 +29,7 @@ Two people who follow the same thing each hear it, once each. The connection sti
 Future diffs must respect:
 
 - A Concierge chat and a task chat it starts answer as not found to anyone but their owner, on every path that reads or writes a chat.
-- A follow, a task row and a kept event belong to the owner of the chat they report to. A stored event is unique per owner and event.
+- A follow, a task row and a kept event record the owner of the chat they were made in, and keep it after that chat is gone. A stored event is unique per owner and event.
 - Triage, the hourly cap of important turns, quiet hours and the digest are each owner's own.
 - Memory and connections are shared, and approvals are decided by the guardian.
 

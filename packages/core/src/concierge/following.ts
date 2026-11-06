@@ -166,10 +166,15 @@ interface FollowRecord {
   options: Record<string, unknown>;
   preference: string | null;
   /**
-   * The Concierge chat its alerts go to. Null is the guardian's main chat. The
-   * follow is the owner's of that chat: each person's Concierge has its own.
+   * The Concierge chat its alerts go to. Null is the guardian's main chat. A
+   * chat that is archived or gone sends them to the owner's main chat.
    */
   chat: string | null;
+  /**
+   * Whose follow it is, kept on the follow so it outlives its chat. Absent on
+   * follows made before owners were kept, which are their chat's owner's.
+   */
+  owner?: ConciergeOwner;
 }
 
 /** A visitor's own rules, and the time zone their browser reported. */
@@ -311,6 +316,7 @@ function parseFollows(value: unknown): FollowRecord[] {
             : {},
         preference: typeof f.preference === "string" && f.preference ? f.preference : null,
         chat: typeof f.chat === "string" && f.chat ? f.chat : null,
+        ...(typeof f.owner === "string" && f.owner ? { owner: f.owner } : {}),
       },
     ];
   });
@@ -444,9 +450,9 @@ export function startConciergeFollowing(
     return resolveGuardianTimezone(deps.settings);
   };
 
-  /** Whose a follow is: the owner of the chat it reports to. */
-  const ownerOfFollow = (follow: FollowRecord): Promise<ConciergeOwner> =>
-    follow.chat ? service.ownerOfChat(follow.chat) : Promise.resolve(GUARDIAN_OWNER);
+  /** Whose a follow is: the owner it records, or for an older follow that records none, its chat's. */
+  const ownerOfFollow = async (follow: FollowRecord): Promise<ConciergeOwner> =>
+    follow.owner ?? (follow.chat ? service.ownerOfChat(follow.chat) : GUARDIAN_OWNER);
 
   /** The follows of one owner. */
   const followsOf = async (stored: StoredFollowing, owner: ConciergeOwner) => {
@@ -516,10 +522,13 @@ export function startConciergeFollowing(
   };
 
   /** A Concierge chat as a list shows it; one that is gone or archived reads as its owner's main chat. */
-  const chatRefOf = async (chatId: string | null): Promise<ConciergeChatRef> => {
+  const chatRefOf = async (
+    chatId: string | null,
+    owner?: ConciergeOwner,
+  ): Promise<ConciergeChatRef> => {
     const live = chatId ? await service.conciergeChat(chatId) : null;
     if (live) return live;
-    const main = mainChatIdOf(await service.ownerOfChat(chatId));
+    const main = mainChatIdOf(owner ?? (await service.ownerOfChat(chatId)));
     return (await service.conciergeChat(main)) ?? { id: main, name: "Concierge", main: true };
   };
 
@@ -564,7 +573,7 @@ export function startConciergeFollowing(
     send: async (items, held) => {
       // A chat that is gone or archived hands its items to their owner's main chat.
       const owner = items[0]?.ownerKey ?? GUARDIAN_OWNER;
-      const chatId = await service.deliveryChat(items[0]?.chatId ?? mainChatIdOf(owner));
+      const chatId = await service.deliveryChat(items[0]?.chatId, owner);
       // The Concierge decides whether to tell each item now. Either way every
       // item also goes into the next digest.
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
@@ -722,7 +731,7 @@ export function startConciergeFollowing(
     const chats = new Map<string, ConciergeChatRef>();
     for (const item of owed) {
       const key = item.chatId ?? "";
-      if (!chats.has(key)) chats.set(key, await chatRefOf(item.chatId));
+      if (!chats.has(key)) chats.set(key, await chatRefOf(item.chatId, owner));
     }
     const ran =
       chatId !== null &&
@@ -1031,7 +1040,7 @@ export function startConciergeFollowing(
       const chats = new Map<string, ConciergeChatRef>();
       for (const follow of mine) {
         const key = follow.chat ?? "";
-        if (!chats.has(key)) chats.set(key, await chatRefOf(follow.chat));
+        if (!chats.has(key)) chats.set(key, await chatRefOf(follow.chat, owner));
       }
       return {
         connectors: mergeConnectors({
@@ -1092,10 +1101,12 @@ export function startConciergeFollowing(
         options: {},
         preference: null,
         chat: await chatForNewFollow(change.chatId, owner),
+        owner,
       };
       const next = {
         ...applyChange(source, base, change),
         account,
+        owner,
         // One that exists moves only when the change names a chat.
         ...(existing && change.chatId ? { chat: await storedChatOf(change.chatId, owner) } : {}),
       };
@@ -1111,7 +1122,7 @@ export function startConciergeFollowing(
         follows: [...stored.follows.filter((f) => f !== existing), next],
       });
       if (!existing) await syncDigest();
-      return toDto(withArmed(source, next.kinds), next, await chatRefOf(next.chat));
+      return toDto(withArmed(source, next.kinds), next, await chatRefOf(next.chat, owner));
     },
 
     async configure(change, owner = GUARDIAN_OWNER) {
@@ -1126,6 +1137,7 @@ export function startConciergeFollowing(
       if (!existing) return null;
       const next = {
         ...applyChange(source, existing, change),
+        owner,
         ...(change.chatId ? { chat: await storedChatOf(change.chatId, owner) } : {}),
       };
       const added = next.kinds.filter((k) => !existing.kinds.includes(k));
@@ -1143,7 +1155,7 @@ export function startConciergeFollowing(
       return toDto(
         withArmed(source, source.status === "ready" ? added : []),
         next,
-        await chatRefOf(next.chat),
+        await chatRefOf(next.chat, owner),
       );
     },
 

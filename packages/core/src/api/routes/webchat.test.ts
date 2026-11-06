@@ -251,6 +251,40 @@ describe("Webchat API", () => {
     expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
   });
 
+  it("searches only chats the caller may open, before taking the 20 best", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const chat = async (id: string, agentName: string | null, ownerKey: string | null) => {
+      await deps.webchatRepo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        agentName,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+      await deps.webchatRepo.addBackendMessage(id, `turn-${id}`, [
+        { type: "text", content: "the launch plan" },
+      ]);
+    };
+    // Three older ordinary chats, then 25 newer ones only the guardian may open.
+    for (let index = 0; index < 3; index++) await chat(`shared-${index}`, null, "guardian");
+    for (let index = 0; index < 25; index++)
+      await chat(`concierge-${index}`, "core:concierge", "guardian");
+    const found = (await (
+      await runWithSessionActor(visitor, () => app.request("/chat/sessions/search?q=launch"))
+    ).json()) as { session: { id: string } }[];
+    expect(found.map((match) => match.session.id).sort()).toEqual([
+      "shared-0",
+      "shared-1",
+      "shared-2",
+    ]);
+  });
+
   it("keeps a Concierge chat's turns, messages and history private when reached by their own ids", async () => {
     const app = createWebchatRuntime(deps).routes;
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };

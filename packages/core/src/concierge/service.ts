@@ -296,13 +296,17 @@ export class ConciergeService {
 
   /**
    * Where something that reports to Concierge chat `chatId` goes: that chat
-   * while it is a live Concierge chat, else its owner's main chat. Null names
-   * the guardian's main chat. Answers null only while that main chat does not
-   * exist.
+   * while it is a live Concierge chat, else its owner's main chat. The owner
+   * is the one the thing itself records, when it records one, so a chat that
+   * is gone never sends it to another owner's chat. Answers null only while
+   * that main chat does not exist.
    */
-  async deliveryChat(chatId: string | null | undefined): Promise<string | null> {
+  async deliveryChat(
+    chatId: string | null | undefined,
+    owner?: ConciergeOwner,
+  ): Promise<string | null> {
     if (chatId && (await this.conciergeChat(chatId))) return chatId;
-    return this.findChatId(await this.ownerOfChat(chatId));
+    return this.findChatId(owner ?? (await this.ownerOfChat(chatId)));
   }
 
   /** An owner's Concierge chats: the main chat first, then the topic chats, oldest first. */
