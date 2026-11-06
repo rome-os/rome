@@ -7,6 +7,11 @@ import { usePresentationMode } from "@/lib/presentation-mode";
 import { useSessionsChanged } from "@/lib/session-events";
 
 export interface SessionIdentity {
+  /**
+   * True while an existing session's metadata is being fetched (a session id is
+   * set but its first fetch has not settled). False for a draft with no id.
+   */
+  loading: boolean;
   /** The session's display name, or null while loading / unnamed. */
   sessionName: string | null;
   model: string | null;
@@ -47,6 +52,9 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
   const [pinnedAt, setPinnedAt] = useState<string | null>(null);
+  // The session id whose first fetch has settled (success or failure). Keyed by
+  // id so switching sessions is "loading" again with no reset-effect flash.
+  const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     sessionGeneration.current += 1;
@@ -65,6 +73,9 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     setLargeModelSelection(null);
     setIsSideChat(false);
     setReasoningEffort(null);
+    // Drop the previous session's identity so it never shows under the new id.
+    setSessionName(null);
+    setPinnedAgentMention(null);
     let cancelled = false;
     (async () => {
       try {
@@ -73,6 +84,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           listChatAgents().catch(() => []),
         ]);
         if (cancelled) return;
+        setSettledSessionId(sessionId);
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
@@ -99,6 +111,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         }
       } catch {
         if (!cancelled) {
+          setSettledSessionId(sessionId);
           setModel(null);
           setLargeModelSelection(null);
           setIsSideChat(false);
@@ -143,6 +156,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   });
 
   return {
+    loading: !!sessionId && settledSessionId !== sessionId,
     sessionName,
     model,
     largeModelSelection,

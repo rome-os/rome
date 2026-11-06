@@ -23,6 +23,7 @@ import { deleteSession } from "@/lib/chat-api";
 import { useApps } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
@@ -352,8 +353,14 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
-    useSessionIdentity(chatSessionId);
+  const {
+    loading: sessionLoading,
+    sessionName,
+    model,
+    reasoningEffort,
+    pinnedAgentMention,
+    pinnedAt,
+  } = useSessionIdentity(chatSessionId);
   // The chat a guardian names is the one they keep a tab on, so the name
   // outranks the route's own title. Claimed here rather than in FreePage so it
   // reads the same identity the header does, and follows a rename with it.
@@ -429,9 +436,17 @@ export function FreeGrid() {
                   model={model}
                   reasoningEffort={reasoningEffort}
                 />
-                <span className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}>
-                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-                </span>
+                {sessionLoading ? (
+                  <SessionLoadingTitle />
+                ) : (
+                  <span
+                    className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}
+                  >
+                    {sessionName?.trim() ||
+                      pinnedAgentMention?.appLabel ||
+                      t("recentChats.newChat")}
+                  </span>
+                )}
                 {isConcierge ? <ConciergeTasksPill chatId={chatSessionId ?? null} /> : null}
                 {/* Same label as the desktop navbar, also none for the Concierge. */}
                 {!isConcierge && sessionName?.trim() && pinnedAgentMention && (
