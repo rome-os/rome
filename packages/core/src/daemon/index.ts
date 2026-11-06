@@ -43,11 +43,16 @@ function loadTelemetry(): Promise<typeof import("../telemetry.js")> {
   return telemetry;
 }
 
+// Never rejects: a telemetry load that failed was already logged, and one still
+// loading counts against the same flush bound.
 async function flushTelemetry(): Promise<void> {
   if (!telemetry) return;
-  const { shutdown: shutdownTelemetry } = await telemetry;
+  const flushed = telemetry.then(
+    (module) => module.shutdown(),
+    () => undefined,
+  );
   await Promise.race([
-    shutdownTelemetry(),
+    flushed,
     new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT_MS)),
   ]);
 }
@@ -827,6 +832,9 @@ export async function main(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch(async (error) => {
+    // A failure before Rome spawned never loaded telemetry, so load it here to
+    // export the fatal log.
+    await loadTelemetry().catch(() => undefined);
     log.error("daemon fatal", { error });
     await flushTelemetry();
     process.exit(1);
