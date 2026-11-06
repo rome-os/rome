@@ -88,14 +88,14 @@ describe("defer session continuity", () => {
 
     const deferredSessionId = rome.model.sessions.at(-1)?.sessionId;
     const deferredSession = deferredSessionId
-      ? await rome.repos.sessions.findById(deferredSessionId)
+      ? await rome.repos.sessions.session(deferredSessionId)
       : null;
 
     // Regression assertion: the continuation keeps the original runtime ID and
     // its session key instead of opening a second AgentSession.
     expect({
       sessionId: deferredSessionId,
-      channelThreadKey: deferredSession?.channelThreadKey,
+      channelThreadKey: deferredSession?.continuityKey,
     }).toEqual({
       sessionId: initialSessionId,
       channelThreadKey: webchatKey,

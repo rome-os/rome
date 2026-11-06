@@ -13,7 +13,6 @@ import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SessionManager } from "../core/session-manager.js";
 import {
   resolveWebchatLargeModelSelection,
   WEBCHAT_LARGE_MODEL_SELECTIONS,
@@ -21,6 +20,7 @@ import {
 } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
+import type { SessionRepository } from "../sessions/session-repository.js";
 import {
   quotaSwitchTarget,
   sameProviderTarget,
@@ -124,7 +124,7 @@ export interface ConciergeDeps {
   tasks: ConciergeTasks;
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
-  sessionManager: Pick<SessionManager, "findReusableSession">;
+  sessionRepository: Pick<SessionRepository, "current">;
   aiToolState: { get(): AIToolStateValue };
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
@@ -321,7 +321,7 @@ export class ConciergeService {
     const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection);
     const runtime = selected
       ? null
-      : await this.deps.sessionManager.findReusableSession(key.channelThreadKey, key.agentName);
+      : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
     const state = this.deps.aiToolState.get();
     // An Auto chat whose first turn failed has no recorded provider yet.
     const from =
@@ -377,11 +377,11 @@ export class ConciergeService {
 
   /** The runtime session id of a Concierge chat, or null before its first turn. */
   async runtimeSessionId(chatId: string): Promise<string | null> {
-    const row = await this.deps.sessionManager.findReusableSession(
+    const stored = await this.deps.sessionRepository.current(
       webchatSessionKey(chatId),
       CONCIERGE_AGENT_ID,
     );
-    return row?.id ?? null;
+    return stored?.id ?? null;
   }
 
   /**

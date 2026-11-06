@@ -891,11 +891,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    */
   const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
     if (session.type !== "fork") return false;
-    const row = await deps.sessionManager.findReusableSession(
+    const stored = await deps.sessionRepository.current(
       webchatSessionKey(session.id),
       session.agentName ?? "main",
     );
-    return !!row?.providerThreadId;
+    return !!stored?.providerThreadId;
   };
 
   const findContinuableSession = async (sessionId: string) => {
@@ -1479,7 +1479,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
       );
       sourceSessionId = source.sessionId;
-      const storedCheckpoint = await deps.sessionsRepo.getTurnCheckpoint(
+      const storedCheckpoint = await deps.sessionRepository.deprecatedCheckpoint(
         source.sessionId,
         input.turnId,
       );
@@ -2471,7 +2471,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    const runtimeSession = await deps.sessionManager.findReusableSession(
+    const runtimeSession = await deps.sessionRepository.current(
       webchatSessionKey(sessionId),
       session.agentName ?? "main",
     );
@@ -3332,7 +3332,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Sending before then (or after a failed first answer) would acquire a
     // fresh thread and silently drop the branched context — refuse instead.
     if (session.parentSessionId !== null) {
-      const branchThread = await deps.sessionManager.findReusableSession(
+      const branchThread = await deps.sessionRepository.current(
         webchatSessionKey(session.id),
         session.agentName ?? "main",
       );

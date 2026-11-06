@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
@@ -23,7 +22,6 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
 import { SessionRepository } from "../sessions/session-repository.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import {
@@ -85,8 +83,6 @@ describe("agent model pins through AgentSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
-  let sessionManager: SessionManager;
-  let sessionsRepo: SessionsRepository;
   let sessionRepository: SessionRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
@@ -140,8 +136,6 @@ describe("agent model pins through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionsRepo = new SessionsRepository(testDb.db);
-    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
     sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
@@ -166,7 +160,7 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(openai.openSession).toHaveBeenCalledTimes(1);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
     expect(anthropic.openSession).not.toHaveBeenCalled();
-    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: MODEL,
       providerThreadId: `native-${session.sessionId}`,
@@ -183,7 +177,7 @@ describe("agent model pins through AgentSessionManager", () => {
       workingDir: directory,
     });
     await collect(session.sendTurn({ prompt: "credits" }).events);
-    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: "gpt-6.1-sol",
     });

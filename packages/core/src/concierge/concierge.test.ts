@@ -254,7 +254,7 @@ function setup(
       before: async (place: Place, cursor: { id: string }, limit: number) =>
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
-    sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
+    sessionRepository: { current: async () => ({ id: "runtime-1" }) },
     agentSessionManager: { peek: rs.fn(() => ({ selectModel: rs.fn() })) },
     aiToolState: {
       get: () => ({
@@ -1611,7 +1611,7 @@ describe("Concierge system turns", () => {
   const serviceWith = (session: { id: string } | null, outcome: "completed" | "failed") => {
     const turns: BackendTurnParams[] = [];
     const service = new ConciergeService({
-      sessionManager: { findReusableSession: async () => session },
+      sessionRepository: { current: async () => session },
       webchatRepo: { getSession: async () => null },
       runBackendTurn: async (params: BackendTurnParams) => {
         turns.push(params);
@@ -1689,9 +1689,7 @@ describe("Concierge quota failover", () => {
     s.service.deps.webchatRepo = s.storedChats;
     const raw = state();
     s.deps.aiToolState.get = () => raw;
-    s.deps.sessionManager.findReusableSession = rs.fn(
-      async () => ({ provider: "openai" }) as never,
-    );
+    s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
     const selectModel = rs.fn();
     s.deps.agentSessionManager.peek = rs.fn(() => ({ selectModel }) as never);
     const inserted = rs.fn();
@@ -1749,11 +1747,9 @@ describe("Concierge quota failover", () => {
   it("uses the runtime provider before the sole-exhausted fallback", async () => {
     const s = setup({ startEvents: false });
     s.deps.aiToolState.get = state;
-    s.deps.sessionManager.findReusableSession = rs.fn(
-      async () => ({ provider: "openai" }) as never,
-    );
+    s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-    s.deps.sessionManager.findReusableSession = rs.fn(async () => undefined);
+    s.deps.sessionRepository.current = rs.fn(async () => undefined);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
       from: "anthropic",
       to: "openai",
@@ -1914,8 +1910,8 @@ describe("Concierge provider recovery", () => {
     s.service.deps.webchatRepo = s.storedChats;
     // No turn has succeeded, so the runtime row records no provider, and
     // neither provider is marked: only the failed turn names its provider.
-    s.service.deps.sessionManager = {
-      findReusableSession: rs.fn(async () => ({ provider: null, model: null })),
+    s.service.deps.sessionRepository = {
+      current: rs.fn(async () => ({ provider: null, model: null })),
     } as never;
     s.service.deps.aiToolState = {
       get: () => ({
@@ -2117,7 +2113,7 @@ describe("Concierge provider recovery", () => {
   it("uses the runtime model for a same-provider move without a stored selection", async () => {
     const s = setup({ startEvents: false });
     s.deps.aiToolState.get = healthy;
-    s.deps.sessionManager.findReusableSession = rs.fn(
+    s.deps.sessionRepository.current = rs.fn(
       async () => ({ provider: "anthropic", model: "claude-sonnet-5-5" }) as never,
     );
     expect(
@@ -2194,7 +2190,7 @@ describe("Concierge provider recovery", () => {
 describe("Concierge chats", () => {
   it("opens a topic chat's runtime before its first background turn, as its first message would", async () => {
     const s = setup({ startEvents: false });
-    s.deps.sessionManager.findReusableSession = (async (key: string) =>
+    s.deps.sessionRepository.current = (async (key: string) =>
       key === `webchat:${TOPIC_CHAT}` ? null : { id: "runtime-1" }) as never;
     expect(await s.service.runSystemTurn(TOPIC_CHAT, "<task_events/>")).toBe(false);
     expect(s.chats.openSession).toHaveBeenCalledWith(TOPIC_CHAT);
@@ -2240,7 +2236,7 @@ describe("Concierge chats", () => {
 
   it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
     const s = setup({ startEvents: false });
-    s.deps.sessionManager.findReusableSession = (async () => null) as never;
+    s.deps.sessionRepository.current = (async () => null) as never;
     s.deps.aiToolState.get = () =>
       ({
         claude: { loggedIn: true, quotaExhausted: true },
