@@ -370,7 +370,7 @@ export async function buildConciergeTools(
                 messageId: {
                   type: "string",
                   description:
-                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required whenever the entry sets state needs_user: it must be the message that asks the guardian, so say or chat_forward first. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it.",
+                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required whenever the entry sets state needs_user: it must be the message that asks the guardian, so say or chat_forward first. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_forward updates this anchor automatically.",
                 },
               },
             },
@@ -699,7 +699,7 @@ export async function buildConciergeTools(
       name: "chat_forward",
       description:
         "Send the guardian a task chat's latest answer as one long message, word for word, without retyping it. " +
-        "Use it for long content the guardian asked for.",
+        "Use it for long content the guardian asked for. An existing task row automatically points to the forwarded message in this Concierge chat.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -720,12 +720,19 @@ export async function buildConciergeTools(
           );
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
+          const { chatId: conciergeChatId } = currentTurn();
           const messageId = await forward(
             answer,
             { chatId, title: chat.name },
             optionalString(args, "intro"),
           );
-          return { forwardedChars: answer.length, messageId };
+          const task = await tasks.repo.findBySession(chatId);
+          if (task) await tasks.repo.setSourceMessage(task.id, conciergeChatId, messageId);
+          return {
+            forwardedChars: answer.length,
+            messageId,
+            ...(task ? { taskAnchored: task.id } : {}),
+          };
         }),
     },
     {

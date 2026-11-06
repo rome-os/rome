@@ -32,6 +32,7 @@ import {
   ConciergeService,
   type ConciergeDeps,
   type TaskChats,
+  TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { ConciergeTasks } from "./tasks.js";
 import { buildConciergeTools } from "./tools.js";
@@ -104,33 +105,33 @@ function setup(
 ) {
   const testDb = createTestDb();
   opened.push(testDb);
-  // The Concierge chat's messages in Chats, each recorded the first time a
-  // row points to it, as the fakes here hold its lines elsewhere.
-  const sourceChat = new StoredChats(testDb.db).start(
-    chatKey("webchat", CONCIERGE_CHAT as ChatId),
-    "dm",
-    null,
-  ).ref;
+  // The Concierge chats' messages in Chats, each recorded the first time a
+  // row points to it, as the fakes here hold their lines elsewhere.
+  const sourceChats = new StoredChats(testDb.db);
+  const sourceChat = (chatId: string) =>
+    sourceChats.start(chatKey("webchat", chatId as ChatId), "dm", null).ref;
   const sourceLines = new StoredMessages(testDb.db);
   const taskRepo = new ConciergeTasksRepository(testDb.db, {
-    idOf: (_chatId, key) =>
-      sourceLines.idOf(sourceChat, key) ??
+    idOf: (chatId, key) =>
+      sourceLines.idOf(sourceChat(chatId), key) ??
       sourceLines.record({
         direction: "toRome",
         key,
-        place: placeIn(sourceChat),
+        place: placeIn(sourceChat(chatId)),
         saidBy: { account: { platform: "webchat", id: "guardian" } },
         body: { text: "" },
         at: new Date(),
       })?.id ??
       null,
-    keysOf: (refs) =>
-      new Map(
+    keysOf: (refs) => {
+      const chatOf = new Map(refs.map((ref) => [ref.id, sourceChat(ref.chatId).id]));
+      return new Map(
         sourceLines
           .byIds(refs.map((ref) => ref.id))
-          .filter((message) => message.place.chat.id === sourceChat.id)
+          .filter((message) => message.place.chat.id === chatOf.get(message.id))
           .map((message) => [message.id, message.key]),
-      ),
+      );
+    },
   });
   const tasks = new ConciergeTasks(taskRepo);
   /** The real chat rows the task rows link to. */
@@ -602,14 +603,20 @@ describe("Concierge tools", () => {
 
   it("chat_forward says the latest answer, not a later follow-up", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const started = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
     s.messages.get("task-1")?.push({
       role: "assistant",
       content: JSON.stringify([{ type: "text", content: "# Report" }]),
     });
     await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     const result = await s.tool("chat_forward", { chatId: "task-1" });
-    expect(JSON.parse(result.content[0].text)).toEqual({ forwardedChars: 8, messageId: "said-1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      forwardedChars: 8,
+      messageId: "said-1",
+      taskAnchored: started.taskId,
+    });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
       [
         {
@@ -991,6 +998,112 @@ describe("Concierge task anchors", () => {
       messageId: "said-2",
     });
     expect(text(await s.tool("chat_forward", { chatId: "task-1" })).messageId).toBe("said-3");
+  });
+
+  it.each([
+    [CONCIERGE_CHAT, CONCIERGE_CHAT],
+    [TOPIC_CHAT, TOPIC_CHAT],
+    [CONCIERGE_CHAT, TOPIC_CHAT],
+    [TOPIC_CHAT, CONCIERGE_CHAT],
+  ] as const)("anchors a task created in %s to its result forwarded in %s before completion", async (createdIn, forwardedIn) => {
+    const s = setup({ said: false });
+    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    s.turnIn(createdIn);
+    const acknowledgment = text(await s.tool("say", { text: "Looking into flights" })).messageId;
+    const { chatId, taskId } = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
+    );
+    expect(await anchorOf(s, taskId)).toBe(acknowledgment);
+    expect((await s.taskRepo.get(taskId))?.chatId).toBe(
+      createdIn === CONCIERGE_CHAT ? null : createdIn,
+    );
+    const [before] = await s.taskRepo.upsertMany(
+      [{ id: taskId, summary: "Searching", waitingOn: "Results", rank: 3, dueAt: new Date(1000) }],
+      new Date(0),
+    );
+    s.tasks.markNotSynced(taskId);
+    await s.settle();
+    const emit = rs.fn();
+    s.tasks.subscribe(emit);
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+    });
+
+    s.turnIn(forwardedIn);
+    const result = await s.tool("chat_forward", { chatId });
+    expect(result.isError).toBeFalsy();
+    const forwarded = text(result);
+    expect(s.messages.get(forwardedIn)?.at(-1)?.id).toBe(forwarded.messageId);
+    expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
+    expect(forwarded).toEqual({ forwardedChars: 9, messageId: "said-2", taskAnchored: taskId });
+    expect(await s.taskRepo.get(taskId)).toEqual({
+      ...before,
+      chatId: forwardedIn === CONCIERGE_CHAT ? null : forwardedIn,
+      sourceMessageId: expect.any(Number),
+    });
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith("task_upsert", {
+      task: expect.objectContaining({
+        id: taskId,
+        conciergeChat: expect.objectContaining({ id: forwardedIn }),
+        sourceMessageId: forwarded.messageId,
+        notSynced: true,
+      }),
+    });
+
+    const completed = text(await s.tool("task_upsert", { tasks: [{ id: taskId, state: "done" }] }));
+    expect(completed.tasks[0]).toMatchObject({ anchor: forwarded.messageId, anchorKept: true });
+    expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
+    expect((await s.tasks.listForPanel())[0]).toMatchObject({
+      state: "done",
+      conciergeChat: expect.objectContaining({ id: forwardedIn }),
+      sourceMessageId: forwarded.messageId,
+      notSynced: false,
+    });
+  });
+
+  it("forwarding again keeps a finished row's completion time and other fields", async () => {
+    const s = setup();
+    const { chatId, taskId } = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
+    );
+    const [before] = await s.taskRepo.upsertMany(
+      [{ id: taskId, state: "done", archived: true, summary: "3 options", rank: 2 }],
+      new Date(0),
+    );
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+    });
+    const forwarded = text(await s.tool("chat_forward", { chatId }));
+    expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
+    expect(forwarded.taskAnchored).toBe(taskId);
+    expect(await s.taskRepo.get(taskId)).toEqual({
+      ...before,
+      sourceMessageId: expect.any(Number),
+    });
+  });
+
+  it("forwards a task chat without a task row without creating one", async () => {
+    const s = setup();
+    const chatId = await s.chats.startChat({});
+    await s.deps.webchatRepo.setSessionTrigger(chatId, {
+      triggerKind: TASK_CHAT_TRIGGER_KIND,
+      triggerName: null,
+    });
+    s.messages.set(chatId, [
+      {
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      },
+    ]);
+    const result = await s.tool("chat_forward", { chatId });
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toEqual({ forwardedChars: 9, messageId: "said-1" });
+    expect(await s.taskRepo.findBySession(chatId)).toBeNull();
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
 
   it("points a new row at the latest thing the Concierge said this turn", async () => {
@@ -1568,6 +1681,7 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(ignored.backendTurns).toHaveLength(1);
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
+    await ignored.tool("chat_forward", { chatId: quiet.chatId });
     await rs.advanceTimersByTimeAsync(10_000);
     expect(ignored.backendTurns).toHaveLength(2);
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(true);
