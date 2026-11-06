@@ -409,6 +409,69 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
+  it("uses page tiles for exactly four first-party apps and keeps other app images", async () => {
+    const firstParty = ["briefing", "inbox", "showcases", "skills"];
+    mockBackend({
+      installed: [
+        ...firstParty.map((id) =>
+          installedCard({
+            id,
+            displayName: id,
+            origin: "builtin",
+            iconUrl: `/icons/${id}.svg`,
+          }),
+        ),
+        installedCard({
+          id: "welcome-to-rome",
+          displayName: "Welcome to Rome",
+          origin: "builtin",
+          iconUrl: "/welcome.svg",
+        }),
+        installedCard({ id: "my-briefing", displayName: "Briefing", iconUrl: "/custom.svg" }),
+      ],
+    });
+    renderPage();
+    await screen.findByText("briefing");
+    const section = screen.getByRole("region", { name: "Built-in apps" });
+    const memoryTile = within(section)
+      .getByText("Memory")
+      .parentElement?.querySelector(".bg-surface-muted");
+    expect(memoryTile).toBeTruthy();
+    for (const id of firstParty) {
+      const tile = within(section).getByText(id).parentElement;
+      const icon = tile?.querySelector(".bg-surface-muted");
+      expect(icon?.className).toBe(memoryTile?.className);
+      expect(icon?.querySelector("svg")?.getAttribute("class")).toContain("h-6 w-6 sm:h-7 sm:w-7");
+      expect(icon?.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+      expect(icon?.querySelector("svg")?.getAttribute("stroke-width")).toBe("2");
+      expect(tile?.querySelector("img")).toBeNull();
+    }
+    expect(section.querySelector('img[src="/welcome.svg"]')).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "My apps" }).querySelector('img[src="/custom.svg"]'),
+    ).toBeTruthy();
+  });
+
+  it("keeps a disabled first-party page tile muted", async () => {
+    mockBackend({
+      installed: [
+        installedCard({
+          id: "inbox",
+          displayName: "Inbox",
+          origin: "builtin",
+          status: "disabled",
+          isEnabled: false,
+          iconUrl: "/inbox.svg",
+        }),
+      ],
+    });
+    renderPage();
+    await screen.findByText("Inbox");
+    const icon = screen.getByText("Inbox").parentElement?.querySelector(".bg-surface-muted");
+    expect(icon?.className).toContain("grayscale opacity-60");
+    expect(icon?.querySelector("svg.lucide-inbox")).toBeTruthy();
+  });
+
   it("sections apps by origin: my apps, then App Store installs, then built-ins", async () => {
     mockBackend({
       installed: [
