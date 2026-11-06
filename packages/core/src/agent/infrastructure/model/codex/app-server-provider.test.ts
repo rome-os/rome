@@ -329,7 +329,9 @@ describe("CodexAppServerProvider", () => {
 
   it.each([
     ["discord", { "shell_environment_policy.set.ROME_CHANNEL": "discord" }],
-    [undefined, {}],
+    // An undefined value clears the variable Rome inherited. The exclude is
+    // the server-wide one, so ROME_CREDITS_TOKEN stays hidden.
+    [undefined, { "shell_environment_policy.exclude": ["ROME_CREDITS_TOKEN", "ROME_CHANNEL"] }],
   ])("sets the prefix env on shell commands, so ROME_CHANNEL %s reaches them", async (channel, expected) => {
     await new CodexAppServerProvider().openSession(
       buildParams({ prefix: { env: { ROME_CHANNEL: channel } } }),

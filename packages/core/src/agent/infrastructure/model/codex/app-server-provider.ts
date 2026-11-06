@@ -101,6 +101,7 @@ import type { FacadeToolResult } from "../../../../core/mcp-facade.js";
 import { codexStop } from "../../../../core/stop-reason.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
 import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
+import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { createLogger } from "../../../../logger.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
 import type { UsageFunding } from "../../../../usage/events.js";
@@ -201,9 +202,15 @@ function buildThreadConfigurationOverrides(
     config.mcp_servers = params.prefix.externalMcpServers;
   }
   // A dotted key adds one variable each. A nested shell_environment_policy
-  // table would replace the server-wide exclude that hides ROME_CREDITS_TOKEN.
+  // table would replace the server-wide exclude that hides ROME_CREDITS_TOKEN,
+  // so a cleared variable joins that exclude instead of replacing it.
+  const cleared: string[] = [];
   for (const [name, value] of Object.entries(params.prefix.env ?? {})) {
-    if (value !== undefined) config[`shell_environment_policy.set.${name}`] = value;
+    if (value === undefined) cleared.push(name);
+    else config[`shell_environment_policy.set.${name}`] = value;
+  }
+  if (cleared.length > 0) {
+    config["shell_environment_policy.exclude"] = [ROME_CREDITS_TOKEN_ENV, ...cleared];
   }
   return {
     model,
