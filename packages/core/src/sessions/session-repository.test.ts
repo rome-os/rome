@@ -276,6 +276,22 @@ describe("SessionRepository", () => {
     expect(successor.deprecatedChatId).toBe("chat-1");
   });
 
+  it("replace() carries the chat over from a stale instance that never saw it recorded", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await repo.add(session);
+    const stale = (await repo.session(session.id))!;
+    const other = (await repo.session(session.id))!;
+    other.deprecatedRecordChat("chat-1");
+    await repo.save(other);
+
+    const successor = stale.replace();
+    expect(successor.deprecatedChatId).toBeNull();
+    await repo.replace(stale, successor);
+    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-1");
+    expect(stale.deprecatedChatId).toBe("chat-1");
+    expect(successor.deprecatedChatId).toBe("chat-1");
+  });
+
   it("replace() keeps the chat the caller named even when the retired chat write lost", async () => {
     const session = Session.create("main", { continuityKey: "k" });
     await repo.add(session);

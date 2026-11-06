@@ -138,8 +138,9 @@ export class SessionRepository {
     }
     const retiredPending = retired.pendingChanges();
     const successorPending = successor.pendingChanges();
+    const carriedOver = successorState.chatId === retiredState.chatId;
     const storedChat = this.db.transaction((tx) => {
-      const storedChat = writeChanges(tx, retiredState, retiredPending.changes);
+      writeChanges(tx, retiredState, retiredPending.changes);
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
@@ -147,11 +148,17 @@ export class SessionRepository {
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
-      // A successor that carried the retired session's chat over carries the
-      // stored one, not the one another instance beat this one to recording.
-      if (storedChat !== null && successorState.chatId === retiredState.chatId) {
-        successorState.chatId = storedChat;
-      }
+      // The chat is read from the row, not the instance, as today's reset
+      // does: the instance can predate the chat's recording, or have lost
+      // its own write to another instance. A successor that carried the chat
+      // over carries the stored one.
+      const storedChat =
+        tx
+          .select({ chatId: sessions.chatId })
+          .from(sessions)
+          .where(eq(sessions.id, retiredState.id))
+          .get()?.chatId ?? null;
+      if (carriedOver) successorState.chatId = storedChat;
       tx.insert(sessions).values(toRow(successorState)).run();
       for (const checkpoint of successorPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       return storedChat;
@@ -160,7 +167,7 @@ export class SessionRepository {
     successor.markSaved();
     if (storedChat !== null && storedChat !== retiredState.chatId) {
       retired.deprecatedKeepStoredChat(storedChat);
-      if (successorState.chatId === storedChat) successor.deprecatedKeepStoredChat(storedChat);
+      if (carriedOver) successor.deprecatedKeepStoredChat(storedChat);
     }
   }
 
