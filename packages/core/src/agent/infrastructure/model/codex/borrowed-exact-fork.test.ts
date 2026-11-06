@@ -4,7 +4,7 @@ import {
   createBorrowedExactForkSession,
   evaluateBorrowedExactFork,
 } from "./borrowed-exact-fork.js";
-import { createRomeDynamicTools, type RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
+import type { RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { FacadeParams } from "../../../../core/mcp-facade.js";
 
@@ -37,11 +37,10 @@ function openParams(overrides: OpenOverrides = {}): ModelSessionParams {
   };
 }
 
-function evaluate(openOverrides: OpenOverrides = {}) {
+function evaluate(isolated = false, openOverrides: OpenOverrides = {}) {
   return evaluateBorrowedExactFork({
+    isolated,
     openParams: openParams(openOverrides),
-    sourceBuiltinTools: [],
-    sourceDynamicTools: createRomeDynamicTools(openParams().tools).definitions,
     sourceModelName: "gpt-5.6-terra",
     sourceSystemPrompt: "system",
     sourceWorkingDir: "/workspace",
@@ -49,13 +48,21 @@ function evaluate(openOverrides: OpenOverrides = {}) {
 }
 
 describe("evaluateBorrowedExactFork", () => {
-  it("accepts a branch with the source's whole configuration and catalog", () => {
+  it("accepts an exact branch with identical provider configuration", () => {
     expect(evaluate()).toEqual({
       eligible: true,
       sameModel: true,
       sameSystemPrompt: true,
       sameWorkingDir: true,
-      sameTools: true,
+    });
+  });
+
+  it("never borrows an isolated branch even when model, prompt, and cwd match", () => {
+    expect(evaluate(true)).toMatchObject({
+      eligible: false,
+      sameModel: true,
+      sameSystemPrompt: true,
+      sameWorkingDir: true,
     });
   });
 
@@ -63,20 +70,8 @@ describe("evaluateBorrowedExactFork", () => {
     ["model", { config: { model: "gpt-5.6-sol" } }, "sameModel"],
     ["system prompt", { config: { systemPrompt: "different" } }, "sameSystemPrompt"],
     ["working directory", { config: { workingDir: "/other" } }, "sameWorkingDir"],
-    ["builtin tool set", { config: { builtinTools: ["Bash"] } }, "sameTools"],
-    [
-      "tools catalog",
-      {
-        tools: {
-          subagentTools: [
-            { name: "reviewer", description: "Review", inputSchema: { type: "object" } },
-          ],
-        },
-      },
-      "sameTools",
-    ],
-  ] as const)("rejects a branch with a different %s", (_label, overrides, mismatch) => {
-    const result = evaluate(overrides as OpenOverrides);
+  ] as const)("rejects an exact branch with a different %s", (_label, overrides, mismatch) => {
+    const result = evaluate(false, overrides);
     expect(result.eligible).toBe(false);
     expect(result[mismatch]).toBe(false);
   });

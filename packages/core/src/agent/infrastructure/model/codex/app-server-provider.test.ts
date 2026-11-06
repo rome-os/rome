@@ -118,7 +118,12 @@ function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
 }
 
 function buildBranchParams(
-  branch: { lifetime?: "ephemeral" | "kept"; checkpointId?: string; modelThreadId?: string } = {},
+  branch: {
+    lifetime?: "ephemeral" | "kept";
+    mode?: "isolated" | "exact";
+    checkpointId?: string;
+    modelThreadId?: string;
+  } = {},
   overrides: ParamOverrides = {},
 ): ModelSessionParams {
   return buildParams({
@@ -131,6 +136,7 @@ function buildBranchParams(
         checkpointId: branch.checkpointId ?? "source-turn",
       },
       lifetime: branch.lifetime ?? "ephemeral",
+      mode: branch.mode ?? "exact",
     },
   });
 }
@@ -646,7 +652,9 @@ describe("CodexAppServerProvider", () => {
 
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(buildParams({ config: { builtinTools: ["Bash"] } }));
-    const forkSession = await provider.openSession(buildBranchParams({ lifetime }));
+    const forkSession = await provider.openSession(
+      buildBranchParams({ lifetime, mode: "isolated" }),
+    );
 
     expect(requestMock).toHaveBeenCalledWith(
       "thread/fork",
@@ -687,7 +695,9 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({ config: { builtinTools: ["ImageGeneration"] } }),
     );
-    const forkSession = await provider.openSession(buildBranchParams({ lifetime: "ephemeral" }));
+    const forkSession = await provider.openSession(
+      buildBranchParams({ lifetime: "ephemeral", mode: "isolated" }),
+    );
 
     expect(threadRequest("thread/fork")?.config).toMatchObject({
       "features.image_generation": false,
@@ -734,7 +744,6 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        config: { builtinTools: ["Bash", "Write"] },
         tools: {
           subagentTools: [
             {
@@ -747,7 +756,9 @@ describe("CodexAppServerProvider", () => {
         },
       }),
     );
-    const forkSession = await provider.openSession(buildBranchParams({ lifetime: "ephemeral" }));
+    const forkSession = await provider.openSession(
+      buildBranchParams({ lifetime: "ephemeral", mode: "isolated" }),
+    );
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "try the inherited tool" });
     await collected;

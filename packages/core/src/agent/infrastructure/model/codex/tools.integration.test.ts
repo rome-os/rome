@@ -290,7 +290,7 @@ describe("bundled Codex app-server", () => {
       await runTurn(source, "Reply with ok. (fork source)");
       const child = await provider.openSession({
         ...sessionParams(model, []),
-        thread: { kind: "branch", at: lastPosition!, lifetime: "kept" },
+        thread: { kind: "branch", at: lastPosition!, lifetime: "kept", mode: "isolated" },
       });
       try {
         const tools = await runTurn(child, "Reply with ok. (isolated fork)");

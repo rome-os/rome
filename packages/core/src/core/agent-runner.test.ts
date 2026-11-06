@@ -173,6 +173,7 @@ describe("AgentRunner", () => {
           kind: "branch",
           at: { provider: "mock", modelThreadId: "thread", checkpointId: "turn" },
           lifetime: "ephemeral",
+          mode: "isolated",
         },
       }),
     ).toThrow("Branching a thread is not supported by this provider");
@@ -1183,6 +1184,7 @@ describe("AgentRunner", () => {
         kind: "branch",
         at: { provider: "mock", modelThreadId: "model-thread", checkpointId: "provider-turn-t2" },
         lifetime: "ephemeral",
+        mode: "exact",
       });
     });
 
@@ -2684,6 +2686,7 @@ describe("AgentRunner", () => {
           checkpointId: "assistant-current",
         },
         lifetime: "ephemeral",
+        mode: "exact",
       });
       await manager.shutdown();
     });

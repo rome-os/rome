@@ -3001,6 +3001,7 @@ class AgentSessionImpl implements AgentSession {
                 kind: "branch",
                 at,
                 lifetime: input.persistThreadKey ? "kept" : "ephemeral",
+                mode,
               },
               threadContext: input.threadContext,
               emit: (msg) => outbound.push(msg),

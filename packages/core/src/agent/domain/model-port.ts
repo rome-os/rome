@@ -130,14 +130,21 @@ export interface ModelProvider {
  * How a session gets its thread. `new` opens a thread the provider names;
  * `resume` continues one it named before; `branch` starts from a position on
  * one. An `ephemeral` branch is closed after one use, and the provider may run
- * it inside the source thread and roll it back when the branch has the source's
- * model, system prompt, working dir and tools. A `kept` branch gets a thread of
- * its own that the session records.
+ * an `exact` one inside the source thread and roll it back when it has the
+ * source's model, system prompt and working dir. A `kept` branch gets a thread
+ * of its own that the session records. `mode` is the fork's: an `isolated`
+ * branch uses no tool, even one its provider keeps from the source thread, and
+ * an `exact` one opens with the source's configuration.
  */
 export type ThreadStart =
   | { kind: "new" }
   | { kind: "resume"; modelThreadId: ModelThreadId }
-  | { kind: "branch"; at: ModelPosition; lifetime: "ephemeral" | "kept" };
+  | {
+      kind: "branch";
+      at: ModelPosition;
+      lifetime: "ephemeral" | "kept";
+      mode: "isolated" | "exact";
+    };
 
 /**
  * Value object. The model session's configuration: what the run fixes when
