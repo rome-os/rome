@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
+import { createRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import type { ChatComposerSnapshot } from "../ChatComposer";
+import type { ChatComposerHandle, ChatComposerSnapshot } from "../ChatComposer";
 import { ConciergeComposer, type ConciergeComposerProps } from "./ConciergeComposer";
 import { ReplyDraftHarness } from "../reply/reply-draft-harness";
 import type { ReplyTarget } from "../reply/reply-draft";
@@ -22,10 +23,27 @@ function renderComposer(
   props: Partial<ConciergeComposerProps> = {},
   reply?: ReplyTarget,
   selector = true,
+  ref?: React.Ref<ChatComposerHandle>,
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation(
     (async (input: RequestInfo | URL) =>
       ({
+        "/api/skills": () =>
+          Response.json({
+            skills: [
+              {
+                name: "@ray/scoped-app:identity_probe",
+                localName: "identity_probe",
+                description: "Scoped identity probe",
+                tools: [],
+                ownerType: "app",
+                ownerId: "@ray/scoped-app",
+                ownerLabel: "Scoped App",
+                ownerDescription: "Scoped app test fixture",
+                iconUrl: null,
+              },
+            ],
+          }),
         "/api/settings": () =>
           Response.json({
             enableModelSelector: selector,
@@ -57,7 +75,7 @@ function renderComposer(
   render(
     <QueryClientProvider client={client}>
       <ReplyDraftHarness initial={reply}>
-        <ConciergeComposer onSend={onSend} {...props} />
+        <ConciergeComposer ref={ref} onSend={onSend} {...props} />
       </ReplyDraftHarness>
     </QueryClientProvider>,
   );
@@ -65,6 +83,75 @@ function renderComposer(
 }
 
 describe("ConciergeComposer", () => {
+  it("picks a scoped skill, sends a chip-only turn, and clears the chip", async () => {
+    const { onSend } = renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(box, { target: { value: "/@ray/scoped-app:identity_probe" } });
+    expect(await screen.findByText("Scoped App")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByText("/identity_probe"));
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+    expect(box.value).toBe("");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "",
+      skillName: "@ray/scoped-app:identity_probe",
+    });
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
+  it("navigates the slash menu with arrows, accepts with Enter, and removes the chip with its button", async () => {
+    const { onSend } = renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await userEvent.type(box, "/");
+    await screen.findByText("/identity_probe");
+    await userEvent.keyboard("{ArrowDown}{ArrowUp}{ArrowRight}{ArrowLeft}{ArrowRight}{Enter}");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Remove skill" }));
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
+  it("dismisses the slash menu with Escape and ignores file paths", async () => {
+    renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await userEvent.type(box, "/");
+    await screen.findByText("/identity_probe");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByText("/identity_probe")).toBeNull();
+    fireEvent.input(box, { target: { value: "/etc/hosts" } });
+    expect(screen.queryByText("/identity_probe")).toBeNull();
+  });
+
+  it("preserves task text after the cursor when accepting a slash skill", async () => {
+    const { onSend } = renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(box, { target: { value: "/identity_probe inspect this" } });
+    box.setSelectionRange(15, 15);
+    fireEvent.select(box);
+    await screen.findByText("/identity_probe");
+    fireEvent.mouseDown(screen.getByText("/identity_probe"));
+    expect(box.value).toBe("inspect this");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "inspect this",
+      skillName: "@ray/scoped-app:identity_probe",
+    });
+  });
+
+  it("supports programmatic selection and restores a selected skill after a failed send", async () => {
+    const ref = createRef<ChatComposerHandle>();
+    const onSend = rs.fn().mockRejectedValueOnce(new Error("failed")).mockResolvedValue(undefined);
+    renderComposer({ onSend }, undefined, true, ref);
+    act(() => ref.current?.setSkillSelection({ name: "@ray/scoped-app:identity_probe" }));
+    await screen.findByRole("button", { name: "Remove skill" });
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("button", { name: "Remove skill" });
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[0][0]).toEqual(onSend.mock.calls[1][0]);
+  });
+
   it.each([
     [false, true],
     [true, false],

@@ -3617,6 +3617,127 @@ describe("Webchat API", () => {
     expect(emptyRes.status).toBe(400);
   });
 
+  it.each([
+    "core:concierge",
+    "concierge",
+  ])("delegates structured and typed skills from %s without telling Concierge to read them", async (agentName) => {
+    const turns: AgentTurnInput[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName, channelThreadKey: "webchat:concierge-skills" },
+      sessionId: "agent-session",
+      status: "idle",
+      sendTurn(input: AgentTurnInput) {
+        turns.push(input);
+        return {
+          turnId: `turn-${turns.length}`,
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+        };
+      },
+      subscribe: () => () => undefined,
+      onStatusChange: () => () => undefined,
+      interrupt: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+    deps.skillCatalog = {
+      get: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      getAll: () => [],
+      getRegistryLoadFailures: () => [],
+    };
+    await deps.webchatRepo.createSession(
+      "concierge-skills",
+      "Concierge",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      agentName,
+    );
+    const { routes } = createWebchatRuntime(deps);
+    for (const body of [
+      { skillName: "coding:app_creation", text: "Build a tracker" },
+      { text: "/coding:app_creation Build a tracker" },
+      { skillName: "coding:app_creation" },
+      { text: "/coding:app_creation" },
+    ]) {
+      const sent = await routes.request("/chat/sessions/concierge-skills/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(sent.status).toBe(200);
+      const prompt = turns.at(-1)?.prompt;
+      expect(prompt).toContain("Acknowledge with `say` first");
+      expect(prompt).toContain("`chat_start`");
+      expect(prompt).toContain('"agent":"main","skill":"coding:app_creation"');
+      expect(prompt).not.toContain("read_skill");
+      expect(prompt).toContain(
+        body.text?.includes("Build")
+          ? '"brief":"Build a tracker"'
+          : "Ask the guardian what they want to do with this skill.",
+      );
+    }
+    const messages = await deps.webchatRepo.getMessages("concierge-skills");
+    expect(
+      messages.filter((message) => message.role === "user").map((message) => message.content),
+    ).toEqual([
+      expect.stringContaining("/app_creation Build a tracker"),
+      expect.stringContaining("/coding:app_creation Build a tracker"),
+      expect.stringContaining("/app_creation"),
+      expect.stringContaining("/coding:app_creation"),
+    ]);
+  });
+
+  it("expands the skill on a task chat's first dashboard send", async () => {
+    let turn: AgentTurnInput | undefined;
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:task-skills" },
+      sessionId: "agent-session",
+      status: "idle",
+      sendTurn(input: AgentTurnInput) {
+        turn = input;
+        return {
+          turnId: "task-skill-turn",
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+        };
+      },
+      subscribe: () => () => undefined,
+      onStatusChange: () => () => undefined,
+      interrupt: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+    deps.skillCatalog = {
+      get: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      getAll: () => [],
+      getRegistryLoadFailures: () => [],
+    };
+    const { runtime } = createWebchatRuntime(deps);
+    const chatId = await runtime.startChat({});
+    const result = await runtime.post(
+      chatId,
+      {
+        text: "Build a tracker",
+        skillName: "coding:app_creation",
+      },
+      { platform: "webchat", id: "core:concierge" },
+    );
+    expect(result.ok).toBe(true);
+    expect(turn?.prompt).toContain("Read it now with the `read_skill` tool");
+    expect(turn?.prompt).toContain('"coding:app_creation"');
+    expect(turn?.prompt).toContain("Task: Build a tracker");
+    const messages = await deps.webchatRepo.getMessages(chatId);
+    expect(messages.find((message) => message.role === "user")?.content).toContain(
+      "/app_creation Build a tracker",
+    );
+  });
+
   describe("suspensions (inline pending_interaction)", () => {
     // Drive the drain loop with a scripted event stream per turn so we can
     // observe what the route does when an action returns an inline

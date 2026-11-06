@@ -132,8 +132,12 @@ export async function buildConciergeTools(
 
   // Said as Concierge's account, so the task event reads who asked off the
   // message.
-  const sendInput = async (chatId: string, text: string) => {
-    const sent = await service.dashboard.send(taskChatPlace(chatId), { text }, CONCIERGE_ACCOUNT);
+  const sendInput = async (chatId: string, text: string, skillName?: string) => {
+    const sent = await service.dashboard.send(
+      taskChatPlace(chatId),
+      { text, ...(skillName ? { skillName } : {}) },
+      CONCIERGE_ACCOUNT,
+    );
     if (!sent.ok) throw new Error(refusal(sent));
   };
 
@@ -421,7 +425,7 @@ export async function buildConciergeTools(
       name: "chat_start",
       description:
         "Start a task chat: a normal chat with another agent (main by default) that does the work while you keep talking. " +
-        "Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. Every task chat has a row on your task list: this call creates one (or links taskId). Returns the chat's id and the row's id.",
+        "Pass skill to invoke a catalog skill on its first turn. Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. Every task chat has a row on your task list: this call creates one (or links taskId). Returns the chat's id and the row's id.",
       inputSchema: {
         type: "object",
         required: ["title", "brief"],
@@ -434,6 +438,11 @@ export async function buildConciergeTools(
             type: "string",
             description:
               "The full request for the other agent, with every detail it needs. It does not see this conversation.",
+          },
+          skill: {
+            type: "string",
+            description:
+              "Exact catalog skill name to invoke on the first turn, with brief as its task.",
           },
           agent: { type: "string", description: 'Agent id. Defaults to "main".' },
           project: {
@@ -462,6 +471,11 @@ export async function buildConciergeTools(
           currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
+          const requestedSkill = optionalString(args, "skill");
+          const skill = requestedSkill ? service.deps.skillCatalog.get(requestedSkill) : undefined;
+          if (args.skill !== undefined && !skill) {
+            throw new Error(`Unknown skill: ${String(args.skill)}. Use search_skills to find it.`);
+          }
           const taskId = optionalString(args, "taskId");
           const messageId = optionalString(args, "messageId");
           if (taskId) {
@@ -508,7 +522,7 @@ export async function buildConciergeTools(
                   chatId: conciergeChatId,
                 },
           ]);
-          await sendInput(chatId, brief);
+          await sendInput(chatId, brief, skill?.name);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
             // The task already runs, so a failure here must not read as a

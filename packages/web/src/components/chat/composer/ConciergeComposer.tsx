@@ -58,6 +58,9 @@ import { ReplyBar } from "../reply/ReplyBar";
 import { useReplyDraft } from "../reply/reply-draft";
 import { ComposerChip } from "./ComposerChip";
 import { PendingUploadsList } from "./PendingUploadsList";
+import { useSlashSkill } from "./use-slash-skill";
+import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
+import { SlashSkillMenu } from "./SlashSkillMenu";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -104,6 +107,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       : DEFAULT_REASONING_EFFORT;
 
     const [inputText, setInputText] = useState("");
+    const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [uploadInFlight, setUploadInFlight] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -119,6 +123,22 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const textareaFocusedAtPressRef = useRef(false);
     // The ref closes the same-event gap before React commits the state.
     const uploadInFlightRef = useRef(false);
+    const {
+      slashMenuOpen,
+      setSlashMenuOpen,
+      slashQuery,
+      setSlashQuery,
+      slashMenuRef,
+      reevaluateSlashContext,
+      acceptSlashSkill,
+      handleSlashKeyDown,
+    } = useSlashSkill({
+      inputText,
+      setInputText,
+      setDraftSkill,
+      textareaRef,
+      uploadInFlightRef,
+    });
     const uploadAbortRef = useRef<AbortController | null>(null);
     // The last failed send, so a retry of the same input reuses its inputId.
     const failedSendRef = useRef<{
@@ -126,6 +146,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       text: string;
       uploads: PendingUpload[];
       folder: FolderSelection | null;
+      skill: SkillSelection | null;
     } | null>(null);
 
     // Programmatic clears fire no `input` event, so resize on every change.
@@ -175,6 +196,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         inputId?: string,
         replyTo?: ReplyTarget,
         pickedFolder: FolderSelection | null = null,
+        skillName?: string,
       ): ChatComposerSnapshot => ({
         text: appendFolderLine(text, pickedFolder),
         uploads,
@@ -183,6 +205,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         projectPath: DEFAULT_PROJECT_NAME,
         inputId,
         replyTo,
+        skillName,
       }),
       [reasoningEffort],
     );
@@ -193,13 +216,15 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       const rawText = inputText;
       const uploads = pendingUploads;
       const pickedFolder = folder;
-      if (!text && uploads.length === 0 && !pickedFolder) return;
+      const skill = draftSkill;
+      if (!text && uploads.length === 0 && !pickedFolder && !skill) return;
       const failed = failedSendRef.current;
       const inputId =
         failed &&
         failed.text === text &&
         failed.uploads === uploads &&
-        failed.folder === pickedFolder
+        failed.folder === pickedFolder &&
+        failed.skill === skill
           ? failed.inputId
           : randomUUID();
       // Text alone clears at once and comes back on failure. Attachments keep
@@ -210,10 +235,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setInputText("");
         setPendingUploads([]);
         setFolder(null);
+        setDraftSkill(null);
         replyDraft?.clear();
       }
       try {
-        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder));
+        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();
@@ -221,17 +247,19 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           setInputText((current) => (current === rawText ? "" : current));
           setFolder((current) => (current === pickedFolder ? null : current));
+          setDraftSkill((current) => (current === skill ? null : current));
         }
       } catch {
-        failedSendRef.current = { inputId, text, uploads, folder: pickedFolder };
+        failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
           setInputText(text);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
+          setDraftSkill(skill);
           if (replyTo) replyDraft?.restore(replyTo);
         }
       }
-    }, [inputText, pendingUploads, folder, invokeOnSend, snapshotOf, replyDraft]);
+    }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);
 
     useImperativeHandle(
       ref,
@@ -247,14 +275,20 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             el.setSelectionRange(text.length, text.length);
           });
         },
-        // Concierge has no skills.
-        setSkillSelection: () => {},
+        setSkillSelection: (skill) => {
+          if (uploadInFlightRef.current) return;
+          setDraftSkill(skill);
+          setSlashMenuOpen(false);
+          setSlashQuery("");
+        },
         addFiles: addPendingFiles,
-        submit: (text) => {
+        submit: (text, options) => {
           const trimmed = text.trim();
-          if (uploadInFlightRef.current || (!trimmed && pendingUploads.length === 0)) return;
+          const skillName = options?.skillName ?? draftSkill?.name;
+          if (uploadInFlightRef.current || (!trimmed && pendingUploads.length === 0 && !skillName))
+            return;
           const uploads = pendingUploads;
-          void invokeOnSend(snapshotOf(trimmed, uploads))
+          void invokeOnSend(snapshotOf(trimmed, uploads, undefined, undefined, null, skillName))
             .then(() => {
               const sentIds = new Set(uploads.map((upload) => upload.id));
               setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
@@ -265,10 +299,19 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         },
         getMetadataSnapshot: () => ({ reasoningEffort }),
       }),
-      [addPendingFiles, pendingUploads, invokeOnSend, snapshotOf, reasoningEffort],
+      [
+        addPendingFiles,
+        pendingUploads,
+        invokeOnSend,
+        snapshotOf,
+        reasoningEffort,
+        draftSkill,
+        setSlashMenuOpen,
+        setSlashQuery,
+      ],
     );
 
-    const empty = !inputText.trim() && pendingUploads.length === 0 && !folder;
+    const empty = !inputText.trim() && pendingUploads.length === 0 && !folder && !draftSkill;
     const sendLabel = isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle");
     const showModel = !!modelSelection;
     const [showAllModels, setShowAllModels] = useState(false);
@@ -312,6 +355,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             }}
           />
           <ReplyBar />
+          {draftSkill && (
+            <div className="mb-2 flex min-w-0">
+              <SkillCommandChip
+                skill={draftSkill}
+                onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
+              />
+            </div>
+          )}
           <div className="flow-root empty:hidden">
             <PendingUploadsList
               uploads={pendingUploads}
@@ -483,40 +534,62 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               className="flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]"
               style={{ minHeight: "var(--row-h)" }}
             >
-              <textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={(event) => setInputText(event.target.value)}
-                onInput={(event) => clampTextareaHeight(event.currentTarget)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape" && replyDraft?.target) {
-                    event.preventDefault();
-                    replyDraft.clear();
-                    return;
-                  }
-                  if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
-                    event.preventDefault();
-                    void runSend();
-                  }
+              <SlashSkillMenu
+                ref={slashMenuRef}
+                open={slashMenuOpen && !uploadInFlight}
+                onOpenChange={(next) => {
+                  if (uploadInFlightRef.current) return;
+                  setSlashMenuOpen(next);
+                  if (!next) setSlashQuery("");
                 }}
-                onPaste={(event) => {
-                  const files = extractFilesFromClipboard(event.clipboardData);
-                  if (files.length === 0) return;
-                  event.preventDefault();
-                  addPendingFiles(files);
-                }}
-                placeholder={
-                  pendingUploads.length > 0
-                    ? t("composer.placeholderWithUploads")
-                    : t("concierge.placeholder")
+                query={slashQuery}
+                onSelect={acceptSlashSkill}
+                anchor={
+                  <textarea
+                    ref={textareaRef}
+                    value={inputText}
+                    onChange={(event) => {
+                      if (uploadInFlightRef.current) return;
+                      setInputText(event.target.value);
+                      reevaluateSlashContext(event.target.value, event.target.selectionEnd);
+                    }}
+                    onSelect={(event) => {
+                      const el = event.currentTarget;
+                      reevaluateSlashContext(el.value, el.selectionEnd);
+                    }}
+                    onInput={(event) => clampTextareaHeight(event.currentTarget)}
+                    onKeyDown={(event) => {
+                      if (handleSlashKeyDown(event)) return;
+                      if (event.key === "Escape" && replyDraft?.target) {
+                        event.preventDefault();
+                        replyDraft.clear();
+                        return;
+                      }
+                      if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
+                        event.preventDefault();
+                        void runSend();
+                      }
+                    }}
+                    onPaste={(event) => {
+                      const files = extractFilesFromClipboard(event.clipboardData);
+                      if (files.length === 0) return;
+                      event.preventDefault();
+                      addPendingFiles(files);
+                    }}
+                    placeholder={
+                      pendingUploads.length > 0
+                        ? t("composer.placeholderWithUploads")
+                        : t("concierge.placeholder")
+                    }
+                    rows={1}
+                    className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"
+                    style={{
+                      minHeight: "1lh",
+                      maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
+                    }}
+                    disabled={uploadInFlight}
+                  />
                 }
-                rows={1}
-                className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"
-                style={{
-                  minHeight: "1lh",
-                  maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
-                }}
-                disabled={uploadInFlight}
               />
             </div>
             {isStreaming && onStop && (

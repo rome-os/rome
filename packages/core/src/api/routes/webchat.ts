@@ -77,7 +77,11 @@ import {
 } from "../../core/prompt-builder.js";
 import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
-import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-skill-command.js";
+import {
+  buildSlashSkillPrompt,
+  parseSlashSkillInvocation,
+} from "../../core/slash-skill-command.js";
+import { buildConciergeSkillPrompt } from "../../concierge/skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
@@ -3423,16 +3427,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const basePrompt = resolution
       ? resolution.prompt
       : appendUploadPathsToPrompt(body.text ?? "", savedUploads);
-    // Skill invocations expand into a read_skill instruction for the
-    // model. A structured selection (body.skillName, from the composer chip)
+    // Concierge delegates skill invocations; other agents read the skill.
+    // A structured selection (body.skillName, from the composer chip)
     // wins; a typed `/<skill-name> task` first token is parsed out of the text
     // otherwise. `displayText` is what gets persisted below, so the transcript
     // shows the invocation as a command either way.
-    const slashSkillPrompt = resolution
+    const skillInvocation = resolution
       ? null
       : skillName
-        ? buildSlashSkillPrompt({ skillName, task: basePrompt.trim() })
-        : expandSlashSkillPrompt(basePrompt, deps.skillCatalog);
+        ? { skillName, task: basePrompt.trim() }
+        : parseSlashSkillInvocation(basePrompt, deps.skillCatalog);
+    const slashSkillPrompt = skillInvocation
+      ? isConciergeChat(session)
+        ? buildConciergeSkillPrompt(skillInvocation)
+        : buildSlashSkillPrompt(skillInvocation)
+      : null;
     const modelPrompt = slashSkillPrompt ?? basePrompt;
     const displayText = skillName
       ? `/${artifactLocalName(skillName)}${basePrompt.trim() ? ` ${basePrompt.trim()}` : ""}`
@@ -4310,7 +4319,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
       const inputId = randomUUID();
-      const sent = await handleChatSend(chatId, { inputId, text: body.text }, { saidBy: as });
+      const sent = await handleChatSend(
+        chatId,
+        { inputId, text: body.text, skillName: body.skillName },
+        { saidBy: as },
+      );
       if (sent.status >= 400) {
         // Once the input is recorded it is said, even when the agent could not
         // be woken on it: answering failed would invite a second message.
