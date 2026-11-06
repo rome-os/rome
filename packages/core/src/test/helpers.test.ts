@@ -105,6 +105,7 @@ describe("Test Helpers", () => {
         actionCatalog: [],
         skillCatalog: [],
         subagentTools: [],
+        thread: { kind: "new" },
         executeAction: async () => ({}),
         executeSubagent: async () => ({}),
       })) {
@@ -125,6 +126,7 @@ describe("Test Helpers", () => {
         actionCatalog: [],
         skillCatalog: [],
         subagentTools: [],
+        thread: { kind: "new" as const },
         executeAction: async () => ({}),
         executeSubagent: async () => ({}),
       };

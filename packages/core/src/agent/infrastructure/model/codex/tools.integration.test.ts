@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import type { ModelSession, ModelSessionParams } from "../../../../core/agent-runner.js";
+import type { ModelSession, ModelSessionParams } from "../../../domain/model-port.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
@@ -183,19 +183,14 @@ describe("bundled Codex app-server", () => {
     await rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   });
 
-  const sessionParams = (
-    model: string,
-    sessionId: string,
-    builtinTools: string[],
-  ): ModelSessionParams => ({
+  const sessionParams = (model: string, builtinTools: string[]): ModelSessionParams => ({
     model,
     systemPrompt: "Integration-test thread; do not modify files.",
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
     builtinTools,
-    sessionId,
-    isNewSession: true,
+    thread: { kind: "new" },
     workingDir: home,
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "unused",
@@ -216,7 +211,7 @@ describe("bundled Codex app-server", () => {
   const fullBuiltins = () => [...provider.builtinTools];
 
   it.each(codexModels)("gives %s the tools Rome relies on", async (model) => {
-    const params = sessionParams(model, `codex-tools-${model}`, fullBuiltins());
+    const params = sessionParams(model, fullBuiltins());
     const romeTools = createRomeDynamicTools(params).definitions.map((tool) => tool.name);
     const session = await provider.openSession(params);
     let tools: string[];
@@ -231,7 +226,7 @@ describe("bundled Codex app-server", () => {
   }, 30_000);
 
   it.each(codexModels)("gives %s no shell when the agent declares no builtins", async (model) => {
-    const params = sessionParams(model, `codex-no-builtins-${model}`, []);
+    const params = sessionParams(model, []);
     const romeTools = createRomeDynamicTools(params).definitions.map((tool) => tool.name);
     const session = await provider.openSession(params);
     let tools: string[];
@@ -252,7 +247,7 @@ describe("bundled Codex app-server", () => {
 
   it("takes the shell away when a thread that had it resumes with no builtins", async () => {
     const model = codexModels[0]!;
-    const first = await provider.openSession(sessionParams(model, "codex-resume", fullBuiltins()));
+    const first = await provider.openSession(sessionParams(model, fullBuiltins()));
     let threadId: string | undefined;
     try {
       expect(await runTurn(first, "Reply with ok. (before resume)")).toContain("exec_command");
@@ -262,9 +257,8 @@ describe("bundled Codex app-server", () => {
     }
 
     const resumed = await provider.openSession({
-      ...sessionParams(model, "codex-resume", []),
-      isNewSession: false,
-      providerThreadId: threadId,
+      ...sessionParams(model, []),
+      thread: { kind: "resume", providerThreadId: threadId! },
     });
     try {
       const tools = await runTurn(resumed, "Reply with ok. (after resume)");
@@ -277,17 +271,11 @@ describe("bundled Codex app-server", () => {
 
   it("gives an isolated fork no shell even when its source had one", async () => {
     const model = codexModels[0]!;
-    const source = await provider.openSession(
-      sessionParams(model, "codex-fork-source", fullBuiltins()),
-    );
+    const source = await provider.openSession(sessionParams(model, fullBuiltins()));
     try {
       await runTurn(source, "Reply with ok. (fork source)");
-      const fork = await source.fork({ sessionId: "codex-fork-child", mode: "thread" });
-      const {
-        sessionId: _sessionId,
-        isNewSession: _isNewSession,
-        ...openParams
-      } = sessionParams(model, "codex-fork-child", fullBuiltins());
+      const fork = await source.fork({ mode: "thread" });
+      const { thread: _thread, ...openParams } = sessionParams(model, fullBuiltins());
       const child = await fork.open(openParams);
       try {
         const tools = await runTurn(child, "Reply with ok. (isolated fork)");
@@ -320,9 +308,7 @@ describe("bundled Codex app-server", () => {
               input: `text(await tools.apply_patch(${JSON.stringify(patch)}));`,
             },
           ];
-    const session = await provider.openSession(
-      sessionParams(codexModels[0]!, `codex-patch-${file}`, builtinTools),
-    );
+    const session = await provider.openSession(sessionParams(codexModels[0]!, builtinTools));
     try {
       await runTurn(session, `Apply the patch. (${file})`);
     } finally {
@@ -359,7 +345,7 @@ describe("bundled Codex app-server", () => {
         },
       ];
     };
-    const session = await provider.openSession(sessionParams("gpt-5.6-terra", "codex-spawn", []));
+    const session = await provider.openSession(sessionParams("gpt-5.6-terra", []));
     try {
       const parentTools = await runTurn(session, parentPrompt);
       expect(parentTools).toContain("spawn_agent");

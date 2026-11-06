@@ -69,7 +69,10 @@ function createProvider(id: ProviderId) {
       },
       params,
     );
-    session.providerThreadId = params.providerThreadId ?? `${id}-thread-${opened.length}`;
+    session.providerThreadId =
+      params.thread.kind === "resume"
+        ? params.thread.providerThreadId
+        : `${id}-thread-${opened.length}`;
     return session;
   });
   const provider: ModelProvider = {
@@ -230,7 +233,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "Which animal was it, and what was my worry?");
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna"]);
-    expect(openai.opened[0]?.providerThreadId).toBeUndefined();
+    expect(openai.opened[0]?.thread).toEqual({ kind: "new" });
     const prompt = openai.calls[0]?.prompt ?? "";
     const notice = continuationOf(prompt);
     expect(notice).toContain('previous_model="claude-sonnet-5-5"');
@@ -276,9 +279,9 @@ describe("continuation notice through AgentSessionManager", () => {
       "claude-sonnet-5-5",
       "claude-opus-5-5[1m]",
     ]);
-    expect(anthropic.opened.map((params) => params.providerThreadId)).toEqual([
-      undefined,
-      "anthropic-thread-1",
+    expect(anthropic.opened.map((params) => params.thread)).toEqual([
+      { kind: "new" },
+      { kind: "resume", providerThreadId: "anthropic-thread-1" },
     ]);
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
@@ -308,7 +311,10 @@ describe("continuation notice through AgentSessionManager", () => {
 
     const resumed = await acquire(createManager(), "claude-sonnet");
     await chatTurn(resumed, "second");
-    expect(anthropic.opened[1]?.providerThreadId).toBe("anthropic-thread-1");
+    expect(anthropic.opened[1]?.thread).toEqual({
+      kind: "resume",
+      providerThreadId: "anthropic-thread-1",
+    });
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
     expect(anthropic.calls[1]?.prompt).not.toContain("<thread_context>");
   });

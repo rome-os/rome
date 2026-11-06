@@ -206,7 +206,8 @@ describe("ApprovalHandler", () => {
       expect(rome.model.lastPrompt()).toContain("approved and executed successfully");
       expect(rome.model.lastPrompt()).toContain('"sent": true');
       expect(rome.model.lastSystemPrompt()).toContain("You are a test agent.");
-      expect(rome.model.sessions[0].sessionId).toBe("sess-1");
+      // The turn ran in the seeded session: its row now records the model.
+      expect(await rome.repos.sessions.session("sess-1")).toMatchObject({ provider: "mock" });
     });
 
     it("delivers the continuation reply on the messaging channel's send port (issue #1626)", async () => {

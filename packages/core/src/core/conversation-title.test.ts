@@ -73,10 +73,7 @@ describe("conversation title generation", () => {
       maxTurns: 1,
       reasoningEffort: "low",
       outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
-      sessionId: expect.stringMatching(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      ),
-      isNewSession: true,
+      thread: { kind: "new" },
     });
     expect(openParams?.getActionCatalog()).toEqual([]);
     expect(openParams?.getSkillCatalog()).toEqual([]);

@@ -33,6 +33,7 @@ export type {
   ModelUserInput,
   ProviderId,
   SkillMcpDefinition,
+  ThreadStart,
 } from "./domain/model-port.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 

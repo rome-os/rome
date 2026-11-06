@@ -1,7 +1,7 @@
 import type {
   ModelSessionForkOpenParams,
   ModelToolCallContext,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import type { FacadeToolResult } from "../../../../core/mcp-facade.js";
 import {
   createRomeMcpServerForSession,

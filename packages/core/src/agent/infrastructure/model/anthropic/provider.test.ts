@@ -11,7 +11,7 @@ import type {
   ModelSession,
   ModelSessionForkOpenParams,
   ModelSessionParams,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../../../lib/anthropic-compatible-providers.js";
 
 const { AbortError } = claudeAgentSdkModule;
@@ -103,6 +103,8 @@ async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
   return messages;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 function buildParams(overrides: Partial<ModelSessionParams> = {}): ModelSessionParams {
   return {
     model: "claude-test",
@@ -110,8 +112,7 @@ function buildParams(overrides: Partial<ModelSessionParams> = {}): ModelSessionP
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
-    sessionId: "test-session",
-    isNewSession: true,
+    thread: { kind: "new" },
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "delegated",
     ...overrides,
@@ -124,9 +125,7 @@ function buildForkOpenParams(
   const params = buildParams(
     overrides as Partial<ModelSessionParams>,
   ) as Partial<ModelSessionParams>;
-  delete params.sessionId;
-  delete params.isNewSession;
-  delete params.providerThreadId;
+  delete params.thread;
   delete params.fork;
   return params as ModelSessionForkOpenParams;
 }
@@ -279,7 +278,7 @@ describe("AnthropicProvider", () => {
         yield result("PONG", [prompt.uuid], "human");
       });
       const session = await new AnthropicProvider().openSession(
-        buildParams({ isNewSession: false, providerThreadId: "thread-1" }),
+        buildParams({ thread: { kind: "resume", providerThreadId: "thread-1" } }),
       );
       await session.sendUserInput({ text: "Reply with PONG.", inputId: p });
       const turn = await nextTurn(session.events[Symbol.asyncIterator]());
@@ -1093,11 +1092,8 @@ describe("AnthropicProvider", () => {
   it("opens forked Claude sessions with native resume fork options and a separate input queue", async () => {
     const provider = new AnthropicProvider();
 
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "thread",
       sourceCheckpoint: "assistant-message-at-t2",
     });
@@ -1105,22 +1101,25 @@ describe("AnthropicProvider", () => {
       buildForkOpenParams({ model: "claude-fork", systemPrompt: "fork system" }),
     );
 
+    // Before a turn reports the SDK's own id, the source's thread is the id it
+    // opened under; the fork names its own thread before it opens.
+    const sourceSdkSessionId = queryMock.mock.calls[0]![0].options.sessionId;
     expect(fork).toMatchObject({
       providerId: "anthropic",
-      sessionId: "fork-session",
-      sourceSessionId: "source-session",
+      sourceProviderThreadId: sourceSdkSessionId,
       mode: "thread",
-      providerThreadId: "fork-session",
     });
+    expect(fork.providerThreadId).toMatch(UUID_PATTERN);
+    expect(fork.providerThreadId).not.toBe(sourceSdkSessionId);
     expect(queryMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         options: expect.objectContaining({
           model: "claude-fork",
           systemPrompt: "fork system",
-          resume: "source-session",
+          resume: sourceSdkSessionId,
           forkSession: true,
-          sessionId: "fork-session",
+          sessionId: fork.providerThreadId,
           resumeSessionAt: "assistant-message-at-t2",
         }),
       }),
@@ -1133,10 +1132,8 @@ describe("AnthropicProvider", () => {
 
   it("rejects a second open of the same Claude fork descriptor", async () => {
     const provider = new AnthropicProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
-    const fork = await source.fork({ sessionId: "fork-session" });
+    const source = await provider.openSession(buildParams());
+    const fork = await source.fork({});
     const opened = await fork.open(buildForkOpenParams());
 
     await expect(fork.open(buildForkOpenParams())).rejects.toThrow(
@@ -1148,46 +1145,20 @@ describe("AnthropicProvider", () => {
   });
 
   describe("session resume gating", () => {
-    it("starts a fresh SDK session with the host session id when the session is new", async () => {
+    it("starts a new thread under an SDK id the provider mints", async () => {
       const provider = new AnthropicProvider();
-      const session = await provider.openSession(
-        buildParams({ sessionId: "fresh-session", isNewSession: true }),
-      );
+      const session = await provider.openSession(buildParams({ thread: { kind: "new" } }));
 
-      expect(queryMock.mock.calls[0]![0].options).toMatchObject({ sessionId: "fresh-session" });
+      expect(queryMock.mock.calls[0]![0].options.sessionId).toMatch(UUID_PATTERN);
       expect(queryMock.mock.calls[0]![0].options.resume).toBeUndefined();
 
       await session.close();
     });
 
-    it("uses a fresh SDK id when a reused session has no resumable transcript", async () => {
-      // A stored session row with no captured provider thread id — e.g. a turn
-      // that short-circuited (the not-logged-in notice) before opening an SDK
-      // conversation. Resuming it would fail with "No conversation found".
+    it("resumes the thread the run names", async () => {
       const provider = new AnthropicProvider();
       const session = await provider.openSession(
-        buildParams({
-          sessionId: "reused-session",
-          isNewSession: false,
-          providerThreadId: undefined,
-        }),
-      );
-
-      expect(queryMock.mock.calls[0]![0].options.sessionId).toMatch(/^[0-9a-f-]{36}$/);
-      expect(queryMock.mock.calls[0]![0].options.sessionId).not.toBe("reused-session");
-      expect(queryMock.mock.calls[0]![0].options.resume).toBeUndefined();
-
-      await session.close();
-    });
-
-    it("resumes by provider thread id when a prior transcript was captured", async () => {
-      const provider = new AnthropicProvider();
-      const session = await provider.openSession(
-        buildParams({
-          sessionId: "reused-session",
-          isNewSession: false,
-          providerThreadId: "sdk-thread-123",
-        }),
+        buildParams({ thread: { kind: "resume", providerThreadId: "sdk-thread-123" } }),
       );
 
       expect(queryMock.mock.calls[0]![0].options).toMatchObject({ resume: "sdk-thread-123" });
@@ -1218,9 +1189,7 @@ describe("AnthropicProvider", () => {
       ]);
 
       const provider = new AnthropicProvider();
-      const session = await provider.openSession(
-        buildParams({ sessionId: "host-session", isNewSession: true }),
-      );
+      const session = await provider.openSession(buildParams());
 
       expect(session.providerThreadId).toBeUndefined();
       await session.sendUserInput({ text: "hi", inputId: SENT });

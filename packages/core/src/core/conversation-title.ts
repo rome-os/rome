@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { ModelSession } from "./agent-runner.js";
 import type { ModelResolver } from "./model-resolver.js";
 
@@ -99,8 +98,7 @@ export function createConversationTitleGenerator(
           builtinTools: [],
           maxTurns: 1,
           reasoningEffort: "low",
-          sessionId: randomUUID(),
-          isNewSession: true,
+          thread: { kind: "new" },
           executeAction: async () => {
             throw new Error("Conversation title generation cannot execute actions");
           },

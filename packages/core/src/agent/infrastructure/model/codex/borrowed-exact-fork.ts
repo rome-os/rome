@@ -16,7 +16,7 @@ import type {
   ModelSessionForkParams,
   ModelUserInput,
   ProviderId,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import {
   createGeneratedImageTracker,
   createImageTraceSessionState,
@@ -67,7 +67,7 @@ export function evaluateBorrowedExactFork(args: {
 
 export interface CreateBorrowedExactForkSessionArgs {
   providerId: ProviderId;
-  forkSessionId: string;
+  forkOwnerId: string;
   sourceThreadId: string;
   openParams: ModelSessionForkOpenParams;
   runExclusive<T>(work: () => Promise<T>): Promise<T>;
@@ -104,7 +104,7 @@ export async function createBorrowedExactForkSession(
   let closePromise: Promise<void> | null = null;
   let lastProviderTurnId: string | undefined;
   const runtime: CodexTurnRuntime = {
-    ownerSessionId: args.forkSessionId,
+    ownerSessionId: args.forkOwnerId,
     sink,
     imageTraceCtx,
     imageTracker,

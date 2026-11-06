@@ -23,7 +23,7 @@ import type {
   ModelToolCallContext,
   ModelToolDefinition,
   SkillMcpDefinition,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import type { FacadeToolDef, RoutineActivationGate } from "../../../../core/mcp-facade.js";
 import {
   createRomeMcpServer,
