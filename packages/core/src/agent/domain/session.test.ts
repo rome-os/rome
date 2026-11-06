@@ -9,7 +9,7 @@ describe("Session", () => {
     expect(session.continuityKey).toBe("webchat:chat-1");
     expect(session.status).toBe("active");
     expect(session.provider).toBeNull();
-    expect(session.providerThreadId).toBeNull();
+    expect(session.modelThreadId).toBeNull();
     expect(session.model).toBeNull();
     expect(session.workingDir).toBe("/w");
     expect(session.deprecatedChatId).toBeNull();
@@ -25,16 +25,16 @@ describe("Session", () => {
 
   it("recordTurn() writes provider, thread and model together", () => {
     const session = Session.create("main");
-    session.recordTurn({ provider: "openai", providerThreadId: "t-1", model: "gpt-5" });
+    session.recordTurn({ provider: "openai", modelThreadId: "t-1", model: "gpt-5" });
     expect(session.provider).toBe("openai");
-    expect(session.providerThreadId).toBe("t-1");
+    expect(session.modelThreadId).toBe("t-1");
     expect(session.model).toBe("gpt-5");
 
     // A provider with no thread yet clears the stale thread and model, so a
     // resume never replays another provider's thread.
     session.recordTurn({ provider: "anthropic" });
     expect(session.provider).toBe("anthropic");
-    expect(session.providerThreadId).toBeNull();
+    expect(session.modelThreadId).toBeNull();
     expect(session.model).toBeNull();
   });
 
@@ -52,12 +52,12 @@ describe("Session", () => {
 
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-2", checkpointId: "c-2" },
     });
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-3", checkpointId: "c-3" },
     });
     expect(session.pendingChanges().checkpoints).toEqual([
@@ -65,14 +65,14 @@ describe("Session", () => {
         sessionId: session.id,
         turnId: "turn-2",
         provider: "openai",
-        providerThreadId: "t-1",
+        modelThreadId: "t-1",
         checkpointId: "c-2",
       },
       {
         sessionId: session.id,
         turnId: "turn-3",
         provider: "openai",
-        providerThreadId: "t-1",
+        modelThreadId: "t-1",
         checkpointId: "c-3",
       },
     ]);
@@ -97,11 +97,11 @@ describe("Session", () => {
     expect([...session.pendingChanges().changes].sort()).toEqual(["lastActiveAt", "status"]);
   });
 
-  it("deprecatedHasProviderThread follows the provider thread", () => {
+  it("deprecatedHasModelThread follows the model thread", () => {
     const session = Session.create("main");
-    expect(session.deprecatedHasProviderThread).toBe(false);
-    session.recordTurn({ provider: "openai", providerThreadId: "t-1" });
-    expect(session.deprecatedHasProviderThread).toBe(true);
+    expect(session.deprecatedHasModelThread).toBe(false);
+    session.recordTurn({ provider: "openai", modelThreadId: "t-1" });
+    expect(session.deprecatedHasModelThread).toBe(true);
   });
 
   it("touch() and complete() move lastActiveAt forward", () => {
@@ -120,7 +120,7 @@ describe("Session", () => {
       workingDir: "/w",
       deprecatedChatId: "chat-1",
     });
-    session.recordTurn({ provider: "openai", providerThreadId: "t-1", model: "gpt-5" });
+    session.recordTurn({ provider: "openai", modelThreadId: "t-1", model: "gpt-5" });
 
     const successor = session.replace();
     expect(session.status).toBe("completed");
@@ -129,7 +129,7 @@ describe("Session", () => {
     expect(successor.agentName).toBe("main");
     expect(successor.continuityKey).toBe("webchat:chat-1");
     expect(successor.provider).toBeNull();
-    expect(successor.providerThreadId).toBeNull();
+    expect(successor.modelThreadId).toBeNull();
     expect(successor.model).toBeNull();
     // The working dir is the provider's, so the successor starts without one
     // until it opens, as a reset does today.

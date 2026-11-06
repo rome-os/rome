@@ -349,7 +349,7 @@ describe("CodexAppServerProvider", () => {
     await new CodexAppServerProvider().openSession(
       buildParams({
         config: { builtinTools: [] },
-        thread: { kind: "resume", providerThreadId: "old-thread" },
+        thread: { kind: "resume", modelThreadId: "old-thread" },
       }),
     );
 
@@ -493,8 +493,8 @@ describe("CodexAppServerProvider", () => {
 
     expect(startMock).toHaveBeenCalledTimes(1);
     expect(requestMock.mock.calls.filter((call) => call[0] === "initialize")).toHaveLength(1);
-    expect(alpha.providerThreadId).toBe("thread-alpha");
-    expect(beta.providerThreadId).toBe("thread-beta");
+    expect(alpha.modelThreadId).toBe("thread-alpha");
+    expect(beta.modelThreadId).toBe("thread-beta");
     expect(alphaExecute).toHaveBeenCalledWith(
       "alpha_researcher",
       { prompt: "alpha_researcher" },
@@ -586,7 +586,7 @@ describe("CodexAppServerProvider", () => {
       }
       if (method === "thread/fork") {
         // app-server emits this on the source client; it must not replace the
-        // source session's provider thread identity.
+        // source session's model thread identity.
         captured.onNotification?.("thread/started", { thread: { id: "fork-thread" } });
         return { thread: { id: "fork-thread" } };
       }
@@ -614,10 +614,10 @@ describe("CodexAppServerProvider", () => {
     const forkCall = requestMock.mock.calls.find((call) => call[0] === "thread/fork");
     expect(forkCall?.[1]).not.toHaveProperty("dynamicTools");
     expect(forkCall?.[1]).not.toHaveProperty("historyMode");
-    expect(source.providerThreadId).toBe("source-thread");
+    expect(source.modelThreadId).toBe("source-thread");
     expect(fork).toMatchObject({
-      sourceProviderThreadId: "source-thread",
-      providerThreadId: "fork-thread",
+      sourceModelThreadId: "source-thread",
+      modelThreadId: "fork-thread",
       mode,
     });
     expect(requestMock).toHaveBeenCalledWith(
@@ -850,7 +850,7 @@ describe("CodexAppServerProvider", () => {
     expect(forkCall?.[1]).not.toHaveProperty("dynamicTools");
     expect(forkCall?.[1]).not.toHaveProperty("historyMode");
     expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
-    expect(fork.providerThreadId).toBe("historical-fork-thread");
+    expect(fork.modelThreadId).toBe("historical-fork-thread");
 
     await forkSession.close();
     await source.close();
@@ -931,7 +931,7 @@ describe("CodexAppServerProvider", () => {
       expect.objectContaining({ threadId: "source-thread", ephemeral: false }),
     );
     expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
-    expect(fork.providerThreadId).toBe("continuable-fork-thread");
+    expect(fork.modelThreadId).toBe("continuable-fork-thread");
 
     await forkSession.close();
     await source.close();
@@ -957,7 +957,7 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        thread: { kind: "resume", providerThreadId: "legacy-source" },
+        thread: { kind: "resume", modelThreadId: "legacy-source" },
       }),
     );
     const fork = await source.fork({
@@ -971,7 +971,7 @@ describe("CodexAppServerProvider", () => {
       expect.objectContaining({ threadId: "legacy-source" }),
     );
     expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
-    expect(fork.providerThreadId).toBe("legacy-child");
+    expect(fork.modelThreadId).toBe("legacy-child");
 
     await forkSession.close();
     await source.close();
@@ -1029,8 +1029,8 @@ describe("CodexAppServerProvider", () => {
       beforeTurnId: "hidden-fork-turn",
     });
     expect(revertAttempts).toBe(2);
-    expect(fork.providerThreadId).toBe("source-thread");
-    expect(source.providerThreadId).toBe("source-thread");
+    expect(fork.modelThreadId).toBe("source-thread");
+    expect(source.modelThreadId).toBe("source-thread");
     expect(msgs.find((m) => m.type === "result")).toMatchObject({
       content: "fork answer",
       accounting: { usage: { inputTokens: 10, cacheReadTokens: 90 } },

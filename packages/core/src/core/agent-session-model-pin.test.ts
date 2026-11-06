@@ -56,8 +56,7 @@ function createProvider(id: ProviderId) {
     );
     return {
       ...session,
-      providerThreadId:
-        params.thread.kind === "resume" ? params.thread.providerThreadId : `native-${id}`,
+      modelThreadId: params.thread.kind === "resume" ? params.thread.modelThreadId : `native-${id}`,
     };
   });
   const provider: ModelProvider = {
@@ -166,7 +165,7 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: MODEL,
-      providerThreadId: "native-openai",
+      modelThreadId: "native-openai",
     });
   });
 

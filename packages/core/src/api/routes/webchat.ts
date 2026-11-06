@@ -883,7 +883,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   /**
    * Session lookup for the two routes a side chat needs: the client's
    * continuability probe and the follow-up send. A fork qualifies only once it
-   * has left a resumable provider thread behind (see
+   * has left a resumable model thread behind (see
    * `AgentSession.persistForkThread`) — which is also how the client tells a
    * live side chat from a read-only trajectory, since the probe 404s for one
    * and 200s for the other. A legacy branch, an errored one, and one that
@@ -899,7 +899,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       webchatSessionKey(session.id),
       session.agentName ?? "main",
     );
-    return !!stored?.providerThreadId;
+    return !!stored?.modelThreadId;
   };
 
   const findContinuableSession = async (sessionId: string) => {
@@ -1468,7 +1468,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       };
       // The in-memory source is intentionally short-lived (15s in production),
       // while webchat provider sessions are durable. Acquire transparently
-      // resumes an evicted source from its persisted provider thread, allowing
+      // resumes an evicted source from its persisted model thread, allowing
       // side chats from settled conversations after the first fork or a
       // backend restart.
       const source = await deps.agentSessionManager.acquire(
@@ -1501,7 +1501,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       sourceCheckpoint = {
         providerId: storedCheckpoint.provider,
-        providerThreadId: storedCheckpoint.providerThreadId,
+        providerThreadId: storedCheckpoint.modelThreadId,
         checkpointId: storedCheckpoint.checkpointId,
       };
     } catch (err) {
@@ -1569,7 +1569,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // asynchronously and respects a manual rename), then flip the type so
       // every type-keyed gate grants ordinary-chat behavior from the 201 on.
       // The send guard in handleChatSend keeps "visible" from outrunning
-      // "continuable" until persistForkThread lands the provider thread.
+      // "continuable" until persistForkThread lands the model thread.
       const fallbackTitle = normalizeConversationTitle(input.prompt);
       const current = await deps.webchatRepo.getSession(forkSessionId);
       if (current && fallbackTitle) {
@@ -3331,7 +3331,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
 
-    // A branch is visible in the sidebar from its 201, but its provider thread
+    // A branch is visible in the sidebar from its 201, but its model thread
     // only exists once persistForkThread lands at first-answer completion.
     // Sending before then (or after a failed first answer) would acquire a
     // fresh thread and silently drop the branched context — refuse instead.
@@ -3340,7 +3340,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         webchatSessionKey(session.id),
         session.agentName ?? "main",
       );
-      if (!branchThread?.providerThreadId) {
+      if (!branchThread?.modelThreadId) {
         return answer(
           {
             error:
@@ -3527,7 +3527,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       largeModelSelection =
         (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
     }
-    // A branch has no stored selection: it continues the provider thread
+    // A branch has no stored selection: it continues the model thread
     // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
       session.parentSessionId !== null

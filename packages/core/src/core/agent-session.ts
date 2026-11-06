@@ -784,7 +784,7 @@ interface TurnExecRefs {
    * namespace it with the fork session id: splitting the in-memory manager
    * alone would not stop the fork child's open from resuming the *source*
    * child's persisted session (`SessionRepository.current` matches on this
-   * key), which would contaminate the same provider thread the source resumes
+   * key), which would contaminate the same model thread the source resumes
    * later.
    */
   childChannelThreadKey: string;
@@ -984,7 +984,7 @@ async function openSession(
     ? { origin: "named", id: requestedRomeSessionId }
     : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumed;
-  const providerThreadId = resumed?.providerThreadId ?? undefined;
+  const modelThreadId = resumed?.modelThreadId ?? undefined;
   // The session model pin records the model that produced this history.
   // Precedence: docs/concepts/sessions.md#model-pin.
   const sessionPin =
@@ -1391,7 +1391,7 @@ async function openSession(
     // starts a new one.
     thread:
       resumeThreadId !== undefined && resumeProviderId === resolution.modelProvider.id
-        ? { kind: "resume", providerThreadId: resumeThreadId }
+        ? { kind: "resume", modelThreadId: resumeThreadId }
         : { kind: "new" },
     executeAction,
     executeSubagent,
@@ -1500,7 +1500,7 @@ async function openSession(
     // never mutates the source" invariant. The separate manager isolates the
     // in-memory map; the namespaced thread key isolates session-store reuse
     // (`SessionRepository.current` would otherwise resume the source child's
-    // provider thread). keepAlive gives one forked turn child continuity across
+    // model thread). keepAlive gives one forked turn child continuity across
     // repeated calls to the same subagent; runForkedTurn disposes the manager
     // when the fork ends, so fork children never outlive the fork.
     let forkChildManager: AgentSessionManager | undefined;
@@ -1654,9 +1654,9 @@ async function openSession(
     initialResolution = await deps.modelResolver.getModelProvider(
       resolveAgentModelRequest(config, selectionId, sessionPin),
     );
-    modelSession = await openModelSession(initialResolution, resumed?.provider, providerThreadId);
+    modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =
-      providerThreadId !== undefined && resumed?.provider === initialResolution.modelProvider.id;
+      modelThreadId !== undefined && resumed?.provider === initialResolution.modelProvider.id;
   }
   // A resume the caller moved to another dir now writes its transcript there,
   // so the row follows it once the provider has opened.
@@ -1686,7 +1686,7 @@ async function openSession(
     threadResumed,
     // The row recorded a thread this open does not resume: another provider
     // now runs the chat, and its new thread has seen none of it.
-    replacedThread: !threadResumed && !!resumed?.providerThreadId,
+    replacedThread: !threadResumed && !!resumed?.modelThreadId,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     toolCount:
@@ -1998,7 +1998,7 @@ class AgentSessionImpl implements AgentSession {
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
   /**
-   * The current provider thread started in this session rather than resuming
+   * The current model thread started in this session rather than resuming
    * one, so its first turn carries the `<thread_context>` block.
    */
   private threadFresh: boolean;
@@ -2170,7 +2170,7 @@ class AgentSessionImpl implements AgentSession {
 
     const previous = this.modelSession;
     const sameProvider = previous.providerId === resolution.modelProvider.id;
-    const resumeThreadId = sameProvider ? previous.providerThreadId : undefined;
+    const resumeThreadId = sameProvider ? previous.modelThreadId : undefined;
     this.replacingModelSession = previous;
     this.modelSessionAvailable = false;
     try {
@@ -2187,7 +2187,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
-        if (previous.providerThreadId !== undefined) {
+        if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
           this.previousModel = previous.model;
         }
@@ -2333,7 +2333,7 @@ class AgentSessionImpl implements AgentSession {
         if (isTerminalEvent(outbound)) {
           // The branch action becomes available when turn_end is published.
           // Persist the provider-native anchor first so an immediate click can
-          // never fall back to (or race with) a later provider-thread head.
+          // never fall back to (or race with) a later model-thread head.
           if (outbound.type === "result") {
             const interrupted =
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
@@ -2606,7 +2606,7 @@ class AgentSessionImpl implements AgentSession {
     try {
       this.session.recordTurn({
         provider: session.providerId,
-        providerThreadId: session.providerThreadId,
+        modelThreadId: session.modelThreadId,
         model: session.model,
         reasoningEffort,
         checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
@@ -2629,7 +2629,7 @@ class AgentSessionImpl implements AgentSession {
   /**
    * Leave a completed fork behind as its own resumable conversation: an
    * agent-session row keyed by the fork's channel-thread key and pinned to the
-   * provider thread the fork actually ran on.
+   * model thread the fork actually ran on.
    *
    * Best-effort by construction. The fork's answer has already been delivered,
    * so a failed write costs only continuability and must never surface as a
@@ -2642,8 +2642,8 @@ class AgentSessionImpl implements AgentSession {
     forkSession: ModelSession,
     reasoningEffort: string | undefined,
   ): Promise<void> {
-    const providerThreadId = forkSession.providerThreadId;
-    if (!providerThreadId) {
+    const modelThreadId = forkSession.modelThreadId;
+    if (!modelThreadId) {
       log.info("fork thread not persisted: provider exposed no thread id", {
         sessionId: this.sessionId,
         forkSessionId,
@@ -2663,7 +2663,7 @@ class AgentSessionImpl implements AgentSession {
       });
       fork.recordTurn({
         provider: forkSession.providerId,
-        providerThreadId,
+        modelThreadId,
         model: forkSession.model,
         reasoningEffort,
       });
@@ -2907,7 +2907,7 @@ class AgentSessionImpl implements AgentSession {
     let outputSchemaSuspended = false;
     // Assigned inside the mutex below, after ensureModelSessionForTurn() may
     // have replaced this.modelSession. See the guard in the `finally`.
-    let sourceProviderThreadId: string | undefined;
+    let sourceModelThreadId: string | undefined;
     try {
       // Enter the cleanup scope before publishing turn_start. If a caller
       // detaches immediately after that first event, iterator.return() must
@@ -2932,19 +2932,19 @@ class AgentSessionImpl implements AgentSession {
           await this.ensureModelSessionForTurn();
           const sourceModelSession = this.modelSession;
           sourceFunding = sourceModelSession.funding;
-          sourceProviderThreadId = sourceModelSession.providerThreadId;
+          sourceModelThreadId = sourceModelSession.modelThreadId;
           if (input.sourceCheckpoint) {
             if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
               throw new Error(
                 `Fork checkpoint provider ${input.sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
               );
             }
-            const liveProviderThreadId = sourceModelSession.providerThreadId;
+            const liveModelThreadId = sourceModelSession.modelThreadId;
             if (
-              liveProviderThreadId &&
-              input.sourceCheckpoint.providerThreadId !== liveProviderThreadId
+              liveModelThreadId &&
+              input.sourceCheckpoint.providerThreadId !== liveModelThreadId
             ) {
-              throw new Error("Fork checkpoint belongs to a different provider thread");
+              throw new Error("Fork checkpoint belongs to a different model thread");
             }
           }
           const forkModel = input.tier
@@ -3099,7 +3099,7 @@ class AgentSessionImpl implements AgentSession {
         input.persistThreadKey &&
         terminalSeen &&
         status === "completed" &&
-        forkSession.providerThreadId !== sourceProviderThreadId
+        forkSession.modelThreadId !== sourceModelThreadId
       ) {
         await this.persistForkThread(
           input.persistThreadKey(forkSessionId),

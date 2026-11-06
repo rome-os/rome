@@ -253,18 +253,18 @@ describe("bundled Codex app-server", () => {
     let threadId: string | undefined;
     try {
       expect(await runTurn(first, "Reply with ok. (before resume)")).toContain("exec_command");
-      threadId = first.providerThreadId;
+      threadId = first.modelThreadId;
     } finally {
       await first.close();
     }
 
     const resumed = await provider.openSession({
       ...sessionParams(model, []),
-      thread: { kind: "resume", providerThreadId: threadId! },
+      thread: { kind: "resume", modelThreadId: threadId! },
     });
     try {
       const tools = await runTurn(resumed, "Reply with ok. (after resume)");
-      expect(resumed.providerThreadId).toBe(threadId);
+      expect(resumed.modelThreadId).toBe(threadId);
       expect(tools.filter((tool) => CODEX_SHELL_TOOLS.includes(tool))).toEqual([]);
     } finally {
       await resumed.close();
@@ -281,7 +281,7 @@ describe("bundled Codex app-server", () => {
       const child = await fork.open(openParams);
       try {
         const tools = await runTurn(child, "Reply with ok. (isolated fork)");
-        expect(child.providerThreadId).not.toBe(source.providerThreadId);
+        expect(child.modelThreadId).not.toBe(source.modelThreadId);
         expect(tools.filter((tool) => CODEX_SHELL_TOOLS.includes(tool))).toEqual([]);
       } finally {
         await child.close();

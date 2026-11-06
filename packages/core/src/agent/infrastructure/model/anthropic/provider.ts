@@ -585,7 +585,7 @@ export class AnthropicProvider implements ModelProvider {
     // the CLI has never seen. A cancelled first turn can leave a user-only
     // transcript that is not resumable, so an id is never reused.
     const sdkSessionId =
-      params.thread.kind === "resume" ? params.thread.providerThreadId : randomUUID();
+      params.thread.kind === "resume" ? params.thread.modelThreadId : randomUUID();
 
     const q = query({
       prompt: inputQueue.iter(),
@@ -617,7 +617,7 @@ export class AnthropicProvider implements ModelProvider {
         ...(params.config.workingDir ? { cwd: params.config.workingDir } : {}),
         ...(params.fork
           ? {
-              resume: params.fork.sourceProviderThreadId,
+              resume: params.fork.sourceModelThreadId,
               forkSession: true,
               sessionId: sdkSessionId,
               ...(params.fork.sourceCheckpoint
@@ -627,9 +627,9 @@ export class AnthropicProvider implements ModelProvider {
           : // `{ resume }` fails with "No conversation found with session ID"
             // for a thread that never wrote a transcript, so the run asks to
             // resume only a thread id this provider reported after a turn with
-            // content (`session.providerThreadId`, captured below).
+            // content (`session.modelThreadId`, captured below).
             params.thread.kind === "resume"
-            ? { resume: params.thread.providerThreadId }
+            ? { resume: params.thread.modelThreadId }
             : { sessionId: sdkSessionId }),
       },
     });
@@ -646,10 +646,10 @@ export class AnthropicProvider implements ModelProvider {
     let running = false;
 
     // The SDK's own session id, captured from the first assistant message once a
-    // transcript with real content exists. Exposed via `session.providerThreadId`
+    // transcript with real content exists. Exposed via `session.modelThreadId`
     // so the host persists it and gates `{ resume }` on it (see options above).
     let establishedThreadId: string | undefined =
-      params.thread.kind === "resume" ? params.thread.providerThreadId : undefined;
+      params.thread.kind === "resume" ? params.thread.modelThreadId : undefined;
     let activeTurnLastAssistantMessageId: string | undefined;
 
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
@@ -1105,7 +1105,7 @@ export class AnthropicProvider implements ModelProvider {
       get isClosed(): boolean {
         return closed || abortController.signal.aborted;
       },
-      get providerThreadId(): string | undefined {
+      get modelThreadId(): string | undefined {
         return establishedThreadId;
       },
       events,
@@ -1186,7 +1186,7 @@ export class AnthropicProvider implements ModelProvider {
         const mode = forkParams.mode ?? "ephemeral";
         // Before a turn with content reports the SDK's own id, the id this
         // session was opened under names its transcript.
-        const sourceProviderThreadId = establishedThreadId ?? sdkSessionId;
+        const sourceModelThreadId = establishedThreadId ?? sdkSessionId;
         // The CLI id of the forked session, so the handle names its thread
         // before it opens.
         const forkSessionId = randomUUID();
@@ -1194,9 +1194,9 @@ export class AnthropicProvider implements ModelProvider {
 
         return {
           providerId,
-          sourceProviderThreadId,
+          sourceModelThreadId,
           mode,
-          providerThreadId: forkSessionId,
+          modelThreadId: forkSessionId,
           open: async (openParams) => {
             if (opened) {
               throw new Error("ModelSession fork already opened");
@@ -1204,9 +1204,9 @@ export class AnthropicProvider implements ModelProvider {
             opened = true;
             return await openProviderSession({
               ...openParams,
-              thread: { kind: "resume", providerThreadId: forkSessionId },
+              thread: { kind: "resume", modelThreadId: forkSessionId },
               fork: {
-                sourceProviderThreadId,
+                sourceModelThreadId,
                 mode,
                 sourceCheckpoint: forkParams.sourceCheckpoint,
               },

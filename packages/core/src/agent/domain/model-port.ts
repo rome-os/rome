@@ -83,7 +83,7 @@ export type ModelCheckpointId = string;
  */
 export type ModelTurnId = string;
 
-/** Where a completed turn left a provider thread. */
+/** Where a completed turn left a model thread. */
 export interface ModelPosition {
   provider: ProviderId;
   modelThreadId: ModelThreadId;
@@ -143,7 +143,7 @@ export interface ModelProvider {
  * `resume` continues one it named before. The branch of a thread at a
  * checkpoint joins here when `ModelSession.fork` goes.
  */
-export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: ModelThreadId };
+export type ThreadStart = { kind: "new" } | { kind: "resume"; modelThreadId: ModelThreadId };
 
 /**
  * Value object. The model session's configuration: what the run fixes when
@@ -265,7 +265,7 @@ export interface ModelSessionForkParams {
 }
 
 export interface ModelSessionForkSource {
-  sourceProviderThreadId: ModelThreadId;
+  sourceModelThreadId: ModelThreadId;
   mode: ModelSessionForkMode;
   sourceCheckpoint?: ModelCheckpointId;
 }
@@ -274,9 +274,9 @@ export type ModelSessionForkOpenParams = Omit<ModelSessionParams, "thread" | "fo
 
 export interface ModelSessionFork {
   readonly providerId: ProviderId;
-  readonly sourceProviderThreadId: ModelThreadId;
+  readonly sourceModelThreadId: ModelThreadId;
   readonly mode: ModelSessionForkMode;
-  readonly providerThreadId?: ModelThreadId;
+  readonly modelThreadId?: ModelThreadId;
 
   open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
 }
@@ -290,7 +290,7 @@ export interface ModelSession {
   readonly events: AsyncIterable<ModelSessionEvent>;
 
   /** The thread this session runs on, once it can be resumed. Claude: after the first assistant message. */
-  readonly providerThreadId?: ModelThreadId;
+  readonly modelThreadId?: ModelThreadId;
 
   /** Who pays the model provider for a turn that ends now. Unset when unknown. */
   readonly funding?: UsageFunding;

@@ -215,7 +215,7 @@ export function buildThreadContextBlock(
 export const FETCH_CHANNEL_HISTORY_ACTION = "system:fetch_channel_history";
 
 /**
- * Render a `<continuation>` block for the first turn of a provider thread that
+ * Render a `<continuation>` block for the first turn of a model thread that
  * replaced the one holding the chat, after a move to another provider. Rome's
  * transcript still has every message; the agent reads what it needs. It names
  * no channel: the thread's channel and id are in its thread context.

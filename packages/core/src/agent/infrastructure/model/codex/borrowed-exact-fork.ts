@@ -120,7 +120,7 @@ export async function createBorrowedExactForkSession(
     providerId: args.providerId,
     model: args.openParams.config.model,
     events: sink.iter(),
-    providerThreadId: args.sourceThreadId,
+    modelThreadId: args.sourceThreadId,
     get funding(): UsageFunding | undefined {
       return args.funding?.();
     },
