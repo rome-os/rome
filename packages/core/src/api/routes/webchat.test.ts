@@ -6159,6 +6159,43 @@ describe("Webchat API", () => {
       await runtime.flushAll();
     });
 
+    it("marks no Stop on a background turn whose provider turn has already moved on", async () => {
+      const sessionId = "sess-late-stop";
+      await deps.webchatRepo.createSession(sessionId, "Late stop");
+      const owner = { currentTurnId: "superseded-turn", interrupt: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const { routes, runtime } = createWebchatRuntime(deps);
+      let stopRequested: (() => boolean) | undefined;
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async (helpers) => {
+        stopRequested = helpers.stopRequested;
+        helpers.emit({
+          type: "turn_start",
+          turnId: "superseded-turn",
+          sessionId: "provider-session",
+          userPrompt: "<task_events/>",
+        });
+        await gate;
+      });
+      let turnId = "";
+      await rs.waitFor(async () => {
+        const turns = await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json();
+        turnId = turns[0]?.turnId;
+        expect(turnId).toMatch(/^backend:/);
+      });
+      // A newer input already ended the turn; the stream is still draining.
+      owner.currentTurnId = "newer-turn";
+      await routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
+      expect(owner.interrupt).not.toHaveBeenCalled();
+      expect(stopRequested?.()).toBe(false);
+      finish();
+      await task;
+      await runtime.flushAll();
+    });
+
     it("keeps a deleted task chat's row on the Concierge's list and tells the Concierge", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
       const deleted: string[] = [];

@@ -3101,7 +3101,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!stream) return answer({ stopped: false, reason: "no_running_turn" }, 404);
     log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
     if (stream.interrupt) {
-      stream.stopRequested = true;
       await stream.interrupt("user-stop");
       return answer({ stopped: stream.finished }, stream.finished ? 200 : 202);
     }
@@ -4314,7 +4313,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // merely because it reuses the same runtime session.
         if (owner?.currentTurnId === msg.turnId) {
           stream.interrupt = async (reason) => {
-            if (owner.currentTurnId === msg.turnId) await owner.interrupt(reason);
+            if (owner.currentTurnId !== msg.turnId) return;
+            // Marked only when the Stop reaches this turn: one that lands
+            // after a newer input ended it stops nothing.
+            if (reason === "user-stop") stream.stopRequested = true;
+            await owner.interrupt(reason);
           };
         }
       }
