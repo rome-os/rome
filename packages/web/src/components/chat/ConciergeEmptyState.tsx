@@ -1,6 +1,6 @@
 import type { ConciergeConnectorDto, ConciergeConnectorsResponse } from "@rome/api-types/concierge";
-import { ArrowRight, CalendarDays, Dumbbell, Github, type LucideIcon, Plane } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { ArrowRight, Briefcase, House, type LucideIcon, Plane } from "lucide-react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RomeLogo } from "@/components/logo";
@@ -12,7 +12,6 @@ import {
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
 import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
-import { fetchJson } from "@/lib/fetch-json";
 
 const PROMPT_KEYS = [
   "concierge.empty.prompts.weather",
@@ -49,75 +48,24 @@ export function ConciergeEmptyState({ onPick }: { onPick: (prompt: string) => vo
   );
 }
 
-/** A connector's follows, or none. */
-const followsOf = (connector: ConciergeConnectorDto | undefined) =>
-  connector?.capabilities.watch.follows ?? [];
-
 /**
- * The starters a blank topic chat offers, from what the guardian already has:
- * calendar alerts when a calendar is followed or connected, a followed GitHub
- * repository's pull requests and CI, then generic ongoing topics, two or three
- * in all.
+ * The starters a blank topic chat offers: three kinds of ongoing topic, the
+ * same for everyone, so they show at once. Picking one sends it as the chat's
+ * first message, and the Concierge works out what to follow from there.
  */
-export function topicStarters(
-  connectors: readonly ConciergeConnectorDto[],
-  t: (key: string, options?: Record<string, string>) => string,
-): TopicStarter[] {
-  const starters: TopicStarter[] = [];
-  const calendar = connectors.find((connector) => /calendar/i.test(connector.service));
-  if (calendar && (calendar.state === "working" || followsOf(calendar).length > 0)) {
-    starters.push({ kind: "calendar", text: t("concierge.topicEmpty.starters.calendar") });
-  }
-  const repo = followsOf(connectors.find((connector) => connector.service === "github"))[0];
-  if (repo) {
-    starters.push({
-      kind: "github",
-      text: t("concierge.topicEmpty.starters.github", { repo: repo.target }),
-    });
-  }
-  for (const kind of ["trip", "fitness"] as const) {
-    if (starters.length >= 3 || (starters.length >= 2 && kind === "fitness")) break;
-    starters.push({ kind, text: t(`concierge.topicEmpty.starters.${kind}`) });
-  }
-  return starters;
-}
-
-/** One starter: what it is about, and the first message it sends. */
-export interface TopicStarter {
-  kind: "calendar" | "github" | "trip" | "fitness";
-  text: string;
-}
-
-const STARTER_ICONS: Record<TopicStarter["kind"], LucideIcon> = {
-  calendar: CalendarDays,
-  github: Github,
-  trip: Plane,
-  fitness: Dumbbell,
-};
+const TOPIC_STARTERS: ReadonlyArray<{ key: "life" | "work" | "trip"; icon: LucideIcon }> = [
+  { key: "life", icon: House },
+  { key: "work", icon: Briefcase },
+  { key: "trip", icon: Plane },
+];
 
 /**
  * What a blank topic chat shows before its first message: what a topic chat
- * is for, two or three starters that send themselves as its first message, and
+ * is for, three starters that send themselves as its first message, and
  * a way back to the main chat for a one-off question.
  */
 export function ConciergeTopicEmptyState({ onStart }: { onStart: (prompt: string) => void }) {
   const { t } = useTranslation("chat");
-  // What the guardian has, read once: without it the starters are generic ones.
-  // Null until the list answers, so the starters show once, in their final set.
-  const [connectors, setConnectors] = useState<ConciergeConnectorDto[] | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchJson<ConciergeConnectorsResponse>("/api/concierge/connectors", {
-      signal: controller.signal,
-      fallback: "",
-    })
-      .then((data) => setConnectors(data.connectors))
-      .catch(() => {
-        if (!controller.signal.aborted) setConnectors([]);
-      });
-    return () => controller.abort();
-  }, []);
-  const starters = connectors ? topicStarters(connectors, t) : null;
   const titleId = useId();
   // One hero line, a description at reading size, and the starters as the
   // focal point: the same column and rhythm as the other empty states, with
@@ -139,13 +87,9 @@ export function ConciergeTopicEmptyState({ onStart }: { onStart: (prompt: string
         </p>
         {/* Every starter takes the column's width, and a long one wraps inside
             its border instead of running past it. */}
-        <div
-          className="mt-8 flex min-h-[calc(2*3.5rem+0.75rem)] w-full flex-col gap-3"
-          aria-busy={starters === null}
-          data-concierge-topic-starters
-        >
-          {starters?.map(({ kind, text }) => {
-            const Icon = STARTER_ICONS[kind];
+        <div className="mt-8 flex w-full flex-col gap-3" data-concierge-topic-starters>
+          {TOPIC_STARTERS.map(({ key, icon: Icon }) => {
+            const text = t(`concierge.topicEmpty.starters.${key}`);
             return (
               <Button
                 key={text}

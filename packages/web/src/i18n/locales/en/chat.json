@@ -85,10 +85,9 @@
       "title": "Start an ongoing topic",
       "description": "Give something that keeps coming up a place of its own, like your calendar, a project or a trip. Alerts and tasks here show up only in this chat.",
       "starters": {
-        "calendar": "Send my calendar reminders here from now on",
-        "github": "Follow {{repo}} PRs and CI here",
-        "trip": "Help me plan next month's trip, and keep everything about it here",
-        "fitness": "Keep my workout plan here, and check in with me each week"
+        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
+        "work": "Keep track of work here: project progress, PRs and meetings",
+        "trip": "Help me plan next month's trip, and keep everything about it here"
       },
       "justAsk": "Just asking a question?",
       "backToMain": "Ask in the main chat →"

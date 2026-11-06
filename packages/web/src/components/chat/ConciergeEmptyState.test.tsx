@@ -53,18 +53,6 @@ describe("ConciergeTopicEmptyState", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
   });
-  const connector = (service: string, state: "working" | null, follows: string[] = []) => ({
-    service,
-    state,
-    capabilities: { watch: { state: "unlocked", follows: follows.map((target) => ({ target })) } },
-  });
-  const serve = (connectors: unknown[]) =>
-    rs
-      .spyOn(globalThis, "fetch")
-      .mockImplementation((async (input: RequestInfo | URL) =>
-        String(input) === "/api/concierge/connectors"
-          ? Response.json({ connectors, rules: { digestTimes: [], quietHours: null } })
-          : new Response("not found", { status: 404 })) as typeof fetch);
   const renderTopic = (onStart = rs.fn()) =>
     render(
       <MemoryRouter>
@@ -72,61 +60,40 @@ describe("ConciergeTopicEmptyState", () => {
       </MemoryRouter>,
     );
 
-  it("says what a topic chat is for, and starts from the calendar and a followed repo the guardian has", async () => {
-    serve([
-      connector("googlecalendar", "working"),
-      connector("github", "working", ["acme/widgets"]),
-    ]);
+  it("offers three topic kinds at once, with no request, and sends the picked one", async () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch");
     const onStart = rs.fn();
     renderTopic(onStart);
     expect(screen.getByRole("region", { name: "Start an ongoing topic" })).toBeTruthy();
-    await screen.findByRole("button", { name: "Follow acme/widgets PRs and CI here" });
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Send my calendar reminders here from now on",
-      "Follow acme/widgets PRs and CI here",
+      "Be my life helper: schedule, bills, deliveries and other errands live here",
+      "Keep track of work here: project progress, PRs and meetings",
       "Help me plan next month's trip, and keep everything about it here",
     ]);
-    await userEvent.click(
-      screen.getByRole("button", { name: "Send my calendar reminders here from now on" }),
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const work = screen.getByRole("button", {
+      name: "Keep track of work here: project progress, PRs and meetings",
+    });
+    // A long starter wraps inside its border and grows taller, at the column's width.
+    expect(work.className).toContain("whitespace-normal");
+    expect(work.className).toContain("w-full");
+    await userEvent.click(work);
+    expect(onStart).toHaveBeenCalledWith(
+      "Keep track of work here: project progress, PRs and meetings",
     );
-    expect(onStart).toHaveBeenCalledWith("Send my calendar reminders here from now on");
     expect(screen.getByRole("link", { name: "Ask in the main chat →" }).getAttribute("href")).toBe(
       "/chat/concierge",
     );
   });
 
-  it("shows no starters until the guardian's connectors are known, then the final set, wrapping a long one", async () => {
-    let answer!: (response: Response) => void;
-    rs.spyOn(globalThis, "fetch").mockImplementation(
-      (() => new Promise<Response>((resolve) => (answer = resolve))) as typeof fetch,
-    );
-    renderTopic();
-    expect(screen.queryAllByRole("button")).toEqual([]);
-    expect(
-      document.querySelector("[data-concierge-topic-starters]")?.getAttribute("aria-busy"),
-    ).toBe("true");
-    answer(
-      Response.json({
-        connectors: [connector("github", "working", ["acme/widgets"])],
-        rules: { digestTimes: [], quietHours: null },
-      }),
-    );
-    const repo = await screen.findByRole("button", { name: "Follow acme/widgets PRs and CI here" });
-    expect(screen.getAllByRole("button")).toHaveLength(2);
-    // A long starter wraps inside its border and grows taller, at the column's width.
-    expect(repo.className).toContain("whitespace-normal");
-    expect(repo.className).toContain("h-auto");
-    expect(repo.className).toContain("w-full");
-  });
-
-  it("offers generic topics when nothing is connected, in the guardian's language", async () => {
+  it("offers them in the guardian's language", async () => {
     await i18n.changeLanguage("zh-CN");
-    serve([connector("googlecalendar", null), connector("github", "working")]);
     renderTopic();
     expect(screen.getByRole("region", { name: "开一个长期话题" })).toBeTruthy();
-    expect((await screen.findAllByRole("button")).map((button) => button.textContent)).toEqual([
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "当我的生活小助手：日程、账单、快递这些琐事都放这里",
+      "帮我跟进工作上的事：项目进度、PR、会议都放这里",
       "帮我规划下个月的旅行，相关的事都放这里",
-      "这里专门管我的健身计划，每周问问我进度",
     ]);
     expect(screen.getByText("只是问个问题？")).toBeTruthy();
     await i18n.changeLanguage("en");
