@@ -45,14 +45,26 @@ let provisionAfterLink: ReturnType<typeof rs.fn>;
 type Persist = NonNullable<Parameters<typeof instanceAdoptRoutes>[1]>["persistInstanceToken"];
 
 // Stands in for the signer-mode persist: stores the token, then reports how
-// registering the key went.
-function link(status: ProveIdentityResult["status"] = "ok"): NonNullable<Persist> {
+// registering the key went. On success Rome Cloud's whoami names `hostedSlug`
+// (left out when it is `undefined`, as for a credential that is not hosted).
+function link(
+  status: ProveIdentityResult["status"] = "ok",
+  // null = Rome Cloud names no hosted slug (`undefined` would take the default).
+  hostedSlug: string | null = "acme",
+): NonNullable<Persist> {
   return async (settings, token) => {
     await settings.set("instanceToken", token);
     setInstanceTokenInMemory(token);
     return (
       status === "ok"
-        ? { status, identity: { accountId: "acct_1", instanceId: "inst_1" } }
+        ? {
+            status,
+            identity: {
+              accountId: "acct_1",
+              instanceId: "inst_1",
+              ...(hostedSlug === null ? {} : { hostedSlug }),
+            },
+          }
         : { status }
     ) as ProveIdentityResult;
   };
@@ -125,7 +137,7 @@ function expectUntouched(): void {
 
 describe("POST /instance/adopt", () => {
   it("adopts a blank hosted instance: applies the slug, stores it, restarts workers", async () => {
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, slug: "acme", origin: "https://acme.romeos.cc" });
@@ -141,7 +153,7 @@ describe("POST /instance/adopt", () => {
   it("does not wait for provisioning", async () => {
     provisionAfterLink = rs.fn(() => new Promise<void>(() => {}));
 
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(200);
   });
@@ -151,7 +163,7 @@ describe("POST /instance/adopt", () => {
       throw new Error("boom");
     });
 
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(200);
     expect(process.env.PANTHEON_SLUG).toBe("acme");
@@ -161,7 +173,7 @@ describe("POST /instance/adopt", () => {
     // In signer mode a registered key is what links the instance.
     await hydrateInstanceToken(memoryStore({ instanceKeyId: "key_existing" }));
 
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "not_blank" });
@@ -171,7 +183,7 @@ describe("POST /instance/adopt", () => {
   it("refuses an instance that already has a guardian", async () => {
     insertGuardian();
 
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "not_blank" });
@@ -182,7 +194,7 @@ describe("POST /instance/adopt", () => {
   it("refuses without a signer, where the token would only be stored", async () => {
     delete process.env.ROME_SIGNER_SOCKET;
 
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "signer_required" });
@@ -190,32 +202,81 @@ describe("POST /instance/adopt", () => {
     expectUntouched();
   });
 
-  it("writes the slug record before it links the token", async () => {
-    let recordWhenLinking: unknown;
+  it("links first and records {from, to} only afterwards", async () => {
+    let recordWhenLinking: unknown = "not read";
     const persist: NonNullable<Persist> = async (settings, token) => {
       recordWhenLinking = store.data.get("instanceSlug");
       return link()(settings, token);
     };
 
-    const res = await adopt(mount({ persistInstanceToken: persist }), {
-      slug: "acme",
+    const res = await adopt(mount({ persistInstanceToken: persist }), { instanceToken: TOKEN });
+
+    expect(res.status).toBe(200);
+    expect(recordWhenLinking).toBeUndefined();
+    expect(store.data.get("instanceSlug")).toEqual(POOL_RECORD);
+  });
+
+  it("ignores a slug in the body: Rome Cloud names it", async () => {
+    const res = await adopt(mount(), { slug: "someone-else", instanceToken: TOKEN });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, slug: "acme", origin: "https://acme.romeos.cc" });
+    expect(process.env.PANTHEON_SLUG).toBe("acme");
+  });
+
+  it("takes whatever slug Rome Cloud names, one character to 63", async () => {
+    const long = await adopt(mount({ persistInstanceToken: link("ok", "a".repeat(63)) }), {
+      instanceToken: TOKEN,
+    });
+    expect(long.status).toBe(200);
+    expect(process.env.PANTHEON_SLUG).toBe("a".repeat(63));
+
+    await hydrateInstanceToken(memoryStore());
+    const short = await adopt(mount({ persistInstanceToken: link("ok", "a") }), {
+      instanceToken: TOKEN,
+    });
+    expect(short.status).toBe(200);
+    expect(process.env.PANTHEON_SLUG).toBe("a");
+  });
+
+  it.each([
+    ["names none (a desktop or browser instance's token)", null],
+    ["names a slug that is not a DNS label", "Not A Label"],
+    ["names a slug with a dot", "acme.evil.com"],
+  ])("refuses and undoes the link when Rome Cloud %s", async (_name, hostedSlug) => {
+    const res = await adopt(mount({ persistInstanceToken: link("ok", hostedSlug) }), {
       instanceToken: TOKEN,
     });
 
-    expect(res.status).toBe(200);
-    expect(recordWhenLinking).toEqual(POOL_RECORD);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "not_hosted_instance" });
+    expect(store.data.has("instanceToken")).toBe(false);
+    expect(getInstanceToken()).toBeNull();
+    expectUntouched();
   });
 
-  it("undoes the token and the slug record when linking throws", async () => {
+  it("undoes the token when linking throws", async () => {
     const persist: NonNullable<Persist> = async (settings, token) => {
       await settings.set("instanceToken", token);
       throw new Error("store unavailable");
     };
 
-    const res = await adopt(mount({ persistInstanceToken: persist }), {
-      slug: "acme",
-      instanceToken: TOKEN,
-    });
+    const res = await adopt(mount({ persistInstanceToken: persist }), { instanceToken: TOKEN });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "adopt_failed" });
+    expect(store.data.has("instanceToken")).toBe(false);
+    expectUntouched();
+  });
+
+  it("undoes the token when the slug record cannot be stored", async () => {
+    const failingSet = store.set.bind(store);
+    store.set = async (key, value) => {
+      if (key === "instanceSlug") throw new Error("disk full");
+      return failingSet(key, value);
+    };
+
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: "adopt_failed" });
@@ -226,7 +287,7 @@ describe("POST /instance/adopt", () => {
   it("refuses an instance that is not hosted", async () => {
     delete process.env.PANTHEON_DOMAIN;
 
-    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+    const res = await adopt(mount(), { instanceToken: TOKEN });
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "not_hosted" });
@@ -234,35 +295,8 @@ describe("POST /instance/adopt", () => {
     expectUntouched();
   });
 
-  it.each([
-    "",
-    "Acme",
-    "-acme",
-    "acme-",
-    "ac me",
-    "acme.evil.com",
-    "a".repeat(64),
-    42,
-    null,
-  ])("rejects the slug %j", async (slug) => {
-    const res = await adopt(mount(), { slug, instanceToken: TOKEN });
-
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "invalid_slug" });
-    expect(getInstanceToken()).toBeNull();
-    expectUntouched();
-  });
-
-  it("accepts a 63-character slug and a single character", async () => {
-    const long = await adopt(mount(), { slug: "a".repeat(63), instanceToken: TOKEN });
-    expect(long.status).toBe(200);
-    setInstanceTokenInMemory(null);
-    const short = await adopt(mount(), { slug: "a", instanceToken: TOKEN });
-    expect(short.status).toBe(200);
-  });
-
   it.each(["rome_accounttoken", "", 7, null])("rejects the token %j", async (instanceToken) => {
-    const res = await adopt(mount(), { slug: "acme", instanceToken });
+    const res = await adopt(mount(), { instanceToken });
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "invalid_token" });
@@ -283,9 +317,8 @@ describe("POST /instance/adopt", () => {
       "clock_skew",
       "audience_mismatch",
       "unconfigured",
-    ] as const)("answers 502 for the transient status %s and undoes token and slug record", async (status) => {
+    ] as const)("answers 502 for the transient status %s and undoes the token", async (status) => {
       const res = await adopt(mount({ persistInstanceToken: link(status) }), {
-        slug: "acme",
         instanceToken: TOKEN,
       });
 
@@ -301,9 +334,8 @@ describe("POST /instance/adopt", () => {
       "revoked",
       "key_conflict",
       "upgrade_required",
-    ] as const)("answers 409 for the terminal status %s and undoes token and slug record", async (status) => {
+    ] as const)("answers 409 for the terminal status %s and undoes the token", async (status) => {
       const res = await adopt(mount({ persistInstanceToken: link(status) }), {
-        slug: "acme",
         instanceToken: TOKEN,
       });
 

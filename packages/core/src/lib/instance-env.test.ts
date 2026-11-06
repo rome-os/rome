@@ -3,6 +3,7 @@ import {
   applyInstanceSlug,
   decideAdoptedSlug,
   deriveInstanceOrigin,
+  isInstanceHosted,
   isInstanceSlug,
   readEnvInstanceOrigin,
   readEnvInstanceSlug,
@@ -84,6 +85,14 @@ describe("deriveInstanceOrigin", () => {
   it("returns null when there is no domain", () => {
     expect(deriveInstanceOrigin("acme", {})).toBeNull();
     expect(deriveInstanceOrigin("acme", { PANTHEON_DOMAIN: "  " })).toBeNull();
+  });
+});
+
+describe("isInstanceHosted", () => {
+  it("is true only with a PANTHEON_DOMAIN", () => {
+    expect(isInstanceHosted({ PANTHEON_DOMAIN: "romeos.cc" })).toBe(true);
+    expect(isInstanceHosted({ PANTHEON_DOMAIN: " . " })).toBe(false);
+    expect(isInstanceHosted({})).toBe(false);
   });
 });
 

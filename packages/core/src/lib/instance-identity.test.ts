@@ -160,6 +160,35 @@ describe("proveIdentity", () => {
     expect(http.calls[0].headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
   });
 
+  it("carries the hosted slug whoami names for a provisioned credential", async () => {
+    const http = createFetchRecorder();
+    http.when("GET", WHOAMI_URL).reply(200, {
+      instanceId: "inst-123",
+      account: { id: "acct-789" },
+      hostedSlug: "acme",
+    });
+
+    const result = await proveIdentity({ fetch: http.fetch });
+
+    expect(result.status === "ok" && result.identity.hostedSlug).toBe("acme");
+  });
+
+  it.each([
+    ["null", { hostedSlug: null }],
+    ["absent (an older Rome Cloud)", {}],
+    ["not a string", { hostedSlug: 7 }],
+  ])("leaves the hosted slug out when whoami's is %s", async (_name, extra) => {
+    const http = createFetchRecorder();
+    http
+      .when("GET", WHOAMI_URL)
+      .reply(200, { instanceId: "inst-123", account: { id: "acct-789" }, ...extra });
+
+    const result = await proveIdentity({ fetch: http.fetch });
+
+    expect(result.status).toBe("ok");
+    expect(result.status === "ok" && "hostedSlug" in result.identity).toBe(false);
+  });
+
   it("reports the running version on the boot-time identity announcement", async () => {
     const http = createFetchRecorder();
     http

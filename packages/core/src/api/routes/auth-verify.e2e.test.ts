@@ -182,9 +182,10 @@ describe("/api/auth/verify", () => {
     expect(res.status).toBe(204);
   });
 
-  it("keeps the instance adopt route private: a blank box has no guardian, so no one passes", async () => {
+  it("returns 204 for the instance adopt route without a cookie, and keeps its siblings private", async () => {
     const host = buildHost(await stubDeps([]));
-    expect((await verifyRequest(host, "/api/instance/adopt")).status).toBe(401);
+    expect((await verifyRequest(host, "/api/instance/adopt")).status).toBe(204);
+    expect((await verifyRequest(host, "/api/instance/adopt/extra")).status).toBe(401);
   });
 
   it("keeps the rest of /api/setups/* private", async () => {

@@ -40,6 +40,11 @@ const PUBLIC_API_PATHS = [
   "/api/bootstrap",
   "/api/onboard/*",
   "/api/instance/enroll/*",
+  // A blank warm-pool instance adopts its tenant identity here, before any
+  // guardian exists. Exact path: the request needs a provisioned instance token
+  // that Rome Cloud accepts, and the route refuses anything but a blank,
+  // unlinked, hosted instance.
+  "/api/instance/adopt",
   "/api/oauth/*",
   // The connect return leg. The desktop shell hands provider sign-in to the
   // system browser (the Electron window has no platform authenticator, so a

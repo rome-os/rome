@@ -13,21 +13,21 @@
  * here lets the source of these values change in one place.
  *
  * A blank hosted instance (a warm-pool VM) receives its identity at runtime
- * through `POST /api/instance/adopt` (api/routes/instance-adopt.ts). The route
- * is private: Caddy's forward_auth needs a guardian session and a blank box has
- * none, so only a caller inside the container, on core's loopback port, can
- * reach it. The token goes through instance-identity.ts, and the slug is written
- * back here with {@link applyInstanceSlug}, which updates `process.env` and so
- * reaches children forked later.
+ * through `POST /api/instance/adopt` (api/routes/instance-adopt.ts). The request
+ * carries only the instance token: the route links with it (instance-identity.ts)
+ * and takes the slug from Rome Cloud's whoami answer, then writes it back here
+ * with {@link applyInstanceSlug}, which updates `process.env` and so reaches
+ * children forked later.
  *
  * The slug is also stored in the settings table as `{ from, to }`
- * ({@link INSTANCE_SLUG_SETTING_KEY}), written before the token is linked. A
+ * ({@link INSTANCE_SLUG_SETTING_KEY}), written right after the link. A
  * respawned backend inherits the container's original env (the pool slug); at
  * boot {@link decideAdoptedSlug} re-applies `to` only while the env slug is still
  * `from`. Once the container is recreated with a newer `.env` (the adopted slug,
  * or a later address change), the env has moved on, the stored value is dropped
- * and the env wins. The control plane never retries adopt on a VM whose claim
- * failed (it quarantines the VM), so no resumable pending state is needed.
+ * and the env wins. A crash between the link and that write leaves a linked box
+ * without the slug; the control plane's call fails, so it quarantines the VM and
+ * never retries adopt on it, and no resumable pending state is needed.
  *
  * Read live, so they follow an adopted identity:
  *   - lib/cloud-auth-gate.ts and lib/auto-upgrade-gate.ts (statsig gates):
@@ -118,6 +118,11 @@ export function readEnvInstanceOrigin(env: NodeJS.ProcessEnv = process.env): str
 export function readEnvInstanceToken(env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (env.ROME_DEV_SKIP_TOKEN_SEED === "1") return undefined;
   return env.ROME_INSTANCE_TOKEN?.trim();
+}
+
+/** Whether the instance is hosted: it has a `PANTHEON_DOMAIN` to derive an origin from. */
+export function isInstanceHosted(env: NodeJS.ProcessEnv = process.env): boolean {
+  return deriveInstanceOrigin("probe", env) !== null;
 }
 
 /**

@@ -247,6 +247,10 @@ export interface InstanceIdentity {
   /** Rome Cloud profile picture for the account owner. Null means Cloud knows
    *  the account has no picture; undefined means the response omitted the field. */
   avatarUrl?: string | null;
+  /** The slug of the Pantheon-hosted Rome this credential is the provisioned one
+   *  of, as whoami names it. Absent when whoami says null or, from an older Rome
+   *  Cloud, omits it: either way this is not a hosted instance. */
+  hostedSlug?: string;
   /** The whole whoami account, for `system:get_guardian_cloud_profile`. */
   profile?: CloudProfile;
 }
@@ -353,6 +357,7 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
 
   const data = (await response.json().catch(() => null)) as {
     instanceId?: unknown;
+    hostedSlug?: unknown;
     account?: { id?: unknown; email?: unknown; avatarUrl?: unknown } | null;
   } | null;
   const instanceId = typeof data?.instanceId === "string" ? data.instanceId : null;
@@ -366,9 +371,18 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
         : null
       : undefined;
 
+  const hostedSlug = typeof data?.hostedSlug === "string" ? data.hostedSlug : undefined;
+
   return {
     status: "ok",
-    identity: { accountId, instanceId, email, avatarUrl, profile: readCloudProfile(data?.account) },
+    identity: {
+      accountId,
+      instanceId,
+      email,
+      avatarUrl,
+      ...(hostedSlug === undefined ? {} : { hostedSlug }),
+      profile: readCloudProfile(data?.account),
+    },
   };
 }
 
