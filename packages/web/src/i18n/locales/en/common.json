@@ -49,6 +49,12 @@
     "conciergeUnreadBadge_other": "{{label}} unread messages",
     "conciergeNeedsYou_one": "{{count}} task needs you",
     "conciergeNeedsYou_other": "{{count}} tasks need you",
+    "newTopicChat": "New topic chat",
+    "topicChatActions": "Actions for {{name}}",
+    "topicChatUnread_one": "{{name}}, {{label}} unread message",
+    "topicChatUnread_other": "{{name}}, {{label}} unread messages",
+    "topicChatDeleteConfirm": "Delete this topic chat permanently? Its follows and open tasks move to the main Concierge chat.",
+    "topicChatRetireFailed": "Couldn't change the topic chat.",
     "startedByConcierge": "Started by Concierge",
     "rowStatus": {
       "waiting": "Waiting for you",

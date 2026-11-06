@@ -2492,6 +2492,93 @@ describe("Webchat API", () => {
     expect((await deps.webchatRepo.getSession(session.id))?.name).toBe("Q4 Launch Plan");
   });
 
+  it("opens a chat's runtime for a background turn as its first message would", async () => {
+    const acquired: Array<[unknown, Record<string, unknown> | undefined]> = [];
+    deps.agentSessionManager = {
+      acquire: rs.fn(async (key: unknown, init?: Record<string, unknown>) => {
+        acquired.push([key, init]);
+        return { sessionId: "runtime-topic" };
+      }),
+      peek: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    await deps.webchatRepo.createSession(
+      "topic-1",
+      "Calendar",
+      undefined,
+      undefined,
+      "claude-sonnet",
+      undefined,
+      "core:concierge",
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    expect(await runtime.openSession("topic-1")).toBe("runtime-topic");
+    const [key, init] = acquired[0]!;
+    expect(key).toEqual({ agentName: "core:concierge", channelThreadKey: "webchat:topic-1" });
+    expect(init).toMatchObject({
+      romeSessionId: "topic-1",
+      selectionId: "claude-sonnet",
+      threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
+    });
+    expect(String(init?.contextSuffix)).toContain("## Guardian");
+  });
+
+  it("names an untitled topic chat from its first message, and never a named one or the main chat", async () => {
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => {
+        throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
+          code: "model_provider_unavailable",
+          provider: "openai",
+          reason: "not_logged_in",
+        });
+      }),
+      peek: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+    rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+      name: "concierge",
+      policy: { finalText: "private", autoTitle: false },
+    } as ReturnType<typeof deps.agentLoader.get>);
+    deps.concierge = {
+      switchIfExhausted: async () => null,
+      conciergeChat: async () => null,
+    } as never;
+    const generateTitle = rs.fn(async () => "Calendar");
+    deps.conversationTitleGenerator = { generate: generateTitle };
+    // The main chat; an untitled topic chat from the dashboard's plus; one topic_start named.
+    for (const [id, name] of [
+      ["concierge", "Concierge"],
+      ["topic-1", ""],
+      ["topic-2", "Trips"],
+    ]) {
+      await deps.webchatRepo.createSession(
+        id!,
+        name!,
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+    }
+    const app = createWebchatRuntime(deps).routes;
+    for (const id of ["concierge", "topic-1", "topic-2"]) {
+      const response = await app.request(`/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Remind me before each meeting" }),
+      });
+      expect(response.status).toBe(200);
+    }
+    await rs.waitFor(async () =>
+      expect((await deps.webchatRepo.getSession("topic-1"))?.name).toBe("Calendar"),
+    );
+    expect(generateTitle).toHaveBeenCalledOnce();
+    expect((await deps.webchatRepo.getSession("concierge"))?.name).toBe("Concierge");
+    expect((await deps.webchatRepo.getSession("topic-2"))?.name).toBe("Trips");
+  });
+
   it("does not delay the turn terminal event while conversation naming is still running", async () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {
@@ -3626,6 +3713,40 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
+      const { sentTurns } = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      deps.concierge = {
+        switchIfExhausted: async () => null,
+        conciergeChat: async (id: string) =>
+          id === "topic-1" ? { id, name: "Calendar", main: false } : null,
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      await deps.webchatRepo.createSession("plain", "Plain");
+      const app = createWebchatRuntime(deps).routes;
+      for (const id of ["topic-1", "plain"]) {
+        const sent = await app.request(`/chat/sessions/${id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        });
+        expect(sent.status).toBe(200);
+        await drainTurn(app, sent);
+      }
+      expect(sentTurns[0]?.prompt).toBe(
+        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n\nhello',
+      );
+      expect(sentTurns[1]?.prompt).toBe("hello");
+    });
+
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
@@ -3634,6 +3755,7 @@ describe("Webchat API", () => {
           await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
           return null;
         },
+        conciergeChat: async () => null,
       } as never;
       await deps.webchatRepo.createSession(
         "concierge",
@@ -5479,6 +5601,58 @@ describe("Webchat API", () => {
 
       expect(deleted).toEqual([row.id]);
       expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
+    });
+
+    it("keeps the main Concierge chat, and retires a topic chat before archiving or deleting it", async () => {
+      const retired: [string, string][] = [];
+      deps.concierge = {
+        taskOfChat: async () => null,
+        retireChat: async (chatId: string, how: string) => void retired.push([chatId, how]),
+      } as never;
+      const topic = (id: string) =>
+        deps.webchatRepo.createSession(
+          id,
+          "Topic",
+          undefined,
+          undefined,
+          null,
+          undefined,
+          "core:concierge",
+        );
+      await deps.webchatRepo.createSession(
+        "concierge",
+        "Concierge",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      await topic("topic-1");
+      await topic("topic-2");
+      await deps.webchatRepo.createSession("plain-chat", "Plain");
+      const app = createWebchatRuntime(deps).routes;
+      const archive = (id: string, archived = true) =>
+        app.request(`/chat/sessions/${id}/archive`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived }),
+        });
+
+      expect((await archive("concierge")).status).toBe(409);
+      expect((await app.request("/chat/sessions/concierge", { method: "DELETE" })).status).toBe(
+        409,
+      );
+      expect(await deps.webchatRepo.getSession("concierge")).toMatchObject({ archivedAt: null });
+
+      expect((await archive("topic-1")).status).toBe(200);
+      expect((await archive("topic-1", false)).status).toBe(200);
+      expect((await app.request("/chat/sessions/topic-2", { method: "DELETE" })).status).toBe(200);
+      expect((await archive("plain-chat")).status).toBe(200);
+      expect(retired).toEqual([
+        ["topic-1", "archived"],
+        ["topic-2", "deleted"],
+      ]);
     });
 
     it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {

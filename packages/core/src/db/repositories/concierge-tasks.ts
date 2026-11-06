@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { and, asc, desc, eq, gte, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { DrizzleDb } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
@@ -10,12 +11,15 @@ export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];
 
 /**
- * A row with the name of the task chat it links, which is the chat's own, and
- * the id of its source message when that message still exists in the Concierge chat.
+ * A row with the name of the task chat it links, which is the chat's own, the
+ * Concierge chat it came from, and the id of its source message when that
+ * message still exists in that Concierge chat.
  */
 export interface ConciergeTaskWithChat {
   row: ConciergeTaskRow;
   chat: { id: string; name: string } | null;
+  /** The Concierge chat the row came from: the main chat when the row names none or its chat is gone. */
+  conciergeChat: { id: string; name: string; main: boolean };
   sourceMessageId: string | null;
 }
 
@@ -30,7 +34,9 @@ export interface ConciergeTaskWrite {
   dueAt?: Date | null;
   rank?: number | null;
   sessionId?: string | null;
-  /** A message of the Concierge chat, by its key there; the caller has
+  /** The Concierge chat the row came from. Null is the main chat. */
+  chatId?: string | null;
+  /** A message of the row's Concierge chat, by its key there; the caller has
    *  checked it. */
   sourceMessageId?: string | null;
   archived?: boolean;
@@ -51,7 +57,7 @@ const isFinished = (state: ConciergeTaskState) => state === "done" || state === 
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
 
-  /** Where a task's source message is looked up: the Concierge chat's
+  /** Where a task's source message is looked up: its Concierge chat's
    *  lines in Chats. */
   private readonly sources: TaskSources;
 
@@ -60,6 +66,26 @@ export class ConciergeTasksRepository {
     sources?: TaskSources,
   ) {
     this.sources = sources ?? conciergeChatSources(db);
+  }
+
+  /**
+   * Moves the unfinished rows of Concierge chat `from` to the main chat, as
+   * when that chat is archived or deleted. Answers how many moved.
+   */
+  async moveToMainChat(from: string): Promise<number> {
+    const moved = await this.db
+      .update(conciergeTasks)
+      .set({ chatId: null })
+      .where(
+        and(
+          eq(conciergeTasks.chatId, from),
+          ne(conciergeTasks.state, "done"),
+          ne(conciergeTasks.state, "dropped"),
+        ),
+      )
+      .returning({ id: conciergeTasks.id });
+    for (const { id } of moved) await this.announce(id, "refresh");
+    return moved.length;
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -166,6 +192,7 @@ export class ConciergeTasksRepository {
               ? (existing?.archivedAt ?? now)
               : null;
         const completedAt = isFinished(state) ? (existing?.completedAt ?? now) : null;
+        const chatId = write.chatId !== undefined ? write.chatId : (existing?.chatId ?? null);
         const fields = {
           title: write.title ?? existing?.title ?? "",
           state,
@@ -176,11 +203,12 @@ export class ConciergeTasksRepository {
           rank: write.rank !== undefined ? write.rank : (existing?.rank ?? null),
           sessionId:
             write.sessionId !== undefined ? write.sessionId : (existing?.sessionId ?? null),
+          chatId: chatId === CONCIERGE_CHAT_ID ? null : chatId,
           sourceMessageId:
             write.sourceMessageId !== undefined
               ? write.sourceMessageId === null
                 ? null
-                : this.sources.idOf(write.sourceMessageId)
+                : this.sources.idOf(chatId ?? CONCIERGE_CHAT_ID, write.sourceMessageId)
               : (existing?.sourceMessageId ?? null),
           updatedAt: now,
           completedAt,
@@ -222,57 +250,100 @@ export class ConciergeTasksRepository {
   }
 
   private async withChat(where: SQL | undefined): Promise<ConciergeTaskWithChat[]> {
+    const origin = alias(romeSessions, "origin");
     const rows = await this.db
       .select({
         task: conciergeTasks,
         chatName: romeSessions.name,
+        originName: origin.name,
+        originArchivedAt: origin.archivedAt,
       })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
+      .leftJoin(origin, eq(origin.id, conciergeTasks.chatId))
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
-    // Only a message the Concierge chat still holds counts as a source.
+    const mainName =
+      rows.length > 0
+        ? ((
+            await this.db
+              .select({ name: romeSessions.name })
+              .from(romeSessions)
+              .where(eq(romeSessions.id, CONCIERGE_CHAT_ID))
+          )[0]?.name ?? "Concierge")
+        : "Concierge";
+    // A row whose chat is archived or gone belongs to the main chat, so its
+    // buttons and results reach a chat the guardian can write in.
+    const conciergeChatOf = (
+      task: ConciergeTaskRow,
+      originName: string | null,
+      originArchivedAt: Date | null,
+    ) =>
+      task.chatId && originName !== null && originArchivedAt === null
+        ? { id: task.chatId, name: originName, main: false }
+        : { id: CONCIERGE_CHAT_ID, name: mainName, main: true };
+    // Only a message the row's Concierge chat still holds counts as a source.
     const sources = this.sources.keysOf(
-      rows.flatMap(({ task }) => (task.sourceMessageId ? [task.sourceMessageId] : [])),
+      rows.flatMap(({ task, originName, originArchivedAt }) =>
+        task.sourceMessageId
+          ? [
+              {
+                id: task.sourceMessageId,
+                chatId: conciergeChatOf(task, originName, originArchivedAt).id,
+              },
+            ]
+          : [],
+      ),
     );
-    return rows.map(({ task, chatName }) => ({
+    return rows.map(({ task, chatName, originName, originArchivedAt }) => ({
       row: task,
       chat: task.sessionId && chatName !== null ? { id: task.sessionId, name: chatName } : null,
+      conciergeChat: conciergeChatOf(task, originName, originArchivedAt),
       sourceMessageId: (task.sourceMessageId && sources.get(task.sourceMessageId)) || null,
     }));
   }
 }
 
-/** The Concierge chat's messages by their key there, and back. */
+/** A Concierge chat's messages by their key there, and back. */
 export interface TaskSources {
-  /** The id of the message keyed `key`, or null when the chat holds none. */
-  idOf(key: string): number | null;
-  /** The key of each of `ids` the chat still holds. */
-  keysOf(ids: readonly number[]): Map<number, string>;
+  /** The id of the message keyed `key` in Concierge chat `chatId`, or null when it holds none. */
+  idOf(chatId: string, key: string): number | null;
+  /** The key of each message that its Concierge chat still holds. */
+  keysOf(refs: readonly { id: number; chatId: string }[]): Map<number, string>;
 }
 
-/** The Concierge chat's messages as Chats holds them. */
+/** The Concierge chats' messages as Chats holds them. */
 function conciergeChatSources(db: DrizzleDb): TaskSources {
   const messages = new MessageRepository(db);
-  const chat = (): ChatRef | null => {
-    const row = db
-      .select({ chatId: romeSessions.chatId, platform: romeSessions.chatPlatform })
+  const chatsOf = (ids: readonly string[]): Map<string, ChatRef> => {
+    if (ids.length === 0) return new Map();
+    const rows = db
+      .select({
+        id: romeSessions.id,
+        chatId: romeSessions.chatId,
+        platform: romeSessions.chatPlatform,
+      })
       .from(romeSessions)
-      .where(eq(romeSessions.id, CONCIERGE_CHAT_ID))
-      .get();
-    return row?.chatId && row.platform ? { platform: row.platform, id: row.chatId } : null;
+      .where(inArray(romeSessions.id, [...new Set(ids)]))
+      .all();
+    return new Map(
+      rows.flatMap((row) =>
+        row.chatId && row.platform ? [[row.id, { platform: row.platform, id: row.chatId }]] : [],
+      ),
+    );
   };
   return {
-    idOf(key) {
-      const at = chat();
+    idOf(chatId, key) {
+      const at = chatsOf([chatId]).get(chatId);
       return at ? messages.idOf(at, key) : null;
     },
-    keysOf(ids) {
-      const at = chat();
+    keysOf(refs) {
+      const chats = chatsOf(refs.map((ref) => ref.chatId));
+      const chatOf = new Map(refs.map((ref) => [ref.id, chats.get(ref.chatId)?.id]));
       return new Map(
         messages
-          .byIds(ids)
-          .filter((message) => message.place.chat.id === at?.id)
+          .byIds(refs.map((ref) => ref.id))
+          .filter((message) => message.place.chat.id === chatOf.get(message.id))
           .map((message) => [message.id, message.key]),
       );
     },

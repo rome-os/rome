@@ -48,7 +48,7 @@ import {
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import { ConciergeEntry } from "./ConciergeEntry";
+import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
@@ -368,15 +368,20 @@ export function RecentChats({
   // while it was in flight. Per mount, since events stop while unmounted; the
   // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // The Concierge chat has its own entry above the list.
+  // The Concierge chats have their own entries above the list. An archived
+  // topic chat has none there, so it stays in the list with the other
+  // archived chats, where it can be found and unarchived.
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
-        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID)
+        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID || s.archivedAt)
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
+  // A blank topic chat opened from the Concierge entry is not New chat.
+  const isTopicDraft =
+    (location.state as { conciergeTopic?: unknown } | null)?.conciergeTopic === true;
 
   // A chat that starts running before the list has it, such as a task chat
   // Concierge just started, would show only when its first turn ends. The
@@ -1149,7 +1154,7 @@ export function RecentChats({
         <div className="shrink-0 px-3 pb-1">
           <Link
             to="/chat"
-            className={`${LINK_CLASS} ${location.pathname === "/chat" ? ACTIVE_CLASS : IDLE_CLASS}`}
+            className={`${LINK_CLASS} ${location.pathname === "/chat" && !isTopicDraft ? ACTIVE_CLASS : IDLE_CLASS}`}
           >
             <span
               className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
@@ -1161,7 +1166,7 @@ export function RecentChats({
             <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
           </Link>
           {conciergeChatId ? (
-            <ConciergeEntry chatId={conciergeChatId} active={activeSessionId === conciergeChatId} />
+            <ConciergeChats mainChatId={conciergeChatId} activeSessionId={activeSessionId} />
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">

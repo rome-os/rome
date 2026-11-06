@@ -5,11 +5,11 @@
 
 ## Context
 
-Concierge keeps one long-lived chat and delegates work to task chats. Its stored messages and task list let a replacement provider thread recover the work. A provider failure need not strand that chat, but an automatic move must remain visible.
+Each [Concierge chat](../domains/chats.md#concierge-chat), the main chat or a topic chat, is long-lived and delegates work to task chats. Its stored messages and task list let a replacement provider thread recover the work. A provider failure need not strand that chat, but an automatic move must remain visible.
 
 ## Decision
 
-Only the fixed Concierge chat retries or changes models automatically after a recognized subscription-provider failure. Every move records a visible notice, and the recovery prompt requires a check before an action repeats.
+Only a Concierge chat, the main chat or a topic chat, retries or changes models automatically after a recognized subscription-provider failure. Every move records a visible notice, and the recovery prompt requires a check before an action repeats.
 
 ## Alternatives
 
@@ -26,7 +26,7 @@ Quota, spend limits and sign-in failures move directly to the other eligible sub
 
 Context limits, invalid requests, output limits, refusals, interruptions, shutdowns, structured-output failures, turn limits and unknown errors never trigger recovery. Neither does an API-key source or an API-key balance error. A target must be signed in, have quota, need no reauthentication and use a subscription, not an API key or Rome credits.
 
-A move cannot return to a model left automatically within ten minutes. Concierge never switches back merely because availability returns. Its manual model menu remains available when the product model selector is off. A turn that finishes during a retry wait neither cancels the retry nor starts another recovery chain. The retry checks history before doing any work.
+A move cannot return to a model the same chat left automatically within ten minutes. Concierge never switches back merely because availability returns. Its manual model menu remains available when the product model selector is off. A turn that finishes during a retry wait neither cancels the retry nor starts another recovery chain. The retry checks history before doing any work.
 
 Future diffs must respect:
 

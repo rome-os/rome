@@ -1,6 +1,7 @@
 // Delivery of task-chat changes to the Concierge. Each change marks its row
 // dirty in memory; a flush hands the dirty rows to the Concierge as one system
-// turn, so a burst of changes is one turn rather than one per change.
+// turn per Concierge chat the rows came from, so a burst of changes is one
+// turn per chat rather than one per change.
 //
 //   urgent  flush 2 s after the row went dirty: a result the Concierge asked
 //           for, an error, a question or an approval
@@ -42,13 +43,22 @@ export interface DirtyTask {
   quiet: boolean;
 }
 
+/** One system turn of a flush: the payload for the rows of one Concierge chat. */
+export interface TaskEventDelivery {
+  /** The Concierge chat the rows came from. Null is the main chat. */
+  chatId: string | null;
+  prompt: string;
+  /** No row in it has an urgent change. */
+  quiet: boolean;
+}
+
 export interface TaskEventDeps {
   now(): number;
   isEnabled(): Promise<boolean>;
-  /** The payload for these rows, read from the database now, or null when none of them exist any more. */
-  render(tasks: DirtyTask[]): Promise<string | null>;
-  /** Runs the payload as a system turn and settles when the turn ends. */
-  deliver(prompt: string, options: { quiet: boolean }): Promise<void>;
+  /** The payloads for these rows, read from the database now, one per Concierge chat; empty when none of them exist any more. */
+  render(tasks: DirtyTask[]): Promise<TaskEventDelivery[]>;
+  /** Runs one payload as a system turn in its chat and settles when the turn ends. */
+  deliver(delivery: TaskEventDelivery): Promise<void>;
   /** The row was flushed and still not settled after its retry. */
   giveUp(taskId: string): void;
 }
@@ -162,12 +172,19 @@ export class TaskEventCoalescer {
         changes: entry.changes,
         quiet: !entry.urgent,
       }));
-      const prompt = await this.deps.render(tasks);
-      if (!prompt) {
+      const deliveries = await this.deps.render(tasks);
+      if (deliveries.length === 0) {
         for (const [taskId] of taken) this.dirty.delete(taskId);
         return;
       }
-      await this.deps.deliver(prompt, { quiet: tasks.every((task) => task.quiet) });
+      // One chat's turn failing leaves the other chats' turns to run.
+      for (const delivery of deliveries) {
+        await this.deps.deliver(delivery).catch((error: unknown) =>
+          log.warn("task event delivery to one chat failed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
     } catch (error) {
       log.warn("task event flush failed", {
         error: error instanceof Error ? error.message : String(error),

@@ -1,4 +1,5 @@
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
+import { conciergeChatLine, isConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -760,6 +761,8 @@ export interface WebchatRuntime {
   /** Start a chat for the guardian, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
   startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
+  openSession(chatId: string): Promise<string>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -2484,6 +2487,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
+    // The main Concierge chat stays; a topic chat hands its follows and open
+    // tasks to it first (docs/domains/chats.md#topic-chat).
+    if (sessionId === CONCIERGE_CHAT_ID) {
+      return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
+    }
+    if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.peek({
@@ -2523,8 +2532,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (typeof body.archived !== "boolean") {
       return c.json({ error: "archived must be a boolean" }, 400);
     }
+    if (body.archived && sessionId === CONCIERGE_CHAT_ID) {
+      return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
+    }
     if (body.archived) {
       await deps.webchatRepo.archiveSession(sessionId);
+      if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
     } else {
       await deps.webchatRepo.unarchiveSession(sessionId);
     }
@@ -2582,7 +2595,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "largeModelSelection must be a model selection id" }, 400);
     }
     if (
-      sessionId !== CONCIERGE_CHAT_ID &&
+      !isConciergeChat(lookup.session) &&
       (await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY)) !== true
     ) {
       return c.json({ error: "The model selector is turned off" }, 409);
@@ -3445,9 +3458,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`
       : repliedPrompt;
-    const promptText = automated
+    const noticedPrompt = automated
       ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
       : contextPrompt;
+    // A Concierge turn opens with the chat it runs in, on each turn, so a
+    // rename reaches a running session (rome-os/rome#1739).
+    const conciergeChat = isConciergeChat(session)
+      ? await deps.concierge?.conciergeChat(sessionId)
+      : null;
+    const promptText = conciergeChat
+      ? `${conciergeChatLine(conciergeChat)}\n\n${noticedPrompt}`
+      : noticedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3491,7 +3512,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
-    if (sessionId === CONCIERGE_CHAT_ID) {
+    if (isConciergeChat(session)) {
       await deps.concierge?.switchIfExhausted(sessionId);
       // A background turn may also have moved the chat since this send read it.
       largeModelSelection =
@@ -3532,6 +3553,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
+    // The main Concierge chat keeps its fixed name, and so does a topic chat
+    // started with one. An untitled topic chat is named from its first
+    // message, as an ordinary chat is.
+    const autoTitle =
+      policy.autoTitle ||
+      (isConciergeChat(session) && sessionId !== CONCIERGE_CHAT_ID && session.name === "");
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
@@ -3604,7 +3631,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
         const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
         enqueueStream(sessionId, stream);
-        if (policy.autoTitle) {
+        if (autoTitle) {
           void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
         }
         await deps.webchatRepo.addMessage(
@@ -3668,7 +3695,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
-      if (policy.autoTitle) {
+      if (autoTitle) {
         void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
       }
 
@@ -4304,6 +4331,46 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const id = started.body.id;
       if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
       return id;
+    },
+    async openSession(chatId) {
+      // A chat that has had no turn yet: its runtime opens as the guardian's
+      // first message would open it, in its project, on its model, with the
+      // guardian's context, so a background turn can run in it.
+      const session = await deps.webchatRepo.getSession(chatId);
+      if (!session) throw new Error(`No chat ${chatId}`);
+      const projectPath = normalizeSelectedWebchatProjectPath(
+        session.projectPath ?? session.projectName,
+      );
+      const project = await ensureStoredProjectSelection(projectPath);
+      const workingDir = resolveWebchatProjectPath(project.path, getWebchatProjectsRoot());
+      const guardian = (await deps.peopleRepo.byBondLevel("guardian"))[0];
+      const modelSelection = await resolveSessionModelSelectionForTurn(
+        { id: chatId, largeModelSelection: session.largeModelSelection },
+        await deps.webchatRepo.getMessageCount(chatId),
+        undefined,
+      );
+      const opened = await deps.agentSessionManager.acquire(
+        { agentName: session.agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) },
+        {
+          workingDir,
+          threadContext: {
+            channel: "webchat",
+            threadId: chatId,
+            romeSessionId: chatId,
+            threadPath: join(workingDir, ".threads", chatId),
+            channelUserId: guardian?.id ?? "guardian",
+            threadType: "private",
+            projectName: project.name,
+            projectPath,
+            ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
+            senderBondLevel: "guardian",
+          },
+          romeSessionId: chatId,
+          contextSuffix: buildWebchatContextSuffix(),
+          selectionId: modelSelection?.id ?? null,
+        },
+      );
+      return opened.sessionId;
     },
     isRunning: isSessionRunning,
     activeTurns: (sessionId) =>

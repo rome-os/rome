@@ -96,8 +96,12 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import {
+  ConciergeEmptyState,
+  ConciergeTopicEmptyState,
+} from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
+import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -296,6 +300,11 @@ export interface ChatProps {
    * this instance mounted for it.
    */
   onSessionCreated?: (sessionId: string) => void;
+  /**
+   * Creates the session a draft's first send goes to, in place of an ordinary
+   * dashboard chat, as a Concierge topic chat does. Answers its id.
+   */
+  startSession?: () => Promise<string>;
   /** Rendered in place of the transcript while the chat has no session. */
   emptyState?: ReactNode;
   /**
@@ -331,6 +340,7 @@ export function Chat({
   recoverMissingSession,
   onSessionMessage,
   onSessionCreated,
+  startSession,
   emptyState,
   centerDraftComposer = false,
   initialProjectName,
@@ -1563,18 +1573,21 @@ export function Chat({
         if (creatingSessionRef.current) return;
         creatingSessionRef.current = true;
         try {
-          const created = await createSession({
-            name: t("sidebar.newChat"),
-            personaId: snapshot.personaId,
-            projectPath: snapshot.projectPath,
-            largeModelSelection: snapshot.largeModelSelection,
-            reasoningEffort: snapshot.reasoningEffort,
-            agentName: snapshot.agentMention?.agentName,
-            deviceFolder: snapshot.deviceFolder
-              ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
-              : undefined,
-          });
-          sendingSessionId = created.id;
+          sendingSessionId = startSession
+            ? await startSession()
+            : (
+                await createSession({
+                  name: t("sidebar.newChat"),
+                  personaId: snapshot.personaId,
+                  projectPath: snapshot.projectPath,
+                  largeModelSelection: snapshot.largeModelSelection,
+                  reasoningEffort: snapshot.reasoningEffort,
+                  agentName: snapshot.agentMention?.agentName,
+                  deviceFolder: snapshot.deviceFolder
+                    ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
+                    : undefined,
+                })
+              ).id;
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
@@ -1665,6 +1678,7 @@ export function Chat({
       workspaceContextRegistry,
       t,
       onSessionCreated,
+      startSession,
       notifySessionsChanged,
       concierge,
     ],
@@ -1769,11 +1783,10 @@ export function Chat({
 
   // Concierge before its first message. It waits for the history fetch, so a
   // chat with messages never flashes the guidance while they load.
+  // A topic chat's draft, before its first send, shows the same empty state.
   const conciergeEmpty =
     concierge &&
-    !!mainSessionId &&
-    messages.has(mainSessionId) &&
-    rows.length === 0 &&
+    (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
     !displayedStreaming;
 
   // The composer is memoized so a streaming turn does not render it, which only
@@ -1973,7 +1986,7 @@ export function Chat({
             <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
               {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
             </span>
-            {concierge ? <ConciergeTasksPill /> : null}
+            {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
             {/* The agent's app beside a titled chat. The Concierge's is always
                 Rome, so it shows none. */}
             {!concierge && sessionName?.trim() && pinnedAgentMention && (
@@ -2109,7 +2122,16 @@ export function Chat({
               )}
             >
               {conciergeEmpty ? (
-                <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
+                mainSessionId === CONCIERGE_CHAT_ID ? (
+                  <ConciergeEmptyState
+                    onPick={(prompt) => composerRef.current?.insertText(prompt)}
+                  />
+                ) : (
+                  // A topic chat: its starters send themselves as its first message.
+                  <ConciergeTopicEmptyState
+                    onStart={(prompt) => composerRef.current?.submit(prompt)}
+                  />
+                )
               ) : mainSessionId ? (
                 <>
                   {hasOlder(mainSessionId) ? (

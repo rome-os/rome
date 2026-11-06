@@ -1,6 +1,7 @@
 // Changes in task chats reach the Concierge as `<task_events>` system turns,
-// coalesced per row (task-events.ts), and a Concierge turn that wrote text
-// without speaking gets one reminder turn.
+// coalesced per row and delivered to the Concierge chat each row came from
+// (task-events.ts), and a Concierge turn that wrote text without speaking gets
+// one reminder turn.
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import type {
@@ -11,13 +12,12 @@ import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
   CONCIERGE_ACCOUNT,
-  CONCIERGE_CHAT_ID,
   type ConciergeService,
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
-import { type DirtyTask, TaskEventCoalescer } from "./task-events.js";
+import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { openQuestion } from "./transcript.js";
 
 import { failoverReason } from "./failover-reason.js";
@@ -99,20 +99,24 @@ async function waitForTurnStream(
 }
 
 /**
- * The `<task_events>` payload for these rows, read from the database now:
- * one `<task>` per row that still exists, with what changed and the latest
- * words from the chat.
+ * The `<task_events>` payloads for these rows, read from the database now, one
+ * per Concierge chat the rows came from: one `<task>` per row that still
+ * exists, with what changed and the latest words from the chat.
  */
-async function renderTaskEvents(
+export async function renderTaskEvents(
   service: ConciergeService,
   tasks: DirtyTask[],
-): Promise<string | null> {
+): Promise<TaskEventDelivery[]> {
   const { tasks: store, messages } = service.deps;
-  const blocks: string[] = [];
+  const byChat = new Map<string, { blocks: string[]; quiet: boolean }>();
   for (const task of tasks) {
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
     const { row } = found;
+    const group = byChat.get(row.chatId ?? "") ?? { blocks: [], quiet: true };
+    byChat.set(row.chatId ?? "", group);
+    group.quiet &&= task.quiet;
+    const blocks = group.blocks;
     const changes = task.changes.map((change) => change.kind);
     const lines: string[] = [];
     // A catch-up carries no event of its own, so it says what the chat holds now:
@@ -148,7 +152,11 @@ async function renderTaskEvents(
       .join(" ");
     blocks.push(`<task ${attrs}>\n${lines.join("\n")}\n</task>`);
   }
-  return blocks.length > 0 ? `<task_events>\n${blocks.join("\n")}\n</task_events>` : null;
+  return [...byChat.entries()].map(([chatId, { blocks, quiet }]) => ({
+    chatId: chatId || null,
+    prompt: `<task_events>\n${blocks.join("\n")}\n</task_events>`,
+    quiet,
+  }));
 }
 
 /** Starts listening. Returns the unsubscribe. */
@@ -165,9 +173,10 @@ export function startConciergeEvents(
     now: () => Date.now(),
     isEnabled: () => service.isEnabled(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async (prompt, options) => {
-      const chatId = await service.findChatId();
-      if (chatId) await service.runSystemTurn(chatId, prompt, options);
+    deliver: async ({ chatId: from, prompt, quiet }) => {
+      // A row whose chat is gone or archived reports to the main chat.
+      const chatId = await service.deliveryChat(from);
+      if (chatId) await service.runSystemTurn(chatId, prompt, { quiet });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
@@ -184,7 +193,6 @@ export function startConciergeEvents(
       active.finished = event;
       return;
     }
-    if (chatId !== CONCIERGE_CHAT_ID) return;
     if (event.status === "error") {
       const failure = event.output.failure;
       const reason = failoverReason(failure, service.deps.aiToolState.get());

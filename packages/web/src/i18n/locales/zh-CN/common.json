@@ -48,6 +48,12 @@
     "conciergeUnreadBadge_other": "{{label}} 条未读消息",
     "conciergeNeedsYou_one": "{{count}} 个任务等你处理",
     "conciergeNeedsYou_other": "{{count}} 个任务等你处理",
+    "newTopicChat": "新建话题对话",
+    "topicChatActions": "{{name}} 的操作",
+    "topicChatUnread_one": "{{name}}，{{label}} 条未读消息",
+    "topicChatUnread_other": "{{name}}，{{label}} 条未读消息",
+    "topicChatDeleteConfirm": "永久删除这个话题对话？它的关注和未完成的任务会转到 Concierge 主对话。",
+    "topicChatRetireFailed": "没能修改这个话题对话。",
     "startedByConcierge": "由 Concierge 发起",
     "empty": "还没有对话",
     "rowStatus": {

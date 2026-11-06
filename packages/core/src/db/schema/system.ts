@@ -697,6 +697,11 @@ export const conciergeTasks = sqliteTable(
     rank: integer("rank"),
     sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
     /**
+     * The Concierge chat the row came from, where its results go. Null is the
+     * main chat, so a row from a deleted chat reports there.
+     */
+    chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    /**
      * The Concierge chat message the row points back to, in Chats. Cleared when
      * the message goes, and the panel then offers no jump. The text is never
      * copied.
@@ -746,6 +751,11 @@ export const conciergeFollowItems = sqliteTable(
     /** What happened, in one line, as triage wrote it. */
     line: text("line").notNull(),
     url: text("url"),
+    /**
+     * The Concierge chat its follow reported to when triage kept it. Null is
+     * the main chat. No reference: a chat that is gone reports to the main chat.
+     */
+    chatId: text("chat_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     /** Set once an important item went to the Concierge, or the hourly cap skipped it. */
     offeredAt: integer("offered_at", { mode: "timestamp_ms" }),

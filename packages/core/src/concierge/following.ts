@@ -7,13 +7,16 @@
 // follows and one event-bus routine per raw event a follow listens on. Events
 // are batched, triaged by the `concierge-triage` agent (triage.ts), and what
 // triage kept reaches the Concierge as quiet system turns: important ones after
-// each batch, digest ones at the guardian's digest times (alerts.ts).
+// each batch, in the Concierge chat each follow reports to, and digest ones at
+// the guardian's digest times, in the main chat (alerts.ts).
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  CONCIERGE_CHAT_ID,
   CONCIERGE_FOLLOW_DEFAULT_RULES,
   CONCIERGE_FOLLOW_MAX_DIGEST_TIMES,
   CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH,
+  type ConciergeChatRef,
   type ConciergeFollowChange,
   type ConciergeFollowDto,
   type ConciergeConnectorsResponse,
@@ -22,6 +25,7 @@ import {
   type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
 import type { ConnectionView } from "../api/routes/connections.js";
+import { actionExecutionContext } from "../actions/context.js";
 import type { Action } from "../actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
@@ -161,6 +165,8 @@ interface FollowRecord {
   kinds: string[];
   options: Record<string, unknown>;
   preference: string | null;
+  /** The Concierge chat its alerts go to. Null is the main chat. */
+  chat: string | null;
 }
 
 interface StoredFollowing extends ConciergeFollowRules {
@@ -199,12 +205,24 @@ export interface ConciergeFollowingDeps {
     | "markDigested"
     | "recentImportant"
     | "prune"
+    | "moveToMainChat"
   >;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
   /** Where triage runs are recorded, so Sessions shows them. */
   triageRecord?: TriageRecordStore;
   now?: () => number;
+  /**
+   * The chat whose turn called a follow action, when a turn did. Reads the
+   * action's own context unless a test gives it.
+   */
+  callingChat?: () => string | null;
+}
+
+/** The chat whose turn runs the current action, read from the action's context. */
+function callingChatOfAction(): string | null {
+  const context = actionExecutionContext.getStore()?.channelContext;
+  return context?.channel === "webchat" && context.threadId ? context.threadId : null;
 }
 
 /** What the Concierge's actions and the connectors route reach. */
@@ -225,6 +243,8 @@ export interface ConciergeFollowing {
   setRules(input: Partial<ConciergeFollowRules>): Promise<ConciergeFollowRules>;
   /** Subscribes every follow again, for one whose subscription another app removed. */
   reconcile(): Promise<void>;
+  /** Moves the follows and owed events of Concierge chat `chatId` to the main chat. Answers how many follows moved. */
+  moveToMainChat(chatId: string): Promise<number>;
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -266,6 +286,7 @@ function parseFollows(value: unknown): FollowRecord[] {
             ? (f.options as Record<string, unknown>)
             : {},
         preference: typeof f.preference === "string" && f.preference ? f.preference : null,
+        chat: typeof f.chat === "string" && f.chat ? f.chat : null,
       },
     ];
   });
@@ -357,6 +378,7 @@ export function startConciergeFollowing(
   deps: ConciergeFollowingDeps,
 ): () => void {
   const now = deps.now ?? (() => Date.now());
+  const callingChat = deps.callingChat ?? callingChatOfAction;
   // The actions run in main, inside their execution's async context, which may
   // not call other actions. The connector's watch actions, and the queue's
   // timer that starts a Concierge turn, run in the context of boot instead.
@@ -438,11 +460,38 @@ export function startConciergeFollowing(
     return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(deps.settings));
   };
 
+  /** A Concierge chat as a list shows it; one that is gone or archived reads as the main chat. */
+  const chatRefOf = async (chatId: string | null): Promise<ConciergeChatRef> =>
+    (chatId ? await service.conciergeChat(chatId) : null) ??
+    (await service.conciergeChat(CONCIERGE_CHAT_ID)) ?? {
+      id: CONCIERGE_CHAT_ID,
+      name: "Concierge",
+      main: true,
+    };
+
+  /** The stored form of a chat a change names: null for the main chat. Throws for any other chat. */
+  const storedChatOf = async (chatId: string): Promise<string | null> => {
+    const chat = await service.conciergeChat(chatId);
+    if (!chat) throw new Error(`No Concierge chat ${chatId}. Name one the following list shows.`);
+    return chat.main ? null : chat.id;
+  };
+
+  /** The chat a new follow reports to: the one asked for, else the chat that asked, else the main chat. */
+  const chatForNewFollow = async (asked: string | undefined): Promise<string | null> => {
+    if (asked) return storedChatOf(asked);
+    const calling = callingChat();
+    if (!calling) return null;
+    const chat = await service.conciergeChat(calling);
+    return chat && !chat.main ? chat.id : null;
+  };
+
   const delivery = new ImportantDelivery({
     now,
     isEnabled: () => service.isEnabled(),
     quietUntil,
     owed: () => deps.items.owedToConcierge(),
+    // One turn per Concierge chat, each counted against the hourly cap.
+    groupOf: (item) => item.chatId ?? "",
     // Past the hourly cap the Concierge does not get them now; the digest still does.
     skip: (items) =>
       deps.items.markOffered(
@@ -450,7 +499,8 @@ export function startConciergeFollowing(
         new Date(now()),
       ),
     send: async (items, held) => {
-      const chatId = await service.findChatId();
+      // A chat that is gone or archived hands its items to the main chat.
+      const chatId = await service.deliveryChat(items[0]?.chatId);
       // The Concierge decides whether to tell each item now. Either way every
       // item also goes into the next digest.
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
@@ -522,6 +572,7 @@ export function startConciergeFollowing(
       decisions.push(...result.decisions);
     }
     const byId = new Map(fresh.map((e) => [e.id, e]));
+    const chatOfFollow = new Map(follows.map((f) => [`${f.source}\u0000${f.target}`, f.chat]));
     const kept = [];
     for (const decision of decisions) {
       const event = byId.get(decision.id);
@@ -543,6 +594,7 @@ export function startConciergeFollowing(
         reason: decision.reason,
         line: decision.line,
         url: event.url ?? null,
+        chatId: chatOfFollow.get(`${event.source}\u0000${event.target}`) ?? null,
       });
     }
     const stored = await deps.items.add(kept, new Date(now()));
@@ -560,20 +612,31 @@ export function startConciergeFollowing(
     flush: (events) => outsideAction(() => triageBatch(events)),
   });
 
-  /** Hands the owed digest to the Concierge as one turn, or does nothing when none is owed. */
+  /** Hands the owed digest to the Concierge as one turn, an empty one included. */
   const deliverDigest = async (): Promise<{ items: number }> => {
     if (!(await service.isEnabled())) return { items: 0 };
+    // An empty digest still runs, with count="0", so the guardian hears that
+    // nothing new came in.
     const owed = await deps.items.owedToDigest();
-    if (owed.length === 0) return { items: 0 };
     const chatId = await service.findChatId();
     const at = guardianNow(now(), await resolveGuardianTimezone(deps.settings));
+    // The digest goes to the main chat and groups every chat's items under it.
+    const chats = new Map<string, ConciergeChatRef>();
+    for (const item of owed) {
+      const key = item.chatId ?? "";
+      if (!chats.has(key)) chats.set(key, await chatRefOf(item.chatId));
+    }
     const ran =
       chatId !== null &&
       (await outsideAction(() =>
-        service.runSystemTurn(chatId, renderDigestTurn(owed, at), {
-          quiet: true,
-          inputLabel: `Following · digest (${owed.length})`,
-        }),
+        service.runSystemTurn(
+          chatId,
+          renderDigestTurn(owed, at, (item) => chats.get(item.chatId ?? "")),
+          {
+            quiet: true,
+            inputLabel: `Following · digest (${owed.length})`,
+          },
+        ),
       ));
     log.info("following digest", { items: owed.length, delivered: ran });
     // A digest that did not run to its end leaves its items for the next one.
@@ -703,7 +766,11 @@ export function startConciergeFollowing(
     }
   };
 
-  const toDto = (source: WatchSource, follow: FollowRecord): ConciergeFollowDto => {
+  const toDto = (
+    source: WatchSource,
+    follow: FollowRecord,
+    chat: ConciergeChatRef,
+  ): ConciergeFollowDto => {
     const options: Record<string, string | boolean | string[]> = {};
     for (const option of source.options) {
       options[option.key] = optionValue(option, follow.options[option.key]);
@@ -725,6 +792,7 @@ export function startConciergeFollowing(
       kinds,
       options,
       preference: follow.preference,
+      chat,
     };
   };
 
@@ -818,6 +886,11 @@ export function startConciergeFollowing(
         readStored(),
         deps.connections(),
       ]);
+      const chats = new Map<string, ConciergeChatRef>();
+      for (const follow of stored.follows) {
+        const key = follow.chat ?? "";
+        if (!chats.has(key)) chats.set(key, await chatRefOf(follow.chat));
+      }
       return {
         connectors: mergeConnectors({
           connections,
@@ -829,7 +902,9 @@ export function startConciergeFollowing(
           followsOf: (service) => {
             const source = watch.find((s) => s.source === service);
             return source
-              ? stored.follows.filter((f) => f.source === service).map((f) => toDto(source, f))
+              ? stored.follows
+                  .filter((f) => f.source === service)
+                  .map((f) => toDto(source, f, chats.get(f.chat ?? "") as ConciergeChatRef))
               : [];
           },
         }),
@@ -872,8 +947,14 @@ export function startConciergeFollowing(
         kinds: source.kinds.filter((k) => k.default).map((k) => k.kind),
         options: {},
         preference: null,
+        chat: await chatForNewFollow(change.chatId),
       };
-      const next = { ...applyChange(source, base, change), account };
+      const next = {
+        ...applyChange(source, base, change),
+        account,
+        // One that exists moves only when the change names a chat.
+        ...(existing && change.chatId ? { chat: await storedChatOf(change.chatId) } : {}),
+      };
       // Check first, so a refusal (no admin rights for a webhook) leaves nothing behind.
       await ensure(source.provider, next, true);
       await ensure(source.provider, next, false);
@@ -883,7 +964,7 @@ export function startConciergeFollowing(
         follows: [...stored.follows.filter((f) => f !== existing), next],
       });
       if (!existing) await syncDigest();
-      return toDto(withArmed(source, next.kinds), next);
+      return toDto(withArmed(source, next.kinds), next, await chatRefOf(next.chat));
     },
 
     async configure(change) {
@@ -894,7 +975,10 @@ export function startConciergeFollowing(
         (f) => f.source === source.source && f.target === target,
       );
       if (!existing) return null;
-      const next = applyChange(source, existing, change);
+      const next = {
+        ...applyChange(source, existing, change),
+        ...(change.chatId ? { chat: await storedChatOf(change.chatId) } : {}),
+      };
       const added = next.kinds.filter((k) => !existing.kinds.includes(k));
       if (added.length > 0 && source.status === "ready") {
         await ensure(source.provider, { ...next, kinds: added }, false);
@@ -904,7 +988,11 @@ export function startConciergeFollowing(
         ...stored,
         follows: stored.follows.map((f) => (f === existing ? next : f)),
       });
-      return toDto(withArmed(source, source.status === "ready" ? added : []), next);
+      return toDto(
+        withArmed(source, source.status === "ready" ? added : []),
+        next,
+        await chatRefOf(next.chat),
+      );
     },
 
     async unfollow(sourceName, rawTarget) {
@@ -955,6 +1043,19 @@ export function startConciergeFollowing(
       return next;
     },
 
+    async moveToMainChat(chatId) {
+      const stored = await readStored();
+      const moved = stored.follows.filter((f) => f.chat === chatId).length;
+      if (moved > 0) {
+        await writeStored({
+          ...stored,
+          follows: stored.follows.map((f) => (f.chat === chatId ? { ...f, chat: null } : f)),
+        });
+      }
+      await deps.items.moveToMainChat(chatId);
+      return moved;
+    },
+
     async reconcile() {
       await syncDigest();
       await keepNoPayloads();
@@ -981,6 +1082,7 @@ export function startConciergeFollowing(
     configure: (change) => exclusive(() => unserialized.configure(change)),
     unfollow: (source, target) => exclusive(() => unserialized.unfollow(source, target)),
     setRules: (change) => exclusive(() => unserialized.setRules(change)),
+    moveToMainChat: (chatId) => exclusive(() => unserialized.moveToMainChat(chatId)),
   };
   service.attachFollowing(following);
 
@@ -1068,7 +1170,7 @@ export function startConciergeFollowing(
       }
     },
   });
-  registerFollowingActions(deps.actions, following);
+  registerFollowingActions(deps.actions, following, callingChat);
 
   // Another app may remove a subscription it shares with these routines (a
   // repo's webhook), which stops them without a word. Subscribing again
@@ -1131,6 +1233,9 @@ export function changeOf(args: Record<string, unknown>): ConciergeFollowChange {
     ...(args.preference === null || typeof args.preference === "string"
       ? { preference: args.preference as string | null }
       : {}),
+    ...(typeof args.chatId === "string" && args.chatId.trim()
+      ? { chatId: args.chatId.trim() }
+      : {}),
   };
 }
 
@@ -1154,6 +1259,11 @@ const CHANGE_SCHEMA_PROPERTIES = {
     type: ["string", "null"],
     description: "The guardian's own words on what matters for this follow. Null clears it.",
   },
+  chatId: {
+    type: "string",
+    description:
+      "The Concierge chat its alerts go to, by the id <concierge_chat> or the following list gives. Left out, a new follow reports to the chat you are in, and one that exists keeps its chat.",
+  },
 } as const;
 
 /**
@@ -1164,6 +1274,7 @@ const CHANGE_SCHEMA_PROPERTIES = {
 function registerFollowingActions(
   actions: { register(action: Action): void },
   following: ConciergeFollowing,
+  callingChat: () => string | null,
 ): void {
   actions.register({
     config: followingActionConfig(
@@ -1193,7 +1304,20 @@ function registerFollowingActions(
     },
     execute: async (args) => {
       try {
-        return { status: "ok", data: await following.follow(changeOf(args)) };
+        const change = changeOf(args);
+        const follow = await following.follow(change);
+        // Followed again from another chat: it keeps reporting where it did, and the agent asks.
+        const here = callingChat() ?? CONCIERGE_CHAT_ID;
+        const elsewhere = !change.chatId && follow.chat.id !== here;
+        return {
+          status: "ok",
+          data: elsewhere
+            ? {
+                ...follow,
+                note: `Its alerts go to the Concierge chat "${follow.chat.name}", not this one. Ask the guardian whether to move them here; ${CONCIERGE_FOLLOWING_ACTIONS.configure} with chatId "${here}" moves them.`,
+              }
+            : follow,
+        };
       } catch (error) {
         return errorOf(error);
       }
@@ -1228,7 +1352,7 @@ function registerFollowingActions(
   actions.register({
     config: followingActionConfig(
       CONCIERGE_FOLLOWING_ACTIONS.configure,
-      "Change what the Concierge follows when the guardian asks. With source (and target), change that follow's kinds, options or preference, by the names the following list gives. The rules hold for every source: digestTimes (when the digest comes each day, HH:mm in the guardian's timezone) and quietHours (a daily window in which nothing urgent is told, null for off).",
+      "Change what the Concierge follows when the guardian asks. With source (and target), change that follow's kinds, options or preference, by the names the following list gives, or move its alerts to another Concierge chat with chatId. The rules hold for every source: digestTimes (when the digest comes each day, HH:mm in the guardian's timezone) and quietHours (a daily window in which nothing urgent is told, null for off).",
       "write",
     ),
     inputSchema: {

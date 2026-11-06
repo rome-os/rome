@@ -20,10 +20,14 @@ import { RecentChats } from "./RecentChats";
 
 // Concierge's chat id comes from its own query, which these tests do not
 // serve; each test that needs the entry sets the id here.
-const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
+const concierge = rs.hoisted(() => ({
+  chatId: null as string | null,
+  chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
+}));
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
+  useConciergeChats: () => concierge.chats,
 }));
 
 beforeAll(async () => {
@@ -36,6 +40,7 @@ afterEach(() => {
   localStorage.clear();
   rs.restoreAllMocks();
   concierge.chatId = null;
+  concierge.chats = [];
 });
 
 interface MockSession {
@@ -177,6 +182,87 @@ describe("RecentChats", () => {
     expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
   });
 
+  describe("Concierge topic chats", () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const mockTopics = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method !== "GET") {
+          requests.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+        }
+        const body =
+          url === "/api/concierge/chats" && method === "POST"
+            ? { id: "topic-2", name: "Trips", main: false, unread: 0 }
+            : url.startsWith("/api/chat/sessions") && method === "GET"
+              ? []
+              : url === "/api/concierge/session"
+                ? { id: "concierge", unread: 0 }
+                : url.startsWith("/api/concierge/tasks")
+                  ? { tasks: [] }
+                  : method !== "GET"
+                    ? {}
+                    : null;
+        if (body === null) return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch);
+
+    beforeEach(() => {
+      requests.length = 0;
+      concierge.chatId = "concierge";
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 2 },
+      ];
+    });
+
+    it("lists each topic chat under the Concierge entry, with its unread count", async () => {
+      mockTopics();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Calendar, 2 unread messages" });
+      expect(entry.getAttribute("href")).toBe("/chat/topic-1");
+      // The main chat is the Concierge entry, not a row of its own.
+      expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
+    });
+
+    it("opens a blank topic chat from the plus beside the Concierge entry, creating nothing yet", async () => {
+      mockTopics();
+      const user = userEvent.setup();
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "New topic chat" }));
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+      expect(screen.getByTestId("location-state").textContent).toBe('{"conciergeTopic":true}');
+      // Like New chat, nothing exists until the first send, and New chat is not the open row.
+      expect(requests).toEqual([]);
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(screen.getByRole("link", { name: "New chat" }).className).not.toContain("shadow-1");
+    });
+
+    it("archives an open topic chat from its menu and returns to the main chat", async () => {
+      mockTopics();
+      const user = userEvent.setup();
+      renderRecentChats("/chat/topic-1");
+      await user.click(await screen.findByRole("button", { name: "Actions for Calendar" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+      await waitFor(() =>
+        expect(requests).toContainEqual({
+          url: "/api/chat/sessions/topic-1/archive",
+          method: "PATCH",
+          body: { archived: true },
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("location-path").textContent).toBe("/chat/concierge"),
+      );
+    });
+  });
+
   describe("Concierge unread badge", () => {
     const server = { unread: 0, tasks: [] as unknown[] };
     const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
@@ -219,6 +305,7 @@ describe("RecentChats", () => {
       completedAt: null,
       archivedAt: null,
       notSynced: false,
+      conciergeChat: { id: "concierge", name: "Concierge", main: true },
       ...extra,
     });
 
@@ -1331,6 +1418,31 @@ describe("RecentChats", () => {
     await user.click(screen.getByRole("button", { name: "Load 1 more" }));
     expect(screen.getByText("Session 25")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Load \d+ more/ })).toBeNull();
+  });
+
+  it("lists an archived topic chat with the archived chats, and no active one", async () => {
+    const topic = (id: string, name: string, archivedAt?: string) => ({
+      id,
+      name,
+      agentName: "core:concierge",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-08T10:00:00.000Z",
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+      ...(archivedAt ? { archivedAt } : {}),
+    });
+    mockSessions([
+      topic("topic-1", "Live topic"),
+      topic("topic-2", "Old topic", "2026-07-08T12:00:00.000Z"),
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+    await user.click(await screen.findByRole("button", { name: "List settings" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archived" }));
+    await waitFor(() => expect(screen.getByText("Old topic")).toBeTruthy());
+    expect(screen.queryByText("Live topic")).toBeNull();
   });
 
   it("refetches with a status query when the status filter changes", async () => {

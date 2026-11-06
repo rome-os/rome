@@ -1185,6 +1185,7 @@ async function main() {
     resolveWebchatContinuationWorkingDir(channel, threadId, webchatRepo);
 
   const backendTurnRunner = createBackendTurnRunner({
+    resolveTurn: (params) => concierge.resolveTurn(params),
     beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;

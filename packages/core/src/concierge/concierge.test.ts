@@ -37,6 +37,9 @@ import { buildConciergeTools } from "./tools.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
+/** A topic chat: another Concierge chat. */
+const TOPIC_CHAT = "topic-1";
+const isConciergeChatId = (id: string) => id === CONCIERGE_CHAT || id === TOPIC_CHAT;
 
 const opened: TestDb[] = [];
 afterEach(() => {
@@ -77,6 +80,9 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
   };
 }
 
+/** The line that opens every Concierge turn's input in the main chat. */
+const MAIN_LINE = '<concierge_chat id="concierge" name="Concierge" main="true"/>\n\n';
+
 /** What the Concierge has already said in its running turn, unless a test says it has not. */
 const ACKNOWLEDGEMENT: Row = {
   id: "ack-1",
@@ -106,7 +112,7 @@ function setup(
   ).ref;
   const sourceLines = new StoredMessages(testDb.db);
   const taskRepo = new ConciergeTasksRepository(testDb.db, {
-    idOf: (key) =>
+    idOf: (_chatId, key) =>
       sourceLines.idOf(sourceChat, key) ??
       sourceLines.record({
         direction: "toRome",
@@ -117,10 +123,10 @@ function setup(
         at: new Date(),
       })?.id ??
       null,
-    keysOf: (ids) =>
+    keysOf: (refs) =>
       new Map(
         sourceLines
-          .byIds(ids)
+          .byIds(refs.map((ref) => ref.id))
           .filter((message) => message.place.chat.id === sourceChat.id)
           .map((message) => [message.id, message.key]),
       ),
@@ -133,7 +139,19 @@ function setup(
   let fake = false;
   const sessions = new Map<string, Record<string, unknown>>([
     [CONCIERGE_CHAT, { id: CONCIERGE_CHAT, name: "Concierge", triggerKind: null }],
+    [
+      TOPIC_CHAT,
+      {
+        id: TOPIC_CHAT,
+        name: "Calendar",
+        triggerKind: null,
+        agentName: CONCIERGE_AGENT_ID,
+        createdAt: new Date(0),
+      },
+    ],
   ]);
+  /** The Concierge chat the tools' turn runs in. */
+  const here = { chat: CONCIERGE_CHAT as string };
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
   const posted: string[] = [];
@@ -150,6 +168,7 @@ function setup(
       await storedChats.createSession(id, "New Chat");
       return id;
     }),
+    openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
     isRunning: rs.fn(() => false),
     activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
@@ -194,7 +213,7 @@ function setup(
       }),
       getTurnChatMessages: async (id: string, turnId: string) =>
         [
-          ...(id === CONCIERGE_CHAT && options.said !== false ? [ACKNOWLEDGEMENT] : []),
+          ...(isConciergeChatId(id) && options.said !== false ? [ACKNOWLEDGEMENT] : []),
           ...(messages.get(id) ?? []),
         ].filter((row) => !row.turnId || row.turnId === turnId),
       addBackendMessage: rs.fn(async (chatId: string, turnId: string, parts: unknown[]) => {
@@ -206,7 +225,7 @@ function setup(
       }),
       getReplyTarget: async (chatId: string, messageId: string) =>
         [
-          ...(chatId === CONCIERGE_CHAT && options.said !== false ? [ACKNOWLEDGEMENT] : []),
+          ...(isConciergeChatId(chatId) && options.said !== false ? [ACKNOWLEDGEMENT] : []),
           ...(messages.get(chatId) ?? []),
         ].find(
           (row) => row.id === messageId && (row.role === "user" || row.role === "assistant"),
@@ -254,13 +273,13 @@ function setup(
   service.attachDashboard({ chats, send });
   const context = (agentName = CONCIERGE_AGENT_ID): SessionToolContext => ({
     agentName,
-    channelThreadKey: `webchat:${CONCIERGE_CHAT}`,
+    channelThreadKey: `webchat:${here.chat}`,
     sessionId: "runtime-1",
     isSubagent: false,
     getTurnId: () => "concierge-turn-1",
     getThreadContext: () => ({
       channel: "webchat",
-      threadId: CONCIERGE_CHAT,
+      threadId: here.chat,
       channelUserId: "guardian",
     }),
   });
@@ -371,6 +390,11 @@ function setup(
     tool,
     posted,
     assignInput,
+    sessions,
+    /** Runs the tools' turn in another Concierge chat. */
+    turnIn: (chatId: string) => {
+      here.chat = chatId;
+    },
     refuseSends: (result: Exclude<SendResult, { ok: true }>) => {
       refuseWith = result;
     },
@@ -392,6 +416,7 @@ describe("Concierge tools", () => {
       "chat_read",
       "chat_stop",
       "chat_list",
+      "topic_start",
       "chat_forward",
       "chat_card",
     ]);
@@ -564,13 +589,106 @@ describe("Concierge tools", () => {
     expect(s.chats.interruptTurn).toHaveBeenCalledWith("t2");
   });
 
-  it("chat_list lists only the task chats it started", async () => {
+  it("chat_list labels each chat with its kind, and a task chat with the Concierge chat it came from", async () => {
     const s = setup();
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.turnIn(TOPIC_CHAT);
+    await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" });
+    s.turnIn(CONCIERGE_CHAT);
     const result = await s.tool("chat_list", {});
     expect(JSON.parse(result.content[0].text)).toEqual([
-      { chatId: "task-1", title: "Flights", status: "idle" },
+      { chatId: TOPIC_CHAT, title: "Calendar", kind: "topic chat" },
+      {
+        chatId: "task-1",
+        title: "Flights",
+        kind: "task chat",
+        from: { chatId: CONCIERGE_CHAT, title: "Concierge" },
+        status: "idle",
+      },
+      {
+        chatId: "task-2",
+        title: "Agenda",
+        kind: "task chat",
+        from: { chatId: TOPIC_CHAT, title: "Calendar" },
+        status: "idle",
+      },
     ]);
+    // From the topic chat, the main chat is the other one.
+    s.turnIn(TOPIC_CHAT);
+    const fromTopic = await s.tool("chat_list", {});
+    expect(JSON.parse(fromTopic.content[0].text)[0]).toEqual({
+      chatId: CONCIERGE_CHAT,
+      title: "Concierge",
+      kind: "main chat",
+    });
+    // A status filter lists task chats only.
+    const idle = await s.tool("chat_list", { status: "idle" });
+    expect(JSON.parse(idle.content[0].text).map((chat: { kind: string }) => chat.kind)).toEqual([
+      "task chat",
+      "task chat",
+    ]);
+  });
+
+  it("chat_read reads another Concierge chat, and refuses a chat that is neither kind", async () => {
+    const s = setup();
+    s.messages.set(TOPIC_CHAT, [
+      { role: "user", content: JSON.stringify([{ type: "text", content: "only interviews" }]) },
+    ]);
+    const read = await s.tool("chat_read", { chatId: TOPIC_CHAT });
+    expect(read.isError).toBeFalsy();
+    expect(JSON.parse(read.content[0].text)).toMatchObject({
+      chatId: TOPIC_CHAT,
+      title: "Calendar",
+      kind: "topic chat",
+      messages: [{ role: "user", text: "only interviews" }],
+    });
+    s.sessions.set("plain", { id: "plain", name: "Plain", triggerKind: null });
+    const refused = await s.tool("chat_read", { chatId: "plain" });
+    expect(refused.isError).toBe(true);
+    // Sending stays for task chats.
+    const send = await s.tool("chat_send", { chatId: TOPIC_CHAT, text: "hi" });
+    expect(send.isError).toBe(true);
+  });
+
+  it("a task started in a topic chat comes from it, and its events go back there", async () => {
+    const s = setup();
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    s.turnIn(TOPIC_CHAT);
+    const started = JSON.parse(
+      (await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" })).content[0].text,
+    ) as { taskId: string };
+    const [row] = await s.tasks.listForPanel();
+    expect(row).toMatchObject({
+      id: started.taskId,
+      conciergeChat: { id: TOPIC_CHAT, name: "Calendar", main: false },
+    });
+    await s.finish({ turnId: "task-turn-1", agentName: "main", chatId: "task-1" });
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    expect(s.backendTurns.at(-1)).toMatchObject({ threadId: TOPIC_CHAT });
+    expect(s.backendTurns.at(-1)?.prompt).toContain(
+      '<concierge_chat id="topic-1" name="Calendar" main="false"/>',
+    );
+  });
+
+  it("topic_start starts a topic chat and answers its link", async () => {
+    const s = setup();
+    const result = await s.tool("topic_start", { name: "Trips" });
+    const started = JSON.parse(result.content[0].text) as { chatId: string; link: string };
+    expect(started.link).toBe(`/chat/${started.chatId}`);
+    expect(s.deps.webchatRepo.createSession).toHaveBeenCalledWith(
+      started.chatId,
+      "Trips",
+      undefined,
+      undefined,
+      // The main chat has no stored model, so the pick for a new chat.
+      "claude-sonnet",
+      undefined,
+      CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
   });
 
   it("chat_card shows the card for a task chat started without one", async () => {
@@ -1098,7 +1216,7 @@ describe("Concierge events", () => {
       threadId: CONCIERGE_CHAT,
     });
     expect(s.backendTurns[0].prompt).toBe(
-      `<task_events>\n<task id="${taskId}" chat_id="task-1" title="Flights" state="doing" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
+      `${MAIN_LINE}<task_events>\n<task id="${taskId}" chat_id="task-1" title="Flights" state="doing" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
     );
     expect(s.quietFlags).toEqual([false]);
   });
@@ -1339,7 +1457,7 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toEqual([]);
     await rs.advanceTimersByTimeAsync(1_000);
     expect(s.backendTurns[0].prompt).toBe(
-      `<task_events>\n<task id="${taskId}" title="Flights" state="doing" changes="chat_deleted" quiet="true">\nThe task chat was deleted.\n</task>\n</task_events>`,
+      `${MAIN_LINE}<task_events>\n<task id="${taskId}" title="Flights" state="doing" changes="chat_deleted" quiet="true">\nThe task chat was deleted.\n</task>\n</task_events>`,
     );
     expect(await s.taskRepo.get(taskId)).toMatchObject({ sessionId: null, title: "Flights" });
   });
@@ -1436,7 +1554,7 @@ describe("Concierge events", () => {
       chatId: CONCIERGE_CHAT,
       text: "It was 7291.",
     });
-    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([NUDGE_PROMPT]);
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([MAIN_LINE + NUDGE_PROMPT]);
   });
 
   it("reminds a Concierge turn that ended on unsent text, once", async () => {
@@ -1447,7 +1565,7 @@ describe("Concierge events", () => {
       chatId: CONCIERGE_CHAT,
       text: "hi",
     });
-    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([NUDGE_PROMPT]);
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([MAIN_LINE + NUDGE_PROMPT]);
     await s.finish({
       turnId: "c2",
       agentName: CONCIERGE_AGENT_ID,
@@ -1485,7 +1603,7 @@ describe("Concierge reminder", () => {
       text: "hi",
     });
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([NUDGE_PROMPT]);
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([MAIN_LINE + NUDGE_PROMPT]);
   });
 });
 
@@ -1494,6 +1612,7 @@ describe("Concierge system turns", () => {
     const turns: BackendTurnParams[] = [];
     const service = new ConciergeService({
       sessionManager: { findReusableSession: async () => session },
+      webchatRepo: { getSession: async () => null },
       runBackendTurn: async (params: BackendTurnParams) => {
         turns.push(params);
         return outcome;
@@ -1663,7 +1782,9 @@ describe("Concierge quota failover", () => {
       status: "error",
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([quotaRecoveryPrompt("Claude")]);
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([
+      MAIN_LINE + quotaRecoveryPrompt("Claude"),
+    ]);
     expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenCalledTimes(1);
   });
   it.each([
@@ -2023,6 +2144,39 @@ describe("Concierge provider recovery", () => {
     expect(s.backendTurns).toHaveLength(1);
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
+  it("recovers a topic chat as the main chat, and keeps each chat's cooldown its own", async () => {
+    const { s } = await prepared({ delay: async () => {} });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(TOPIC_CHAT, "claude-sonnet");
+    s.onBackendTurn(() => {
+      void s.finish({
+        turnId: "ok",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId: TOPIC_CHAT,
+        text: "done",
+      });
+    });
+    await s.finish({
+      turnId: "failed",
+      agentName: CONCIERGE_AGENT_ID,
+      chatId: TOPIC_CHAT,
+      status: "error",
+      failure: failure("monthly spend limit"),
+      text: "done",
+    });
+    await s.settle();
+    expect(s.backendTurns.at(-1)).toMatchObject({ threadId: TOPIC_CHAT });
+    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "gpt-6-luna" });
+    // The topic chat left Sonnet; the main chat may still move to it.
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");
+    expect(
+      await s.service.switchForFailure(
+        CONCIERGE_CHAT,
+        failure("monthly spend limit", "openai"),
+        "quota",
+      ),
+    ).toMatchObject({ selectionId: "claude-sonnet" });
+  });
+
   it("ignores a task chat's temporary failure", async () => {
     const { s } = await prepared({ delay: async () => {} });
     await s.finish({
@@ -2034,5 +2188,126 @@ describe("Concierge provider recovery", () => {
     });
     expect(s.backendTurns).toHaveLength(0);
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("Concierge chats", () => {
+  it("opens a topic chat's runtime before its first background turn, as its first message would", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.sessionManager.findReusableSession = (async (key: string) =>
+      key === `webchat:${TOPIC_CHAT}` ? null : { id: "runtime-1" }) as never;
+    expect(await s.service.runSystemTurn(TOPIC_CHAT, "<task_events/>")).toBe(false);
+    expect(s.chats.openSession).toHaveBeenCalledWith(TOPIC_CHAT);
+    expect(s.backendTurns.at(-1)).toMatchObject({
+      sessionId: `opened-${TOPIC_CHAT}`,
+      threadId: TOPIC_CHAT,
+    });
+    // A chat with a runtime keeps it.
+    await s.service.runSystemTurn(CONCIERGE_CHAT, "<task_events/>");
+    expect(s.chats.openSession).toHaveBeenCalledTimes(1);
+    expect(s.backendTurns.at(-1)).toMatchObject({ sessionId: "runtime-1" });
+  });
+
+  it.each([
+    "archived",
+    "deleted",
+  ] as const)("sends a defer's wake-up for a topic chat to the main chat once the topic chat is %s", async (how) => {
+    const s = setup({ startEvents: false });
+    // The wake-up `defer` stored while the task was watched in the topic chat.
+    const wakeUp = {
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: "runtime-topic",
+      channel: "webchat",
+      threadId: TOPIC_CHAT,
+      prompt: "⏰ Time's up: watch task:abc",
+    };
+    expect(await s.service.resolveTurn(wakeUp)).toMatchObject({
+      threadId: TOPIC_CHAT,
+      sessionId: "runtime-topic",
+    });
+    if (how === "archived") {
+      s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
+    } else {
+      s.sessions.delete(TOPIC_CHAT);
+    }
+    const fired = await s.service.resolveTurn(wakeUp);
+    expect(fired).toMatchObject({ threadId: CONCIERGE_CHAT, sessionId: "runtime-1" });
+    expect(fired.prompt).toBe(`${MAIN_LINE}⏰ Time's up: watch task:abc`);
+    // A task chat's own wake-up is not the Concierge's, and stays.
+    const taskWakeUp = { ...wakeUp, agentName: "main" };
+    expect(await s.service.resolveTurn(taskWakeUp)).toEqual(taskWakeUp);
+  });
+
+  it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.sessionManager.findReusableSession = (async () => null) as never;
+    s.deps.aiToolState.get = () =>
+      ({
+        claude: { loggedIn: true, quotaExhausted: true },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      }) as never;
+    s.sessions.set(CONCIERGE_CHAT, {
+      ...s.sessions.get(CONCIERGE_CHAT),
+      largeModelSelection: "claude-sonnet",
+    });
+    const openedOn: unknown[] = [];
+    s.chats.openSession = rs.fn(async (chatId: string) => {
+      openedOn.push(s.sessions.get(chatId)?.largeModelSelection);
+      return `opened-${chatId}`;
+    });
+    await s.service.runSystemTurn(CONCIERGE_CHAT, "<external_events/>");
+    // The runtime opens on the provider the quota check moved it to.
+    expect(openedOn).toEqual(["gpt-6-luna"]);
+    expect(s.backendTurns.at(-1)).toMatchObject({ sessionId: `opened-${CONCIERGE_CHAT}` });
+  });
+
+  it("lists the main chat first, then the topic chats", async () => {
+    const s = setup({ startEvents: false });
+    expect(await s.service.listChats()).toEqual([
+      { id: CONCIERGE_CHAT, name: "Concierge", main: true },
+      { id: TOPIC_CHAT, name: "Calendar", main: false },
+    ]);
+  });
+
+  it("delivers to a live Concierge chat, and to the main chat for one archived, gone, or not a Concierge chat", async () => {
+    const s = setup({ startEvents: false });
+    expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(TOPIC_CHAT);
+    expect(await s.service.deliveryChat(null)).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat("gone")).toBe(CONCIERGE_CHAT);
+    s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
+    expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(CONCIERGE_CHAT);
+  });
+
+  it("retiring a topic chat moves its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+    s.turnIn(TOPIC_CHAT);
+    await s.tool("task_upsert", { tasks: [{ title: "Book dentist" }] });
+    await s.tool("task_upsert", { tasks: [{ title: "Old", state: "done" }] });
+    await s.service.retireChat(TOPIC_CHAT, "archived");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const rows = await s.tasks.listForPanel();
+    expect(rows.find((row) => row.title === "Book dentist")?.conciergeChat.main).toBe(true);
+    expect(rows.find((row) => row.title === "Old")?.conciergeChat.id).toBe(TOPIC_CHAT);
+    expect(s.backendTurns.at(-1)).toMatchObject({ threadId: CONCIERGE_CHAT });
+    expect(s.backendTurns.at(-1)?.prompt).toContain(
+      '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',
+    );
+    await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
+  });
+
+  it("switches a topic chat's provider when its quota runs out, as the main chat's", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.aiToolState.get = () =>
+      ({
+        claude: { loggedIn: true, quotaExhausted: true },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      }) as never;
+    s.sessions.set(TOPIC_CHAT, {
+      ...s.sessions.get(TOPIC_CHAT),
+      largeModelSelection: "claude-sonnet",
+    });
+    expect(await s.service.switchIfExhausted(TOPIC_CHAT)).toMatchObject({ from: "anthropic" });
+    expect(await s.service.switchIfExhausted("task-1")).toBeNull();
   });
 });

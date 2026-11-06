@@ -14,7 +14,14 @@ import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
-import { CONCIERGE_CHAT_ID, ensureConciergeChat, useConciergeChat } from "@/hooks/use-concierge";
+import {
+  CONCIERGE_CHAT_ID,
+  ensureConciergeChat,
+  CONCIERGE_CHATS_QUERY_KEY,
+  startConciergeTopicChat,
+  useConciergeChat,
+  useConciergeChats,
+} from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
 
@@ -66,7 +73,9 @@ export function ChatComponent({
 
   const { data: settings } = useSettings();
   const concierge = useConciergeChat();
-  const isConcierge = sessionId === CONCIERGE_CHAT_ID;
+  const conciergeChats = useConciergeChats();
+  const isListedConcierge =
+    sessionId === CONCIERGE_CHAT_ID || conciergeChats.some((chat) => chat.id === sessionId);
   const coarsePointer = useCoarsePointer();
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
@@ -90,6 +99,18 @@ export function ChatComponent({
       setCreatedSessionId(null);
     }
   }
+  // A draft opened from the Concierge entry's plus is a topic chat until its
+  // first send creates one. Moving between it and an ordinary draft mounts a
+  // fresh surface, as any return to a draft does.
+  const location = useLocation();
+  const wantsTopicDraft =
+    !sessionId && (location.state as { conciergeTopic?: unknown } | null)?.conciergeTopic === true;
+  const [topicDraftKey, setTopicDraftKey] = useState<number | null>(null);
+  if (!sessionId && wantsTopicDraft !== (topicDraftKey === draftKey)) {
+    setDraftKey(draftKey + 1);
+    setTopicDraftKey(wantsTopicDraft ? draftKey + 1 : null);
+  }
+  const topicDraft = topicDraftKey === draftKey && (!sessionId || sessionId === createdSessionId);
   const surfaceKey = !sessionId || sessionId === createdSessionId ? `draft-${draftKey}` : sessionId;
   // Queued before the host's own update, so the render that receives the new
   // sessionId already knows this surface created it and keeps the key.
@@ -102,12 +123,14 @@ export function ChatComponent({
   );
 
   const composerRef = useRef<ChatComposerHandle>(null);
+  // A topic chat's draft takes the Concierge's composer once the setting
+  // loads, and that composer takes the focus too.
+  const conciergeDraft = topicDraft && concierge.enabled;
   useEffect(() => {
     if (!sessionId && !coarsePointer) composerRef.current?.focus();
-  }, [sessionId, coarsePointer]);
+  }, [sessionId, coarsePointer, conciergeDraft]);
 
   const navigate = useNavigate();
-  const location = useLocation();
   useEffect(() => {
     if (sessionId) return;
     const hasTextOrSkill = initialDraftText !== undefined || initialSkillName !== undefined;
@@ -238,11 +261,17 @@ export function ChatComponent({
     [navigate],
   );
 
-  // The Concierge chat's id is fixed, so its messages load alongside the request
+  // The main Concierge chat's id is fixed, so its messages load alongside the request
   // that creates it. The first load of a new instance can reach the server
   // first and 404; the chat waits for the creation and asks again.
   const queryClient = useQueryClient();
+  const isConcierge = isListedConcierge || topicDraft;
   const conciergeEnabled = isConcierge && concierge.enabled;
+  const startTopicChat = useCallback(async () => {
+    const chat = await startConciergeTopicChat();
+    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
+    return chat.id;
+  }, [queryClient]);
   const recoverMissingSession = useCallback(
     async (missingSessionId: string) => {
       if (missingSessionId !== CONCIERGE_CHAT_ID) return false;
@@ -257,7 +286,9 @@ export function ChatComponent({
   );
 
   // `/chat/concierge` opened directly: the setting decides whether the chat
-  // exists for this instance, so wait for it before choosing a layout.
+  // exists for this instance, so wait for it before choosing a layout. A
+  // topic chat takes the Concierge layout once the Concierge chat list, which
+  // the sidebar has usually loaded already, names it.
   if (isConcierge && concierge.settingsLoading) return null;
 
   return (
@@ -277,7 +308,8 @@ export function ChatComponent({
         navbarSlot={navbarSlot}
         recoverMissingSession={conciergeEnabled ? recoverMissingSession : undefined}
         variant={conciergeEnabled ? "concierge" : "default"}
-        centerDraftComposer={greetingOnlyHome}
+        startSession={topicDraft && concierge.enabled ? startTopicChat : undefined}
+        centerDraftComposer={greetingOnlyHome && !topicDraft}
         emptyState={
           <ChatEmptyState
             guardianName={guardianName}

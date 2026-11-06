@@ -30,6 +30,7 @@ function task(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}):
     completedAt: null,
     archivedAt: null,
     notSynced: false,
+    conciergeChat: { id: "concierge", name: "Concierge", main: true },
     ...extra,
   };
 }

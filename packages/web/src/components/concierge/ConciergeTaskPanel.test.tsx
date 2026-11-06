@@ -39,6 +39,7 @@ function row(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}): 
     completedAt: null,
     archivedAt: null,
     notSynced: false,
+    conciergeChat: { id: "concierge", name: "Concierge", main: true },
     ...extra,
   };
 }
@@ -51,6 +52,8 @@ const server = {
   turns: [] as Array<Record<string, unknown>>,
 };
 const posts: Array<Record<string, unknown>> = [];
+/** What a press on a topic chat's row posted to that chat. */
+const topicPosts: Array<Record<string, unknown>> = [];
 let postStatus = 200;
 
 function mockServer() {
@@ -75,6 +78,10 @@ function mockServer() {
     if (url.startsWith("/api/chat/sessions/concierge/messages")) {
       return json({ messages: server.messages, nextCursor: null });
     }
+    if (url === "/api/chat/sessions/topic-1/turns" && init?.method === "POST") {
+      topicPosts.push(JSON.parse(String(init.body)));
+      return json({ turnId: "turn-1", sessionId: "topic-1", startedAt: "" });
+    }
     if (url === "/api/chat/sessions/concierge/turns" && init?.method === "POST") {
       posts.push(JSON.parse(String(init.body)));
       return postStatus === 200
@@ -85,12 +92,12 @@ function mockServer() {
   }) as typeof fetch);
 }
 
-function renderPanel(props: { onNavigate?: () => void } = {}) {
+function renderPanel(props: { chatId?: string; onNavigate?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
       <QueryClientProvider client={client}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat/concierge"]}>
           <ConciergeTaskPanel {...props} />
         </MemoryRouter>
       </QueryClientProvider>
@@ -330,6 +337,37 @@ describe("ConciergeTaskPanel", () => {
     off();
     expect(jumps).toEqual(["m-run", "m-next", "m-ask", "m-done"]);
     expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("lists only the rows of the Concierge chat it is opened in", async () => {
+    const topic = { id: "topic-1", name: "Calendar", main: false };
+    server.recent = [
+      row("doing", { title: "Main work" }),
+      row("doing", { title: "Agenda", conciergeChat: topic }),
+    ];
+    mockServer();
+    renderPanel();
+    expect(await screen.findByText("Main work")).toBeTruthy();
+    expect(screen.queryByText("Agenda")).toBeNull();
+    cleanup();
+    renderPanel({ chatId: "topic-1" });
+    expect(await screen.findByText("Agenda")).toBeTruthy();
+    expect(screen.queryByText("Main work")).toBeNull();
+  });
+
+  it("sends a topic chat's buttons to that chat", async () => {
+    const topic = { id: "topic-1", name: "Calendar", main: false };
+    server.recent = [
+      row("doing", { title: "Agenda", chat: { id: "c1", name: "c" }, conciergeChat: topic }),
+    ];
+    mockServer();
+    topicPosts.length = 0;
+    const user = userEvent.setup();
+    renderPanel({ chatId: "topic-1" });
+    await screen.findByText("Agenda");
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(topicPosts).toHaveLength(1));
+    expect(posts).toEqual([]);
   });
 
   it("closes the mobile sheet before it asks for the jump", async () => {

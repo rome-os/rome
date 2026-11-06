@@ -6,19 +6,20 @@ import { Sheet, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { ConciergeTaskPanel } from "./ConciergeTaskPanel";
-import { pillState } from "./tasks";
+import { pillState, tasksOfChat } from "./tasks";
 import { useConciergeTasks } from "./use-concierge-tasks";
 
 /**
- * The Concierge chat's header pill, beside its name: the number of tasks that
+ * A Concierge chat's header pill, beside its name, counting that chat's tasks
+ * only: the number of tasks that
  * need the guardian in warning colour, else the number in progress, else a
  * quiet icon. It opens the task list in the side pane's Tasks tab, or in a
  * full-height sheet where the pane would take the whole width.
  */
-export function ConciergeTasksPill() {
+export function ConciergeTasksPill({ chatId }: { chatId: string | null }) {
   const { t } = useTranslation("chat");
   const pane = useToolTasks();
-  const { tasks } = useConciergeTasks();
+  const tasks = tasksOfChat(useConciergeTasks().tasks, chatId);
   const state = pillState(tasks);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -79,7 +80,7 @@ export function ConciergeTasksPill() {
           />
         </div>
         <div className="min-h-0 flex-1">
-          <ConciergeTaskPanel onNavigate={() => setSheetOpen(false)} />
+          <ConciergeTaskPanel chatId={chatId} onNavigate={() => setSheetOpen(false)} />
         </div>
       </Sheet>
     </>
