@@ -49,7 +49,7 @@ export function createSession(userId: string): string {
   return jwt.sign({ userId }, JWT_SECRET, { expiresIn: SESSION_MAX_AGE_SECONDS });
 }
 
-export interface GuardianSessionEnvelope {
+export interface SessionEnvelope {
   token: string;
   expiresAt: string;
 }
@@ -57,11 +57,14 @@ export interface GuardianSessionEnvelope {
 // Native callers need the same guardian session material that browser login
 // writes as a cookie. Decode the expiry from the signed token itself so the
 // JSON metadata and JWT can never drift.
-export function createGuardianSession(userId: string): GuardianSessionEnvelope {
-  const token = createSession(userId);
+export function createGuardianSession(userId: string): SessionEnvelope {
+  return sessionEnvelope(createSession(userId));
+}
+
+function sessionEnvelope(token: string): SessionEnvelope {
   const decoded = jwt.decode(token);
   if (!decoded || typeof decoded === "string" || typeof decoded.exp !== "number") {
-    throw new Error("guardian session token has no expiry");
+    throw new Error("session token has no expiry");
   }
   return { token, expiresAt: new Date(decoded.exp * 1000).toISOString() };
 }
@@ -91,6 +94,17 @@ export function createVisitorSession(
     JWT_SECRET,
     { expiresIn: SESSION_MAX_AGE_SECONDS },
   );
+}
+
+// The native visitor sign-in returns the same visitor session the web flow
+// sets as a cookie.
+export function createVisitorSessionEnvelope(
+  accountId: string,
+  email: string,
+  favorViewerToken?: string,
+  avatarUrl?: string | null,
+): SessionEnvelope {
+  return sessionEnvelope(createVisitorSession(accountId, email, favorViewerToken, avatarUrl));
 }
 
 /**

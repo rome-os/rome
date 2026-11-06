@@ -47,13 +47,13 @@ rs.mock("../../profile-memory.js", () => ({
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../lib/auth.js";
+import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../lib/auth.js";
 import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
 import {
   INSTANCE_TOKEN_SETTING_KEY,
   setInstanceTokenInMemory,
 } from "../../lib/instance-identity.js";
-import { guardianAuth, persons, settings } from "../../db/schema.js";
+import { guardianAuth, persons, settings, visitorProfiles } from "../../db/schema.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
@@ -71,6 +71,7 @@ beforeEach(() => {
   testDb.db.delete(guardianAuth).run();
   testDb.db.delete(persons).run();
   testDb.db.delete(settings).run();
+  testDb.db.delete(visitorProfiles).run();
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
@@ -108,8 +109,9 @@ function signIdToken(opts: {
   email?: string;
   picture?: string;
   name?: string;
+  claims?: Record<string, unknown>;
 }): string {
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = { ...opts.claims };
   if (opts.nonce) payload.nonce = opts.nonce;
   if (opts.email) payload.email = opts.email;
   if (opts.picture) payload.picture = opts.picture;
@@ -315,6 +317,7 @@ describe("/api/auth/cloud/native", () => {
       origin: string;
     };
     expect(body.cookie_name).toBe(COOKIE_NAME);
+    expect(body).toMatchObject({ role: "owner" });
     expect(jwt.verify(body.session_token, JWT_SECRET)).toMatchObject({ userId: "A" });
     expect(new Date(body.expires_at).getTime()).toBeGreaterThan(Date.now());
     expect(body.origin).toBeTruthy();
@@ -977,5 +980,84 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=denied");
     expect(sessionUserId(res)).toBeNull();
+  });
+});
+
+describe("/api/auth/cloud/native/complete — guardian seat", () => {
+  interface NativeBody {
+    cookie_name?: string;
+    session_token?: string;
+    role?: string;
+    error?: string;
+  }
+
+  // One native round trip: start, have the fake Rome Cloud sign `token`, then
+  // complete with the code.
+  async function nativeSignIn(token: {
+    sub: string;
+    email?: string;
+    claims?: Record<string, unknown>;
+  }): Promise<{ res: Response; body: NativeBody }> {
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ ...token, nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const { state, nonce } = await nativeStart(app);
+    romeCloud.setNonce(nonce);
+    const res = await app.request("/api/auth/cloud/native/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state, code: "one-time-code", iss: ISSUER }),
+    });
+    return { res, body: (await res.json()) as NativeBody };
+  }
+
+  function guardianRow() {
+    return testDb.db.select().from(guardianAuth).where(eq(guardianAuth.id, "g1")).get();
+  }
+
+  it("signs the owner in when the account matches the guardian seat", async () => {
+    insertGuardian({ accountId: "A", email: "owner@example.com" });
+
+    const { res, body } = await nativeSignIn({ sub: "A" });
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ cookie_name: COOKIE_NAME, role: "owner" });
+    expect(verifySession(body.session_token as string)).toEqual({ userId: "A" });
+  });
+
+  it("refuses another account and leaves the seat bound as it was", async () => {
+    insertGuardian({ accountId: "A", email: "owner@example.com" });
+
+    const { res, body } = await nativeSignIn({ sub: "B", email: "other@example.com" });
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "not_owner" });
+    expect(guardianRow()).toMatchObject({ accountId: "A", email: "owner@example.com" });
+  });
+
+  it("never issues a visitor session, whatever the token claims", async () => {
+    insertGuardian({ accountId: "A" });
+
+    const { res, body } = await nativeSignIn({
+      sub: "B",
+      email: "guest@example.com",
+      claims: { instance_role: "visitor" },
+    });
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "not_owner" });
+  });
+
+  it("binds an unbound seat and creates a missing one", async () => {
+    insertGuardian({ accountId: null });
+    const bound = await nativeSignIn({ sub: "A" });
+    expect(bound.res.status).toBe(200);
+    expect(guardianRow()?.accountId).toBe("A");
+
+    testDb.db.delete(guardianAuth).run();
+    const created = await nativeSignIn({ sub: "C", email: "new@example.com" });
+    expect(created.res.status).toBe(200);
+    const [seat] = testDb.db.select().from(guardianAuth).all();
+    expect(seat.accountId).toBe("C");
   });
 });

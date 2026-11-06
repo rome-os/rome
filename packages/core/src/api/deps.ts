@@ -49,6 +49,8 @@ import type { AIToolState } from "../core/ai-tool-state.js";
 import type { CodexAccountService } from "../core/codex/account-service.js";
 import type { PublicAccessState } from "../lib/public-access-state.js";
 import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import type { DashboardAccessStore } from "../lib/dashboard-access-store.js";
+import type { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
 import type { RelayDrainer } from "../relay/drainer.js";
 import type { BootVersionReport } from "../lib/boot-version-report.js";
 import type { SystemUpgradeService } from "../system-upgrade/service.js";
@@ -208,6 +210,10 @@ export interface ApiDeps {
    * `/api/dashboard-access`.
    */
   dashboardAccessState: DashboardAccessState;
+  /** The stored dashboard allow-list and the revision Rome Cloud orders it by. */
+  dashboardAccessStore: DashboardAccessStore;
+  /** Sends each saved dashboard allow-list to Rome Cloud in the background. */
+  visitorAllowListSync: VisitorAllowListSync;
   /** Webhook relay drainer — present so the Integrations settings route can
    * hot-reload the live connection when the guardian edits relay credentials. */
   relayDrainer: RelayDrainer;

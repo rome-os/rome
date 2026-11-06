@@ -565,7 +565,9 @@
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
       "savedFlash": "允许的邮箱已保存",
-      "saveFailedFallback": "保存允许的邮箱失败。"
+      "saveFailedFallback": "保存允许的邮箱失败。",
+      "tooMany": "最多允许 {{limit}} 个邮箱",
+      "emailTooLong": "邮箱超过 {{limit}} 个字符"
     }
   },
   "aiTools": {

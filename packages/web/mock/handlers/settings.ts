@@ -24,6 +24,11 @@ import type {
   FavorRechargePackList,
   FavorRechargePackView,
 } from "@rome/api-types/favors";
+import {
+  DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
+  DASHBOARD_ACCESS_MAX_EMAILS,
+  checkDashboardAccessLimits,
+} from "@rome/api-types/dashboard-access";
 
 // Settings-page fixtures: the AI Tools tab and the access-control sections of
 // Advanced. Both are read-modify-write surfaces, so the stores below are mutable
@@ -439,6 +444,19 @@ export const settingsHandlers = [
   http.get("/api/dashboard-access", () => HttpResponse.json(dashboardAccess)),
   http.put("/api/dashboard-access", async ({ request }) => {
     const body = (await request.json()) as { cloudEmailAccess: string[] };
+    const limitError = checkDashboardAccessLimits(body.cloudEmailAccess);
+    if (limitError) {
+      return HttpResponse.json(
+        {
+          error: limitError,
+          limit:
+            limitError === "too_many_emails"
+              ? DASHBOARD_ACCESS_MAX_EMAILS
+              : DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
+        },
+        { status: 400 },
+      );
+    }
     dashboardAccess.cloudEmailAccess = body.cloudEmailAccess;
     return HttpResponse.json(dashboardAccess);
   }),

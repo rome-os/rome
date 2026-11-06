@@ -205,6 +205,8 @@ import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
+import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
 import { emitAgentMessage } from "./actions/runtime-events.js";
@@ -1907,6 +1909,10 @@ async function main() {
     });
   }
   const dashboardAccessState = new DashboardAccessState();
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const visitorAllowListSync = new VisitorAllowListSync({
+    raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
+  });
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
@@ -2035,6 +2041,8 @@ async function main() {
       codexAccountService,
       publicAccessState,
       dashboardAccessState,
+      dashboardAccessStore,
+      visitorAllowListSync,
       relayDrainer,
       bootVersionReport,
       favorService,
@@ -2063,15 +2071,17 @@ async function main() {
   favorDispatchRunner.start();
 
   // Everything that needs a linked instance: the node caller, the self-provisioned
-  // relay mailbox (re-minted with a full-TTL drain key each time), and the first
-  // favor sync. Run after the boot identity check, after a sign-in links, and
-  // when a background check links an instance that was not linked. Each step is
-  // idempotent and handles a missing credential, so one failing never stops the next.
+  // relay mailbox (re-minted with a full-TTL drain key each time), the first
+  // favor sync, and the dashboard allow-list Rome Cloud lists visitors from. Run
+  // after the boot identity check, after a sign-in links, and when a background
+  // check links an instance that was not linked. Each step is idempotent and
+  // handles a missing credential, so one failing never stops the next.
   provisionAfterLink = async () => {
     const steps = [
       provisionNodeCaller,
       () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
       () => favorDispatchRunner.runOnce(),
+      () => syncStoredVisitorAllowList(dashboardAccessStore, visitorAllowListSync),
     ];
     for (const step of steps) {
       await step().catch((err) => {
@@ -2292,6 +2302,7 @@ async function main() {
     unsubscribeCodexAccountChanged();
     unsubscribeInstanceTokenChanged();
     unsubscribeInstanceLinked();
+    visitorAllowListSync.stop();
     romeCreditsPayer.close();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");
