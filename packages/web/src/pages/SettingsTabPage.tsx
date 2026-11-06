@@ -1125,7 +1125,7 @@ function TierModelMappingsAdvancedSection({
               <FormRowControl>
                 <Input
                   id={id}
-                  className="w-64"
+                  className="w-44 sm:w-64"
                   value={mappings[provider]?.[tier] ?? ""}
                   placeholder={placeholder}
                   onChange={(event) => update(provider, tier, event.target.value)}
