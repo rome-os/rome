@@ -1095,13 +1095,34 @@ describe("Concierge events", () => {
     expect(s.backendTurns[0].prompt).not.toContain("first answer");
   });
 
-  it("cuts a long reply to 600 characters", async () => {
+  const replyLine = async (text: string) => {
     const s = setup();
-    const { chatId } = await startTask(s, "y".repeat(2_000));
+    const { chatId } = await startTask(s, text);
     s.fakeTimers();
     await finishTask(s, chatId);
     await rs.advanceTimersByTimeAsync(2_000);
-    expect(s.backendTurns[0].prompt).toContain(`reply: ${"y".repeat(600)}…`);
+    rs.useRealTimers();
+    return /\nreply: ([\s\S]*)\n<\/task>/.exec(s.backendTurns[0].prompt)?.[1];
+  };
+  const leftOut = (count: number) =>
+    `\n[… ${count} characters left out; chat_read shows the full reply]\n`;
+
+  it("keeps the start and the end of a long reply, so a closing question reaches the Concierge", async () => {
+    const question = "你更看重续航还是相机？";
+    expect(await replyLine(`${"y".repeat(1_989)}${question}`)).toBe(
+      `${"y".repeat(400)}${leftOut(1_300)}${"y".repeat(289)}${question}`,
+    );
+  });
+
+  it("cuts a long reply on whole characters, near a space, and keeps one of 700 whole", async () => {
+    const family = "👨‍👩‍👧";
+    expect(await replyLine(family.repeat(1_000))).toBe(
+      `${family.repeat(400)}${leftOut(300)}${family.repeat(300)}`,
+    );
+    expect(await replyLine("abcd ".repeat(200))).toBe(
+      `${"abcd ".repeat(79)}abcd${leftOut(301)}${"abcd ".repeat(59)}abcd`,
+    );
+    expect(await replyLine("我".repeat(700))).toBe("我".repeat(700));
   });
 
   it("puts tasks that finish together in one turn", async () => {
