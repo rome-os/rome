@@ -47,20 +47,16 @@ export class SessionRepository {
     return rows[0] ? restore(rows[0]) : null;
   }
 
-  /**
-   * The active session for this continuity key and agent, or null. Idle time
-   * never retires a session.
-   * @deprecated behaviour: the agent also matches under its legacy names,
-   * which is identity resolution Sessions should not do. Goes when agent names
-   * are canonical before they reach Sessions.
-   */
+  /** The active session for this continuity key and agent, or null. Idle time
+   *  never retires a session. The agent also matches under its legacy names,
+   *  through {@link deprecatedSameAgent}. */
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {
     const rows = await this.db
       .select()
       .from(sessions)
       .where(and(eq(sessions.channelThreadKey, continuityKey), eq(sessions.status, "active")))
       .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt));
-    const row = rows.find((candidate) => this.sameAgent(candidate.agentName, agentName));
+    const row = rows.find((candidate) => this.deprecatedSameAgent(candidate.agentName, agentName));
     return row ? restore(row) : null;
   }
 
@@ -172,7 +168,10 @@ export class SessionRepository {
     return rows[0] ?? null;
   }
 
-  private sameAgent(storedName: string, requestedName: string): boolean {
+  /** @deprecated Matches an agent under its legacy names, which is identity
+   *  resolution Sessions should not do. Goes when agent names are canonical
+   *  before they reach Sessions, and `current` compares them as strings. */
+  private deprecatedSameAgent(storedName: string, requestedName: string): boolean {
     if (storedName === requestedName) return true;
     try {
       const legacyBindings = this.identity.legacyBindings;
