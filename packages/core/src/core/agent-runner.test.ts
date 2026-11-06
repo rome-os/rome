@@ -2,6 +2,7 @@ import { createSessionLog } from "../agent-sessions/rows/session-log.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { callerFromKey } from "./session-caller.js";
 import { version as uuidVersion } from "uuid";
+import { catchUpBriefing } from "./connection-briefing.js";
 import { AgentRunner, type WakeDeps } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
 import { SessionManager } from "../agent-sessions/session-manager.js";
@@ -3798,8 +3799,14 @@ describe("AgentRunner", () => {
         { threadContext: webchatThreadContext, workingDir: projectWorkingDir },
       );
 
-      const first = await collectMessages(session.sendTurn({ prompt: "First" }).events);
-      const second = await collectMessages(session.sendTurn({ prompt: "Second" }).events);
+      // The runner briefs every turn with the chat's framing.
+      const briefing = () => ({
+        briefing: catchUpBriefing({}, { threadContext: webchatThreadContext }),
+      });
+      const first = await collectMessages(session.sendTurn({ prompt: "First" }, briefing()).events);
+      const second = await collectMessages(
+        session.sendTurn({ prompt: "Second" }, briefing()).events,
+      );
 
       expect(initUserPrompt(first)).toContain("<thread_context>");
       expect(initUserPrompt(second)).not.toContain("<thread_context>");

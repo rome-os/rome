@@ -34,6 +34,7 @@ import { PromptBuilder } from "../core/prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import type { ThreadContext } from "../core/types.js";
+import { catchUpBriefing } from "../core/connection-briefing.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "continuation_agent";
@@ -165,7 +166,11 @@ describe("continuation notice through TestSessionManager", () => {
       JSON.stringify([{ type: "text", content: text }]),
     );
     at((now - START) / 1000 + 1);
-    const handle = session.sendTurn({ prompt: text, inputId });
+    // The dashboard's runner briefs each turn with the chat's framing.
+    const handle = session.sendTurn(
+      { prompt: text, inputId },
+      { briefing: catchUpBriefing({}, { threadContext }) },
+    );
     for await (const _event of handle.events) {
       // drain
     }

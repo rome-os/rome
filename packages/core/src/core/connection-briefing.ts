@@ -6,6 +6,7 @@ import type { TurnBriefing } from "../agent-sessions/index.js";
 import type { ChannelSurface } from "../connections/session-surface.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import type { ThreadContext } from "./types.js";
+import { buildThreadContextBlock } from "./prompt-builder.js";
 
 // What a wake on a connection tells the agent before the waking message: the
 // messages said where its session stands that it has not seen, and the one the
@@ -81,13 +82,34 @@ export interface CatchUpDeps {
 }
 
 /**
- * The briefing of a turn a wake on a connection starts: the messages the agent
- * has not seen where its session stands, and the message the waking one
- * replies to. Only a turn recorded in a connection's conversation on a surface
- * that carries prompt context gets one. Undefined when there is nothing to
- * read the messages from.
+ * The briefing of a turn that replies somewhere: the thread and project
+ * framing the agent opens its provider thread with, and, for a wake on a
+ * connection, the messages the agent has not seen where its session stands
+ * and the message the waking one replies to. Undefined for a turn that replies
+ * nowhere.
  */
 export function catchUpBriefing(
+  deps: CatchUpDeps,
+  turn: Parameters<typeof catchUpOf>[1],
+): TurnBriefing | undefined {
+  const thread = turn.threadContext;
+  if (!thread) return undefined;
+  const catchUp = catchUpOf(deps, turn);
+  return {
+    compose(prompt, facts) {
+      const composed = catchUp ? catchUp.compose(prompt, facts) : { prompt };
+      const opening = buildThreadContextBlock(thread, facts.workingDir);
+      return opening ? { ...composed, opening } : composed;
+    },
+  };
+}
+
+/**
+ * The catch-up of a turn a wake on a connection starts. Only a turn recorded
+ * in a connection's conversation on a surface that carries prompt context gets
+ * one. Undefined when there is nothing to read the messages from.
+ */
+function catchUpOf(
   deps: CatchUpDeps,
   turn: {
     threadContext?: ThreadContext;

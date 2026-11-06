@@ -26,12 +26,8 @@ import { actionExecutionContext, type ActionExecutionStore } from "./context.js"
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
-import {
-  callerConnection,
-  callerFromKey,
-  callerKey,
-  type SessionCaller,
-} from "../core/session-caller.js";
+import { callerKey, type SessionCaller } from "../core/session-caller.js";
+import { connectionOfCaller } from "../connections/session-surface.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
   fromWireError,
@@ -100,7 +96,7 @@ function buildRomeSpanAttrs(ctx?: ActionRunContext): Record<string, string> {
   if (ctx.turnId) out["turn.id"] = ctx.turnId;
   if (ctx.channelThreadKey) {
     out["channel.thread_key"] = ctx.channelThreadKey;
-    const name = callerConnection(callerFromKey(ctx.channelThreadKey));
+    const name = connectionOfCaller(ctx.channelThreadKey);
     if (name) out["channel.name"] = name;
   }
   return out;

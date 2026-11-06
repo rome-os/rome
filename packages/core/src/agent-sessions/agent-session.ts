@@ -19,7 +19,6 @@ import {
   buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
   buildDeviceFolderBlock,
-  buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
   type PromptBuilder,
 } from "../core/prompt-builder.js";
@@ -181,7 +180,16 @@ export interface TurnConversation {
  * moment, and calls `sent` once the prompt reached the model.
  */
 export interface TurnBriefing {
-  compose(prompt: string, turn: { turnId: string }): { prompt: string; sent?: () => void };
+  compose(
+    prompt: string,
+    turn: { turnId: string; workingDir?: string },
+  ): {
+    prompt: string;
+    /** What the agent reads once, before the first turn its provider thread
+     *  sees. The session places it only on that turn. */
+    opening?: string;
+    sent?: () => void;
+  };
 }
 
 /** One turn as the session hands it to its log. */
@@ -2053,13 +2061,13 @@ class AgentSessionImpl implements AgentSession {
   // Captured at session open; passed through to per-turn span attrs.
   private isNewSession: boolean;
   private isSubagent: boolean;
-  // One-shot guard: the `<thread_context>` block is prepended to the FIRST user
+  // One-shot guard: the caller's opening is prepended to the FIRST user
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
   /**
    * The current provider thread started in this session rather than resuming
-   * one, so its first turn carries the `<thread_context>` block.
+   * one, so its first turn carries the caller's opening.
    */
   private threadFresh: boolean;
   /**
@@ -3558,18 +3566,19 @@ class AgentSessionImpl implements AgentSession {
       // cleanup demotes it to once-per-session — turn_start above is already
       // the authoritative turn boundary.
       const tc = sink.threadContext;
-      // Thread + project framing lives on the FIRST user message of a fresh
-      // conversation (a `<thread_context>` block), not the system prompt, so the
-      // cached system prefix stays identical across sessions. Gated to a new,
-      // non-subagent session's first turn: a resumed session already carries the
-      // block in its provider history (re-injecting would duplicate it), and
-      // subagents get no such framing (they get no contextSuffix either). The
-      // one-shot flag flips here regardless — if a brand-new session's first turn
-      // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
-      // that path means Rome isn't usable yet, so the loss is benign.
+      // The caller's opening (its thread and project framing) lives on the
+      // first user message of a fresh provider thread, not the system prompt,
+      // so the cached system prefix stays identical across sessions. A resumed
+      // thread already carries it in its history, and subagents get none. The
+      // one-shot flag flips here regardless: if a brand-new session's first
+      // turn short-circuits (e.g. the not-logged-in gate) it is not carried
+      // forward; that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       // The caller's briefing, read now that the turn holds the turn lock.
-      const briefed = sink.briefing?.compose(userPrompt, { turnId: sink.turnId });
+      const briefed = sink.briefing?.compose(userPrompt, {
+        turnId: sink.turnId,
+        workingDir: this.workingDir,
+      });
       if (briefed) userPrompt = briefed.prompt;
       // Every turn, subagents included: the folder is where the work happens.
       const deviceFolderBlock = buildDeviceFolderBlock(tc);
@@ -3590,12 +3599,9 @@ class AgentSessionImpl implements AgentSession {
       }
       // A thread that starts in this session, the first one or one that
       // replaced it on another provider, has not seen the block yet.
-      if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
+      if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && briefed?.opening) {
         this.threadContextInjected = true;
-        const block = buildThreadContextBlock(tc, this.workingDir);
-        if (block) {
-          userPrompt = `${block}\n\n${userPrompt}`;
-        }
+        userPrompt = `${briefed.opening}\n\n${userPrompt}`;
       }
       const initMsg: AgentEvent = {
         type: "session_init",

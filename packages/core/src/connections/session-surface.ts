@@ -1,6 +1,6 @@
 import type { SessionSurface } from "../agent-sessions/index.js";
 import { isGuardianFacingChannel } from "../core/guardian-channel.js";
-import { callerConnection, type SessionCaller } from "../core/session-caller.js";
+import { callerConnection, callerFromKey, type SessionCaller } from "../core/session-caller.js";
 import type { ThreadContext } from "../core/types.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE } from "../chats/dashboard/dashboard-account.js";
@@ -74,4 +74,10 @@ export function sessionSurfaceOf(
  *  the session's log keeps the trace either way. */
 export function surfaceKeepsLines(replies?: ThreadContext): boolean {
   return replies?.channel === WEBCHAT_CHANNEL;
+}
+
+/** The connection a stored caller's turns are delivered on, as Participation
+ *  reads the caller it minted. Undefined for a caller on no connection. */
+export function connectionOfCaller(stored: string): string | undefined {
+  return callerConnection(callerFromKey(stored));
 }
