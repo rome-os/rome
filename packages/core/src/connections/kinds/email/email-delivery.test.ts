@@ -20,7 +20,7 @@ import {
 import { EmailAdapter } from "./email.js";
 import { REPLY_LOOKUP_BUDGET_MS } from "./email-reply-target.js";
 
-const THREAD = "provider-thread";
+const THREAD = "model-thread";
 const GUARDIAN = "guardian@example.com";
 
 function listItem(

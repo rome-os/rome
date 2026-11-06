@@ -284,7 +284,7 @@ describe("AnthropicProvider", () => {
         yield result("PONG", [prompt.uuid], "human");
       });
       const session = await new AnthropicProvider().openSession(
-        buildParams({ thread: { kind: "resume", providerThreadId: "thread-1" } }),
+        buildParams({ thread: { kind: "resume", modelThreadId: "thread-1" } }),
       );
       await session.sendUserInput({ text: "Reply with PONG.", inputId: p });
       const turn = await nextTurn(session.events[Symbol.asyncIterator]());
@@ -1120,11 +1120,11 @@ describe("AnthropicProvider", () => {
     const sourceSdkSessionId = queryMock.mock.calls[0]![0].options.sessionId;
     expect(fork).toMatchObject({
       providerId: "anthropic",
-      sourceProviderThreadId: sourceSdkSessionId,
+      sourceModelThreadId: sourceSdkSessionId,
       mode: "thread",
     });
-    expect(fork.providerThreadId).toMatch(UUID_PATTERN);
-    expect(fork.providerThreadId).not.toBe(sourceSdkSessionId);
+    expect(fork.modelThreadId).toMatch(UUID_PATTERN);
+    expect(fork.modelThreadId).not.toBe(sourceSdkSessionId);
     expect(queryMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -1133,7 +1133,7 @@ describe("AnthropicProvider", () => {
           systemPrompt: "fork system",
           resume: sourceSdkSessionId,
           forkSession: true,
-          sessionId: fork.providerThreadId,
+          sessionId: fork.modelThreadId,
           resumeSessionAt: "assistant-message-at-t2",
         }),
       }),
@@ -1172,7 +1172,7 @@ describe("AnthropicProvider", () => {
     it("resumes the thread the run names", async () => {
       const provider = new AnthropicProvider();
       const session = await provider.openSession(
-        buildParams({ thread: { kind: "resume", providerThreadId: "sdk-thread-123" } }),
+        buildParams({ thread: { kind: "resume", modelThreadId: "sdk-thread-123" } }),
       );
 
       expect(queryMock.mock.calls[0]![0].options).toMatchObject({ resume: "sdk-thread-123" });
@@ -1181,7 +1181,7 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
-    it("exposes the SDK session id as providerThreadId once a turn produces content", async () => {
+    it("exposes the SDK session id as modelThreadId once a turn produces content", async () => {
       mockQuery([
         {
           type: "assistant",
@@ -1205,10 +1205,10 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider();
       const session = await provider.openSession(buildParams());
 
-      expect(session.providerThreadId).toBeUndefined();
+      expect(session.modelThreadId).toBeUndefined();
       await session.sendUserInput({ text: "hi", inputId: SENT });
       const messages = await collectEvents(session);
-      expect(session.providerThreadId).toBe("sdk-thread-xyz");
+      expect(session.modelThreadId).toBe("sdk-thread-xyz");
       expect(messages.at(-1)).toMatchObject({
         type: "result",
         position: { provider: "anthropic", modelThreadId: "sdk-thread-xyz", checkpointId: "u1" },

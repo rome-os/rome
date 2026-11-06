@@ -34,11 +34,11 @@ export interface ReplaceSessionOptions {
 /** What one turn ran on. */
 export interface TurnRun {
   provider: string;
-  providerThreadId?: string;
+  modelThreadId?: string;
   model?: string;
   reasoningEffort?: string;
   /** Where the turn left the provider's thread, so a fork can branch at it.
-   *  Recorded only with a `providerThreadId`. */
+   *  Recorded only with a `modelThreadId`. */
   checkpoint?: { turnId: string; checkpointId: string };
 }
 
@@ -48,7 +48,7 @@ export interface TurnCheckpoint {
   sessionId: SessionId;
   turnId: string;
   provider: string;
-  providerThreadId: string;
+  modelThreadId: string;
   checkpointId: string;
 }
 
@@ -59,7 +59,7 @@ export interface SessionState {
   continuityKey: ContinuityKey | null;
   status: SessionStatus;
   provider: string | null;
-  providerThreadId: string | null;
+  modelThreadId: string | null;
   model: string | null;
   reasoningEffort: string | null;
   workingDir: string | null;
@@ -104,7 +104,7 @@ export class Session {
       continuityKey: options.continuityKey ?? null,
       status: "active",
       provider: null,
-      providerThreadId: null,
+      modelThreadId: null,
       model: null,
       reasoningEffort: null,
       workingDir: options.workingDir ?? null,
@@ -135,8 +135,8 @@ export class Session {
     return this.state.provider;
   }
   /** The provider's thread for this session, which a resume continues. */
-  get providerThreadId(): string | null {
-    return this.state.providerThreadId;
+  get modelThreadId(): string | null {
+    return this.state.modelThreadId;
   }
   /** The session model pin: the model that produced its history. */
   get model(): string | null {
@@ -164,8 +164,8 @@ export class Session {
   /** @deprecated Whether the provider has a thread for this session, which the
    *  dashboard reads as "this side chat can continue". Sessions should answer
    *  that question itself. */
-  get deprecatedHasProviderThread(): boolean {
-    return this.state.providerThreadId !== null;
+  get deprecatedHasModelThread(): boolean {
+    return this.state.modelThreadId !== null;
   }
 
   /**
@@ -177,19 +177,19 @@ export class Session {
    */
   recordTurn(run: TurnRun): void {
     this.state.provider = run.provider;
-    this.state.providerThreadId = run.providerThreadId ?? null;
+    this.state.modelThreadId = run.modelThreadId ?? null;
     this.state.model = run.model ?? null;
     this.changes.add("turn");
     if (run.reasoningEffort !== undefined) {
       this.state.reasoningEffort = run.reasoningEffort;
       this.changes.add("reasoningEffort");
     }
-    if (run.checkpoint && run.providerThreadId) {
+    if (run.checkpoint && run.modelThreadId) {
       this.checkpoints.set(run.checkpoint.turnId, {
         sessionId: this.state.id,
         turnId: run.checkpoint.turnId,
         provider: run.provider,
-        providerThreadId: run.providerThreadId,
+        modelThreadId: run.modelThreadId,
         checkpointId: run.checkpoint.checkpointId,
       });
     }

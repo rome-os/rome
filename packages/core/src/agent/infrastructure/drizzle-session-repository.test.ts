@@ -66,7 +66,7 @@ describe("DrizzleSessionRepository", () => {
     const session = Session.create("main", { deprecatedId: "fork-1" });
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       model: "gpt-5",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
     });
@@ -74,7 +74,7 @@ describe("DrizzleSessionRepository", () => {
 
     const found = (await repo.session("fork-1"))!;
     expect(found.provider).toBe("openai");
-    expect(found.providerThreadId).toBe("t-1");
+    expect(found.modelThreadId).toBe("t-1");
     expect(found.model).toBe("gpt-5");
     expect((await repo.deprecatedCheckpoint("fork-1", "turn-1"))?.checkpointId).toBe("c-1");
     expect(session.pendingChanges().checkpoints).toEqual([]);
@@ -132,7 +132,7 @@ describe("DrizzleSessionRepository", () => {
 
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       model: "gpt-5",
       reasoningEffort: "xhigh",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
@@ -143,7 +143,7 @@ describe("DrizzleSessionRepository", () => {
 
     const found = (await repo.session(session.id))!;
     expect(found.provider).toBe("openai");
-    expect(found.providerThreadId).toBe("t-1");
+    expect(found.modelThreadId).toBe("t-1");
     expect(found.model).toBe("gpt-5");
     expect(found.reasoningEffort).toBe("xhigh");
     expect(found.workingDir).toBe("/elsewhere");
@@ -151,7 +151,7 @@ describe("DrizzleSessionRepository", () => {
       sessionId: session.id,
       turnId: "turn-1",
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpointId: "c-1",
     });
     expect(await repo.deprecatedCheckpoint(session.id, "turn-2")).toBeNull();
@@ -162,12 +162,12 @@ describe("DrizzleSessionRepository", () => {
     await repo.add(session);
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
     });
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-2", checkpointId: "c-2" },
     });
     await repo.save(session);
@@ -180,33 +180,33 @@ describe("DrizzleSessionRepository", () => {
     await repo.add(session);
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
     });
     await repo.save(session);
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-2",
+      modelThreadId: "t-2",
       checkpoint: { turnId: "turn-1", checkpointId: "c-2" },
     });
     await repo.save(session);
 
     const rows = await testDb.db.select().from(sessionTurnCheckpoints);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ providerThreadId: "t-2", checkpointId: "c-2" });
+    expect(rows[0]).toMatchObject({ modelThreadId: "t-2", checkpointId: "c-2" });
   });
 
   it("save() clears a stale thread and model when a provider has no thread yet", async () => {
     const session = Session.create("main");
     await repo.add(session);
-    session.recordTurn({ provider: "openai", providerThreadId: "codex-thread-1", model: "gpt-5" });
+    session.recordTurn({ provider: "openai", modelThreadId: "codex-thread-1", model: "gpt-5" });
     await repo.save(session);
     session.recordTurn({ provider: "anthropic" });
     await repo.save(session);
 
     const found = (await repo.session(session.id))!;
     expect(found.provider).toBe("anthropic");
-    expect(found.providerThreadId).toBeNull();
+    expect(found.modelThreadId).toBeNull();
     expect(found.model).toBeNull();
   });
 
@@ -214,7 +214,7 @@ describe("DrizzleSessionRepository", () => {
     const session = Session.create("main");
     session.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
     });
     await expect(repo.save(session)).rejects.toThrow(/never added/);
@@ -232,14 +232,14 @@ describe("DrizzleSessionRepository", () => {
     const streaming = (await repo.session(session.id))!;
     const recording = (await repo.session(session.id))!;
 
-    recording.recordTurn({ provider: "openai", providerThreadId: "t-1", model: "gpt-5" });
+    recording.recordTurn({ provider: "openai", modelThreadId: "t-1", model: "gpt-5" });
     await repo.save(recording);
     streaming.touch();
     await repo.save(streaming);
 
     const found = (await repo.session(session.id))!;
     expect(found.provider).toBe("openai");
-    expect(found.providerThreadId).toBe("t-1");
+    expect(found.modelThreadId).toBe("t-1");
     expect(seconds(found.lastActiveAt)).toBe(seconds(streaming.lastActiveAt));
   });
 
@@ -309,7 +309,7 @@ describe("DrizzleSessionRepository", () => {
       channelThreadKey: "k",
       chatId: "chat-1",
       provider: null,
-      providerThreadId: null,
+      modelThreadId: null,
     });
     expect((await repo.current("k", "main"))?.id).toBe(successor.id);
   });
@@ -319,13 +319,13 @@ describe("DrizzleSessionRepository", () => {
     await repo.add(current);
     current.recordTurn({
       provider: "openai",
-      providerThreadId: "t-1",
+      modelThreadId: "t-1",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
     });
     const successor = current.replace();
     await repo.replace(current, successor);
 
-    expect((await repo.session(current.id))!.providerThreadId).toBe("t-1");
+    expect((await repo.session(current.id))!.modelThreadId).toBe("t-1");
     expect((await repo.deprecatedCheckpoint(current.id, "turn-1"))?.checkpointId).toBe("c-1");
   });
 
@@ -335,12 +335,12 @@ describe("DrizzleSessionRepository", () => {
     const successor = current.replace();
     successor.recordTurn({
       provider: "openai",
-      providerThreadId: "t-2",
+      modelThreadId: "t-2",
       checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
     });
     await repo.replace(current, successor);
 
-    expect((await repo.session(successor.id))!.providerThreadId).toBe("t-2");
+    expect((await repo.session(successor.id))!.modelThreadId).toBe("t-2");
     expect((await repo.deprecatedCheckpoint(successor.id, "turn-1"))?.checkpointId).toBe("c-1");
     expect(successor.pendingChanges().checkpoints).toEqual([]);
   });

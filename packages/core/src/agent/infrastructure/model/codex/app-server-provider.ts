@@ -722,9 +722,9 @@ export class CodexAppServerProvider implements ModelProvider {
       providerId: this.id,
       model: params.config.model,
       events: sink.iter(),
-      get providerThreadId(): string | undefined {
+      get modelThreadId(): string | undefined {
         return (
-          threadId ?? (params.thread.kind === "resume" ? params.thread.providerThreadId : undefined)
+          threadId ?? (params.thread.kind === "resume" ? params.thread.modelThreadId : undefined)
         );
       },
       get funding(): UsageFunding | undefined {
@@ -1063,7 +1063,7 @@ export class CodexAppServerProvider implements ModelProvider {
     const openedThread = await this.appServerManager.openThread(
       threadConfig,
       binding,
-      params.thread.kind === "resume" ? params.thread.providerThreadId : undefined,
+      params.thread.kind === "resume" ? params.thread.modelThreadId : undefined,
     );
     threadId = openedThread.threadId;
 
@@ -1113,7 +1113,7 @@ export class CodexAppServerProvider implements ModelProvider {
         return;
       }
       const tid = threadId;
-      if (!tid) throw new Error("Codex session has no provider thread id");
+      if (!tid) throw new Error("Codex session has no model thread id");
       // Inline any attached input images as data-URL items. Fails the turn
       // (never drops an image) so an edit/combine request can't silently run
       // against a subset of its inputs.
@@ -1380,9 +1380,8 @@ export class CodexAppServerProvider implements ModelProvider {
       // A native thread/fork would copy the contaminated history into the
       // child; a borrowed fork would run on it directly. Refuse both.
       if (contaminatedReason) throw new Error(contaminatedReason);
-      const source = session.providerThreadId;
-      if (!source)
-        throw new Error("Cannot fork Codex session before providerThreadId is available");
+      const source = session.modelThreadId;
+      if (!source) throw new Error("Cannot fork Codex session before modelThreadId is available");
       const mode = forkParams.mode ?? "ephemeral";
       // The fork's turn runs under an owner of its own, whether on a borrowed
       // source thread or a native child.
@@ -1391,9 +1390,9 @@ export class CodexAppServerProvider implements ModelProvider {
       let forkedId: string | undefined;
       return {
         providerId: this.id,
-        sourceProviderThreadId: source,
+        sourceModelThreadId: source,
         mode,
-        get providerThreadId() {
+        get modelThreadId() {
           return forkedId;
         },
         open: async (openParams) => {
@@ -1532,9 +1531,9 @@ export class CodexAppServerProvider implements ModelProvider {
           return await this.openSessionWithInheritedDynamicTools(
             {
               ...openParams,
-              thread: { kind: "resume", providerThreadId: forkedId },
+              thread: { kind: "resume", modelThreadId: forkedId },
               fork: {
-                sourceProviderThreadId: source,
+                sourceModelThreadId: source,
                 mode,
                 sourceCheckpoint: forkParams.sourceCheckpoint,
               },

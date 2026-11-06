@@ -1656,7 +1656,7 @@ export class WebChatRepository {
   }
 
   /**
-   * A branch whose first answer completed on its own provider thread stops
+   * A branch whose first answer completed on its own model thread stops
    * being special: it becomes an ordinary chat, listed and managed like any
    * other. It takes its own address in place of the parent's it copied, and
    * the unread clock starts; lineage stays in `parent_session_id` and the

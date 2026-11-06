@@ -6,7 +6,7 @@ A Rome session is the durable product boundary around one continuous body of age
 
 - For webchat and external IM, one session is the stable chat. External chats are addressed by their channel and thread: a platform-native thread is a separate session, while an ordinary reply remains in its chat.
 - The transcript is durable and belongs to Rome, including participant and out-of-band messages the model provider has not seen yet. Provider-side execution state is a separate, re-derivable resource — losing it never loses the chat.
-- A chat does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same chat and the same provider thread.
+- A chat does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same chat and the same model thread.
 - Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another session. An ordinary reply never does.
 - Provider compaction manages the live context window without deleting Rome's durable transcript.
 - Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. Parent/child sessions are linked and appear as session lineage.
@@ -16,7 +16,7 @@ A Rome session is the durable product boundary around one continuous body of age
 
 - **[Turn](#turn)** — a turn is one unit of work inside a session. A session is the durable boundary around many turns.
 - **[Forked turn](#forked-turns)** — a fork branches from a session's context but can never mutate it.
-- **Provider execution state** — the provider-side thread is an implementation resource the session resumes. The session is the product boundary.
+- **Model execution state** — the model thread is an implementation resource the session resumes. The session is the product boundary.
 
 ## Continuity key
 
@@ -43,7 +43,7 @@ A session remembers the concrete model that produced its history — the **sessi
 - A successful turn establishes or updates the pin. Only the Concierge chat may change providers automatically through [provider failover](../adrs/concierge-provider-failover.md), and its note names the reason. A temporary error gets one delayed retry first. A single-model limit tries another model on the same provider first. Concierge keeps its manual model menu when the model selector is off. Other pinned sessions never drift to another model on their own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
 - Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
 - The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again. A side chat promoted to a chat, and a chat with a handoff open, show no selector.
-- A pick on the same provider continues the provider thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
+- A pick on the same provider continues the model thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
 - The chat shows a short centered note before the first turn that ran on another model than the session's previous turn. It names the model that ran, as the turn's accounting records it, so two picks that a custom provider maps to one model show no note.
 - Outside Concierge provider failover, a pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
@@ -58,7 +58,7 @@ A session remembers the concrete model that produced its history — the **sessi
 
 ## Continuation
 
-Rome's transcript is the conversation, and a provider thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice: the earlier messages are not in its context, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice says to read them with it. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
+Rome's transcript is the conversation, and a model thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice: the earlier messages are not in its context, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice says to read them with it. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
 
 **Contracts:**
 
@@ -214,7 +214,7 @@ The caller creating the fork chooses one of two modes:
 The caller also chooses how long the fork's provider branch lives:
 
 - **One-shot** (the default) — the provider branch is disposable. It closes when the single turn completes, and nothing can resume it. Recap and turn-feedback forks run this way.
-- **Continuable** — the caller asks for a provider thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a chat the guardian can keep talking to.
+- **Continuable** — the caller asks for a model thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a chat the guardian can keep talking to.
 
 **Contracts:**
 
@@ -222,7 +222,7 @@ The caller also chooses how long the fork's provider branch lives:
 - The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. A fork never writes a [model pin](#model-pin) onto its source. A continuable fork records provider and model on its own agent session, which is what a later turn resumes from. It also records the reasoning effort its turn ran with, for display only.
 - A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other turn.
-- A fork is continuable only when it completed on a provider thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.
+- A fork is continuable only when it completed on a model thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.
 - A fork holds no scheduled wake-ups and hosts no approval continuation, continuable or not. Both resume through the top-level session host, which answers into the chat that scheduled them.
 
 **Not to be confused with:**

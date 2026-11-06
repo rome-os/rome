@@ -158,7 +158,7 @@ export class DrizzleSessionRepository implements SessionRepository {
         sessionId: sessionTurnCheckpoints.sessionId,
         turnId: sessionTurnCheckpoints.turnId,
         provider: sessionTurnCheckpoints.provider,
-        providerThreadId: sessionTurnCheckpoints.providerThreadId,
+        modelThreadId: sessionTurnCheckpoints.modelThreadId,
         checkpointId: sessionTurnCheckpoints.checkpointId,
       })
       .from(sessionTurnCheckpoints)
@@ -205,7 +205,7 @@ function upsertCheckpoint(tx: DrizzleTx, checkpoint: TurnCheckpoint): void {
       target: [sessionTurnCheckpoints.sessionId, sessionTurnCheckpoints.turnId],
       set: {
         provider: checkpoint.provider,
-        providerThreadId: checkpoint.providerThreadId,
+        modelThreadId: checkpoint.modelThreadId,
         checkpointId: checkpoint.checkpointId,
         createdAt: now,
       },
@@ -220,7 +220,7 @@ function restore(row: SessionRow): Session {
     continuityKey: row.channelThreadKey,
     status: row.status,
     provider: row.provider,
-    providerThreadId: row.providerThreadId,
+    modelThreadId: row.modelThreadId,
     model: row.model,
     reasoningEffort: row.reasoningEffort,
     workingDir: row.workingDir,
@@ -239,7 +239,7 @@ function writeChanges(
   const columns: Partial<SessionRow> = {};
   if (changes.has("turn")) {
     columns.provider = state.provider;
-    columns.providerThreadId = state.providerThreadId;
+    columns.modelThreadId = state.modelThreadId;
     columns.model = state.model;
   }
   if (changes.has("reasoningEffort")) columns.reasoningEffort = state.reasoningEffort;
@@ -266,7 +266,7 @@ function toRow(state: SessionState): SessionRow {
     channelThreadKey: state.continuityKey,
     chatId: state.chatId,
     provider: state.provider,
-    providerThreadId: state.providerThreadId,
+    modelThreadId: state.modelThreadId,
     model: state.model,
     reasoningEffort: state.reasoningEffort,
     workingDir: state.workingDir,

@@ -1967,7 +1967,7 @@ describe("Webchat API", () => {
       const runtime = Session.create("main", { continuityKey: `webchat:${session.id}` });
       runtime.recordTurn({
         provider: "codex",
-        providerThreadId: "thread-1",
+        modelThreadId: "thread-1",
         model: "gpt-5.5",
         reasoningEffort: "xhigh",
       });
@@ -1975,7 +1975,7 @@ describe("Webchat API", () => {
       const otherAgent = Session.create("other-agent", { continuityKey: `webchat:${session.id}` });
       otherAgent.recordTurn({
         provider: "claude",
-        providerThreadId: "thread-2",
+        modelThreadId: "thread-2",
         model: "other-model",
       });
       await deps.sessionRepository.add(otherAgent);
@@ -4794,7 +4794,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "rated-provider-turn",
       });
       const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -4833,7 +4833,7 @@ describe("Webchat API", () => {
         mode: "exact",
         sourceCheckpoint: {
           providerId: "openai",
-          providerThreadId: "source-provider-thread",
+          providerThreadId: "source-model-thread",
           checkpointId: "rated-provider-turn",
         },
       });
@@ -5133,7 +5133,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "provider-turn-t2",
       });
       const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -5164,7 +5164,7 @@ describe("Webchat API", () => {
         mode: "exact",
         sourceCheckpoint: {
           providerId: "openai",
-          providerThreadId: "source-provider-thread",
+          providerThreadId: "source-model-thread",
           checkpointId: "provider-turn-t2",
         },
       });
@@ -5224,7 +5224,7 @@ describe("Webchat API", () => {
           sessionId: "live-source-session",
           turnId: "turn-before-stop",
           provider: "anthropic",
-          providerThreadId: "claude-thread",
+          modelThreadId: "claude-thread",
           checkpointId: "durable-assistant-before-stop",
         });
       const app = createWebchatRuntime(deps).routes;
@@ -5347,7 +5347,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "provider-turn-t2",
       });
       rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -5425,7 +5425,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "provider-turn-t2",
       });
       rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -5444,7 +5444,7 @@ describe("Webchat API", () => {
 
       // Visibility now precedes thread persistence, so the send guard is what
       // keeps "visible" from outrunning "continuable": a follow-up before
-      // persistForkThread's row exists would acquire a fresh provider thread
+      // persistForkThread's row exists would acquire a fresh model thread
       // and silently lose the branched context.
       const refused = await app.request(`/chat/sessions/branch-fork-session/turns`, {
         method: "POST",
@@ -5459,7 +5459,7 @@ describe("Webchat API", () => {
       findRow.mockResolvedValue({
         id: "branch-fork-session",
         provider: "anthropic",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "claude",
         reasoningEffort: null,
         createdAt: new Date(),
@@ -5505,7 +5505,7 @@ describe("Webchat API", () => {
       ({
         id,
         provider: "anthropic",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "claude",
         reasoningEffort: null,
         createdAt: new Date(),
@@ -5615,7 +5615,7 @@ describe("Webchat API", () => {
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
       // `persistForkThread` stored the row without a model-selection suffix. If
       // a follow-up ever recomputed a suffixed key, `acquire` would open a
-      // fresh provider thread and lose the branch history with no error. The
+      // fresh model thread and lose the branch history with no error. The
       // selector setting must be ON or the selection is discarded before the
       // pin and this proves nothing.
       await deps.settingsRepo.set("enableModelSelector", true);
@@ -6028,7 +6028,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.sessionRepository, "current").mockResolvedValue({
         id: forkId,
         provider: "anthropic",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "claude",
         reasoningEffort: null,
         createdAt: new Date(),

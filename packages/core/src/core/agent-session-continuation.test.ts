@@ -71,9 +71,9 @@ function createProvider(id: ProviderId) {
     );
     return {
       ...session,
-      providerThreadId:
+      modelThreadId:
         params.thread.kind === "resume"
-          ? params.thread.providerThreadId
+          ? params.thread.modelThreadId
           : `${id}-thread-${opened.length}`,
     };
   });
@@ -283,7 +283,7 @@ describe("continuation notice through AgentSessionManager", () => {
     ]);
     expect(anthropic.opened.map((params) => params.thread)).toEqual([
       { kind: "new" },
-      { kind: "resume", providerThreadId: "anthropic-thread-1" },
+      { kind: "resume", modelThreadId: "anthropic-thread-1" },
     ]);
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
@@ -315,7 +315,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(resumed, "second");
     expect(anthropic.opened[1]?.thread).toEqual({
       kind: "resume",
-      providerThreadId: "anthropic-thread-1",
+      modelThreadId: "anthropic-thread-1",
     });
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
     expect(anthropic.calls[1]?.prompt).not.toContain("<thread_context>");

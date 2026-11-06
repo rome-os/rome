@@ -174,7 +174,7 @@ describe("AgentRunner", () => {
       executeSubagent: async () => "delegated",
     });
     expect(session.providerId).toBe("mock");
-    expect(session.providerThreadId).toBeUndefined();
+    expect(session.modelThreadId).toBeUndefined();
 
     // The events stream parks (no provider query, nothing to resume/error) until
     // close() ends it — proven by racing the iterator against a timer.
@@ -1029,7 +1029,7 @@ describe("AgentRunner", () => {
     provider: MockModelProvider,
     makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
     options: {
-      providerThreadId?: string;
+      modelThreadId?: string;
       onFork?: (params: ModelSessionForkParams) => void;
     } = {},
   ): MockModelProvider {
@@ -1038,12 +1038,12 @@ describe("AgentRunner", () => {
       const session = await baseOpen(params);
       return {
         ...session,
-        providerThreadId: options.providerThreadId,
+        modelThreadId: options.modelThreadId,
         fork: async (forkParams: ModelSessionForkParams) => {
           options.onFork?.(forkParams);
           return {
             providerId: "mock" as const,
-            sourceProviderThreadId: options.providerThreadId ?? "mock-source-thread",
+            sourceModelThreadId: options.modelThreadId ?? "mock-source-thread",
             mode: "ephemeral" as const,
             open: async (openParams: ModelSessionForkOpenParams) => makeForkSession(openParams),
           };
@@ -1075,7 +1075,7 @@ describe("AgentRunner", () => {
       provider?: MockModelProvider;
       agentName?: string;
       fork?: Partial<Omit<ForkRunParams, "agentName" | "sourceSessionId" | "channelThreadKey">>;
-      sourceProviderThreadId?: string;
+      sourceModelThreadId?: string;
       onFork?: (params: ModelSessionForkParams) => void;
       appCatalog?: Pick<AppCatalog, "get">;
     } = {},
@@ -1084,7 +1084,7 @@ describe("AgentRunner", () => {
     const provider = withForkSupport(
       opts.provider ?? new MockModelProvider([[{ type: "result", content: "Done" }]]),
       makeForkSession,
-      { providerThreadId: opts.sourceProviderThreadId, onFork: opts.onFork },
+      { modelThreadId: opts.sourceModelThreadId, onFork: opts.onFork },
     );
     const runner = createRunner(provider, undefined, {
       keepAliveAcrossTurns: true,
@@ -1133,12 +1133,12 @@ describe("AgentRunner", () => {
             })(),
           }),
         {
-          sourceProviderThreadId: "provider-thread",
+          sourceModelThreadId: "model-thread",
           fork: {
             mode: "exact",
             sourceCheckpoint: {
               providerId: "mock",
-              providerThreadId: "provider-thread",
+              providerThreadId: "model-thread",
               checkpointId: "provider-turn-t2",
             },
           },
@@ -1160,7 +1160,7 @@ describe("AgentRunner", () => {
             })(),
           }),
         {
-          sourceProviderThreadId: "provider-thread",
+          sourceModelThreadId: "model-thread",
           onFork: (params) => {
             providerFork = params;
           },
@@ -1168,7 +1168,7 @@ describe("AgentRunner", () => {
             mode: "exact",
             sourceCheckpoint: {
               providerId: "mock",
-              providerThreadId: "provider-thread",
+              providerThreadId: "model-thread",
               checkpointId: "provider-turn-t2",
             },
           },
@@ -1182,15 +1182,15 @@ describe("AgentRunner", () => {
       });
     });
 
-    it("rejects a checkpoint from a different provider thread", async () => {
+    it("rejects a checkpoint from a different model thread", async () => {
       const onFork = rs.fn();
       const messages = await runForkAgainstLiveSession(() => forkSessionStub({}), {
-        sourceProviderThreadId: "live-provider-thread",
+        sourceModelThreadId: "live-model-thread",
         onFork,
         fork: {
           sourceCheckpoint: {
             providerId: "mock",
-            providerThreadId: "different-provider-thread",
+            providerThreadId: "different-model-thread",
             checkpointId: "provider-turn-t2",
           },
         },
@@ -1199,7 +1199,7 @@ describe("AgentRunner", () => {
       expect(messages.map((message) => message.type)).toEqual(["turn_start", "error", "turn_end"]);
       expect(messages[1]).toMatchObject({
         type: "error",
-        error: "Fork checkpoint belongs to a different provider thread",
+        error: "Fork checkpoint belongs to a different model thread",
       });
       expect(onFork).not.toHaveBeenCalled();
     });
@@ -1318,18 +1318,18 @@ describe("AgentRunner", () => {
       expect(row).toMatchObject({ model: "claude-opus-5-5[1m]" });
     });
 
-    it("leaves a resumable thread behind for a fork that ran on its own provider thread", async () => {
+    it("leaves a resumable thread behind for a fork that ran on its own model thread", async () => {
       let forkMode: string | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
+            modelThreadId: "fork-model-thread",
             events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield { type: "result", content: "Fork answer", reasoningEffort: "max" };
             })(),
           }),
         {
-          sourceProviderThreadId: "source-provider-thread",
+          sourceModelThreadId: "source-model-thread",
           onFork: (params) => {
             forkMode = params.mode;
           },
@@ -1345,7 +1345,7 @@ describe("AgentRunner", () => {
       ).resolves.toMatchObject({
         id: start.sessionId,
         provider: "mock",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "mock-model",
         // The branch header shows the effort its provider ran at, not the model alone.
         reasoningEffort: "max",
@@ -1370,13 +1370,13 @@ describe("AgentRunner", () => {
           (params) => {
             openParams.push(params);
             return forkSessionStub({
-              providerThreadId: "fork-provider-thread",
+              modelThreadId: "fork-model-thread",
               events: (async function* (): AsyncIterable<ModelSessionEvent> {
                 yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
               })(),
             });
           },
-          { sourceProviderThreadId: "source-provider-thread", fork: { mode: "exact", ...fork } },
+          { sourceModelThreadId: "source-model-thread", fork: { mode: "exact", ...fork } },
         );
 
       await runFork({ persistThreadKey: (id: string) => `webchat:${id}` });
@@ -1394,13 +1394,13 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "shared-source-thread",
+            modelThreadId: "shared-source-thread",
             events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         {
-          sourceProviderThreadId: "shared-source-thread",
+          sourceModelThreadId: "shared-source-thread",
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
@@ -1412,12 +1412,12 @@ describe("AgentRunner", () => {
       ).resolves.toBeNull();
     });
 
-    it("stays one-shot and ephemeral with no thread key, no provider thread, or a failed fork", async () => {
+    it("stays one-shot and ephemeral with no thread key, no model thread, or a failed fork", async () => {
       let defaultMode: string | undefined;
       const noKey = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
+            modelThreadId: "fork-model-thread",
             events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
@@ -1440,13 +1440,13 @@ describe("AgentRunner", () => {
       const failed = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
+            modelThreadId: "fork-model-thread",
             events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield { type: "error", error: "the branch blew up" };
             })(),
           }),
         {
-          sourceProviderThreadId: "source-provider-thread",
+          sourceModelThreadId: "source-model-thread",
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
@@ -2507,7 +2507,7 @@ describe("AgentRunner", () => {
                   content: "Work before cancellation",
                   position: {
                     provider: "anthropic",
-                    providerThreadId: "persisted-claude-thread",
+                    modelThreadId: "persisted-claude-thread",
                     checkpointId: "assistant-current",
                   },
                 };
@@ -2521,7 +2521,7 @@ describe("AgentRunner", () => {
           );
           return {
             ...model,
-            providerThreadId: "persisted-claude-thread",
+            modelThreadId: "persisted-claude-thread",
             get isClosed() {
               return disposed;
             },
@@ -2576,7 +2576,7 @@ describe("AgentRunner", () => {
       );
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        thread: { kind: "resume", providerThreadId: "persisted-claude-thread" },
+        thread: { kind: "resume", modelThreadId: "persisted-claude-thread" },
       });
       expect(session.status).toBe("idle");
       await manager.shutdown();
@@ -2612,7 +2612,7 @@ describe("AgentRunner", () => {
                 content: "Work before cancellation",
                 position: {
                   provider: "anthropic",
-                  providerThreadId: "persisted-claude-thread",
+                  modelThreadId: "persisted-claude-thread",
                   checkpointId: "assistant-current",
                 },
               };
@@ -2622,7 +2622,7 @@ describe("AgentRunner", () => {
           );
           return {
             ...model,
-            providerThreadId: "persisted-claude-thread",
+            modelThreadId: "persisted-claude-thread",
             get isClosed() {
               return disposed;
             },
@@ -2636,9 +2636,9 @@ describe("AgentRunner", () => {
               providerFork = forkParams;
               return {
                 providerId: "anthropic" as const,
-                sourceProviderThreadId: "persisted-claude-thread",
+                sourceModelThreadId: "persisted-claude-thread",
                 mode: forkParams.mode ?? "ephemeral",
-                providerThreadId: "forked-claude-thread",
+                modelThreadId: "forked-claude-thread",
                 open: async () =>
                   forkSessionStub({
                     providerId: "anthropic",
@@ -2696,7 +2696,7 @@ describe("AgentRunner", () => {
       expect(forkMessages[1]).toMatchObject({ type: "result", content: "Fork complete" });
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        thread: { kind: "resume", providerThreadId: "persisted-claude-thread" },
+        thread: { kind: "resume", modelThreadId: "persisted-claude-thread" },
       });
       expect(providerFork).toMatchObject({
         configurationMode: "exact",
@@ -3007,14 +3007,14 @@ describe("AgentRunner", () => {
               content: "Done",
               position: {
                 provider: "mock",
-                providerThreadId: "provider-thread",
+                modelThreadId: "model-thread",
                 checkpointId: "provider-turn-2",
               },
             };
           },
           params,
         ),
-        providerThreadId: "provider-thread",
+        modelThreadId: "model-thread",
       }));
       const runner = createRunner(provider);
 
@@ -3031,7 +3031,7 @@ describe("AgentRunner", () => {
         sessionId: start.sessionId,
         turnId: start.turnId,
         provider: "mock",
-        providerThreadId: "provider-thread",
+        modelThreadId: "model-thread",
         checkpointId: "provider-turn-2",
       });
     });
@@ -3062,14 +3062,14 @@ describe("AgentRunner", () => {
                 },
                 position: {
                   provider: "anthropic",
-                  providerThreadId: "claude-thread",
+                  modelThreadId: "claude-thread",
                   checkpointId: "streamed-but-not-resumable-assistant-uuid",
                 },
               };
             },
             params,
           );
-          return { ...session, providerThreadId: "claude-thread" };
+          return { ...session, modelThreadId: "claude-thread" };
         },
       };
       const runner = createRunner(provider);
@@ -3118,14 +3118,14 @@ describe("AgentRunner", () => {
                 },
                 position: {
                   provider: "openai",
-                  providerThreadId: "codex-thread",
+                  modelThreadId: "codex-thread",
                   checkpointId: "codex-turn-1",
                 },
               };
             },
             params,
           );
-          return { ...session, providerThreadId: "codex-thread" };
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const runner = createRunner(provider, lifecycle);
@@ -4193,11 +4193,11 @@ describe("AgentRunner", () => {
     });
 
     it("does not inject into a resumed session (the block is already in its history)", async () => {
-      // A row whose provider thread the provider resumes already holds the block.
+      // A row whose model thread the provider resumes already holds the block.
       const seeded = Session.create("test-main", { continuityKey: "webchat:tc-resumed" });
       seeded.recordTurn({
         provider: "mock",
-        providerThreadId: "mock-thread-1",
+        modelThreadId: "mock-thread-1",
         model: "mock-model",
       });
       await sessionRepository.add(seeded);
@@ -4216,7 +4216,7 @@ describe("AgentRunner", () => {
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
     });
 
-    it("injects into a session whose row never recorded a provider thread", async () => {
+    it("injects into a session whose row never recorded a model thread", async () => {
       // The provider resumes only a recorded thread, so this one starts new
       // and has not seen the block.
       const seeded = Session.create("test-main", { continuityKey: "webchat:tc-unthreaded" });
@@ -4753,7 +4753,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          return { ...modelSession, providerThreadId: "codex-thread-1" };
+          return { ...modelSession, modelThreadId: "codex-thread-1" };
         },
       };
       const modelResolver = createTestModelResolver({ providers: [openai] });
@@ -4783,7 +4783,7 @@ describe("AgentRunner", () => {
       });
       expect(openAiSessions[1]).toMatchObject({
         config: { model: "gpt-5.6-terra" },
-        thread: { kind: "resume", providerThreadId: "codex-thread-1" },
+        thread: { kind: "resume", modelThreadId: "codex-thread-1" },
       });
       expect(resumedMessages.find((message) => message.type === "session_init")).toMatchObject({
         sessionId: firstSession.sessionId,
@@ -4815,7 +4815,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          return { ...session, providerThreadId: "codex-thread" };
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const claude: ModelProvider = {
@@ -4832,7 +4832,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          return { ...session, providerThreadId: "claude-thread" };
+          return { ...session, modelThreadId: "claude-thread" };
         },
       };
       const modelResolver = createModelResolver({
@@ -4893,7 +4893,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          return { ...session, providerThreadId: "codex-thread" };
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const modelResolver = createModelResolver({
@@ -4924,7 +4924,7 @@ describe("AgentRunner", () => {
       });
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        thread: { kind: "resume", providerThreadId: "codex-thread" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
@@ -4956,7 +4956,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          return { ...session, providerThreadId: "codex-thread" };
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const modelResolver = createModelResolver({
@@ -4977,7 +4977,7 @@ describe("AgentRunner", () => {
 
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
-        thread: { kind: "resume", providerThreadId: "codex-thread" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
@@ -5051,7 +5051,7 @@ describe("AgentRunner", () => {
     function recordingProvider(
       id: ProviderId,
       displayName: string,
-      providerThreadId: string,
+      modelThreadId: string,
       opens: ModelSessionParams[],
     ): ModelProvider {
       return {
@@ -5067,7 +5067,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          return { ...session, providerThreadId: providerThreadId };
+          return { ...session, modelThreadId: modelThreadId };
         },
       };
     }
@@ -5239,7 +5239,7 @@ describe("AgentRunner", () => {
       });
       const seeded = Session.create("test-main", { continuityKey: "telegram:legacy-row" });
       // A pre-cutover row: provider + thread persisted, model NULL.
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5250,11 +5250,11 @@ describe("AgentRunner", () => {
       );
 
       // Tier resolution as before the pin (large → Sol with access), carrying
-      // the stored provider thread; the successful turn then records the pin.
+      // the stored model thread; the successful turn then records the pin.
       expect(opens).toHaveLength(1);
       expect(opens[0]).toMatchObject({
         config: { model: "gpt-6.1-sol" },
-        thread: { kind: "resume", providerThreadId: "codex-thread" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       expect(await sessionRepository.session(legacyId)).toMatchObject({
         provider: "openai",
@@ -5277,7 +5277,7 @@ describe("AgentRunner", () => {
       const seeded = Session.create("test-main", { continuityKey: "webchat:shared-thread" });
       seeded.recordTurn({
         provider: "openai",
-        providerThreadId: "codex-thread",
+        modelThreadId: "codex-thread",
         model: "gpt-5.6-sol",
       });
       await sessionRepository.add(seeded);
@@ -5333,7 +5333,7 @@ describe("AgentRunner", () => {
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
         config: { model: "gpt-5.6-terra" },
-        thread: { kind: "resume", providerThreadId: "codex-thread" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await resumedManager.shutdown();
     });
@@ -5354,7 +5354,7 @@ describe("AgentRunner", () => {
       const seeded = Session.create("test-main", { continuityKey: "webchat:override-pin" });
       seeded.recordTurn({
         provider: "openai",
-        providerThreadId: "codex-thread",
+        modelThreadId: "codex-thread",
         model: "gpt-5.6-terra",
       });
       await sessionRepository.add(seeded);
@@ -5399,7 +5399,7 @@ describe("AgentRunner", () => {
       const seeded = Session.create("test-main", { continuityKey: "webchat:rescue" });
       seeded.recordTurn({
         provider: "openai",
-        providerThreadId: "codex-thread",
+        modelThreadId: "codex-thread",
         model: "gpt-5.6-sol",
       });
       await sessionRepository.add(seeded);
@@ -5453,7 +5453,7 @@ describe("AgentRunner", () => {
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
-      // while the stored provider thread is Codex. With the resume guard removed,
+      // while the stored model thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
       await new ChatsWebChatRepository(testDb.db).createSession(
@@ -5464,7 +5464,7 @@ describe("AgentRunner", () => {
         "claude-opus",
       );
       const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-mismatch" });
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5483,7 +5483,7 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // The resume opens Claude Opus on a fresh model thread (provider changed
       // from Codex), never the stored-provider tier resolution.
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
@@ -5510,7 +5510,7 @@ describe("AgentRunner", () => {
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
-      // while the stored provider thread is Codex. With the resume guard removed,
+      // while the stored model thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
       await new ChatsWebChatRepository(testDb.db).createSession(
@@ -5521,7 +5521,7 @@ describe("AgentRunner", () => {
         "claude-opus",
       );
       const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-no-context" });
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5535,7 +5535,7 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // The resume opens Claude Opus on a fresh model thread (provider changed
       // from Codex), never the stored-provider tier resolution.
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
@@ -5574,7 +5574,7 @@ describe("AgentRunner", () => {
       const seeded = Session.create("test-main", {
         continuityKey: "webchat:legacy-parent:subagent:child-1",
       });
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 

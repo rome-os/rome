@@ -37,7 +37,7 @@ export const sessions = sqliteTable(
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
     provider: text("provider"),
-    providerThreadId: text("provider_thread_id"),
+    modelThreadId: text("provider_thread_id"),
     /** The concrete model that produced the session's last successful turn,
      *  written by the same after-turn provider-info write. Null for legacy
      *  rows and sessions that never completed a turn. Nothing reads it yet. */
@@ -64,7 +64,7 @@ export const sessions = sqliteTable(
 // The checkpoint id is intentionally opaque to core persistence: Codex stores
 // its app-server turn id, while Claude stores the final top-level assistant
 // message UUID. Fork callers use it to branch at the selected turn instead of
-// implicitly branching from the provider thread's current head.
+// implicitly branching from the model thread's current head.
 export const sessionTurnCheckpoints = sqliteTable(
   "session_turn_checkpoints",
   {
@@ -73,7 +73,7 @@ export const sessionTurnCheckpoints = sqliteTable(
       .references(() => sessions.id, { onDelete: "cascade" }),
     turnId: text("turn_id").notNull(),
     provider: text("provider").notNull(),
-    providerThreadId: text("provider_thread_id").notNull(),
+    modelThreadId: text("provider_thread_id").notNull(),
     checkpointId: text("checkpoint_id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
