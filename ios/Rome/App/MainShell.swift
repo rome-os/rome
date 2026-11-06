@@ -149,6 +149,13 @@ struct MainShell: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
+        // A tapped push for this instance: Chat in front, nothing over it.
+        .onChange(of: model.conciergeRequest) {
+            showTasks = false
+            showSettings = false
+            closeDrawer()
+            show(.chat)
+        }
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in
             switch command {

@@ -102,8 +102,13 @@ final class AppModel {
     private(set) var sessionExpired = false
     /// Shown once after the app picked an instance among several on its own.
     var autoOpenHint: String?
+    /// Goes up when a tapped push asks the shell to show Chat.
+    private(set) var conciergeRequest = 0
+    /// A tapped push waiting for an instance to open.
+    private var pendingPush: PushTarget?
 
-    let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
+    let cloud: CloudAuth
+    let push: PushCenter
     /// Keeps the open instance on its latest release.
     let update = InstanceUpdater()
     static let updateCheckHold: Duration = .seconds(1)
@@ -115,6 +120,12 @@ final class AppModel {
     private let token = TokenBox()
     private var refreshing = false
 
+    init() {
+        let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
+        self.cloud = cloud
+        push = PushCenter(registry: cloud)
+    }
+
     // MARK: Launch
 
     func launch(skipSnapshot: Bool = false) async {
@@ -123,6 +134,9 @@ final class AppModel {
             await SnapshotRunner.run(model: self)
             return
         }
+        #endif
+        Task { await push.launch() }
+        #if DEBUG
         let environment = ProcessInfo.processInfo.environment
         if environment["ROME_DEMO"] == "1" {
             openDemo()
@@ -140,7 +154,8 @@ final class AppModel {
         }
         #endif
         if cloud.hasCredential {
-            await openInstance(preferring: nil, showHint: false)
+            // A tap that launched the app opens its instance first.
+            await openInstance(preferring: pendingPush?.instanceId, showHint: false)
         } else {
             phase = .signedOut
         }
@@ -177,17 +192,17 @@ final class AppModel {
             let list = try await cloud.listInstances()
             instances = list
             let running = list.filter(\.isRunning)
-            let remembered = id ?? UserDefaults.standard.string(forKey: Defaults.lastInstance)
-            let chosen = running.first { $0.id == remembered } ?? running.first
+            let remembered = UserDefaults.standard.string(forKey: Defaults.lastInstance)
+            let chosen = running.first { $0.id == id } ?? running.first { $0.id == remembered } ?? running.first
             guard let chosen else {
-                if let stopped = list.first(where: { $0.id == remembered }) ?? list.first {
+                if let stopped = list.first(where: { $0.id == (id ?? remembered) }) ?? list.first {
                     phase = .stopped(instanceName: stopped.name)
                 } else {
                     phase = .noInstance
                 }
                 return
             }
-            let pickedAmongMany = running.count > 1 && remembered == nil
+            let pickedAmongMany = running.count > 1 && id == nil && remembered == nil
             await connect(to: chosen)
             if showHint, pickedAmongMany, !UserDefaults.standard.bool(forKey: Defaults.hintShown) {
                 UserDefaults.standard.set(true, forKey: Defaults.hintShown)
@@ -214,6 +229,8 @@ final class AppModel {
             token.token = session.token
             UserDefaults.standard.set(instance.id, forKey: Defaults.lastInstance)
             currentInstanceID = instance.id
+            // Signed in to Rome Cloud: this launch's token, if it has one yet.
+            Task { await push.upload() }
             let client = APIClient(origin: URL(string: instance.origin)!, token: { [token] in token.token }) { [weak self] in
                 Task { @MainActor in self?.handleUnauthorized() }
             }
@@ -267,7 +284,8 @@ final class AppModel {
         workspace?.stop()
         workspace = nil
         token.token = nil
-        await cloud.signOut()
+        pendingPush = nil
+        await push.signOut { await cloud.signOut() }
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         instances = []
         currentInstanceID = nil
@@ -316,7 +334,36 @@ final class AppModel {
             await update.waitForFirstAnswer(upTo: Self.updateCheckHold)
         }
         phase = .ready
+        if pendingPush != nil {
+            await routePendingPush()
+            // The push was for another instance, now open in its place.
+            guard self.workspace === workspace else { return }
+        }
         await workspace.start()
+    }
+
+    // MARK: Pushes
+
+    /// A tapped push: its instance, then its Concierge. It waits while no
+    /// instance is open, through a cold launch or a sign-in.
+    func openFromPush(_ target: PushTarget) async {
+        pendingPush = target
+        await routePendingPush()
+    }
+
+    private func routePendingPush() async {
+        guard let target = pendingPush, phase == .ready, workspace != nil else { return }
+        pendingPush = nil
+        if target.instanceId != currentInstanceID, !instances.contains(where: { $0.id == target.instanceId }) {
+            await refreshInstances()
+        }
+        switch PushRoute.decide(target, currentInstanceID: currentInstanceID, instances: instances) {
+        case .switchTo(let instance):
+            // The same path as the instances page; the new shell opens on Chat.
+            await switchInstance(to: instance)
+        case .openConcierge:
+            conciergeRequest += 1
+        }
     }
 
     /// The instance restarted on its new release: open it fresh, so the chat,

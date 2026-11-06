@@ -117,6 +117,21 @@ struct SettingsScreen: View {
                 }
                 .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
+                    Button(action: openNotifications) {
+                        SettingsRow(systemImage: "bell", title: "Notifications") {
+                            HStack(spacing: 8) {
+                                if let state = notificationsState {
+                                    Text(state)
+                                        .romeFont(17)
+                                        .foregroundStyle(Palette.sub)
+                                }
+                                Image(systemName: model.push.permission == .notSet ? "chevron.right" : "arrow.up.right")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
+                        }
+                    }
+                    .buttonStyle(RowPressStyle())
                     Button {
                         if let url = model.webURL { openURL(url) }
                     } label: {
@@ -168,6 +183,7 @@ struct SettingsScreen: View {
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task { usage = try? await workspace.backend.aiTools() }
+        .task { await model.push.refresh() }
         .confirmationDialog("After signing out, sign in with Rome Cloud to open Rome again.", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { Task { await model.signOut() } }
         }
@@ -208,6 +224,24 @@ struct SettingsScreen: View {
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
         .accessibilityHint("Switches instances.")
+    }
+
+    private var notificationsState: LocalizedStringKey? {
+        switch model.push.permission {
+        case .on: return "On"
+        case .off: return "Off"
+        case .notSet: return "Not set"
+        case nil: return nil
+        }
+    }
+
+    /// Not set asks here; on or off is changed in the Settings app.
+    private func openNotifications() {
+        if model.push.permission == .notSet {
+            Task { await model.push.turnOn() }
+        } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+            openURL(url)
+        }
     }
 
     private var appVersion: String {

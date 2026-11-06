@@ -57,9 +57,23 @@ struct ChatScreen: View {
             if store.loadError == .offline {
                 TopBanner(kind: .warning, text: String(localized: "No network connection"))
             }
+            if offersPush {
+                PushPromptCard(
+                    onTurnOn: { Task { await model.push.turnOn() } },
+                    onNotNow: { model.push.notNow() }
+                )
+                .padding(.horizontal, Metrics.pagePadding)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
-        .padding(.top, model.autoOpenHint != nil || store.loadError == .offline ? 10 : 0)
+        .padding(.top, model.autoOpenHint != nil || store.loadError == .offline || offersPush ? 10 : 0)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.autoOpenHint)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
+    }
+
+    /// Offered once Concierge is open, never while it loads or is off.
+    private var offersPush: Bool {
+        workspace.conciergeState == .ready && model.push.offersPrompt()
     }
 
     @ViewBuilder

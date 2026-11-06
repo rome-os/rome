@@ -568,6 +568,16 @@
         }
       }
     },
+    "Get notified when Rome has something for you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 有消息给你时通知你"
+          }
+        }
+      }
+    },
     "Hourly" : {
       "localizations" : {
         "zh-Hans" : {
@@ -867,6 +877,16 @@
         }
       }
     },
+    "Not now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以后再说"
+          }
+        }
+      }
+    },
     "Not sent · Tap to retry" : {
       "localizations" : {
         "zh-Hans" : {
@@ -887,6 +907,16 @@
         }
       }
     },
+    "Not set" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置"
+          }
+        }
+      }
+    },
     "Not signed in" : {
       "localizations" : {
         "zh-Hans" : {
@@ -903,6 +933,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未同步"
+          }
+        }
+      }
+    },
+    "Notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关"
+          }
+        }
+      }
+    },
+    "On" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开"
           }
         }
       }
@@ -1777,6 +1837,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启后就能在这里对话。"
+          }
+        }
+      }
+    },
+    "Turn on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开"
           }
         }
       }

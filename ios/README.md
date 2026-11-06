@@ -12,7 +12,7 @@ xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simul
 
 If Xcode reports that CoreSimulator is out of date, finish Xcode's first launch once: `sudo xcodebuild -runFirstLaunch`, then `xcodebuild -downloadPlatform iOS` if no iOS runtime is installed.
 
-Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set `DEVELOPMENT_TEAM`. Debug builds use the bundle id `cc.romeos.mobile.dev` and the name "Rome Dev"; Release builds are the TestFlight app (see "Release to TestFlight").
+Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig`, which sets `DEVELOPMENT_TEAM` to Rome's own team, Amantru, Inc (`4YWXB26F39`). Debug and Release both sign with it, because pushes are sent with that team's APNs key and reach only apps it signed. Debug builds use the bundle id `cc.romeos.mobile.dev` and the name "Rome Dev"; Release builds are the TestFlight app (see "Release to TestFlight").
 
 ### On a physical iPhone
 
@@ -36,7 +36,7 @@ Installing works on a locked phone, but launching does not: it fails with "Locke
 
 Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome", HTTPS to `https://romeos.cc` only, and no demo data, snapshot runner, debug environment variables or Mac Catalyst. Debug builds are `cc.romeos.mobile.dev`, named "Rome Dev", so both can sit on one phone. `MARKETING_VERSION` is in `Config/Base.xcconfig`.
 
-TestFlight ships under Rome's own Apple Developer team, not a personal one. Pass that team on the command line instead of changing `Config/Local.xcconfig`, which keeps signing your Debug builds. The build number is the archive time in UTC, `YYYYMMDDHHMM`. It always increases whatever branch you archive from, so no upload needs a manual edit.
+TestFlight ships under Rome's own Apple Developer team, not a personal one. The archive command passes that team on the command line, so it signs with it whatever `Config/Local.xcconfig` says. The build number is the archive time in UTC, `YYYYMMDDHHMM`. It always increases whatever branch you archive from, so no upload needs a manual edit.
 
 1. Archive (local only, safe to run):
 
@@ -57,6 +57,22 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. Pass
 3. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
 
 To check a Release build without signing: `xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -derivedDataPath /tmp/rome-release CODE_SIGNING_ALLOWED=NO build`.
+
+## Push notifications
+
+The Push Notifications capability is on for both builds: `Config/Rome.entitlements` sets `aps-environment` from `ROME_APS_ENVIRONMENT` in `Config/Base.xcconfig`, `development` for Debug and `production` for Release. The same value tells Rome Cloud whether the token is for the APNs sandbox or production. Mac Catalyst builds sign without it, so the ad-hoc signed test and snapshot runs still launch.
+
+The app asks for permission from a card in Chat, never at launch, and registers its token with Rome Cloud (`POST /api/devices`) on every launch while signed in. On a simulator, send a push to the Debug build with a payload file:
+
+```bash
+xcrun simctl push booted cc.romeos.mobile.dev push.json
+```
+
+```json
+{"aps": {"alert": {"title": "Rome", "body": "Your report is ready"}}, "rome": {"instanceId": "<instance id>", "chatId": "<chat id>"}}
+```
+
+While the app is open the push shows no banner; the chat updates from live events. A tap opens the instance named in `rome.instanceId`, then its Concierge.
 
 ## Debug modes
 

@@ -1,9 +1,12 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct RomeApp: App {
-    @State private var model = AppModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @Environment(\.scenePhase) private var scenePhase
+
+    private var model: AppModel { delegate.model }
 
     var body: some Scene {
         WindowGroup {
@@ -13,11 +16,44 @@ struct RomeApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .background: model.workspace?.backend.events.pause()
-                    case .active: model.workspace?.backend.events.resume()
+                    case .active:
+                        model.workspace?.backend.events.resume()
+                        Task { await model.push.refresh() }
                     default: break
                     }
                 }
         }
+    }
+}
+
+/// Owns the model, because pushes arrive here: the APNs token, and a tap on a
+/// notification, also one that launches the app.
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    let model = AppModel()
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Before launch ends, so the tap that launched the app is delivered.
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Task { await model.push.didRegister(deviceToken: deviceToken) }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // No token this launch; the next launch asks again.
+    }
+
+    /// While the app is open the live events already update the chat, so a
+    /// push shows no banner and plays no sound.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        []
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard let target = PushTarget(userInfo: response.notification.request.content.userInfo) else { return }
+        await model.openFromPush(target)
     }
 }
 

@@ -242,6 +242,33 @@ final class CloudAuth {
         return session
     }
 
+    // MARK: Devices
+
+    /// Builds a call to Rome Cloud's device list for this phone's push token.
+    nonisolated static func deviceRequest(origin: URL, accessToken: String, method: String, body: Data) -> URLRequest {
+        var request = URLRequest(url: origin.appending(path: "api/devices"))
+        request.httpMethod = method
+        // Sign-out waits on the removal, so a slow Cloud must not hold it long.
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return request
+    }
+
+    /// Unlike `cloudRequest`, a 401 here keeps the credential: it can mean a
+    /// Rome Cloud without the device route, and `v1/instances` catches a
+    /// credential that really expired.
+    private func deviceCall(_ method: String, body: some Encodable) async throws {
+        guard let credential = Keychain.value(CloudCredential.self, for: Key.credential) else {
+            throw AuthError.cloudUnauthorized
+        }
+        let request = Self.deviceRequest(origin: origin, accessToken: credential.accessToken, method: method, body: try JSONEncoder().encode(body))
+        let (_, status) = try await perform(request)
+        guard (200..<300).contains(status) else { throw AuthError.sessionRejected }
+    }
+
     func signOut() async {
         if let credential = Keychain.value(CloudCredential.self, for: Key.credential) {
             var request = URLRequest(url: origin.appending(path: "v1/mobile/session"))
@@ -309,5 +336,17 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
         newRequest request: URLRequest
     ) async -> URLRequest? {
         nil
+    }
+}
+
+extension CloudAuth: DeviceRegistry {
+    var canRegisterDevice: Bool { hasCredential }
+
+    func registerDevice(_ device: DeviceRegistration) async throws {
+        try await deviceCall("POST", body: device)
+    }
+
+    func unregisterDevice(token: String) async throws {
+        try await deviceCall("DELETE", body: ["token": token])
     }
 }
