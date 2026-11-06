@@ -6,11 +6,12 @@
 // The port knows models, threads, positions and builtin tools. It knows
 // nothing of agents, sessions, chats or connected accounts: the resolver
 // picks the provider and model in front of it, the session stores what it
-// returns, and what a turn cost travels on the result event's accounting.
+// returns, and what a turn cost travels on the terminal event's accounting.
 // Until the adapters implement this port they implement
 // ./deprecated-model-port.ts.
 
 import type {
+  AgentAccounting,
   AgentBlockEvent,
   AgentDeltaEvent,
   InputStatusEvent,
@@ -33,6 +34,9 @@ export type ProviderThreadId = string;
  * the domain; each provider spells it its own way.
  */
 export type CheckpointId = string;
+
+/** Value. The provider's own id for a turn. Opaque to the domain. */
+export type ProviderTurnId = string;
 
 /** Value. A model as the provider names it (`claude-opus-4-1`, `gpt-5-codex`). */
 export type ModelName = string;
@@ -114,6 +118,30 @@ export interface ModelUserInput {
   injectedToolResult?: { toolUseId: ToolUseId; content: unknown };
 }
 
+/** Value. Who paid the provider for a turn. `unknown` when the provider has not said. */
+export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
+
+/**
+ * Value object. What a turn cost, with what the usage recorder needs beyond
+ * what apps see: the three members below stay inside Rome and leave the
+ * event before it reaches an app's turn hooks.
+ */
+export interface ModelTurnAccounting extends AgentAccounting {
+  funding?: ModelFunding;
+  /** The provider's own id for the turn, for reconciliation with its bill. */
+  providerTurnId?: ProviderTurnId;
+  /** The effort the provider applied, in its own terms (`xhigh`, `max`). */
+  reasoningEffort?: string;
+}
+
+export interface ModelTurnResultEvent extends Omit<TurnResultEvent, "accounting"> {
+  accounting?: ModelTurnAccounting;
+}
+
+export interface ModelTurnErrorEvent extends Omit<TurnErrorEvent, "accounting"> {
+  accounting?: ModelTurnAccounting;
+}
+
 /**
  * The events a model session emits, in Rome's vocabulary. Provider-native
  * units become these inside the adapter and nowhere else. No turn brackets:
@@ -128,8 +156,8 @@ export type ModelSessionEvent =
   | InputStatusEvent
   | PlanUpdateEvent
   | StructuredOutputEvent
-  | TurnResultEvent
-  | TurnErrorEvent;
+  | ModelTurnResultEvent
+  | ModelTurnErrorEvent;
 
 /**
  * Live handle on one open provider thread. Owns the provider's client and

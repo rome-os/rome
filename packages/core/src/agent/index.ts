@@ -17,6 +17,7 @@ export {
 } from "./domain/session.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export type { ModelTier } from "./domain/model-tier.js";
+export type { ModelFunding, ModelTurnAccounting } from "./domain/model-port.js";
 // The model port as the adapters implement it today. The run and the resolver
 // move to ./domain/model-port.ts and ./domain/rome-tools.ts with the
 // adapters; until then those two are reachable only inside the context.

@@ -1,13 +1,14 @@
 // Usage events this instance reports to Rome Cloud.
 // Contract: docs/concepts/rome-cloud.md#usage-reporting.
 
-import type { AgentFunding, AgentTurnStatus } from "@rome-os/app-runtime";
+import type { AgentTurnStatus } from "@rome-os/app-runtime";
+import type { ModelFunding } from "../agent/index.js";
 
 /** Where the work came from. Subagent and fork turns take their root's kind. */
 export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
 
-/** Who paid the model provider for a turn. The same word the result event's accounting carries. */
-export type UsageFunding = AgentFunding;
+/** Who paid the model provider for a turn. The word the model port's accounting carries. */
+export type UsageFunding = ModelFunding;
 
 /**
  * What set the work off: a person, a schedule, an event or webhook, or
