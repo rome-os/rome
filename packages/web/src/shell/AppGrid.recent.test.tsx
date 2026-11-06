@@ -89,6 +89,71 @@ afterEach(() => {
 });
 
 describe("Recent apps on the rail", () => {
+  it.each([
+    "briefing",
+    "inbox",
+    "showcases",
+    "skills",
+  ])("renders %s like a page in pins, recents and overflow", async (id) => {
+    const app = fixture(id, id, { origin: "builtin" });
+    seed([app], { [id]: minutesAgo(1) });
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { type: "builtin", id: "memory" },
+        { type: "app", id },
+      ]),
+    );
+    const pinned = renderSidebar();
+    const link = await screen.findByRole("link", { name: id, exact: true });
+    const pageIcon = screen
+      .getByRole("link", { name: "Memory" })
+      .querySelector(".rome-sidebar-icon");
+    expect(link.querySelector(".rome-sidebar-icon")?.className).toBe(pageIcon?.className);
+    expect(link.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+    expect(link.querySelector("img")).toBeNull();
+    pinned.unmount();
+
+    localStorage.removeItem(STORAGE_KEY);
+    const recent = renderSidebar();
+    expect(
+      (await screen.findByRole("link", { name: id, exact: true })).querySelector(
+        ".rome-sidebar-icon",
+      ),
+    ).toBeTruthy();
+    recent.unmount();
+
+    seed([fixture("a", "Alpha"), fixture("b", "Bravo"), fixture("c", "Charlie"), app], {
+      a: minutesAgo(1),
+      b: minutesAgo(2),
+      c: minutesAgo(3),
+      [id]: minutesAgo(4),
+    });
+    renderSidebar();
+    await userEvent.setup().click(await screen.findByRole("button", { name: /More recent apps/i }));
+    expect(
+      (await screen.findByRole("menuitem", { name: id, exact: true })).querySelector(
+        ".rome-sidebar-icon",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps Welcome to Rome and user-created app images on the rail", async () => {
+    seed(
+      [
+        fixture("welcome-to-rome", "Welcome to Rome", { origin: "builtin" }),
+        fixture("my-briefing", "Briefing"),
+      ],
+      { "welcome-to-rome": minutesAgo(1), "my-briefing": minutesAgo(2) },
+    );
+    renderSidebar();
+    for (const name of ["Welcome to Rome", "Briefing"]) {
+      expect(
+        (await screen.findByRole("link", { name, exact: true })).querySelector("img"),
+      ).toBeTruthy();
+    }
+  });
+
   it("lists recent unpinned apps newest first, below a divider, without system or hidden apps", async () => {
     seed(
       [

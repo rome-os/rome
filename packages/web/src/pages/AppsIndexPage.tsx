@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
+import { getBuiltinAppIcon } from "@/lib/builtin-app-icons";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
@@ -393,6 +394,7 @@ export default function AppsIndexPage() {
   );
 
   const renderInstalledTile = (app: InstalledAppCard) => {
+    const BuiltinIcon = getBuiltinAppIcon(app.id);
     // An app is openable either via its own embedded frontend (`href`) or via a
     // host route registered for a backend-only app (see HOST_APP_ROUTES in
     // lib/auth-routing.ts — shared with App.tsx routing and auth classification).
@@ -431,7 +433,8 @@ export default function AppsIndexPage() {
           <>
             <TileIcon
               size="lg"
-              kind="image"
+              kind={BuiltinIcon ? "builtin" : "image"}
+              BuiltinIcon={BuiltinIcon}
               displayName={app.displayName}
               iconUrl={app.iconUrl}
               muted={app.status === "disabled"}
