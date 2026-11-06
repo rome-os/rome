@@ -1081,6 +1081,7 @@ async function main() {
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
   const concierge = new ConciergeService({
+    skillCatalog,
     settingsRepo,
     webchatRepo,
     sessionRepository,

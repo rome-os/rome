@@ -195,6 +195,9 @@ function setup(
     };
   });
   const deps = {
+    skillCatalog: {
+      get: (name: string) => (name === "coding:app_creation" ? { name } : undefined),
+    },
     settingsRepo: {
       get: async () => {
         if (options.settingsDelayMs)
@@ -460,6 +463,41 @@ describe("Concierge tools", () => {
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
       { type: "task_chat", chatId: "task-1", title: "Flights" },
     ]);
+  });
+
+  it("chat_start passes a catalog skill to the task chat's first turn", async () => {
+    const s = setup();
+    const result = await s.tool("chat_start", {
+      title: "Build a tracker",
+      brief: "Build a habit tracker",
+      skill: "coding:app_creation",
+    });
+    expect(result.isError).not.toBe(true);
+    expect(s.send).toHaveBeenCalledWith(
+      expect.objectContaining({ chat: expect.objectContaining({ id: "task-1" }) }),
+      { text: "Build a habit tracker", skillName: "coding:app_creation" },
+      CONCIERGE_ACCOUNT,
+    );
+    expect(s.order).toEqual(["trigger", "post", "rename"]);
+  });
+
+  it.each([
+    "missing:skill",
+  ])("chat_start rejects an invalid skill %s before starting anything", async (skill) => {
+    const s = setup();
+    const result = await s.tool("chat_start", { title: "Build", brief: "Build it", skill });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Unknown skill");
+    expect(s.chats.startChat).not.toHaveBeenCalled();
+    expect(s.send).not.toHaveBeenCalled();
+    expect(await s.tasks.repo.listForAgent(false)).toEqual([]);
+  });
+
+  it.each([null, ""])("chat_start treats skill %s as no skill", async (skill) => {
+    const s = setup();
+    const result = await s.tool("chat_start", { title: "Build", brief: "Build it", skill });
+    expect(result.isError).not.toBe(true);
+    expect(s.send).toHaveBeenCalledWith(expect.anything(), { text: "Build it" }, CONCIERGE_ACCOUNT);
   });
 
   it("chat_start answers the started chat when naming it fails", async () => {

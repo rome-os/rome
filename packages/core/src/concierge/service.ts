@@ -13,6 +13,7 @@ import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { SkillCatalog } from "../core/skill-catalog.js";
 import {
   resolveWebchatLargeModelSelection,
   WEBCHAT_LARGE_MODEL_SELECTIONS,
@@ -106,6 +107,7 @@ export interface ConciergeDashboard {
 }
 
 export interface ConciergeDeps {
+  skillCatalog: Pick<SkillCatalog, "get">;
   settingsRepo: Pick<SettingsRepository, "get">;
   webchatRepo: Pick<
     WebChatRepository,
