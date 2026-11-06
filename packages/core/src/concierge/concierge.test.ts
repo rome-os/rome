@@ -601,6 +601,24 @@ describe("Concierge tools", () => {
     });
   });
 
+  it("chat_read and chat_list call a task chat whose latest turn failed failed, unless it runs or waits", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const status = async () =>
+      JSON.parse((await s.tool("chat_read", { chatId: "task-1" })).content[0].text).status;
+    s.sessions.set("task-1", { ...s.sessions.get("task-1"), lastTurnFailed: true });
+    expect(await status()).toBe("failed");
+    const failed = await s.tool("chat_list", { status: "failed" });
+    expect(JSON.parse(failed.content[0].text)).toMatchObject([
+      { chatId: "task-1", status: "failed" },
+    ]);
+
+    s.sessions.set("task-1", { ...s.sessions.get("task-1"), awaitingGuardian: true });
+    expect(await status()).toBe("waiting_input");
+    s.chats.isRunning = () => true;
+    expect(await status()).toBe("running");
+  });
+
   it("chat_forward says the latest answer, not a later follow-up", async () => {
     const s = setup();
     const started = JSON.parse(

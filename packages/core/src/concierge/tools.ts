@@ -35,7 +35,7 @@ import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.
 
 const log = createLogger("concierge-tools");
 
-const TASK_STATUSES = ["running", "idle", "waiting_input"] as const;
+const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
 
@@ -50,9 +50,14 @@ function optionalString(args: Record<string, unknown>, field: string): string | 
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function statusOf(running: boolean, chat: { awaitingGuardian: boolean } | undefined): TaskStatus {
+/** A chat whose latest turn ended in an error, such as on a model it could not use, is failed. */
+function statusOf(
+  running: boolean,
+  chat: { awaitingGuardian: boolean; lastTurnFailed: boolean } | undefined,
+): TaskStatus {
   if (running) return "running";
-  return chat?.awaitingGuardian ? "waiting_input" : "idle";
+  if (chat?.awaitingGuardian) return "waiting_input";
+  return chat?.lastTurnFailed ? "failed" : "idle";
 }
 
 const isTaskState = (value: unknown): value is ConciergeTaskState =>
@@ -569,7 +574,7 @@ export async function buildConciergeTools(
     {
       name: "chat_read",
       description:
-        "Read a task chat's status (running, idle, or waiting_input) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there.",
+        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
