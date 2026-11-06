@@ -56,11 +56,20 @@ interface LoadedLifecycleHook {
     | (AgentTurnStartedHook & AgentTurnFinishedHook);
 }
 
+/** A turn that failed before it started, so no finished event will say so. */
+export interface AgentTurnFailedBeforeStart {
+  turn: AgentTurnRef;
+  error: string;
+}
+
 export interface AgentLifecycleDispatcher {
   loadFromCatalog(catalog: AppCatalog): Promise<AgentLifecycleHookLoadFailure[]>;
   dispatchStarted(event: AgentTurnStartedEvent): HookDispatchResult;
   dispatchFinished(event: AgentTurnFinishedEvent): HookDispatchResult;
   onFinished(listener: (event: AgentTurnFinishedEvent) => void): () => void;
+  /** Tells in-process listeners only; app hooks never see a turn that did not start. */
+  dispatchFailedBeforeStart(event: AgentTurnFailedBeforeStart): void;
+  onFailedBeforeStart(listener: (event: AgentTurnFailedBeforeStart) => void): () => void;
 }
 
 export interface AgentLifecycleDispatcherOptions {
@@ -124,6 +133,7 @@ export function createAgentLifecycleDispatcher(
   let startedHooks: LoadedLifecycleHook[] = [];
   let finishedHooks: LoadedLifecycleHook[] = [];
   const finishedListeners = new Map<string, (event: AgentTurnFinishedEvent) => void>();
+  const failedBeforeStartListeners = new Set<(event: AgentTurnFailedBeforeStart) => void>();
 
   return {
     async loadFromCatalog(catalog) {
@@ -185,6 +195,26 @@ export function createAgentLifecycleDispatcher(
       finishedListeners.set(id, listener);
       return () => {
         finishedListeners.delete(id);
+      };
+    },
+
+    dispatchFailedBeforeStart(event) {
+      for (const listener of failedBeforeStartListeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          log.warn("agent lifecycle failed-before-start listener threw", {
+            error: err instanceof Error ? err.message : String(err),
+            turnId: event.turn.turnId,
+          });
+        }
+      }
+    },
+
+    onFailedBeforeStart(listener) {
+      failedBeforeStartListeners.add(listener);
+      return () => {
+        failedBeforeStartListeners.delete(listener);
       };
     },
   };

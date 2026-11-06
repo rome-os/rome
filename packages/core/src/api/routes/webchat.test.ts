@@ -2338,20 +2338,23 @@ describe("Webchat API", () => {
       peek: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
-    const taskTurnFailedBeforeStart = rs.fn(async () => {});
-    deps.concierge = { taskTurnFailedBeforeStart } as never;
+    const turnFailedBeforeStart = rs.fn();
+    deps.concierge = { turnFailedBeforeStart } as never;
     rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
     const id = await runtime.startChat({});
 
     expect(await runtime.post(id, { text: "Find flights" }, concierge)).toMatchObject({ ok: true });
-    expect(taskTurnFailedBeforeStart).toHaveBeenCalledTimes(1);
-    expect(taskTurnFailedBeforeStart).toHaveBeenCalledWith(
-      id,
-      concierge,
-      "Selected model provider is unavailable: Claude",
-    );
+    const turnId = (await deps.webchatRepo.getMessages(id)).find((m) => m.role === "user")?.turnId;
+    expect(turnFailedBeforeStart).toHaveBeenCalledTimes(1);
+    expect(turnFailedBeforeStart).toHaveBeenCalledWith({
+      turn: expect.objectContaining({
+        turnId,
+        threadContext: expect.objectContaining({ channel: "webchat", threadId: id }),
+      }),
+      error: "Selected model provider is unavailable: Claude",
+    });
   });
 
   it("accepts a logged-out provider as a persisted failed turn", async () => {

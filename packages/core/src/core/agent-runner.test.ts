@@ -2072,6 +2072,10 @@ describe("AgentRunner", () => {
       onFinished() {
         return () => {};
       },
+      dispatchFailedBeforeStart() {},
+      onFailedBeforeStart() {
+        return () => {};
+      },
     };
   }
 

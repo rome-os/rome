@@ -2780,11 +2780,24 @@ class AgentSessionImpl implements AgentSession {
 
   private dispatchTurnFinished(sink: TurnSink, terminal?: StreamAgentEvent): void {
     const dispatcher = this.deps.lifecycleDispatcher;
-    if (
-      sink.lifecycleFinishDispatched ||
-      !sink.lifecycleStartedAt ||
-      sink.lifecycleStartedAtMs === undefined
-    ) {
+    if (sink.lifecycleFinishDispatched) return;
+    if (!sink.lifecycleStartedAt || sink.lifecycleStartedAtMs === undefined) {
+      // A turn that failed before it started, such as on a model that cannot
+      // be resolved, has no finished event; in-process listeners still hear.
+      if (terminal?.type === "error") {
+        sink.lifecycleFinishDispatched = true;
+        dispatcher.dispatchFailedBeforeStart({
+          turn: createAgentTurnRef({
+            sessionId: this.sessionId,
+            turnId: sink.turnId,
+            agentName: this.key.agentName,
+            channelThreadKey: this.key.channelThreadKey,
+            threadContext: sink.threadContext ?? this.threadContext,
+            parent: sink.lifecycleParent,
+          }),
+          error: terminal.error,
+        });
+      }
       return;
     }
     sink.lifecycleFinishDispatched = true;

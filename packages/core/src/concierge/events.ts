@@ -3,7 +3,10 @@
 // without speaking gets one reminder turn.
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import type {
+  AgentLifecycleDispatcher,
+  AgentTurnFailedBeforeStart,
+} from "../core/agent-lifecycle.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
@@ -151,7 +154,7 @@ async function renderTaskEvents(
 /** Starts listening. Returns the unsubscribe. */
 export function startConciergeEvents(
   service: ConciergeService,
-  dispatcher: Pick<AgentLifecycleDispatcher, "onFinished">,
+  dispatcher: Pick<AgentLifecycleDispatcher, "onFinished" | "onFailedBeforeStart">,
   options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
   const remindersRunning = new Set<string>();
@@ -331,7 +334,26 @@ export function startConciergeEvents(
     }),
   );
 
+  // A turn that failed before it started fires no turn end, so it is told as a failed turn.
+  const onFailedBeforeStart = ({ turn, error }: AgentTurnFailedBeforeStart) => {
+    const thread = turn.threadContext;
+    if (turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+    if (isConciergeAgent(turn.agentName)) return;
+    const failed: AgentTurnFinishedEvent = {
+      type: "agent-turn-finished",
+      version: 1,
+      turn,
+      status: "error",
+      timing: { startedAt: "", finishedAt: "", durationMs: 0 },
+      output: { text: "", state: "none", error },
+      metrics: { toolCallCount: 0, skillWritten: false },
+    };
+    void guard(`task turn failure (${turn.turnId})`, onTaskChatTurn(failed, thread.threadId));
+  };
+  service.attachFailedBeforeStart(onFailedBeforeStart);
+
   const unsubscribers = [
+    dispatcher.onFailedBeforeStart(onFailedBeforeStart),
     tasks.repo.onChange(({ row }, change) => {
       if (change === "write") coalescer.settle(row.id);
     }),
@@ -352,5 +374,6 @@ export function startConciergeEvents(
     for (const unsubscribe of unsubscribers) unsubscribe();
     coalescer.stop();
     service.attachTaskEvents(null);
+    service.attachFailedBeforeStart(null);
   };
 }

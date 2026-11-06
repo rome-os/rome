@@ -21,6 +21,7 @@ import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { readWebchatMessages } from "../chats/dashboard/webchat.js";
+import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import { startConciergeEvents } from "./events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import {
@@ -264,12 +265,17 @@ function setup(
     }),
   });
   const listeners: Array<(event: AgentTurnFinishedEvent) => void> = [];
+  const failedBeforeStartListeners: Array<(event: AgentTurnFailedBeforeStart) => void> = [];
   const startEvents = () =>
     startConciergeEvents(
       service,
       {
         onFinished: (listener) => {
           listeners.push(listener);
+          return () => {};
+        },
+        onFailedBeforeStart: (listener) => {
+          failedBeforeStartListeners.push(listener);
           return () => {};
         },
       },
@@ -311,6 +317,21 @@ function setup(
     }
     await settle();
   };
+  /** A turn in a chat that failed before it started, as an agent session tells it. */
+  const failBeforeStart = async (event: { turnId: string; chatId: string; error: string }) => {
+    for (const listener of failedBeforeStartListeners) {
+      listener({
+        turn: {
+          sessionId: "runtime-x",
+          turnId: event.turnId,
+          agentName: "core:main",
+          threadContext: { channel: "webchat", threadId: event.chatId },
+        },
+        error: event.error,
+      });
+    }
+    await settle();
+  };
   const tool = async (name: string, input: Record<string, unknown>) => {
     const tools = await buildConciergeTools(service, context());
     const found = tools.find((candidate) => candidate.name === name);
@@ -346,6 +367,7 @@ function setup(
     order,
     context,
     finish,
+    failBeforeStart,
     tool,
     posted,
     assignInput,
@@ -1267,20 +1289,42 @@ describe("Concierge events", () => {
     expect(s.quietFlags).toEqual([false]);
   });
 
-  it("tells the Concierge at once of a task turn that failed before its agent ran", async () => {
-    const s = setup();
-    const { chatId, taskId } = await startTask(s);
-    s.fakeTimers();
+  it("tells the Concierge at once of a task turn that failed before it started, either way it is told", async () => {
     const error = "Selected model provider is unavailable: Claude is not signed in";
-    await s.service.taskTurnFailedBeforeStart(chatId, CONCIERGE_ACCOUNT, error);
-    await s.service.taskTurnFailedBeforeStart("not-a-task-chat", CONCIERGE_ACCOUNT, error);
+    const expectFailedTurn = (s: ReturnType<typeof setup>, chatId: string, taskId: string) => {
+      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns[0].prompt).toContain(
+        `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:error by=concierge">`,
+      );
+      expect(s.backendTurns[0].prompt).toContain(`error: ${error}`);
+      expect(s.quietFlags).toEqual([false]);
+    };
+
+    // A reused agent session: it could not resolve the model for the turn.
+    const reused = setup();
+    const first = await startTask(reused);
+    reused.fakeTimers();
+    await reused.failBeforeStart({ turnId: "task-turn-1", chatId: first.chatId, error });
+    await reused.failBeforeStart({ turnId: "other-turn", chatId: "not-a-task-chat", error });
     await rs.advanceTimersByTimeAsync(2_000);
-    expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0].prompt).toContain(
-      `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:error by=concierge">`,
-    );
-    expect(s.backendTurns[0].prompt).toContain(`error: ${error}`);
-    expect(s.quietFlags).toEqual([false]);
+    expectFailedTurn(reused, first.chatId, first.taskId);
+
+    // No agent session opened: the dashboard tells the Concierge itself.
+    const cold = setup();
+    const second = await startTask(cold);
+    cold.fakeTimers();
+    cold.service.turnFailedBeforeStart({
+      turn: {
+        sessionId: second.chatId,
+        turnId: "task-turn-1",
+        agentName: "core:main",
+        threadContext: { channel: "webchat", threadId: second.chatId },
+      },
+      error,
+    });
+    await cold.settle();
+    await rs.advanceTimersByTimeAsync(2_000);
+    expectFailedTurn(cold, second.chatId, second.taskId);
   });
 
   it("tells the Concierge quietly that a task chat was deleted, and the row stays", async () => {

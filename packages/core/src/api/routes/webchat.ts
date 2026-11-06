@@ -53,6 +53,7 @@ import {
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
+import { createAgentTurnRef } from "../../core/agent-lifecycle.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
@@ -3640,15 +3641,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
           return { success: false, ...modelError };
         });
-        // No agent turn ran, so no turn end tells the Concierge its task failed.
-        void deps.concierge
-          ?.taskTurnFailedBeforeStart(sessionId, saidBy, modelError.error)
-          .catch((error: unknown) =>
-            log.warn("failed to tell the Concierge of a failed task turn", {
-              sessionId,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        // No agent session opened, so no turn end tells the Concierge its task failed.
+        deps.concierge?.turnFailedBeforeStart({
+          turn: createAgentTurnRef({ sessionId, turnId, agentName, threadContext }),
+          error: modelError.error,
+        });
 
         return answer({ turnId, sessionId, startedAt: stream.startedAt });
       }
