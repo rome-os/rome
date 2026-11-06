@@ -1358,7 +1358,7 @@ async function openSession(
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): ModelSessionParams => ({
-    prefix: {
+    config: {
       model: resolution.model,
       systemPrompt,
       builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
@@ -1453,7 +1453,7 @@ async function openSession(
     if (fork.mode !== "exact") {
       return {
         params: {
-          prefix: {
+          config: {
             model: fork.model,
             systemPrompt,
             builtinTools: [],
@@ -1559,7 +1559,7 @@ async function openSession(
     return {
       params: {
         ...liveOpenParams,
-        prefix: { ...liveOpenParams.prefix, model: fork.model },
+        config: { ...liveOpenParams.config, model: fork.model },
         executeAction: makeExecuteAction(refs),
         executeSubagent: makeExecuteSubagent(refs),
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,

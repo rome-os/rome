@@ -50,10 +50,10 @@ export function evaluateBorrowedExactFork(args: {
   sourceWorkingDir?: string;
 }): BorrowedExactForkCompatibility {
   const sameModel =
-    stripLegacyReasoningSuffix(args.openParams.prefix.model) === args.sourceModelName;
-  const sameSystemPrompt = args.openParams.prefix.systemPrompt === args.sourceSystemPrompt;
+    stripLegacyReasoningSuffix(args.openParams.config.model) === args.sourceModelName;
+  const sameSystemPrompt = args.openParams.config.systemPrompt === args.sourceSystemPrompt;
   const sameWorkingDir =
-    (args.openParams.prefix.workingDir ?? process.cwd()) ===
+    (args.openParams.config.workingDir ?? process.cwd()) ===
     (args.sourceWorkingDir ?? process.cwd());
   return {
     eligible:
@@ -122,7 +122,7 @@ export async function createBorrowedExactForkSession(
 
   return {
     providerId: args.providerId,
-    model: args.openParams.prefix.model,
+    model: args.openParams.config.model,
     events: sink.iter(),
     providerThreadId: args.sourceThreadId,
     get funding(): UsageFunding | undefined {

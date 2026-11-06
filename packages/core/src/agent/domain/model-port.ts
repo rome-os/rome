@@ -80,11 +80,13 @@ export interface ModelProvider {
 export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: string };
 
 /**
- * Value object. Everything the model sees before the first turn, fixed for the
- * session. The run composes it; the adapter passes it through and changes
- * nothing in it.
+ * Value object. The model session's configuration: what the run fixes when
+ * it opens the session and keeps for its lifetime, from the model and what it
+ * sees first to the environment its builtin tools run in. The run composes it
+ * from the agent's configuration and the conversation; the adapter passes it
+ * through and changes nothing in it.
  */
-export interface ModelPrefix {
+export interface ModelSessionConfig {
   model: string;
   systemPrompt: string;
   /** Rome-canonical names, already filtered against `ModelProvider.builtinTools`. */
@@ -108,7 +110,7 @@ export interface ModelPrefix {
 }
 
 export interface ModelSessionParams {
-  prefix: ModelPrefix;
+  config: ModelSessionConfig;
   agentName?: string;
   /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
   appStoreListingId?: string;

@@ -88,7 +88,7 @@ export function createConversationTitleGenerator(
       const operation = (async () => {
         const resolution = await modelResolver.getModelProvider({ tier: "small" });
         const openedSession = await resolution.modelProvider.openSession({
-          prefix: {
+          config: {
             model: resolution.model,
             systemPrompt: TITLE_SYSTEM_PROMPT,
             builtinTools: [],

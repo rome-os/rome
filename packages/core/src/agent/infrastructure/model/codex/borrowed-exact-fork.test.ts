@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type {
-  ModelPrefix,
+  ModelSessionConfig,
   ModelSessionForkOpenParams,
   ModelSessionForkParams,
 } from "../../../domain/model-port.js";
@@ -10,19 +10,19 @@ import {
 } from "./borrowed-exact-fork.js";
 import type { RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
 
-type OpenOverrides = Partial<Omit<ModelSessionForkOpenParams, "prefix">> & {
-  prefix?: Partial<ModelPrefix>;
+type OpenOverrides = Partial<Omit<ModelSessionForkOpenParams, "config">> & {
+  config?: Partial<ModelSessionConfig>;
 };
 
 function openParams(overrides: OpenOverrides = {}): ModelSessionForkOpenParams {
-  const { prefix, ...rest } = overrides;
+  const { config, ...rest } = overrides;
   return {
-    prefix: {
+    config: {
       model: "gpt-5.6-terra",
       systemPrompt: "system",
       builtinTools: [],
       workingDir: "/workspace",
-      ...prefix,
+      ...config,
     },
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
@@ -69,9 +69,9 @@ describe("evaluateBorrowedExactFork", () => {
   });
 
   it.each([
-    ["model", { prefix: { model: "gpt-5.6-sol" } }, "sameModel"],
-    ["system prompt", { prefix: { systemPrompt: "different" } }, "sameSystemPrompt"],
-    ["working directory", { prefix: { workingDir: "/other" } }, "sameWorkingDir"],
+    ["model", { config: { model: "gpt-5.6-sol" } }, "sameModel"],
+    ["system prompt", { config: { systemPrompt: "different" } }, "sameSystemPrompt"],
+    ["working directory", { config: { workingDir: "/other" } }, "sameWorkingDir"],
   ] as const)("rejects an exact fork with a different %s", (_label, overrides, mismatch) => {
     const result = evaluate({}, overrides);
     expect(result.eligible).toBe(false);

@@ -5,7 +5,7 @@ import { CodexAppServerManager } from "./app-server-manager.js";
 import type {
   ModelSession,
   ModelSessionForkOpenParams,
-  ModelPrefix,
+  ModelSessionConfig,
   ModelSessionParams,
 } from "../../../domain/model-port.js";
 import type { AgentEvent } from "../../../../types.js";
@@ -87,14 +87,14 @@ rs.mock("./app-server-client.js", () => ({
   }),
 }));
 
-type ParamOverrides = Partial<Omit<ModelSessionParams, "prefix">> & {
-  prefix?: Partial<ModelPrefix>;
+type ParamOverrides = Partial<Omit<ModelSessionParams, "config">> & {
+  config?: Partial<ModelSessionConfig>;
 };
 
 function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
-  const { prefix, ...rest } = overrides;
+  const { config, ...rest } = overrides;
   return {
-    prefix: { model: "gpt-5.4", systemPrompt: "system", builtinTools: [], ...prefix },
+    config: { model: "gpt-5.4", systemPrompt: "system", builtinTools: [], ...config },
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
@@ -312,7 +312,7 @@ describe("CodexAppServerProvider", () => {
     sandbox,
     off,
   }) => {
-    await new CodexAppServerProvider().openSession(buildParams({ prefix: { builtinTools } }));
+    await new CodexAppServerProvider().openSession(buildParams({ config: { builtinTools } }));
 
     const start = threadRequest("thread/start")!;
     expect(start.sandbox).toBe(sandbox);
@@ -332,9 +332,9 @@ describe("CodexAppServerProvider", () => {
     // An undefined value clears the variable Rome inherited. The exclude is
     // the server-wide one, so ROME_CREDITS_TOKEN stays hidden.
     [undefined, { "shell_environment_policy.exclude": ["ROME_CREDITS_TOKEN", "ROME_CHANNEL"] }],
-  ])("sets the prefix env on shell commands, so ROME_CHANNEL %s reaches them", async (channel, expected) => {
+  ])("sets the config env on shell commands, so ROME_CHANNEL %s reaches them", async (channel, expected) => {
     await new CodexAppServerProvider().openSession(
-      buildParams({ prefix: { env: { ROME_CHANNEL: channel } } }),
+      buildParams({ config: { env: { ROME_CHANNEL: channel } } }),
     );
 
     const { config } = threadRequest("thread/start")!;
@@ -347,7 +347,7 @@ describe("CodexAppServerProvider", () => {
   it("applies the agent's builtins when it resumes a thread opened with more", async () => {
     await new CodexAppServerProvider().openSession(
       buildParams({
-        prefix: { builtinTools: [] },
+        config: { builtinTools: [] },
         thread: { kind: "resume", providerThreadId: "old-thread" },
       }),
     );
@@ -393,7 +393,7 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     await provider.openSession(
       buildParams({
-        prefix: {
+        config: {
           externalMcpServers: {
             discovered_browser: { command: "browser-mcp", args: ["--stdio"] },
           },
@@ -465,7 +465,7 @@ describe("CodexAppServerProvider", () => {
     const [alpha, beta] = await Promise.all([
       provider.openSession(
         buildParams({
-          prefix: {
+          config: {
             systemPrompt: "alpha",
           },
           subagentTools: [tool("alpha_researcher")],
@@ -474,7 +474,7 @@ describe("CodexAppServerProvider", () => {
       ),
       provider.openSession(
         buildParams({
-          prefix: {
+          config: {
             systemPrompt: "beta",
           },
           subagentTools: [tool("beta_researcher")],
@@ -637,11 +637,11 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const source = await new CodexAppServerProvider().openSession(
-      buildParams({ prefix: { builtinTools: ["ImageGeneration"] } }),
+      buildParams({ config: { builtinTools: ["ImageGeneration"] } }),
     );
     const fork = await source.fork({ mode: "ephemeral" });
     const forkSession = await fork.open(
-      buildForkOpenParams({ prefix: { builtinTools: ["ImageGeneration"] } }),
+      buildForkOpenParams({ config: { builtinTools: ["ImageGeneration"] } }),
     );
 
     expect(threadRequest("thread/fork")?.config).toMatchObject({
@@ -701,7 +701,7 @@ describe("CodexAppServerProvider", () => {
     );
     const fork = await source.fork({ mode: "ephemeral" });
     const forkSession = await fork.open(
-      buildForkOpenParams({ prefix: { builtinTools: ["Bash", "Write"] } }),
+      buildForkOpenParams({ config: { builtinTools: ["Bash", "Write"] } }),
     );
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "try the inherited tool" });
@@ -779,7 +779,7 @@ describe("CodexAppServerProvider", () => {
     // A model change sends the exact fork down the native thread/fork path.
     const forkSession = await fork.open(
       buildForkOpenParams({
-        prefix: {
+        config: {
           model: "gpt-5.4-mini",
         },
         subagentTools: [
@@ -829,7 +829,7 @@ describe("CodexAppServerProvider", () => {
       sourceCheckpoint: "provider-turn-t2",
     });
     const forkSession = await fork.open(
-      buildForkOpenParams({ prefix: { builtinTools: ["Bash"] } }),
+      buildForkOpenParams({ config: { builtinTools: ["Bash"] } }),
     );
 
     expect(requestMock).toHaveBeenCalledWith(
@@ -1521,7 +1521,7 @@ describe("CodexAppServerProvider", () => {
     // A model-changing fork (e.g. a recap turn on a smaller tier) arrives
     // while the borrowed turn holds the thread.
     const nativeFork = await source.fork({ mode: "ephemeral" });
-    const nativeOpen = nativeFork.open(buildForkOpenParams({ prefix: { model: "gpt-5.4-mini" } }));
+    const nativeOpen = nativeFork.open(buildForkOpenParams({ config: { model: "gpt-5.4-mini" } }));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(requestMock).not.toHaveBeenCalledWith("thread/fork", expect.anything());
 
@@ -1574,7 +1574,7 @@ describe("CodexAppServerProvider", () => {
     // …but open() re-checks inside the lane: the borrowed turn is now a
     // permanent part of the source history, so no child may snapshot it.
     await expect(
-      nativeFork.open(buildForkOpenParams({ prefix: { model: "gpt-5.4-mini" } })),
+      nativeFork.open(buildForkOpenParams({ config: { model: "gpt-5.4-mini" } })),
     ).rejects.toThrow(/revert failed/);
     expect(requestMock).not.toHaveBeenCalledWith("thread/fork", expect.anything());
 
@@ -1924,7 +1924,7 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
 
-    const session = await provider.openSession(buildParams({ prefix: { outputSchema: schema } }));
+    const session = await provider.openSession(buildParams({ config: { outputSchema: schema } }));
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "return seven" });
     const messages = await collected;
@@ -1971,7 +1971,7 @@ describe("CodexAppServerProvider", () => {
     });
     const session = await provider.openSession(
       buildParams({
-        prefix: {
+        config: {
           outputSchema: {
             type: "object",
             properties: { value: { type: "integer" } },
@@ -2024,7 +2024,7 @@ describe("CodexAppServerProvider", () => {
     });
     const session = await provider.openSession(
       buildParams({
-        prefix: {
+        config: {
           outputSchema: {
             type: "object",
             properties: { value: { type: "integer" } },
@@ -2072,7 +2072,7 @@ describe("CodexAppServerProvider", () => {
     });
     const session = await provider.openSession(
       buildParams({
-        prefix: {
+        config: {
           outputSchema: {
             type: "object",
             properties: { value: { type: "integer" } },
@@ -2227,7 +2227,7 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
 
-    const session = await provider.openSession(buildParams({ prefix: { model: "gpt-5.6-sol" } }));
+    const session = await provider.openSession(buildParams({ config: { model: "gpt-5.6-sol" } }));
 
     const firstCollected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "first" });
@@ -2800,7 +2800,7 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
 
-    const session = await provider.openSession(buildParams({ prefix: { model: "gpt-5.6-sol" } }));
+    const session = await provider.openSession(buildParams({ config: { model: "gpt-5.6-sol" } }));
     let collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "first" });
     const first = (await collected).find((m) => m.type === "error");

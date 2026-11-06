@@ -67,7 +67,7 @@ describe("conversation title generation", () => {
     expect(title).toBe("Q4 launch planning");
     expect(modelResolver.getModelProvider).toHaveBeenCalledWith({ tier: "small" });
     expect(openParams).toMatchObject({
-      prefix: {
+      config: {
         model: "small-model",
         builtinTools: [],
         maxTurns: 1,

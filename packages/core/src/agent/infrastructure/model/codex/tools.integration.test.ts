@@ -184,7 +184,7 @@ describe("bundled Codex app-server", () => {
   });
 
   const sessionParams = (model: string, builtinTools: string[]): ModelSessionParams => ({
-    prefix: {
+    config: {
       model,
       systemPrompt: "Integration-test thread; do not modify files.",
       builtinTools,
