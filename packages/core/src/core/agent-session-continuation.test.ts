@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import {
   createEmptyLegacyArtifactBindings,
@@ -34,7 +33,6 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "./model-selector.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
 import { SessionRepository } from "../sessions/session-repository.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
@@ -98,8 +96,6 @@ describe("continuation notice through AgentSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
-  let sessionManager: SessionManager;
-  let sessionsRepo: SessionsRepository;
   let sessionRepository: SessionRepository;
   let webchatRepo: WebChatRepository;
   let openai: ReturnType<typeof createProvider>;
@@ -193,8 +189,6 @@ describe("continuation notice through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionsRepo = new SessionsRepository(testDb.db);
-    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
     sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
@@ -249,7 +243,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "Thanks.");
     expect(continuationOf(openai.calls[1]?.prompt)).toBeNull();
     expect(openai.calls[1]?.prompt).not.toContain("<thread_context>");
-    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: "gpt-6-luna",
     });
@@ -287,7 +281,7 @@ describe("continuation notice through AgentSessionManager", () => {
       "anthropic-thread-1",
     ]);
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
-    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       model: "claude-opus-5-5[1m]",
     });
   });
@@ -325,12 +319,8 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "first");
     await first.shutdown();
 
-    await sessionsRepo.rotateProviderGeneration({
-      agentName: AGENT,
-      channelThreadKey: key.channelThreadKey,
-      newSessionId: randomUUID(),
-      chatId: CHAT,
-    });
+    const retired = (await sessionRepository.current(key.channelThreadKey, AGENT))!;
+    await sessionRepository.replace(retired, retired.replace({ deprecatedChatId: CHAT }));
     await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
   });
@@ -392,7 +382,7 @@ describe("continuation notice through AgentSessionManager", () => {
       await webchatRepo.updateSessionLargeModelSelection(chatId, from);
       const service = new ConciergeService({
         webchatRepo,
-        sessionManager,
+        sessionRepository,
         agentSessionManager: manager,
         aiToolState: { get: () => raw },
       } as unknown as ConciergeDeps);
@@ -412,7 +402,7 @@ describe("continuation notice through AgentSessionManager", () => {
     expect(continuationOf(prompt)).toEqual(
       concierge ? expect.stringContaining("system:fetch_channel_history") : null,
     );
-    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: concierge ? target : source,
       model: concierge
         ? to === "claude-sonnet"

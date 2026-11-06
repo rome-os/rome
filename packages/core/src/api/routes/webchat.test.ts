@@ -12,6 +12,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
+import { Session } from "../../sessions/session.js";
 import {
   AgentInputQueue,
   type AgentInputReceipt,
@@ -1963,17 +1964,21 @@ describe("Webchat API", () => {
       const read = async () => (await app.request(`/chat/sessions/${session.id}`)).json();
       expect(await read()).toMatchObject({ model: null, reasoningEffort: null });
 
-      const runtimeId = await deps.sessionsRepo.create({
-        agentName: "main",
-        channelThreadKey: `webchat:${session.id}`,
+      const runtime = Session.create("main", { continuityKey: `webchat:${session.id}` });
+      runtime.recordTurn({
+        provider: "codex",
+        providerThreadId: "thread-1",
+        model: "gpt-5.5",
+        reasoningEffort: "xhigh",
       });
-      await deps.sessionsRepo.setProviderInfo(runtimeId, "codex", "thread-1", "gpt-5.5");
-      await deps.sessionsRepo.setReasoningEffort(runtimeId, "xhigh");
-      const otherAgentId = await deps.sessionsRepo.create({
-        agentName: "other-agent",
-        channelThreadKey: `webchat:${session.id}`,
+      await deps.sessionRepository.add(runtime);
+      const otherAgent = Session.create("other-agent", { continuityKey: `webchat:${session.id}` });
+      otherAgent.recordTurn({
+        provider: "claude",
+        providerThreadId: "thread-2",
+        model: "other-model",
       });
-      await deps.sessionsRepo.setProviderInfo(otherAgentId, "claude", "thread-2", "other-model");
+      await deps.sessionRepository.add(otherAgent);
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
       // A stored selection does not change the key the runtime session is under.
@@ -4658,7 +4663,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -4997,7 +5002,7 @@ describe("Webchat API", () => {
       const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -5086,13 +5091,15 @@ describe("Webchat API", () => {
       const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      const exactCheckpoint = rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
-        sessionId: "live-source-session",
-        turnId: "turn-before-stop",
-        provider: "anthropic",
-        providerThreadId: "claude-thread",
-        checkpointId: "durable-assistant-before-stop",
-      });
+      const exactCheckpoint = rs
+        .spyOn(deps.sessionRepository, "deprecatedCheckpoint")
+        .mockResolvedValue({
+          sessionId: "live-source-session",
+          turnId: "turn-before-stop",
+          provider: "anthropic",
+          providerThreadId: "claude-thread",
+          checkpointId: "durable-assistant-before-stop",
+        });
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
@@ -5159,7 +5166,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue(null);
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
@@ -5209,7 +5216,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -5287,7 +5294,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -5298,9 +5305,7 @@ describe("Webchat API", () => {
         status: "place_widget",
         placement: { appId: "sessions", route: "branch-fork-session" },
       });
-      const findRow = rs
-        .spyOn(deps.sessionManager, "findReusableSession")
-        .mockResolvedValue(undefined);
+      const findRow = rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(null);
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
@@ -5332,7 +5337,7 @@ describe("Webchat API", () => {
         reasoningEffort: null,
         createdAt: new Date(),
         lastActiveAt: new Date(),
-      });
+      } as unknown as Session);
       deps.agentSessionManager = fakeSessionManager(async () => {
         return {
           key: { agentName: "main", channelThreadKey: "webchat:branch-fork-session" },
@@ -5368,15 +5373,17 @@ describe("Webchat API", () => {
     // A branch as it ships now: born type "webchat" with lineage intact.
     const PROMOTED_ID = "branch-session-promoted";
 
-    const withThread = (id: string) => ({
-      id,
-      provider: "anthropic",
-      providerThreadId: "fork-provider-thread",
-      model: "claude",
-      reasoningEffort: null,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
-    });
+    /** A stored session with a resumable thread, as the route reads it. */
+    const withThread = (id: string) =>
+      ({
+        id,
+        provider: "anthropic",
+        providerThreadId: "fork-provider-thread",
+        model: "claude",
+        reasoningEffort: null,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      }) as unknown as Session;
 
     beforeEach(async () => {
       for (const id of [FORK_ID, LEGACY_FORK_ID]) {
@@ -5402,8 +5409,8 @@ describe("Webchat API", () => {
     });
 
     it("serves a fork that has a resumable thread and refuses one that does not", async () => {
-      rs.spyOn(deps.sessionManager, "findReusableSession").mockImplementation(async (key) =>
-        key === `webchat:${FORK_ID}` ? withThread(FORK_ID) : undefined,
+      rs.spyOn(deps.sessionRepository, "current").mockImplementation(async (key) =>
+        key === `webchat:${FORK_ID}` ? withThread(FORK_ID) : null,
       );
       const app = createWebchatRuntime(deps).routes;
 
@@ -5415,7 +5422,7 @@ describe("Webchat API", () => {
       // Legacy fork-typed rows keep the narrow surface. A branch that ships
       // today is born type "webchat" and deliberately gets every ordinary
       // route — this fixture covers the pre-promotion shape that remains.
-      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue(withThread(FORK_ID));
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(FORK_ID));
       const app = createWebchatRuntime(deps).routes;
 
       expect((await app.request(`/chat/sessions/${FORK_ID}/messages`)).status).toBe(404);
@@ -5435,9 +5442,7 @@ describe("Webchat API", () => {
     });
 
     it("resumes the branch's own thread for a follow-up turn, with no interactive surface", async () => {
-      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue(
-        withThread(PROMOTED_ID),
-      );
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
       let acquiredKey: unknown;
       let acquiredInit: AgentSessionInit | undefined;
       deps.agentSessionManager = fakeSessionManager(async (key, init) => {
@@ -5487,9 +5492,7 @@ describe("Webchat API", () => {
       // selector setting must be ON or the selection is discarded before the
       // pin and this proves nothing.
       await deps.settingsRepo.set("enableModelSelector", true);
-      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue(
-        withThread(PROMOTED_ID),
-      );
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
       let acquiredKey: unknown;
       deps.agentSessionManager = fakeSessionManager(async (key) => {
         acquiredKey = key;
@@ -5895,7 +5898,7 @@ describe("Webchat API", () => {
         parentSessionId: "parent-chat",
         parentTurnId: "parent-turn",
       });
-      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue({
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue({
         id: forkId,
         provider: "anthropic",
         providerThreadId: "fork-provider-thread",
@@ -5903,7 +5906,7 @@ describe("Webchat API", () => {
         reasoningEffort: null,
         createdAt: new Date(),
         lastActiveAt: new Date(),
-      });
+      } as unknown as Session);
       const { runtime } = createWebchatRuntime(deps);
 
       await expect(

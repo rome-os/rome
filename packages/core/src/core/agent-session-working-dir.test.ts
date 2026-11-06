@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import { AgentLoader } from "./agent-loader.js";
@@ -14,6 +13,7 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
+import { Session } from "../sessions/session.js";
 import { SessionRepository } from "../sessions/session-repository.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
@@ -26,7 +26,7 @@ describe("AgentSessionManager working dirs", () => {
   let directory: string;
   let testDb: TestDb;
   let manager: AgentSessionManager;
-  let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let webchatRepo: WebChatRepository;
   const previousProjectsRoot = process.env.ROME_PROJECTS_ROOT;
 
@@ -49,7 +49,7 @@ describe("AgentSessionManager working dirs", () => {
     const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
-    sessionsRepo = new SessionsRepository(testDb.db);
+    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",
@@ -74,7 +74,7 @@ describe("AgentSessionManager working dirs", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionRepository: new SessionRepository(testDb.db, artifactIdentity),
+        sessionRepository,
         webchatRepo,
         promptBuilder,
         actionRegistry,
@@ -199,13 +199,15 @@ describe("AgentSessionManager working dirs", () => {
       romeSessionId: "conv-1",
     });
     await original.close("idle");
-    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("conv-1");
+    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("conv-1");
 
     await rm(projectDir, { recursive: true });
     const replacement = await manager.acquire(key);
 
     expect(replacement.sessionId).not.toBe(original.sessionId);
-    expect((await sessionsRepo.findById(replacement.sessionId))?.chatId).toBe("conv-1");
+    expect((await sessionRepository.session(replacement.sessionId))?.deprecatedChatId).toBe(
+      "conv-1",
+    );
     expect(replacement.conversation).toMatchObject({ origin: "recorded", id: "conv-1" });
   });
 
@@ -274,12 +276,12 @@ describe("AgentSessionManager working dirs", () => {
     const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
     const original = await manager.acquire(key);
     await original.close("idle");
-    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBeNull();
+    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBeNull();
 
     const reused = await manager.acquire(key, { romeSessionId: "legacy" });
 
     expect(reused.sessionId).toBe(original.sessionId);
-    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("legacy");
+    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("legacy");
   });
 
   it("keeps a reused row's conversation when the caller names another", async () => {
@@ -291,7 +293,7 @@ describe("AgentSessionManager working dirs", () => {
 
     expect(reused.sessionId).toBe(original.sessionId);
     expect(reused.conversation).toEqual({ origin: "named", id: "other" });
-    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("kept");
+    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("kept");
   });
 
   it("records a conversation learned after acquire, without overwriting it", async () => {
@@ -299,12 +301,14 @@ describe("AgentSessionManager working dirs", () => {
       agentName: AGENT,
       channelThreadKey: "main:subagent:1",
     });
-    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBeNull();
+    expect((await sessionRepository.session(child.sessionId))?.deprecatedChatId).toBeNull();
 
     await manager.recordConversation(child.sessionId, child.sessionId);
     await manager.recordConversation(child.sessionId, "other");
 
-    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBe(child.sessionId);
+    expect((await sessionRepository.session(child.sessionId))?.deprecatedChatId).toBe(
+      child.sessionId,
+    );
   });
 
   it("fills a row with no conversation when a resume names one", async () => {
@@ -318,7 +322,9 @@ describe("AgentSessionManager working dirs", () => {
       romeSessionId: original.sessionId,
     });
 
-    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe(original.sessionId);
+    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe(
+      original.sessionId,
+    );
   });
 
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {
@@ -333,11 +339,11 @@ describe("AgentSessionManager working dirs", () => {
 
     const byId = await manager.acquireBySessionId!(sessionId, AGENT, { workingDir: secondDir });
     await byId.close("idle");
-    expect((await sessionsRepo.findById(sessionId))?.workingDir).toBe(secondDir);
+    expect((await sessionRepository.session(sessionId))?.workingDir).toBe(secondDir);
 
     const byKey = await manager.acquire(key, { workingDir: thirdDir });
     await byKey.close("idle");
-    expect((await sessionsRepo.findById(sessionId))?.workingDir).toBe(thirdDir);
+    expect((await sessionRepository.session(sessionId))?.workingDir).toBe(thirdDir);
 
     await manager.acquireBySessionId(sessionId, AGENT);
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(thirdDir);
@@ -357,25 +363,23 @@ describe("AgentSessionManager working dirs", () => {
     expect(manager.findWorkingDirBySessionId!(fresh.sessionId)).toBe(
       join(directory, "projects", "default"),
     );
-    expect((await sessionsRepo.findById(original.sessionId))?.status).toBe("completed");
-    expect((await sessionsRepo.findById(fresh.sessionId))?.workingDir).toBe(
+    expect((await sessionRepository.session(original.sessionId))?.status).toBe("completed");
+    expect((await sessionRepository.session(fresh.sessionId))?.workingDir).toBe(
       join(directory, "projects", "default"),
     );
   });
 
   it("resumes a legacy session with no recorded working dir in the default project", async () => {
-    await sessionsRepo.create({
-      id: "legacy-session",
-      agentName: AGENT,
-      channelThreadKey: "action:legacy",
-    });
+    await sessionRepository.add(
+      Session.create(AGENT, { deprecatedId: "legacy-session", continuityKey: "action:legacy" }),
+    );
 
     await manager.acquireBySessionId!("legacy-session", AGENT);
 
     expect(manager.findWorkingDirBySessionId!("legacy-session")).toBe(
       join(directory, "projects", "default"),
     );
-    expect((await sessionsRepo.findById("legacy-session"))?.workingDir).toBe(
+    expect((await sessionRepository.session("legacy-session"))?.workingDir).toBe(
       join(directory, "projects", "default"),
     );
   });
