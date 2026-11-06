@@ -54,8 +54,7 @@ describe("defer facade tool", () => {
   it("carries textPrivate from the session params into the Codex tool server", () => {
     const server = createRomeMcpServerForSession({
       ...baseParams(),
-      model: "gpt-test",
-      systemPrompt: "system",
+      config: { model: "gpt-test", systemPrompt: "system", builtinTools: [] },
       executeDefer: rs.fn().mockResolvedValue({ ok: true }),
       textPrivate: true,
     });

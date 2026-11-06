@@ -132,7 +132,7 @@ export function createSessionFromRun(
 
   return {
     providerId,
-    model: params.model,
+    model: params.config.model,
     events,
     get appliedReasoningEffort(): string | undefined {
       return appliedReasoningEffort;
@@ -140,20 +140,21 @@ export function createSessionFromRun(
     async sendUserInput(input: ModelUserInput): Promise<void> {
       // ModelRunParams is a per-turn snapshot for legacy `run()`-based mock
       // providers — call the getters here so each turn sees the current view.
+      const { config } = params;
       const runParams: ModelRunParams = {
-        model: params.model,
-        systemPrompt: params.systemPrompt,
+        model: config.model,
+        systemPrompt: config.systemPrompt,
         prompt: input.text,
         actionCatalog: params.getActionCatalog(),
         skillCatalog: params.getSkillCatalog(),
         subagentTools: params.subagentTools,
-        outputSchema: params.outputSchema,
-        builtinTools: params.builtinTools,
-        maxTurns: params.maxTurns,
-        reasoningEffort: input.reasoningEffort ?? params.reasoningEffort,
+        outputSchema: config.outputSchema,
+        builtinTools: config.builtinTools,
+        maxTurns: config.maxTurns,
+        reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
         thread: params.thread,
-        workingDir: params.workingDir,
-        externalMcpServers: params.externalMcpServers,
+        workingDir: config.workingDir,
+        externalMcpServers: config.externalMcpServers,
         executeAction: params.executeAction,
         executeSubagent: params.executeSubagent,
       };
@@ -221,7 +222,7 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
 
   return {
     providerId: "mock",
-    model: params.model,
+    model: params.config.model,
     events,
     async sendUserInput(): Promise<void> {
       emit({ type: "text", content: FALLBACK });

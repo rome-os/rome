@@ -532,18 +532,11 @@ export class AnthropicProvider implements ModelProvider {
   // its CLI subprocess down cleanly.
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
-    const {
-      model,
-      systemPrompt,
-      subagentTools,
-      maxTurns = 1000,
-      executeAction,
-      executeSubagent,
-      executeDefer,
-      routineActivation,
-    } = params;
-    const outputValidator = params.outputSchema
-      ? compileOutputSchema(params.outputSchema)
+    const { subagentTools, executeAction, executeSubagent, executeDefer, routineActivation } =
+      params;
+    const { model, systemPrompt, maxTurns = 1000 } = params.config;
+    const outputValidator = params.config.outputSchema
+      ? compileOutputSchema(params.config.outputSchema)
       : undefined;
 
     const toolUseNames = new Map<string, string>();
@@ -552,7 +545,7 @@ export class AnthropicProvider implements ModelProvider {
       getActionCatalog: params.getActionCatalog,
       getSkillCatalog: params.getSkillCatalog,
       subagentTools,
-      externalMcpServers: params.externalMcpServers,
+      externalMcpServers: params.config.externalMcpServers,
       executeAction,
       executeSubagent,
       supportsInteractiveSurface: params.supportsInteractiveSurface,
@@ -564,20 +557,22 @@ export class AnthropicProvider implements ModelProvider {
     });
 
     const queryContext = await this.buildQueryContext();
-    const effort = toAnthropicEffort(params.reasoningEffort);
+    const effort = toAnthropicEffort(params.config.reasoningEffort);
     const queryEnv: Record<string, string | undefined> = {
       ...queryContext.env,
+      // The run's variables for the shell the builtin tools run in; an
+      // undefined value clears one Rome itself inherited.
+      ...params.config.env,
       CLAUDE_CODE_EFFORT_LEVEL: effort,
-      // Set even when undefined, so a value Rome itself inherited never leaks in.
-      ROME_CHANNEL: params.channel,
       CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpToolsEnv(
         queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
         askQuestionParksOnCard(params),
       ),
       // Claude Code nudges a turn that has gone a few rounds without visible
-      // text. A private-text agent's text is never visible, so the nudge would
-      // fire even right after it messaged the guardian.
-      ...(params.textPrivate ? { CLAUDE_CODE_SILENT_TURN_REMINDER: "0" } : {}),
+      // text. Rome's agents speak through their tools as often as through
+      // text, so the nudge would fire right after an agent messaged the
+      // guardian; Rome never wants it.
+      CLAUDE_CODE_SILENT_TURN_REMINDER: "0",
     };
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
@@ -631,12 +626,12 @@ export class AnthropicProvider implements ModelProvider {
         model: effectiveModel,
         effort,
         systemPrompt,
-        ...(params.outputSchema
-          ? { outputFormat: { type: "json_schema" as const, schema: params.outputSchema } }
+        ...(params.config.outputSchema
+          ? { outputFormat: { type: "json_schema" as const, schema: params.config.outputSchema } }
           : {}),
         env: queryEnv,
         maxTurns,
-        tools: params.builtinTools ?? [],
+        tools: params.config.builtinTools ?? [],
         mcpServers,
         // Only the servers above. Without this, a claude.ai subscription login
         // also loads that account's claude.ai connectors (Gmail, Drive, ...).
@@ -650,7 +645,7 @@ export class AnthropicProvider implements ModelProvider {
         allowDangerouslySkipPermissions: true,
         settingSources: ["project"],
         settings: CLAUDE_AGENT_SDK_SETTINGS,
-        ...(params.workingDir ? { cwd: params.workingDir } : {}),
+        ...(params.config.workingDir ? { cwd: params.config.workingDir } : {}),
         ...(params.fork
           ? {
               resume: params.fork.sourceProviderThreadId,
@@ -783,7 +778,7 @@ export class AnthropicProvider implements ModelProvider {
               } else if (evt.type === "content_block_delta") {
                 const blockId = blockIdOf(streamMessageId, evt.index);
                 if (evt.delta.type === "text_delta") {
-                  if (params.outputSchema) continue;
+                  if (params.config.outputSchema) continue;
                   if (partialText === "" && pendingText !== null) {
                     yield textBlock(pendingText, "commentary", pendingTextBlockId);
                     pendingText = null;
@@ -834,7 +829,7 @@ export class AnthropicProvider implements ModelProvider {
                 blockId = blockIdOf(assistantMessageId, index);
               }
               if (isTextBlock(block) && block.text) {
-                if (params.outputSchema) continue;
+                if (params.config.outputSchema) continue;
                 partialText = "";
                 partialTextBlockId = undefined;
                 // The SDK's synthetic message for a failed API call. Its text is
@@ -931,7 +926,7 @@ export class AnthropicProvider implements ModelProvider {
               }
               // The turn is ending: any text still held was the closing answer,
               // unless an API error cut the turn short.
-              if (!params.outputSchema && pendingText !== null) {
+              if (!params.config.outputSchema && pendingText !== null) {
                 yield textBlock(
                   pendingText,
                   apiFailed ? "commentary" : "final",
@@ -972,7 +967,7 @@ export class AnthropicProvider implements ModelProvider {
               // fingerprint we can't diff).
               void clearAnthropicAuthRevoked(authRevokedSource).catch(() => {});
               if (!sdkOwned) lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
-              if (params.outputSchema) {
+              if (params.config.outputSchema) {
                 if (!("structured_output" in message) || message.structured_output === undefined) {
                   terminal = {
                     type: "error",
@@ -1059,13 +1054,13 @@ export class AnthropicProvider implements ModelProvider {
         }
         if (abortController.signal.aborted && running) {
           await queryProcess.abort();
-          if (!params.outputSchema && pendingText !== null) {
+          if (!params.config.outputSchema && pendingText !== null) {
             yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
           }
-          if (!params.outputSchema && partialText)
+          if (!params.config.outputSchema && partialText)
             yield textBlock(partialText, "final", partialTextBlockId);
           running = false;
-          yield params.outputSchema
+          yield params.config.outputSchema
             ? { type: "error", error: "Claude structured-output turn was interrupted" }
             : { type: "result", content: partialText || pendingText || "" };
         }
@@ -1076,16 +1071,16 @@ export class AnthropicProvider implements ModelProvider {
         // isn't silently dropped. Done in `catch` rather than `finally` on
         // purpose: a `yield` in `finally` re-suspends the generator when the
         // consumer abandons iteration via `.return()`, swallowing the close.
-        if (!params.outputSchema && pendingText !== null) {
+        if (!params.config.outputSchema && pendingText !== null) {
           yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
         }
-        if (!params.outputSchema && partialText)
+        if (!params.config.outputSchema && partialText)
           yield textBlock(partialText, "final", partialTextBlockId);
         if (abortController.signal.aborted && err instanceof AbortError) {
           await queryProcess.abort();
           if (running) {
             running = false;
-            yield params.outputSchema
+            yield params.config.outputSchema
               ? { type: "error", error: "Claude structured-output turn was interrupted" }
               : { type: "result", content: partialText || pendingText || "" };
           }

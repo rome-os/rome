@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type {
+  ModelSessionConfig,
   ModelSessionForkOpenParams,
   ModelSessionForkParams,
 } from "../../../domain/model-port.js";
@@ -9,25 +10,32 @@ import {
 } from "./borrowed-exact-fork.js";
 import type { RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
 
-function openParams(
-  overrides: Partial<ModelSessionForkOpenParams> = {},
-): ModelSessionForkOpenParams {
+type OpenOverrides = Partial<Omit<ModelSessionForkOpenParams, "config">> & {
+  config?: Partial<ModelSessionConfig>;
+};
+
+function openParams(overrides: OpenOverrides = {}): ModelSessionForkOpenParams {
+  const { config, ...rest } = overrides;
   return {
-    model: "gpt-5.6-terra",
-    systemPrompt: "system",
-    workingDir: "/workspace",
+    config: {
+      model: "gpt-5.6-terra",
+      systemPrompt: "system",
+      builtinTools: [],
+      workingDir: "/workspace",
+      ...config,
+    },
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "delegated",
-    ...overrides,
+    ...rest,
   };
 }
 
 function evaluate(
   forkOverrides: Partial<ModelSessionForkParams> = {},
-  openOverrides: Partial<ModelSessionForkOpenParams> = {},
+  openOverrides: OpenOverrides = {},
 ) {
   return evaluateBorrowedExactFork({
     forkParams: {
@@ -61,9 +69,9 @@ describe("evaluateBorrowedExactFork", () => {
   });
 
   it.each([
-    ["model", { model: "gpt-5.6-sol" }, "sameModel"],
-    ["system prompt", { systemPrompt: "different" }, "sameSystemPrompt"],
-    ["working directory", { workingDir: "/other" }, "sameWorkingDir"],
+    ["model", { config: { model: "gpt-5.6-sol" } }, "sameModel"],
+    ["system prompt", { config: { systemPrompt: "different" } }, "sameSystemPrompt"],
+    ["working directory", { config: { workingDir: "/other" } }, "sameWorkingDir"],
   ] as const)("rejects an exact fork with a different %s", (_label, overrides, mismatch) => {
     const result = evaluate({}, overrides);
     expect(result.eligible).toBe(false);

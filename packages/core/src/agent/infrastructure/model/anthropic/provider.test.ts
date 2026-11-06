@@ -10,6 +10,7 @@ import type { AgentEvent } from "../../../../types.js";
 import type {
   ModelSession,
   ModelSessionForkOpenParams,
+  ModelSessionConfig,
   ModelSessionParams,
 } from "../../../domain/model-port.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../../../lib/anthropic-compatible-providers.js";
@@ -105,26 +106,26 @@ async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-function buildParams(overrides: Partial<ModelSessionParams> = {}): ModelSessionParams {
+type ParamOverrides = Partial<Omit<ModelSessionParams, "config">> & {
+  config?: Partial<ModelSessionConfig>;
+};
+
+function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
+  const { config, ...rest } = overrides;
   return {
-    model: "claude-test",
-    systemPrompt: "system",
+    config: { model: "claude-test", systemPrompt: "system", builtinTools: [], ...config },
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
     thread: { kind: "new" },
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "delegated",
-    ...overrides,
+    ...rest,
   };
 }
 
-function buildForkOpenParams(
-  overrides: Partial<ModelSessionForkOpenParams> = {},
-): ModelSessionForkOpenParams {
-  const params = buildParams(
-    overrides as Partial<ModelSessionParams>,
-  ) as Partial<ModelSessionParams>;
+function buildForkOpenParams(overrides: ParamOverrides = {}): ModelSessionForkOpenParams {
+  const params = buildParams(overrides) as Partial<ModelSessionParams>;
   delete params.thread;
   delete params.fork;
   return params as ModelSessionForkOpenParams;
@@ -721,7 +722,7 @@ describe("AnthropicProvider", () => {
     ]);
 
     const session = await new AnthropicProvider().openSession(
-      buildParams({ outputSchema: schema }),
+      buildParams({ config: { outputSchema: schema } }),
     );
     await session.sendUserInput({ text: "return seven", inputId: SENT });
     const events = await collectEvents(session);
@@ -758,11 +759,13 @@ describe("AnthropicProvider", () => {
     ]);
     const session = await new AnthropicProvider().openSession(
       buildParams({
-        outputSchema: {
-          type: "object",
-          properties: { value: { type: "integer" } },
-          required: ["value"],
-          additionalProperties: false,
+        config: {
+          outputSchema: {
+            type: "object",
+            properties: { value: { type: "integer" } },
+            required: ["value"],
+            additionalProperties: false,
+          },
         },
       }),
     );
@@ -791,11 +794,13 @@ describe("AnthropicProvider", () => {
     ]);
     const session = await new AnthropicProvider().openSession(
       buildParams({
-        outputSchema: {
-          type: "object",
-          properties: { value: { type: "integer" } },
-          required: ["value"],
-          additionalProperties: false,
+        config: {
+          outputSchema: {
+            type: "object",
+            properties: { value: { type: "integer" } },
+            required: ["value"],
+            additionalProperties: false,
+          },
         },
       }),
     );
@@ -1098,7 +1103,7 @@ describe("AnthropicProvider", () => {
       sourceCheckpoint: "assistant-message-at-t2",
     });
     const forkSession = await fork.open(
-      buildForkOpenParams({ model: "claude-fork", systemPrompt: "fork system" }),
+      buildForkOpenParams({ config: { model: "claude-fork", systemPrompt: "fork system" } }),
     );
 
     // Before a turn reports the SDK's own id, the source's thread is the id it
@@ -1621,7 +1626,9 @@ describe("AnthropicProvider", () => {
     ] as const)("maps %s reasoning effort to Claude effort %s", async (configured, expected) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
 
-      const session = await provider.openSession(buildParams({ reasoningEffort: configured }));
+      const session = await provider.openSession(
+        buildParams({ config: { reasoningEffort: configured } }),
+      );
       // Claude fixes effort at open and reports it in its own terms.
       expect(session.appliedReasoningEffort).toBe(expected);
       await collectEvents(session);
@@ -1640,26 +1647,22 @@ describe("AnthropicProvider", () => {
     it.each([
       ["discord-2", "discord-2"],
       [undefined, undefined],
-    ])("puts channel %s in the agent env as ROME_CHANNEL", async (channel, expected) => {
+    ])("passes the config env through, so ROME_CHANNEL %s reaches the agent", async (channel, expected) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const session = await provider.openSession(buildParams({ channel }));
+      const session = await provider.openSession(
+        buildParams({ config: { env: { ROME_CHANNEL: channel } } }),
+      );
       await collectEvents(session);
       await session.close();
       expect(queryMock.mock.calls[0]![0].options.env.ROME_CHANNEL).toBe(expected);
     });
 
-    it.each([
-      [true, "0"],
-      [false, undefined],
-      [undefined, undefined],
-    ])("with textPrivate %s, sets CLAUDE_CODE_SILENT_TURN_REMINDER to %s", async (textPrivate, expected) => {
+    it("turns the silent-turn reminder off for every session", async () => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const session = await provider.openSession(buildParams({ textPrivate }));
+      const session = await provider.openSession(buildParams({ textPrivate: false }));
       await collectEvents(session);
       await session.close();
-      expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_SILENT_TURN_REMINDER).toBe(
-        expected,
-      );
+      expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_SILENT_TURN_REMINDER).toBe("0");
     });
 
     it("drops the defer confirmation line for a private-text agent", async () => {
@@ -1807,7 +1810,9 @@ describe("AnthropicProvider", () => {
         },
       });
 
-      const session = await provider.openSession(buildParams({ model: "claude-sonnet-5" }));
+      const session = await provider.openSession(
+        buildParams({ config: { model: "claude-sonnet-5" } }),
+      );
       await collectEvents(session);
       await session.close();
 
@@ -1839,7 +1844,9 @@ describe("AnthropicProvider", () => {
         },
       });
 
-      const session = await provider.openSession(buildParams({ model: "claude-sonnet-5" }));
+      const session = await provider.openSession(
+        buildParams({ config: { model: "claude-sonnet-5" } }),
+      );
       await collectEvents(session);
       await session.close();
 
@@ -2530,7 +2537,9 @@ describe("AnthropicProvider", () => {
       );
 
       const provider = new AnthropicProvider();
-      const session = await provider.openSession(buildParams({ model: "claude-sonnet-5" }));
+      const session = await provider.openSession(
+        buildParams({ config: { model: "claude-sonnet-5" } }),
+      );
       const messages = await collectEvents(session);
       await session.close();
 
