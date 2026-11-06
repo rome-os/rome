@@ -18,7 +18,8 @@
 // The scan reads source text with regular expressions instead of a parser, so
 // the check stays dependency-free. It finds static `import` and `export … from`
 // statements, side-effect imports and dynamic `import("…")` calls with a
-// literal specifier, after blanking comments.
+// literal specifier, after blanking comments and the contents of string and
+// template literals.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -46,14 +47,16 @@ interface ImportRecord {
   specifier: string;
   kind: "import" | "export" | "dynamic" | "side-effect";
   bindings: Binding[];
-  /** True when the record takes the whole module: `* as`, `export *`, or a dynamic import. */
+  /** True when the record takes the whole module: `* as`, `export *`, or a dynamic import with no member access. */
   wholeModule: boolean;
 }
 
 const STATIC_PATTERN =
-  /\b(import|export)\s+(?:type\s+)?([\w$]+\s*,\s*)?(\{[^}]*\}|\*\s*as\s+[\w$]+|\*|[\w$]+)?\s*from\s*(["'])([^"'\n]+)\4/g;
-const SIDE_EFFECT_PATTERN = /\bimport\s*(["'])([^"'\n]+)\1/g;
-const DYNAMIC_PATTERN = /\bimport\s*\(\s*(["'`])([^"'`\n]+)\1\s*[,)]/g;
+  /\b(import|export)\s+(?:type\s+)?([\w$]+\s*,\s*)?(\{[^}]*\}|\*\s*as\s+[\w$]+|\*|[\w$]+)?\s*from\s*(["'])([^"'\n]+)\4/dg;
+const SIDE_EFFECT_PATTERN = /\bimport\s*(["'])([^"'\n]+)\1/dg;
+const DYNAMIC_PATTERN =
+  /\bimport\s*\(\s*(["'`])([^"'`\n]+)\1\s*(?:,[^)]*)?\)(?:\s*\.\s*([\w$]+))?/dg;
+const PROMISE_METHODS = new Set(["then", "catch", "finally"]);
 const LOCAL_EXPORT_PATTERN = /\bexport\s+(?:type\s+)?\{([^}]*)\}(?!\s*from\b)/g;
 const DECLARATION_EXPORT_PATTERN =
   /\bexport\s+(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|interface|type|enum|namespace)\s+([\w$]+)/g;
@@ -246,7 +249,7 @@ function collectInfrastructureExports(root: string): Set<string> {
     }
   }
 
-  const source = stripComments(readFileSync(indexFile, "utf8"));
+  const source = blankCommentsAndStrings(readFileSync(indexFile, "utf8"));
   for (const match of source.matchAll(LOCAL_EXPORT_PATTERN)) {
     for (const binding of parseBraceList(match[1])) {
       if (importedFromInfrastructure.has(binding.imported)) names.add(binding.local);
@@ -260,13 +263,14 @@ function exportedNames(modulePath: string, root: string, visited: Set<string>): 
   if (file === null || visited.has(file)) return [];
   visited.add(file);
 
-  const source = stripComments(readFileSync(file, "utf8"));
+  const rawSource = readFileSync(file, "utf8");
+  const source = blankCommentsAndStrings(rawSource);
   const names: string[] = [];
   for (const match of source.matchAll(DECLARATION_EXPORT_PATTERN)) names.push(match[1]);
   for (const match of source.matchAll(LOCAL_EXPORT_PATTERN)) {
     for (const binding of parseBraceList(match[1])) names.push(binding.local);
   }
-  for (const record of parseImports(source)) {
+  for (const record of parseImports(rawSource)) {
     if (record.kind !== "export") continue;
     if (record.wholeModule && record.bindings.length === 0) {
       const target = resolveSpecifier(file, record.specifier, root);
@@ -278,8 +282,14 @@ function exportedNames(modulePath: string, root: string, visited: Set<string>): 
 }
 
 function parseImports(rawSource: string): ImportRecord[] {
-  const source = stripComments(rawSource);
+  const source = blankCommentsAndStrings(rawSource);
   const records: ImportRecord[] = [];
+  // The patterns run on the blanked text, where every specifier reads as
+  // spaces, so the specifier comes from the same offsets in the raw text.
+  const textOf = (match: RegExpMatchArray, group: number): string => {
+    const [start, end] = match.indices?.[group] ?? [0, 0];
+    return rawSource.slice(start, end);
+  };
 
   for (const match of source.matchAll(STATIC_PATTERN)) {
     const kind = match[1] === "import" ? "import" : "export";
@@ -298,14 +308,32 @@ function parseImports(rawSource: string): ImportRecord[] {
     } else if (clause) {
       bindings.push({ imported: "default", local: clause });
     }
-    records.push({ specifier: match[5], kind, bindings, wholeModule });
+    records.push({ specifier: textOf(match, 5), kind, bindings, wholeModule });
   }
   for (const match of source.matchAll(SIDE_EFFECT_PATTERN)) {
-    records.push({ specifier: match[2], kind: "side-effect", bindings: [], wholeModule: false });
+    records.push({
+      specifier: textOf(match, 2),
+      kind: "side-effect",
+      bindings: [],
+      wholeModule: false,
+    });
   }
   for (const match of source.matchAll(DYNAMIC_PATTERN)) {
-    if (match[2].includes("${")) continue;
-    records.push({ specifier: match[2], kind: "dynamic", bindings: [], wholeModule: true });
+    const specifier = textOf(match, 2);
+    if (specifier.includes("${")) continue;
+    const member = match[3];
+    // `import("x").Name` names one export, as an import type expression does.
+    // A promise method such as `.then` hands over the whole module.
+    if (member && !PROMISE_METHODS.has(member)) {
+      records.push({
+        specifier,
+        kind: "dynamic",
+        bindings: [{ imported: member, local: member }],
+        wholeModule: false,
+      });
+    } else {
+      records.push({ specifier, kind: "dynamic", bindings: [], wholeModule: true });
+    }
   }
   return records;
 }
@@ -322,39 +350,138 @@ function parseBraceList(body: string): Binding[] {
 }
 
 /**
- * Blanks `//` and `/* *\/` comments and keeps string literals, so an import
- * written inside a comment is not scanned. A quoted string ends at a newline,
- * which bounds the damage when a regex literal holding a quote opens a false
- * string.
+ * Returns `source` with comments and the contents of string, template and
+ * regex literals replaced by spaces, so text that only looks like an import is
+ * not scanned. Quotes, backticks, `${`, `}`, regex slashes and flags, and
+ * newlines stay, and the result has the same length as `source`, so an offset
+ * into it is an offset into `source`. Code inside `${…}` stays, including
+ * nested literals, which are blanked in turn.
+ *
+ * A `/` that opens neither comment starts a regex when the code before it
+ * cannot end an operand (see `regexMayStartAfter`); otherwise it is division.
+ * The guess fails on rare code such as a regex right after `if (…)`. Quoted
+ * strings and regex literals end at a newline, which bounds the damage of a
+ * wrong guess to one line.
  */
-function stripComments(source: string): string {
-  let out = "";
+function blankCommentsAndStrings(source: string): string {
+  const out = source.split("");
+  const blank = (from: number, to: number) => {
+    for (let k = from; k < to; k += 1) if (out[k] !== "\n") out[k] = " ";
+  };
+  // One entry per open `${`: the depth of `{` nesting inside that expression.
+  // A `}` at depth 0 closes the expression and resumes the template around it.
+  const expressionDepths: number[] = [];
+  let inTemplate = false;
   let i = 0;
+
   while (i < source.length) {
     const char = source[i];
     const next = source[i + 1];
+
+    if (inTemplate) {
+      if (char === "\\") {
+        blank(i, i + 2);
+        i += 2;
+      } else if (char === "`") {
+        inTemplate = false;
+        i += 1;
+      } else if (char === "$" && next === "{") {
+        expressionDepths.push(0);
+        inTemplate = false;
+        i += 2;
+      } else {
+        blank(i, i + 1);
+        i += 1;
+      }
+      continue;
+    }
+
     if (char === "/" && next === "/") {
       const end = source.indexOf("\n", i);
-      i = end === -1 ? source.length : end;
+      const stop = end === -1 ? source.length : end;
+      blank(i, stop);
+      i = stop;
     } else if (char === "/" && next === "*") {
       const end = source.indexOf("*/", i + 2);
       const stop = end === -1 ? source.length : end + 2;
-      out += source.slice(i, stop).replace(/[^\n]/g, " ");
+      blank(i, stop);
       i = stop;
-    } else if (char === '"' || char === "'" || char === "`") {
+    } else if (char === "/" && regexMayStartAfter(out, i)) {
       let j = i + 1;
-      while (j < source.length && source[j] !== char) {
-        if (source[j] === "\n" && char !== "`") break;
+      let inClass = false;
+      while (j < source.length && source[j] !== "\n" && (inClass || source[j] !== "/")) {
+        if (source[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (source[j] === "[") inClass = true;
+        else if (source[j] === "]") inClass = false;
+        j += 1;
+      }
+      const end = Math.min(j, source.length);
+      blank(i + 1, end);
+      i = end + 1;
+    } else if (char === '"' || char === "'") {
+      let j = i + 1;
+      while (j < source.length && source[j] !== char && source[j] !== "\n") {
         j += source[j] === "\\" ? 2 : 1;
       }
-      out += source.slice(i, j + 1);
-      i = j + 1;
+      const end = Math.min(j, source.length);
+      blank(i + 1, end);
+      i = end + 1;
+    } else if (char === "`") {
+      inTemplate = true;
+      i += 1;
+    } else if (char === "{" && expressionDepths.length > 0) {
+      expressionDepths[expressionDepths.length - 1] += 1;
+      i += 1;
+    } else if (char === "}" && expressionDepths.length > 0) {
+      const top = expressionDepths.length - 1;
+      if (expressionDepths[top] === 0) {
+        expressionDepths.pop();
+        inTemplate = true;
+      } else {
+        expressionDepths[top] -= 1;
+      }
+      i += 1;
     } else {
-      out += char;
       i += 1;
     }
   }
-  return out;
+  return out.join("");
+}
+
+const REGEX_PRECEDING_CHARS = new Set("(,=:[!&|?{};+-*%<>~^");
+const REGEX_PRECEDING_WORDS = new Set([
+  "return",
+  "typeof",
+  "case",
+  "do",
+  "else",
+  "in",
+  "of",
+  "instanceof",
+  "new",
+  "delete",
+  "void",
+  "throw",
+  "yield",
+  "await",
+]);
+
+/**
+ * Whether a `/` at `index` starts a regex literal rather than a division,
+ * judged from the code before it in `blanked`, where comments and literal
+ * contents are already spaces and so are skipped as whitespace.
+ */
+function regexMayStartAfter(blanked: string[], index: number): boolean {
+  let k = index - 1;
+  while (k >= 0 && /\s/.test(blanked[k])) k -= 1;
+  if (k < 0) return true;
+  if (REGEX_PRECEDING_CHARS.has(blanked[k])) return true;
+  let start = k;
+  while (start >= 0 && /[\w$]/.test(blanked[start])) start -= 1;
+  return REGEX_PRECEDING_WORDS.has(blanked.slice(start + 1, k + 1).join(""));
 }
 
 /** Absolute path of the imported module, or null for a package import. */
