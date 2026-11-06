@@ -60,7 +60,6 @@ import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type { EventSources } from "../events/event-sources.js";
 import type {
-  ActionMcpDefinition,
   ModelSession,
   ModelSessionParams,
   ModelReasoningEffort,
@@ -68,8 +67,9 @@ import type {
   RomeToolDefinition,
   ModelToolCallContext,
   ProviderId,
-  SkillMcpDefinition,
 } from "./agent-runner.js";
+import type { ActionMcpDefinition } from "./mcp-facade.js";
+import type { SkillMcpDefinition } from "./skill-catalog.js";
 import {
   toModelResolutionErrorPayload,
   type ModelResolution,

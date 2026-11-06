@@ -2,12 +2,9 @@ import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
-import type {
-  ActionMcpDefinition,
-  ModelToolCallContext,
-  RomeToolDefinition,
-  SkillMcpDefinition,
-} from "../../../../core/agent-runner.js";
+import type { ModelToolCallContext, RomeToolDefinition } from "../../../../core/agent-runner.js";
+import type { ActionMcpDefinition } from "../../../../core/mcp-facade.js";
+import type { SkillMcpDefinition } from "../../../../core/skill-catalog.js";
 
 const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
   createSdkMcpServerMock: rs.fn((config: unknown) => config),

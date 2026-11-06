@@ -17,6 +17,7 @@ import type {
   ModelSessionParams,
   ModelUserInput,
   ProviderId,
+  ModelFunding,
 } from "../../../domain/model-port.js";
 import {
   createGeneratedImageTracker,
@@ -27,7 +28,6 @@ import {
 import { stripLegacyReasoningSuffix } from "./common.js";
 import { AgentMessageSink } from "./session.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
-import type { UsageFunding } from "../../../../usage/events.js";
 import type { DynamicToolSpec } from "./app-server-protocol.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 
@@ -89,7 +89,7 @@ export interface CreateBorrowedExactForkSessionArgs {
   onSend?: (input: ModelUserInput) => void;
   revertTurn(threadId: string, beforeTurnId: string): Promise<void>;
   interrupt(reason?: string): Promise<void>;
-  funding?: () => UsageFunding | undefined;
+  funding?: () => ModelFunding | undefined;
 }
 
 /** Build the ephemeral one-turn ModelSession used only by eligible exact forks. */
@@ -131,7 +131,7 @@ export async function createBorrowedExactForkSession(
     model: args.openParams.config.model,
     events: sink.iter(),
     modelThreadId: args.sourceThreadId,
-    get funding(): UsageFunding | undefined {
+    get funding(): ModelFunding | undefined {
       return args.funding?.();
     },
     sendUserInput: async (input) => {

@@ -18,7 +18,8 @@ export {
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export type { ModelTier } from "./domain/model-tier.js";
 export type {
-  ActionMcpDefinition,
+  McpServerConfig,
+  ModelFunding,
   ModelSessionConfig,
   ModelProvider,
   ModelReasoningEffort,
@@ -29,7 +30,6 @@ export type {
   ModelUserInput,
   ProviderId,
   ModelPosition,
-  SkillMcpDefinition,
   ThreadStart,
 } from "./domain/model-port.js";
 export type {

@@ -23,6 +23,7 @@ import type {
   ModelSessionEvent,
   ModelTurnActivityEvent,
   ModelPosition,
+  ModelFunding,
 } from "../../../domain/model-port.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
@@ -48,7 +49,6 @@ import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
 import { anthropicFunding } from "../../../../usage/funding.js";
-import type { UsageFunding } from "../../../../usage/events.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -450,7 +450,7 @@ export class AnthropicProvider implements ModelProvider {
   private async buildQueryContext(): Promise<{
     env: Record<string, string | undefined>;
     authRevokedSource: AnthropicAuthRevokedSource | null;
-    funding: UsageFunding;
+    funding: ModelFunding;
   }> {
     const [credentials, timezone] = await Promise.all([
       getStoredAnthropicCompatibleCredentials(this.options.settingsRepo),
