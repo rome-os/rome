@@ -1,10 +1,10 @@
 # Notification Delivery
 
-How a mobile push notification travels from an [instance](../concepts/deployment.md#instances) to a guardian's device, and the invariants that hold across the instance ↔ [Rome Cloud](../concepts/rome-cloud.md) ↔ push-provider boundary. A device receives push through its platform service — APNs for iOS, FCM for Android — and the notification itself originates from a user-directed [action](../concepts/actions.md).
+How a mobile push notification travels from an [instance](../concepts/deployment.md#instances) to a guardian's device, and the invariants that hold across the instance ↔ [Rome Cloud](../concepts/rome-cloud.md) ↔ push-provider boundary. A device receives push through its platform service — APNs for iOS, FCM for Android — and the notification itself originates from a user-directed [action](../concepts/actions.md) or from a [Concierge](concierge.md) turn the guardian did not start.
 
 ## Components
 
-- **Instance** — runs the agent and the notification action. Decides *whether* to notify and *what* the body says.
+- **Instance** — runs the agent and the notification action, and the Concierge's proactive turns. Decides *whether* to notify and *what* the body says.
 - **Rome Cloud** — the central push broker. Owns device registration, the push-provider credentials (APNs for iOS, FCM for Android), and the delivery fan-out.
 - **APNs / FCM** — the platform push services (Apple's APNs for iOS, Google's FCM for Android), and the only path to the physical device.
 
@@ -17,6 +17,12 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 - **The owning account is derived from the credential, never named by the caller.** A notification request carries no account, user, or device identifier — Rome Cloud resolves the account from the authenticated instance token and fans out only to that account's registered devices. There is no cross-account delivery.
 
 - **The title is fixed and broker-owned. The body is the only sender-supplied content.** Rome Cloud always sets the notification title and provides the default body. A request may override only the body.
+
+- **A push level and a chat are routing data, never shown.** A request may say whether the push alerts (`active`) or arrives silently (`passive`), and which chat a tap opens. Neither is displayed, so the body stays the only content the guardian reads. Only the instance itself sets them. The agent-facing action supplies a body alone.
+
+- **A Concierge turn the guardian did not start pushes its first message, once.** A turn the guardian started never pushes, and neither does the reminder after it. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
+
+- **A push never holds or fails the turn that caused it.** The message is in the chat before the push is asked for, and a failed or refused push is logged with its outcome only. An instance with no Rome Cloud credential sends nothing.
 
 - **Rome Cloud is the single content-enforcement point.** All validation, normalization, length-capping, and fallback of the body happen at the broker, once, before device lookup and delivery. The instance forwards the body unchanged and makes no content decisions.
 

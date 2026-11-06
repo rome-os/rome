@@ -1,0 +1,95 @@
+import { describe, expect, it, rs } from "@rstest/core";
+import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
+
+const logged = rs.fn();
+rs.mock("../logger.js", () => ({
+  createLogger: () => ({ info: logged, warn: logged, error: logged, debug: logged }),
+}));
+
+const { ConciergePush, PUSH_BODY_MAX_CHARS, pushBody } = await import("./push.js");
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+function pushWith(
+  options: { quietUntil?: number | null; outcome?: () => Promise<SendOutcome> } = {},
+) {
+  const sent: SystemNotifyContent[] = [];
+  const push = new ConciergePush({
+    notify: {
+      send: async (content) => {
+        sent.push(content);
+        return (await options.outcome?.()) ?? { kind: "ok", attempted: 1, sent: 1, failed: 0 };
+      },
+    },
+    quietUntil: async () => options.quietUntil ?? null,
+  });
+  return { push, sent };
+}
+
+describe("pushBody", () => {
+  it("keeps the words of Markdown on one line", () => {
+    expect(
+      pushBody(
+        "# Build\n\n**PR #12** in `acme/widgets` [failed](https://ci.example/1).\n\n- lint\n- tests\n\n> retry?",
+      ),
+    ).toBe("Build PR #12 in acme/widgets failed. lint tests retry?");
+  });
+
+  it("shows characters Markdown escapes as themselves", () => {
+    expect(pushBody('Tom & Jerry\'s <draft> "plan"')).toBe('Tom & Jerry\'s "plan"');
+    expect(pushBody("`a < b && c`")).toBe("a < b && c");
+  });
+
+  it("cuts a long message to about 100 characters, never inside an emoji", () => {
+    // The cut lands right after the emoji, so it stays whole.
+    expect(pushBody(`${"word ".repeat(19)}ab👩‍👩‍👧 and the rest of it`)).toBe(
+      `${"word ".repeat(19)}ab👩‍👩‍👧…`,
+    );
+    expect(pushBody("short")).toBe("short");
+  });
+});
+
+describe("ConciergePush", () => {
+  it("pushes the first message of a turn with a level, once", async () => {
+    const { push, sent } = pushWith();
+    push.said({ turnId: "t1", chatId: "c", text: "first", level: "active" });
+    push.said({ turnId: "t1", chatId: "c", text: "second", level: "active" });
+    push.said({ turnId: "t2", chatId: "c", text: "next turn", level: "passive" });
+    await settle();
+    expect(sent).toEqual([
+      { body: "first", level: "active", chatId: "c" },
+      { body: "next turn", level: "passive", chatId: "c" },
+    ]);
+  });
+
+  it("pushes nothing for a turn without a level", async () => {
+    const { push, sent } = pushWith();
+    push.said({ turnId: "t1", chatId: "c", text: "hi", level: undefined });
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it("pushes nothing in quiet hours", async () => {
+    const { push, sent } = pushWith({ quietUntil: Date.now() + 60_000 });
+    push.said({ turnId: "t1", chatId: "c", text: "hi", level: "active" });
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it("never logs the message, whatever the outcome", async () => {
+    const secret = "the body text";
+    for (const outcome of [
+      async (): Promise<SendOutcome> => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }),
+      async (): Promise<SendOutcome> => ({ kind: "no_token" }),
+      async (): Promise<SendOutcome> => {
+        throw new Error("network down");
+      },
+    ]) {
+      const { push } = pushWith({ outcome });
+      push.said({ turnId: "t1", chatId: "c", text: secret, level: "active" });
+      await settle();
+    }
+    expect(logged).toHaveBeenCalled();
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
+  });
+});

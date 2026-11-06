@@ -510,6 +510,7 @@ export function startConciergeFollowing(
         (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at), {
           quiet: true,
           inputLabel: `Following · important (${items.length})`,
+          pushLevel: "active",
         }));
       // Items the Concierge never had stay owed, and the delivery tries again.
       if (!ran) throw new Error("the Concierge's important turn did not run to its end");
@@ -635,6 +636,8 @@ export function startConciergeFollowing(
           {
             quiet: true,
             inputLabel: `Following · digest (${owed.length})`,
+            // A digest is expected at its time, so it arrives without an alert.
+            pushLevel: "passive",
           },
         ),
       ));

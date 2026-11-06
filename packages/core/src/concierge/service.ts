@@ -32,6 +32,10 @@ import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
+import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { quietWindowEnd } from "./alerts.js";
+import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 
 import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
 
@@ -134,8 +138,18 @@ export interface ConciergeDeps {
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
   runBackendTurn: (
     params: BackendTurnParams,
-    options?: { quiet?: boolean; inputLabel?: string },
+    options?: SystemTurnOptions,
   ) => Promise<"completed" | "failed" | void>;
+  /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
+  notify?: ConciergePushDeps["notify"];
+}
+
+export interface SystemTurnOptions {
+  quiet?: boolean;
+  inputLabel?: string;
+  /** The first message the Concierge says in the turn goes to the guardian's
+   *  phone at this level. Only a turn the guardian did not start has one. */
+  pushLevel?: NotifyLevel;
 }
 
 export class ConciergeService {
@@ -145,8 +159,28 @@ export class ConciergeService {
   private taskEvents: TaskEventCoalescer | null = null;
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
+  private readonly push: ConciergePush | null;
 
-  constructor(readonly deps: ConciergeDeps) {}
+  constructor(readonly deps: ConciergeDeps) {
+    this.push = deps.notify
+      ? new ConciergePush({ notify: deps.notify, quietUntil: (at) => this.quietUntil(at) })
+      : null;
+  }
+
+  /**
+   * The Concierge said `text` in a chat. The first message of a turn with a
+   * push level also goes to the guardian's phone, outside quiet hours.
+   */
+  said(said: SaidInTurn): void {
+    this.push?.said(said);
+  }
+
+  /** When the guardian's quiet window `at` falls in ends, or null outside it. */
+  private async quietUntil(at: number): Promise<number | null> {
+    const quietHours = (await this.attachedFollowing?.rules())?.quietHours;
+    if (!quietHours) return null;
+    return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(this.deps.settingsRepo));
+  }
 
   attachDashboard(dashboard: ConciergeDashboard): void {
     this.attached = dashboard;
@@ -441,7 +475,7 @@ export class ConciergeService {
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean; inputLabel?: string } = {},
+    options: SystemTurnOptions = {},
   ): Promise<boolean> {
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,

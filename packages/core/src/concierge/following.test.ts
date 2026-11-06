@@ -198,6 +198,7 @@ function setup(
   /** While on, every Concierge turn fails to run to its end. */
   const turnFails = { on: false };
   const inputLabels: (string | undefined)[] = [];
+  const pushLevels: (string | undefined)[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
   const testDb = createTestDb();
@@ -347,11 +348,12 @@ function setup(
     runSystemTurn: async (
       chatId: string,
       prompt: string,
-      turnOptions?: { inputLabel?: string },
+      turnOptions?: { inputLabel?: string; pushLevel?: string },
     ) => {
       turnChats.push(chatId);
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
+      pushLevels.push(turnOptions?.pushLevel);
       return !turnFails.on;
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
@@ -367,6 +369,7 @@ function setup(
     turns,
     turnFails,
     inputLabels,
+    pushLevels,
     triaged,
     prompts,
     omitted,
@@ -988,6 +991,18 @@ describe("the follow pipeline", () => {
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     await s.action("core:concierge_digest").execute({}, {} as never);
     expect(s.inputLabels).toEqual(["Following · important (1)", "Following · digest (2)"]);
+    s.stop();
+  });
+
+  it("pushes an important turn's message with an alert and a digest's without one", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e2: "digest" } });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await fire(s, "e1");
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.pushLevels).toEqual(["active", "passive"]);
     s.stop();
   });
 

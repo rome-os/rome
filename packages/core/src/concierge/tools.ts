@@ -265,11 +265,16 @@ export async function buildConciergeTools(
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
+  // A message the guardian did not ask for may also reach their phone.
+  const said = (chatId: string, turnId: string, text: string) =>
+    service.said({ turnId, chatId, text, level: context.getTurnPushLevel() });
+
   const say = async (text: string, format: "bubble" | "long") => {
     const { chatId, turnId } = currentTurn();
     const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
     ]);
+    said(chatId, turnId, text);
     return id;
   };
 
@@ -281,6 +286,7 @@ export async function buildConciergeTools(
       ...(intro ? [{ type: "text" as const, content: intro }] : []),
       { type: "text", content: text, format: "long", forwardedFrom: from },
     ]);
+    said(chatId, turnId, intro ?? text);
     return id;
   };
 

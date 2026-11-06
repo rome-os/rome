@@ -14,6 +14,8 @@ import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../connections/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
+import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
+import type { ConciergeFollowing } from "./following.js";
 import { ChatRepository as StoredChats } from "../chats/storage/chat-repository.js";
 import { MessageRepository as StoredMessages } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
@@ -31,6 +33,7 @@ import {
   CONCIERGE_CHAT_ID,
   ConciergeService,
   type ConciergeDeps,
+  type SystemTurnOptions,
   type TaskChats,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
@@ -101,6 +104,8 @@ function setup(
     startEvents?: boolean;
     /** False: the turn has said nothing yet, so a new task row has no message to point to. */
     said?: boolean;
+    /** False: no Rome Cloud push sender is wired. */
+    notify?: boolean;
   } = {},
 ) {
   const testDb = createTestDb();
@@ -138,6 +143,15 @@ function setup(
   const storedChats = new ChatsWebChatRepository(testDb.db);
   const approvalListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
+  const turnOptions: (SystemTurnOptions | undefined)[] = [];
+  /** Every push asked of Rome Cloud, in order. */
+  const pushes: SystemNotifyContent[] = [];
+  let pushOutcome: () => Promise<SendOutcome> = async () => ({
+    kind: "ok",
+    attempted: 1,
+    sent: 1,
+    failed: 0,
+  });
   let fake = false;
   const sessions = new Map<string, Record<string, unknown>>([
     [CONCIERGE_CHAT, { id: CONCIERGE_CHAT, name: "Concierge", triggerKind: null }],
@@ -153,7 +167,7 @@ function setup(
     ],
   ]);
   /** The Concierge chat the tools' turn runs in. */
-  const here = { chat: CONCIERGE_CHAT as string };
+  const here = { chat: CONCIERGE_CHAT as string, pushLevel: undefined as NotifyLevel | undefined };
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
   const posted: string[] = [];
@@ -267,11 +281,22 @@ function setup(
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
       }),
     },
-    runBackendTurn: async (params: BackendTurnParams, turn?: { quiet?: boolean }) => {
+    runBackendTurn: async (params: BackendTurnParams, turn?: SystemTurnOptions) => {
       backendTurns.push(params);
       quietFlags.push(turn?.quiet === true);
+      turnOptions.push(turn);
       return (await onBackendTurn(params)) ?? "completed";
     },
+    ...(options.notify === false
+      ? {}
+      : {
+          notify: {
+            send: async (content: SystemNotifyContent) => {
+              pushes.push(content);
+              return await pushOutcome();
+            },
+          },
+        }),
   } as unknown as ConciergeDeps;
   /** A system turn's outcome: it ran to its end unless the hook says it failed. */
   type BackendOutcome = "completed" | "failed" | undefined;
@@ -291,6 +316,7 @@ function setup(
       threadId: here.chat,
       channelUserId: "guardian",
     }),
+    getTurnPushLevel: () => here.pushLevel,
   });
   const listeners: Array<(event: AgentTurnFinishedEvent) => void> = [];
   const failedBeforeStartListeners: Array<(event: AgentTurnFailedBeforeStart) => void> = [];
@@ -378,6 +404,15 @@ function setup(
     taskRepo,
     storedChats,
     quietFlags,
+    turnOptions,
+    pushes,
+    /** Runs the tools' turn as one the guardian did not start, pushed at this level. */
+    pushLevel: (level: NotifyLevel | undefined) => {
+      here.pushLevel = level;
+    },
+    pushAnswers: (outcome: () => Promise<SendOutcome>) => {
+      pushOutcome = outcome;
+    },
     startEvents,
     settle,
     /** Moves the clock by hand from here on, so event delivery can be timed. */
@@ -1393,6 +1428,8 @@ describe("Concierge events", () => {
       `${MAIN_LINE}<task_events>\n<task id="${taskId}" chat_id="task-1" title="Flights" state="doing" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
     );
     expect(s.quietFlags).toEqual([false]);
+    // The guardian did not start it, so its first message goes to the phone.
+    expect(s.turnOptions[0]?.pushLevel).toBe("active");
   });
 
   it("reads the reply from the chat when it builds, so a reply written after the turn ended is in", async () => {
@@ -1825,6 +1862,117 @@ describe("Concierge system turns", () => {
     const none = serviceWith(null, "completed");
     expect(await none.service.runSystemTurn(CONCIERGE_CHAT_ID, "lines")).toBe(false);
     expect(none.turns).toEqual([]);
+  });
+});
+
+describe("Concierge pushes", () => {
+  const sayIn = async (s: ReturnType<typeof setup>, text: string) => {
+    await s.tool("say", { text });
+    await s.settle();
+  };
+  // Local time, as the guardian's timezone falls back to this machine's.
+  const hhmm = (at: number) => {
+    const date = new Date(at);
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  };
+  /** Quiet hours from an hour ago to an hour from now. */
+  const quietNow = (s: ReturnType<typeof setup>) =>
+    s.service.attachFollowing({
+      rules: async () => ({
+        digestTimes: ["09:00"],
+        quietHours: { start: hhmm(Date.now() - 3_600_000), end: hhmm(Date.now() + 3_600_000) },
+      }),
+    } as unknown as ConciergeFollowing);
+
+  it("hands a system turn's push level to the turn it runs", async () => {
+    const s = setup();
+    await s.service.runSystemTurn(CONCIERGE_CHAT, "<task_events/>", { pushLevel: "active" });
+    expect(s.turnOptions[0]?.pushLevel).toBe("active");
+  });
+
+  it("pushes the first message of a turn the guardian did not start, with its chat", async () => {
+    const s = setup();
+    s.pushLevel("active");
+    await sayIn(s, "Your flight to **Rome** moved to 9:40.");
+    expect(s.pushes).toEqual([
+      { body: "Your flight to Rome moved to 9:40.", level: "active", chatId: CONCIERGE_CHAT },
+    ]);
+  });
+
+  it("pushes a digest's message without an alert", async () => {
+    const s = setup();
+    s.pushLevel("passive");
+    await sayIn(s, "Nothing new since this morning.");
+    expect(s.pushes.map((push) => push.level)).toEqual(["passive"]);
+  });
+
+  it("pushes a message said in a topic chat with that chat's id", async () => {
+    const s = setup();
+    s.turnIn(TOPIC_CHAT);
+    s.pushLevel("active");
+    await sayIn(s, "The 3pm moved to 4pm.");
+    expect(s.pushes.map((push) => push.chatId)).toEqual([TOPIC_CHAT]);
+  });
+
+  it("pushes once for a turn that says two messages", async () => {
+    const s = setup();
+    s.pushLevel("active");
+    await sayIn(s, "The build failed.");
+    await sayIn(s, "I restarted it.");
+    expect(s.pushes.map((push) => push.body)).toEqual(["The build failed."]);
+  });
+
+  it("pushes nothing for a turn the guardian started", async () => {
+    const s = setup();
+    await sayIn(s, "Here are three flights.");
+    expect(s.pushes).toEqual([]);
+  });
+
+  it("pushes nothing in quiet hours, and the message stays in the chat", async () => {
+    const s = setup();
+    quietNow(s);
+    s.pushLevel("active");
+    await sayIn(s, "A PR needs your review.");
+    expect(s.pushes).toEqual([]);
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => textOf(row.content))).toEqual([
+      "A PR needs your review.",
+    ]);
+  });
+
+  it("pushes nothing without a push sender, and still says the message", async () => {
+    const s = setup({ notify: false });
+    s.pushLevel("active");
+    await sayIn(s, "A PR needs your review.");
+    expect(s.messages.get(CONCIERGE_CHAT)).toHaveLength(1);
+  });
+
+  it("keeps the turn going when the push fails or has no instance credential", async () => {
+    for (const outcome of [
+      async (): Promise<SendOutcome> => ({ kind: "no_token" }),
+      async (): Promise<SendOutcome> => {
+        throw new Error("network down");
+      },
+    ]) {
+      const s = setup();
+      s.pushLevel("active");
+      s.pushAnswers(outcome);
+      expect((await s.tool("say", { text: "A PR needs your review." })).isError).toBeFalsy();
+      await s.settle();
+      expect(s.pushes).toHaveLength(1);
+      expect(s.messages.get(CONCIERGE_CHAT)).toHaveLength(1);
+    }
+  });
+
+  it("runs the reminder after a guardian's turn as one that pushes nothing", async () => {
+    const s = setup();
+    await s.finish({
+      turnId: "c1",
+      agentName: CONCIERGE_AGENT_ID,
+      chatId: CONCIERGE_CHAT,
+      text: "It was 7291.",
+    });
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([MAIN_LINE + NUDGE_PROMPT]);
+    expect(s.turnOptions[0]?.pushLevel).toBeUndefined();
   });
 });
 
