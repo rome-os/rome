@@ -65,13 +65,15 @@ export class SessionRepository {
   }
 
   /**
-   * Adds a new session. Throws `ActiveSessionExistsError` when the session
+   * Adds a new session, with any turn it recorded before being added. Throws
+   * `ActiveSessionExistsError` when the session
    * has a continuity key and a session is already active for it and exactly
    * this agent. Whoever opens sessions serializes `add` per continuity key, so
    * two opens at once cannot both pass the check.
    */
   async add(session: Session): Promise<void> {
     const state = session.snapshot();
+    const pending = session.pendingChanges();
     this.db.transaction((tx) => {
       if (state.continuityKey !== null) {
         const active = tx
@@ -83,8 +85,12 @@ export class SessionRepository {
           throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
         }
       }
+      // The row carries every fact the session holds, so a turn recorded
+      // before the add needs only its checkpoint written beside it.
       tx.insert(sessions).values(toRow(state)).run();
+      if (pending.checkpoint) upsertCheckpoint(tx, pending.checkpoint);
     });
+    session.markSaved();
   }
 
   /**
@@ -222,7 +228,11 @@ function restore(row: SessionRow): Session {
 }
 
 /** Writes each changed fact as its own targeted update, as today's callers do. */
-function writeChanges(tx: DrizzleTx, state: SessionState, changes: ReadonlySet<SessionChange>): void {
+function writeChanges(
+  tx: DrizzleTx,
+  state: SessionState,
+  changes: ReadonlySet<SessionChange>,
+): void {
   const columns: Partial<SessionRow> = {};
   if (changes.has("turn")) {
     columns.provider = state.provider;

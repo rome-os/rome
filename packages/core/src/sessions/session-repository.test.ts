@@ -60,6 +60,25 @@ describe("SessionRepository", () => {
     await repo.add(Session.create("main"));
   });
 
+  it("add() writes a turn recorded before the add, checkpoint included", async () => {
+    // A persisted fork records what it ran on before it is added.
+    const session = Session.create("main", { deprecatedId: "fork-1" });
+    session.recordTurn({
+      provider: "openai",
+      providerThreadId: "t-1",
+      model: "gpt-5",
+      checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
+    });
+    await repo.add(session);
+
+    const found = (await repo.session("fork-1"))!;
+    expect(found.provider).toBe("openai");
+    expect(found.providerThreadId).toBe("t-1");
+    expect(found.model).toBe("gpt-5");
+    expect((await repo.deprecatedCheckpoint("fork-1", "turn-1"))?.checkpointId).toBe("c-1");
+    expect(session.pendingChanges().checkpoint).toBeUndefined();
+  });
+
   it("add() accepts a successor once the earlier session is completed", async () => {
     const first = Session.create("main", { continuityKey: "k" });
     await repo.add(first);
@@ -172,8 +191,20 @@ describe("SessionRepository", () => {
     expect(found.model).toBeNull();
   });
 
-  it("save() refuses a session that was never added", async () => {
-    await expect(repo.save(Session.create("main"))).rejects.toThrow(/never added/);
+  it("save() refuses a session that was never added, and keeps its changes for a retry", async () => {
+    const session = Session.create("main");
+    session.recordTurn({
+      provider: "openai",
+      providerThreadId: "t-1",
+      checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
+    });
+    await expect(repo.save(session)).rejects.toThrow(/never added/);
+
+    // The failed save consumed nothing: the next one writes the turn and its checkpoint.
+    await repo.add(Session.create("main", { deprecatedId: session.id }));
+    await repo.save(session);
+    expect((await repo.session(session.id))!.provider).toBe("openai");
+    expect((await repo.deprecatedCheckpoint(session.id, "turn-1"))?.checkpointId).toBe("c-1");
   });
 
   it("save() writes only the facts each instance changed, so two instances keep both", async () => {
@@ -271,6 +302,21 @@ describe("SessionRepository", () => {
       providerThreadId: null,
     });
     expect((await repo.current("k", "main"))?.id).toBe(successor.id);
+  });
+
+  it("replace() writes the retired session's last turn and checkpoint", async () => {
+    const current = Session.create("main", { continuityKey: "k" });
+    await repo.add(current);
+    current.recordTurn({
+      provider: "openai",
+      providerThreadId: "t-1",
+      checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
+    });
+    const successor = current.replace();
+    await repo.replace(current, successor);
+
+    expect((await repo.session(current.id))!.providerThreadId).toBe("t-1");
+    expect((await repo.deprecatedCheckpoint(current.id, "turn-1"))?.checkpointId).toBe("c-1");
   });
 
   it("replace() refuses a session that was not completed, or a stranger as successor", async () => {
