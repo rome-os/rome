@@ -473,10 +473,26 @@ export interface AgentStop {
   raw?: string;
 }
 
+/**
+ * Who paid the provider for a model run. `rome_credits` bills the account's
+ * Rome credits, `byok` the guardian's own key, `subscription` the provider
+ * login the host runs on; `unknown` when the provider has not said.
+ */
+export type AgentFunding = "rome_credits" | "byok" | "subscription" | "unknown";
+
 export interface AgentAccounting {
   provider: string;
   model: string;
   usage: AgentTokenUsage;
+  /** Unset when the provider reports none. */
+  funding?: AgentFunding;
+  /** The provider's own id for the run, for reconciliation with its bill. */
+  providerTurnId?: string;
+  /**
+   * The reasoning effort the provider applied, in its own terms (`xhigh`,
+   * `max`). Unset when the provider reports none.
+   */
+  reasoningEffort?: string;
   context?: AgentContextUsage;
   costUsd?: number;
   numTurns?: number;

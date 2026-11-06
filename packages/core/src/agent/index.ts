@@ -16,6 +16,10 @@ export {
   type TurnRun,
 } from "./domain/session.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
+export type { ModelTier } from "./domain/model-tier.js";
+// The model port as the adapters implement it today. The run and the resolver
+// move to ./domain/model-port.ts and ./domain/rome-tools.ts with the
+// adapters; until then those two are reachable only inside the context.
 export type {
   ActionMcpDefinition,
   ModelProvider,
@@ -27,13 +31,12 @@ export type {
   ModelSessionForkParams,
   ModelSessionForkSource,
   ModelSessionParams,
-  ModelTier,
   ModelToolCallContext,
   ModelToolDefinition,
   ModelUserInput,
   ProviderId,
   SkillMcpDefinition,
-} from "./domain/model-port.js";
+} from "./domain/deprecated-model-port.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 
 // The model port's adapters, as the composition root wires them. The Codex

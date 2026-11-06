@@ -1,265 +1,200 @@
-// The model provider port: what the agent context needs from a model it can
-// run. Adapters live in agent/infrastructure/model/. Agent model:
-// docs/concepts/agents.md.
+// The model port: what the agent context needs from a model it can run, and
+// nothing it can do without. Adapters live in agent/infrastructure/model/
+// and implement ModelProvider; the run implements RomeTools (./rome-tools.ts)
+// and hands it in. Agent model: docs/concepts/agents.md.
 //
-// The interface only requires what every model needs: an id, a builtin-tool
-// catalog and `openSession`. ModelResolver owns provider priority and concrete
-// model selection. Deliberately excludes mid-session control
-// (setModel/setPermissionMode/setMcpServers/stopTask) — that vocabulary is
-// Claude-SDK-specific and has no place in the provider contract.
-//
-// Extracted from core/agent-runner.ts with its shapes unchanged. The imports
-// from core/ are the shapes it still shares with the run; they go when the
-// port is reshaped.
+// The port knows models, threads, positions and builtin tools. It knows
+// nothing of agents, sessions, chats or connected accounts: the resolver
+// picks the provider and model in front of it, the session stores what it
+// returns, and what a turn cost travels on the result event's accounting.
+// Until the adapters implement this port they implement
+// ./deprecated-model-port.ts.
 
-import type { ActionConfig } from "../../actions/types.js";
-import type { DeferInput } from "../../core/defer.js";
-import type { FacadeToolDef, RoutineActivationGate } from "../../core/mcp-facade.js";
-import type { SkillMcpDefinition } from "../../core/skill-catalog.js";
-import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../../types.js";
-import type { UsageFunding } from "../../usage/events.js";
+import type {
+  AgentBlockEvent,
+  AgentDeltaEvent,
+  InputStatusEvent,
+  PlanUpdateEvent,
+  ReasoningEffort,
+  StructuredOutputEvent,
+  TurnErrorEvent,
+  TurnResultEvent,
+} from "@rome-os/app-runtime";
+import type { RomeTools, ToolUseId } from "./rome-tools.js";
 
+/** Value. Names a provider in the domain. The adapters give a name its behaviour. */
 export type ProviderId = "anthropic" | "openai" | "mock";
-export type ModelTier = "large" | "medium" | "small";
 
-export interface ModelToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
+/** Value. The provider's name for one of its threads. Opaque to the domain. */
+export type ProviderThreadId = string;
 
-export interface ModelToolCallContext {
-  /** Provider-issued identity of the model tool call. */
-  toolUseId: string;
-}
+/**
+ * Value. The provider's marker for where a turn left its thread. Opaque to
+ * the domain; each provider spells it its own way.
+ */
+export type CheckpointId = string;
 
-export interface ActionMcpDefinition {
-  name: string;
-  description: string;
-  type: ActionConfig["type"];
-  complexity: ActionConfig["complexity"];
-  speed: ActionConfig["speed"];
-  reliability: ActionConfig["reliability"];
-  sideEffects: ActionConfig["sideEffects"];
-  requiresApproval: boolean;
-  cancellable: boolean;
-  inputSchema: Record<string, unknown>;
-}
+/** Value. A model as the provider names it (`claude-opus-4-1`, `gpt-5-codex`). */
+export type ModelName = string;
 
-// One definition, owned by the skill catalog that produces it.
-export type { SkillMcpDefinition };
+/** Value. The run's identity for one user input, so a steer can be confirmed. */
+export type InputId = string;
 
 export type ModelReasoningEffort = ReasoningEffort;
 
-export interface ModelProvider {
-  /** Stable id used for telemetry and to look the provider up in the registry. */
-  readonly id: ProviderId;
-  /** Human-readable label for the dashboard. */
-  readonly displayName: string;
-  /**
-   * Names of tools the provider handles natively. These are Rome-canonical
-   * names (Read / Edit / Bash / Glob / Grep / WebSearch / WebFetch / Task) —
-   * the agent loader filters yaml `tools:` entries against this set.
-   */
-  readonly builtinTools: ReadonlySet<string>;
-  /**
-   * Open a long-lived model session. The returned handle owns the underlying
-   * SDK / HTTP client and the input queue. Multiple turns are driven by
-   * repeated `sendUserInput()` calls; the consumer drains `events()` for as
-   * long as the session is open.
-   */
-  openSession(params: ModelSessionParams): Promise<ModelSession>;
+/**
+ * Value object. Where a completed turn left a provider thread. Minted by the
+ * provider, recorded with the turn, handed back to `fork`.
+ */
+export interface ProviderPosition {
+  provider: ProviderId;
+  providerThreadId: ProviderThreadId;
+  checkpointId: CheckpointId;
 }
 
-export interface ModelSessionParams {
-  model: string;
+/** Value object. An MCP server the guardian configured, as a command to spawn. */
+export interface ExternalMcpServer {
+  command: string;
+  args: string[];
+}
+
+/**
+ * Value object. What the model sees before the conversation. Built by the
+ * run; the adapter passes it through and changes nothing in it.
+ */
+export interface ModelPrefix {
+  model: ModelName;
   systemPrompt: string;
-  agentName?: string;
-  /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
-  appStoreListingId?: string;
-  /**
-   * Live getter the MCP facade reads on every tool request, so actions added
-   * mid-session (e.g. by `app_management`) become callable in-session. No
-   * static-snapshot fallback exists — every caller must supply a real getter.
-   */
-  getActionCatalog: () => ActionMcpDefinition[];
-  /**
-   * Live getter the MCP facade reads on every tool request, so skills from
-   * apps installed mid-session (e.g. via `app_management`) become
-   * discoverable in-session.
-   */
-  getSkillCatalog: () => SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
-  /** Provider-native final-response JSON Schema for every model turn. */
-  outputSchema?: Record<string, unknown>;
-  builtinTools?: string[];
-  maxTurns?: number;
+  /** Rome-canonical names, already filtered against `ModelProvider.builtinTools`. */
+  builtinTools: string[];
   reasoningEffort?: ModelReasoningEffort;
+  /** Provider-native JSON Schema for every final answer. */
+  outputSchema?: Record<string, unknown>;
   workingDir?: string;
-  /** The channel the session's turns are delivered on, from its key. Shell
-   *  tools such as the Discord CLI read it to act as that channel's account. */
-  channel?: string;
+  /** Only the provider can mount these next to its builtin tools. */
+  externalMcpServers?: Record<string, ExternalMcpServer>;
+  /** Set on the shell the builtin tools run in. The adapter reads none of it. */
+  env?: Record<string, string>;
   /**
-   * The agent's text stays in its trace (`policy.finalText: private`), so it
-   * reaches the guardian only through its tools.
+   * The agent's text stays in its trace and reaches the guardian only
+   * through its tools. The adapter turns off its model's nudges toward
+   * visible text; the run cannot spell those without knowing the provider.
    */
   textPrivate?: boolean;
-  externalMcpServers?: Record<string, McpServerConfig>;
-  /**
-   * The session identifier, a bare UUID. The Anthropic provider passes a new
-   * session's id to Claude Code as `--session-id`, which rejects anything
-   * else.
-   */
-  sessionId: string;
-  /**
-   * When true, the provider has never seen `sessionId`, so it may use it as
-   * the new conversation's id. When false, the id may already be taken, and
-   * the provider resumes only through `providerThreadId`.
-   */
-  isNewSession?: boolean;
-  /**
-   * Provider-specific thread/session id from a previous session, used for
-   * resume. Codex generates its own opaque thread id that must be passed
-   * back to `resumeThread()`; Anthropic captures the SDK transcript's id.
-   */
-  providerThreadId?: string;
-  /** Provider-owned fork source. Normal application code should not set this. */
-  fork?: ModelSessionForkSource;
-  /** Execute callbacks; the provider invokes these as MCP tools. */
-  executeAction: (name: string, input: unknown) => Promise<unknown>;
-  executeSubagent: (
-    name: string,
-    input: unknown,
-    context: ModelToolCallContext,
-  ) => Promise<unknown>;
-  /** Invoked when the agent calls the `defer` tool: schedules a
-   * one-off wakeup back into this same thread. Absent for sessions with no
-   * live thread to wake. */
-  executeDefer?: (input: DeferInput) => Promise<unknown>;
-  /** See FacadeParams.sessionTools. */
-  sessionTools?: FacadeToolDef[];
-  /** See FacadeParams.routineActivation. */
-  routineActivation?: RoutineActivationGate;
-  /**
-   * Whether the consuming surface can render interactive inline UI
-   * (`propose_routine` cards, app components). True only for webchat-bound
-   * sessions (dashboard + desktop); other channels skip the tools so the model
-   * doesn't dead-end waiting for UI no one will deliver.
-   */
-  supportsInteractiveSurface?: boolean;
-  /**
-   * True when the session must keep advertising the interactive-surface tool
-   * catalog but nothing drains its stream to mount UI — exact-mode forked
-   * turns, whose model-visible prefix (system prompt + tools) must stay
-   * byte-identical to their webchat source while no webchat drain exists to
-   * render cards. The interactive tools' *runtime*
-   * degrades to the non-interactive fallbacks (ask_question relays prose;
-   * propose_routine refuses) instead of claiming UI was
-   * delivered. See FacadeParams.interactiveSurfaceDetached.
-   */
-  interactiveSurfaceDetached?: boolean;
 }
 
+/**
+ * Value object. Which provider thread a model session opens on. `new` starts
+ * a thread that has seen nothing; `resume` continues one the provider named.
+ */
+export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: ProviderThreadId };
+
+export interface OpenModelSessionParams {
+  prefix: ModelPrefix;
+  thread: ThreadStart;
+  tools: RomeTools;
+}
+
+export interface ModelProvider {
+  readonly id: ProviderId;
+  /** Tools the provider runs itself, by Rome-canonical name. */
+  readonly builtinTools: ReadonlySet<string>;
+  /** Open a model session on a thread. The provider names the thread. */
+  open(params: OpenModelSessionParams): Promise<ModelSession>;
+}
+
+/** Value object. One user input to a session. A turn may consume several. */
 export interface ModelUserInput {
-  /** Stable identity of an independently submitted conversational input. */
-  inputId?: string;
+  inputId?: InputId;
   text: string;
-  /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
+  /** Absolute local paths, for providers that take images. */
   images?: string[];
   reasoningEffort?: ModelReasoningEffort;
-  /** Optional injected tool-result, used for approval continuations. */
-  injectedToolResult?: { toolUseId: string; content: unknown };
+  /** The answer to a tool approval, continuing the turn that asked. */
+  injectedToolResult?: { toolUseId: ToolUseId; content: unknown };
 }
 
-export type ModelSessionForkMode = "ephemeral" | "thread";
+/**
+ * The events a model session emits, in Rome's vocabulary. Provider-native
+ * units become these inside the adapter and nowhere else. No turn brackets:
+ * `turn_start`, `turn_end`, the subagent events, the interactive cards,
+ * usage and spans are the run's. A turn's events end with exactly one
+ * `result` or `error`, whose accounting carries what the turn cost and who
+ * paid.
+ */
+export type ModelSessionEvent =
+  | AgentBlockEvent
+  | AgentDeltaEvent
+  | InputStatusEvent
+  | PlanUpdateEvent
+  | StructuredOutputEvent
+  | TurnResultEvent
+  | TurnErrorEvent;
 
-export interface ModelSessionForkParams {
-  /** Rome session id to assign to the forked provider session. */
-  sessionId: string;
-  /** Ephemeral forks are closed after one use; thread forks may be persisted. */
-  mode?: ModelSessionForkMode;
-  /**
-   * Whether the fork may change the source session's runtime configuration.
-   * Providers can use exact-mode knowledge to preserve provider-specific cache
-   * lineage when the model and prompt configuration are unchanged.
-   */
-  configurationMode?: "isolated" | "exact";
-  /** Provider-native checkpoint to include as the fork's final source turn. */
-  sourceCheckpoint?: string;
-}
-
-export interface ModelSessionForkSource {
-  sourceSessionId: string;
-  sourceProviderThreadId?: string;
-  mode: ModelSessionForkMode;
-  sourceCheckpoint?: string;
-}
-
-export type ModelSessionForkOpenParams = Omit<
-  ModelSessionParams,
-  "sessionId" | "isNewSession" | "providerThreadId" | "fork"
->;
-
-export interface ModelSessionFork {
-  readonly providerId: ProviderId;
-  readonly sessionId: string;
-  readonly sourceSessionId: string;
-  readonly sourceProviderThreadId?: string;
-  readonly mode: ModelSessionForkMode;
-  readonly providerThreadId?: string;
-
-  open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
-}
-
+/**
+ * Live handle on one open provider thread. Owns the provider's client and
+ * the input queue. One lifetime stream of events across all its turns.
+ */
 export interface ModelSession {
-  readonly providerId: ProviderId;
-  readonly model: string;
+  /** The model that runs, after any substitution the provider made. */
+  readonly model: ModelName;
+  /** The thread this session runs on, once the provider has named it. */
+  readonly providerThreadId?: ProviderThreadId;
+  /** Disposed by an interrupt or a close; a new turn needs a new session. */
+  readonly isClosed: boolean;
+  readonly events: AsyncIterable<ModelSessionEvent>;
   /**
-   * Effort the provider applied to its most recent turn, in the provider's
-   * own terminology (for example `xhigh` for Claude and Codex). A provider
-   * that fixes effort when the session opens may report it before the first
-   * turn. Unset when the provider reports none.
+   * Where the most recent completed turn left the thread. Set at the turn's
+   * `result`, cleared when the next turn starts, readable after `close()`.
+   * Absent after an interrupted or failed turn.
    */
-  readonly appliedReasoningEffort?: string;
-  /** A disposed provider execution must be reopened before another turn. */
-  readonly isClosed?: boolean;
-  /** Single, lifetime stream of AgentMessages produced by the provider. */
-  readonly events: AsyncIterable<AgentEvent>;
+  readonly lastPosition?: ProviderPosition;
 
-  /**
-   * Provider-specific thread id, set after the first turn for providers that
-   * generate their own (e.g. Codex). Used by the session manager to persist
-   * the id for future resume.
-   */
-  providerThreadId?: string;
-
-  /** Opaque checkpoint for the most recent successfully completed provider turn. */
-  readonly lastCompletedTurnCheckpoint?: string;
-
-  /**
-   * The provider's own id for the most recent turn that reached it, whatever
-   * its outcome. Unset for providers that mint no turn ids of their own.
-   */
-  readonly lastProviderTurnId?: string;
-
-  /** Who pays the model provider for a turn that ends now. Unset when unknown. */
-  readonly funding?: UsageFunding;
-
-  /** Push a new user turn. Resolves once the provider accepts it. */
+  /** Queue an input. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;
-
-  /** Append without interrupting. Only `deferred` is safe to submit again. */
-  steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
-
-  /** Create an isolated provider-owned branch from this live session. */
-  fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
-
-  /** Stop the in-flight turn. The provider may dispose of its execution. */
-  interrupt(reason?: string): Promise<void>;
-
   /**
-   * Close the session. The events iterable terminates. Idempotent. After
-   * close(), sendUserInput() rejects.
+   * Add an input to the running turn without interrupting it. `deferred`
+   * means the provider did not take it and it may be sent again. A provider
+   * without it takes the input as the next turn.
    */
+  steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
+  /** A new thread branched from this one. Refuses while a turn is running. */
+  fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
+  /** Stop the running turn. The provider may dispose its client. */
+  interrupt(): Promise<void>;
+  /** End the session; `events` terminates. Idempotent. */
   close(): Promise<void>;
+}
+
+/** Value object. How to branch a thread. */
+export interface ModelSessionForkParams {
+  /**
+   * Where to branch. Absent branches at the head. The provider refuses a
+   * position on another provider or another thread.
+   */
+  at?: ProviderPosition;
+  /**
+   * `ephemeral` is closed after one use; `kept` gets a thread of its own
+   * that the session may record.
+   */
+  lifetime: "ephemeral" | "kept";
+}
+
+export interface ModelSessionForkOpenParams {
+  prefix: ModelPrefix;
+  tools: RomeTools;
+}
+
+/**
+ * The branch before it is opened. Minted under the source's lock, opened
+ * outside it, so the source's later turns are not held.
+ */
+export interface ModelSessionFork {
+  /**
+   * The child's thread, once opened. Absent when the provider ran the turn
+   * inside the source thread and rolled it back; such a child has no thread
+   * of its own to record.
+   */
+  readonly providerThreadId?: ProviderThreadId;
+  open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
 }
