@@ -757,6 +757,8 @@ describe("Webchat API", () => {
       recordConversation: async () => {},
       shutdown: async () => {},
     };
+    const guardianStopped = rs.fn(async () => {});
+    deps.concierge = { guardianStopped } as never;
     const app = createWebchatRuntime(deps).routes;
     const created = await app.request("/chat/sessions", {
       method: "POST",
@@ -779,6 +781,8 @@ describe("Webchat API", () => {
         200,
       );
       expect(interrupt).toHaveBeenCalledWith("user-stop", "stop-1");
+      // A guardian turn of their own is not a background turn.
+      expect(guardianStopped).not.toHaveBeenCalled();
     } finally {
       for (const finish of finishers) finish();
     }
@@ -6092,6 +6096,8 @@ describe("Webchat API", () => {
     it("retries backend continuation Stop without interrupting a later provider turn", async () => {
       const sessionId = "sess-backend-stop";
       await deps.webchatRepo.createSession(sessionId, "Backend stop");
+      const guardianStopped = rs.fn(async () => {});
+      deps.concierge = { guardianStopped } as never;
       const owner = { currentTurnId: "backend-provider-turn", interrupt: rs.fn(async () => {}) };
       rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
@@ -6123,6 +6129,7 @@ describe("Webchat API", () => {
       });
       const stop = () => routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
       expect((await stop()).status).toBe(202);
+      expect(guardianStopped).toHaveBeenCalledWith(sessionId);
       expect((await stop()).status).toBe(202);
       expect(owner.interrupt).toHaveBeenCalledTimes(2);
       owner.currentTurnId = "later-turn";

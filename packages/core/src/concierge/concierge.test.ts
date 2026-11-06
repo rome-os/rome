@@ -1498,12 +1498,28 @@ describe("Concierge events", () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
-    s.onBackendTurn(() => "interrupted");
+    s.onBackendTurn(async () => {
+      await s.service.guardianStopped(CONCIERGE_CHAT);
+      return "interrupted" as const;
+    });
     await finishTask(s, chatId);
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
     expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it("hands a task's result over again when a newer message, not a Stop, cut the turn short", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "interrupted");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.backendTurns).toHaveLength(2);
   });
 
   it("tells the Concierge of a failed turn at once, with its cause, and holds a stopped one", async () => {

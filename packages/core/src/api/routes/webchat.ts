@@ -3098,6 +3098,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     if (!stream) return answer({ stopped: false, reason: "no_running_turn" }, 404);
     log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
+    // A Stop of a background turn is the guardian's: in a Concierge chat, the
+    // task changes the turn carried are not handed over again.
+    if (stream.turnId.startsWith("backend:"))
+      await deps.concierge?.guardianStopped(stream.sessionId);
     if (stream.interrupt) {
       await stream.interrupt("user-stop");
       return answer({ stopped: stream.finished }, stream.finished ? 200 : 202);

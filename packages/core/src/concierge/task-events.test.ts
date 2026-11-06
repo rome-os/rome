@@ -309,19 +309,20 @@ describe("TaskEventCoalescer", () => {
     expect(s.rendered.at(-1)).toEqual(["approval"]);
   });
 
-  it("never hands a stopped turn's changes over again, but still delivers a change that came while it ran", async () => {
+  it("never hands the changes of a turn the guardian stopped over again, but still delivers one that came while it ran", async () => {
     const s = setup();
     s.turnsStopped();
     s.holdTurns();
     s.coalescer.mark(urgent("a"));
     s.coalescer.mark(urgent("b"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    // A change for "b" lands while the stopped turn runs.
+    // The guardian presses Stop, and a change for "b" lands while the turn ends.
+    s.coalescer.guardianStopped();
     await rs.advanceTimersByTimeAsync(1_000);
     s.coalescer.mark(urgent("b", "approval"));
     await s.endTurn();
     expect(s.coalescer.pending).toEqual(["b"]);
-    expect(s.gaveUp).toEqual([]);
+    expect(s.gaveUp).toEqual(["a"]);
 
     s.turnsRun(true);
     await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
@@ -336,6 +337,28 @@ describe("TaskEventCoalescer", () => {
         .flat()
         .filter((id) => id === "a"),
     ).toHaveLength(1);
+  });
+
+  it("tries a turn a newer message cut short again, since it may never have reached the model", async () => {
+    const s = setup();
+    s.turnsStopped();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.flushes).toHaveLength(1);
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.gaveUp).toEqual([]);
+  });
+
+  it("ignores a Stop while no task-event turn is delivering", async () => {
+    const s = setup();
+    s.coalescer.guardianStopped();
+    s.turnsStopped();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.coalescer.pending).toEqual(["a"]);
+    expect(s.gaveUp).toEqual([]);
   });
 
   it("waits to retry only the rows of a chat whose turn did not run", async () => {

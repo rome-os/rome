@@ -91,6 +91,8 @@ export class TaskEventCoalescer {
   private dirty = new Map<string, Dirty>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
+  /** The guardian stopped the turn now delivering; reset as each delivery starts. */
+  private stopRequested = false;
   private lastFlushStartedAt = Number.NEGATIVE_INFINITY;
 
   constructor(private deps: TaskEventDeps) {}
@@ -135,6 +137,11 @@ export class TaskEventCoalescer {
     if (entry && entry.builtAt !== undefined && entry.since <= entry.builtAt) {
       this.dirty.delete(taskId);
     }
+  }
+
+  /** The guardian stopped the turn now delivering. Its rows are not handed over again. */
+  guardianStopped(): void {
+    this.stopRequested = true;
   }
 
   /** Drops a row's mark, such as when its row is gone. */
@@ -182,7 +189,7 @@ export class TaskEventCoalescer {
     );
     // Rows whose turn did not run to its end; all of them until delivery starts.
     const notRun = new Set(taken.map(([taskId]) => taskId));
-    // Rows whose turn a Stop or a newer message cut short.
+    // Rows whose turn the guardian stopped.
     const stopped = new Set<string>();
     // What each row's turn carries, kept in case the turn does not run.
     const carried = new Map(
@@ -214,6 +221,7 @@ export class TaskEventCoalescer {
       notRun.clear();
       // One chat's turn failing leaves the other chats' turns to run.
       for (const delivery of deliveries) {
+        this.stopRequested = false;
         const outcome = await this.deps.deliver(delivery).catch((error: unknown) => {
           log.warn("task event delivery to one chat failed", {
             error: error instanceof Error ? error.message : String(error),
@@ -221,7 +229,9 @@ export class TaskEventCoalescer {
           return "failed" as const;
         });
         if (outcome === "completed") continue;
-        const ended = outcome === "failed" ? notRun : stopped;
+        // Only a guardian Stop drops what the turn carried. A turn a newer
+        // message cut short may never have sent it to the model.
+        const ended = outcome === "interrupted" && this.stopRequested ? stopped : notRun;
         for (const taskId of delivery.taskIds) ended.add(taskId);
       }
     } catch (error) {
@@ -269,9 +279,10 @@ export class TaskEventCoalescer {
         entry.undelivered = true;
         entry.notBefore = this.deps.now() + RETRY_MS;
       } else if (stopped.has(taskId) && entry.changes === carried.get(taskId)?.changes) {
-        // The guardian stopped the turn, or a newer message cut it short and
-        // carried its input on: what it carried is never handed over again.
+        // The guardian stopped the turn: what it carried is never handed over
+        // again, and the row shows it is not synced.
         this.dirty.delete(taskId);
+        this.deps.giveUp(taskId);
       } else if (entry.builtAt !== undefined && entry.since > entry.builtAt) {
         // A change came after the build: it waits for its own flush.
         entry.builtAt = undefined;

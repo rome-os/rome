@@ -529,6 +529,11 @@ export class ConciergeService {
     return (await this.systemTurnOutcome(chatId, prompt, options)) === "completed";
   }
 
+  /** The guardian stopped a background turn in this chat. */
+  async guardianStopped(chatId: string): Promise<void> {
+    if (await this.conciergeChat(chatId)) this.taskEvents?.guardianStopped();
+  }
+
   /** {@link runSystemTurn}, telling a turn cut short by a Stop or a newer message from one that failed. */
   async systemTurnOutcome(
     chatId: string,
