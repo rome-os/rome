@@ -776,8 +776,9 @@ interface TurnExecRefs {
    * channelThreadKey under which this owner's children are acquired. Forks
    * namespace it with the fork session id: splitting the in-memory manager
    * alone would not stop the fork child's open from resuming the *source*
-   * child's persisted session (findReusableSession matches on this key), which
-   * would contaminate the same provider thread the source resumes later.
+   * child's persisted session (`SessionRepository.current` matches on this
+   * key), which would contaminate the same provider thread the source resumes
+   * later.
    */
   childChannelThreadKey: string;
   /** Attach the Child execution to this owner's provider tool call. */
@@ -1488,8 +1489,8 @@ async function openSession(
     // state the source observably depends on, so sharing it breaks the "fork
     // never mutates the source" invariant. The separate manager isolates the
     // in-memory map; the namespaced thread key isolates session-store reuse
-    // (findReusableSession would otherwise resume the source child's provider
-    // thread). keepAlive gives one forked turn child continuity across
+    // (`SessionRepository.current` would otherwise resume the source child's
+    // provider thread). keepAlive gives one forked turn child continuity across
     // repeated calls to the same subagent; runForkedTurn disposes the manager
     // when the fork ends, so fork children never outlive the fork.
     let forkChildManager: AgentSessionManager | undefined;

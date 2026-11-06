@@ -1749,7 +1749,7 @@ describe("Concierge quota failover", () => {
     s.deps.aiToolState.get = state;
     s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-    s.deps.sessionRepository.current = rs.fn(async () => undefined);
+    s.deps.sessionRepository.current = rs.fn(async () => null);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
       from: "anthropic",
       to: "openai",
