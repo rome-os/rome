@@ -248,10 +248,48 @@ describe("SessionRepository", () => {
     const first = (await repo.session(session.id))!;
     const second = (await repo.session(session.id))!;
     first.deprecatedRecordChat("chat-1");
-    second.deprecatedRecordChat("chat-2");
+    expect(second.deprecatedRecordChat("chat-2")).toBe(true);
     await repo.save(first);
     await repo.save(second);
     expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
+    // The losing instance learns which chat stuck, so a caller that compares
+    // tells a lost write from a won one, as fillChatId's answer does today.
+    expect(second.deprecatedChatId).toBe("chat-1");
+    expect(first.deprecatedChatId).toBe("chat-1");
+    expect([...second.pendingChanges().changes]).toEqual([]);
+  });
+
+  it("replace() carries the stored chat over when another instance recorded one first", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await repo.add(session);
+    const first = (await repo.session(session.id))!;
+    const second = (await repo.session(session.id))!;
+    first.deprecatedRecordChat("chat-1");
+    await repo.save(first);
+    second.deprecatedRecordChat("chat-2");
+
+    const successor = second.replace();
+    await repo.replace(second, successor);
+    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
+    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-1");
+    expect(second.deprecatedChatId).toBe("chat-1");
+    expect(successor.deprecatedChatId).toBe("chat-1");
+  });
+
+  it("replace() keeps the chat the caller named even when the retired chat write lost", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await repo.add(session);
+    const first = (await repo.session(session.id))!;
+    const second = (await repo.session(session.id))!;
+    first.deprecatedRecordChat("chat-1");
+    await repo.save(first);
+    second.deprecatedRecordChat("chat-2");
+
+    const successor = second.replace({ deprecatedChatId: "chat-3" });
+    await repo.replace(second, successor);
+    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
+    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-3");
+    expect(successor.deprecatedChatId).toBe("chat-3");
   });
 
   it("save() never brings a completed session back to active", async () => {

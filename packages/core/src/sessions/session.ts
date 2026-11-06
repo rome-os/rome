@@ -232,12 +232,21 @@ export class Session {
   }
 
   /** @deprecated Records the chat only when none is recorded yet. Answers
-   *  whether it did. */
+   *  whether it did, as this instance sees it. Another instance can record a
+   *  chat first; then the save keeps the stored chat, so after the save
+   *  `deprecatedChatId` is the chat that stuck. */
   deprecatedRecordChat(chatId: string): boolean {
     if (this.state.chatId !== null) return false;
     this.state.chatId = chatId;
     this.changes.add("chat");
     return true;
+  }
+
+  /** @deprecated Only the repository calls this, after a save found that
+   *  another instance recorded a chat first: the stored chat replaces the one
+   *  this instance tried to record, so the two agree again. */
+  deprecatedKeepStoredChat(chatId: string): void {
+    this.state.chatId = chatId;
   }
 
   /** The state to write. Only the repository calls this. */

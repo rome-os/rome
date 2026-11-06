@@ -99,17 +99,21 @@ export class SessionRepository {
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
+    const storedChat = this.db.transaction((tx) => {
       const stored = tx
         .select({ id: sessions.id })
         .from(sessions)
         .where(eq(sessions.id, state.id))
         .get();
       if (!stored) throw new Error(`Session "${state.id}" was never added`);
-      writeChanges(tx, state, pending.changes);
+      const storedChat = writeChanges(tx, state, pending.changes);
       for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      return storedChat;
     });
     session.markSaved();
+    if (storedChat !== null && storedChat !== state.chatId) {
+      session.deprecatedKeepStoredChat(storedChat);
+    }
   }
 
   /**
@@ -134,8 +138,8 @@ export class SessionRepository {
     }
     const retiredPending = retired.pendingChanges();
     const successorPending = successor.pendingChanges();
-    this.db.transaction((tx) => {
-      writeChanges(tx, retiredState, retiredPending.changes);
+    const storedChat = this.db.transaction((tx) => {
+      const storedChat = writeChanges(tx, retiredState, retiredPending.changes);
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
@@ -143,11 +147,21 @@ export class SessionRepository {
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
+      // A successor that carried the retired session's chat over carries the
+      // stored one, not the one another instance beat this one to recording.
+      if (storedChat !== null && successorState.chatId === retiredState.chatId) {
+        successorState.chatId = storedChat;
+      }
       tx.insert(sessions).values(toRow(successorState)).run();
       for (const checkpoint of successorPending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      return storedChat;
     });
     retired.markSaved();
     successor.markSaved();
+    if (storedChat !== null && storedChat !== retiredState.chatId) {
+      retired.deprecatedKeepStoredChat(storedChat);
+      if (successorState.chatId === storedChat) successor.deprecatedKeepStoredChat(storedChat);
+    }
   }
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back
@@ -230,12 +244,17 @@ function restore(row: SessionRow): Session {
   });
 }
 
-/** Writes each changed fact as its own targeted update, as today's callers do. */
+/**
+ * Writes each changed fact as its own targeted update, as today's callers do.
+ * Answers the chat the row holds afterwards when one was to be recorded,
+ * which is another instance's when it recorded a chat first, and null when
+ * no chat was to be recorded.
+ */
 function writeChanges(
   tx: DrizzleTx,
   state: SessionState,
   changes: ReadonlySet<SessionChange>,
-): void {
+): string | null {
   const columns: Partial<SessionRow> = {};
   if (changes.has("turn")) {
     columns.provider = state.provider;
@@ -251,12 +270,20 @@ function writeChanges(
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
-  if (changes.has("chat") && state.chatId !== null) {
-    tx.update(sessions)
-      .set({ chatId: state.chatId })
-      .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
-      .run();
-  }
+  if (!changes.has("chat") || state.chatId === null) return null;
+  const written = tx
+    .update(sessions)
+    .set({ chatId: state.chatId })
+    .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
+    .run();
+  if (written.changes > 0) return state.chatId;
+  // The guard held, so the row already has a chat, and it is not this one.
+  const row = tx
+    .select({ chatId: sessions.chatId })
+    .from(sessions)
+    .where(eq(sessions.id, state.id))
+    .get();
+  return row?.chatId ?? state.chatId;
 }
 
 function toRow(state: SessionState): SessionRow {
