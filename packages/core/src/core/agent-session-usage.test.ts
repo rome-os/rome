@@ -6,6 +6,7 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
+import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
@@ -21,6 +22,10 @@ import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
+import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
+
+const recordMetrics = rs.hoisted(() => rs.fn());
+rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
 const AGENT = "usage_agent";
 const key = { agentName: AGENT, channelThreadKey: "webchat:usage-test" };
@@ -38,8 +43,7 @@ describe("AgentSession turn usage", () => {
   let recorded: TurnUsageFacts[];
   // Each run decides whether it reaches the provider. One that does mints a
   // provider turn id, like Codex does on turn/start.
-  let nextRun: () => AsyncIterable<AgentEvent>;
-  let providerTurnId: string | undefined;
+  let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
   let forkable: boolean;
   let funding: UsageFunding;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
@@ -67,7 +71,7 @@ describe("AgentSession turn usage", () => {
     await loader.loadAll(directory);
     testDb = createTestDb();
     recorded = [];
-    providerTurnId = undefined;
+    recordMetrics.mockClear();
     forkable = false;
     funding = "byok";
     beforeModelDispatch = undefined;
@@ -86,7 +90,6 @@ describe("AgentSession turn usage", () => {
           },
           params,
         );
-        Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
         Object.defineProperty(session, "funding", { get: () => funding });
         if (forkable) {
           session.fork = async (fork) => ({
@@ -147,7 +150,7 @@ describe("AgentSession turn usage", () => {
 
   it("records each finished turn once with its accounting, funding, and provider turn id", async () => {
     nextRun = async function* () {
-      providerTurnId = "provider-turn-1";
+      yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
       yield {
         type: "result",
         content: "done",
@@ -172,6 +175,12 @@ describe("AgentSession turn usage", () => {
       providerTurnId: "provider-turn-1",
       accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
     });
+    // The run attributes the turn; the provider knows nothing of the agent.
+    expect(recordMetrics).toHaveBeenCalledTimes(1);
+    expect(recordMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-5.6-terra" }),
+      { agentName: `core:${AGENT}`, appStoreListingId: undefined },
+    );
   });
 
   it("does not hand a turn that never reached the provider the previous turn's id", async () => {
@@ -179,7 +188,7 @@ describe("AgentSession turn usage", () => {
     nextRun = async function* () {
       calls++;
       if (calls === 1) {
-        providerTurnId = "provider-turn-1";
+        yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
         yield { type: "result", content: "done" };
         return;
       }
@@ -200,7 +209,7 @@ describe("AgentSession turn usage", () => {
     nextRun = async function* () {
       calls++;
       if (calls === 1) {
-        providerTurnId = "provider-turn-1";
+        yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
         yield { type: "result", content: "done" };
         return;
       }
@@ -296,6 +305,7 @@ describe("AgentSession turn usage", () => {
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
     forkable = true;
     nextRun = async function* () {
+      yield { type: "model_turn_started", modelTurnId: "fork-provider-turn" };
       yield {
         type: "result",
         content: "done",
@@ -315,8 +325,15 @@ describe("AgentSession turn usage", () => {
     expect(recorded[0]).toMatchObject({
       romeSessionType: "fork",
       status: "completed",
+      providerTurnId: "fork-provider-turn",
       accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
     });
+    // The run attributes the turn; the provider knows nothing of the agent.
+    expect(recordMetrics).toHaveBeenCalledTimes(1);
+    expect(recordMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-5.6-terra" }),
+      { agentName: `core:${AGENT}`, appStoreListingId: undefined },
+    );
   });
 
   it("records a forked turn under its fork session", async () => {

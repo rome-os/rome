@@ -6,11 +6,6 @@ import {
   buildAgentAccounting,
   calculateImpliedCostUsd,
 } from "../../../../core/provider-accounting.js";
-import {
-  modelTokenMetricAttributes,
-  modelTurnDurationMetric,
-  modelTokensMetric,
-} from "../../../../telemetry.js";
 
 /** Token usage for a Codex turn. Mirrors the shape codex emits over the
  *  app-server protocol. */
@@ -49,8 +44,6 @@ export function stripLegacyReasoningSuffix(model: string): string {
 interface BuildOpenAiAccountingArgs {
   usage: Usage | undefined;
   model: string;
-  agentName?: string;
-  appStoreListingId?: string;
   reportedCostUsd?: number;
   stop?: AgentStop;
   stopReason?: string;
@@ -66,8 +59,6 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
   const reportedReasoningTokens = usage?.reasoning_output_tokens;
   const reasoningTokens = reportedReasoningTokens ?? 0;
   return {
-    sdkInputTokens,
-    outputTokens,
     agentUsage: {
       inputTokens,
       outputTokens,
@@ -105,7 +96,7 @@ export function calculateOpenAiCostUsd(usage: Usage | undefined, model: string) 
 export function buildOpenAiAccounting(args: BuildOpenAiAccountingArgs) {
   const normalized = normalizeOpenAiUsage(args.usage);
 
-  const accounting = buildAgentAccounting({
+  return buildAgentAccounting({
     provider: "openai",
     model: stripLegacyReasoningSuffix(args.model),
     usage: normalized.agentUsage,
@@ -115,30 +106,4 @@ export function buildOpenAiAccounting(args: BuildOpenAiAccountingArgs) {
     durationMs: args.durationMs,
     rawUsage: normalized.rawUsage,
   });
-
-  if (accounting?.usage) {
-    const modelName = stripLegacyReasoningSuffix(args.model);
-    if (typeof args.durationMs === "number" && Number.isFinite(args.durationMs)) {
-      modelTurnDurationMetric().record(args.durationMs, { model: modelName });
-    }
-    const tokens = modelTokensMetric();
-    if (normalized.sdkInputTokens > 0)
-      tokens.add(
-        normalized.sdkInputTokens,
-        modelTokenMetricAttributes(modelName, "in", {
-          agentName: args.agentName,
-          appStoreListingId: args.appStoreListingId,
-        }),
-      );
-    if (normalized.outputTokens > 0)
-      tokens.add(
-        normalized.outputTokens,
-        modelTokenMetricAttributes(modelName, "out", {
-          agentName: args.agentName,
-          appStoreListingId: args.appStoreListingId,
-        }),
-      );
-  }
-
-  return accounting;
 }

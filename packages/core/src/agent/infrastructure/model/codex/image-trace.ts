@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import type { AgentEvent } from "../../../../types.js";
+import type { ModelTurnActivityEvent } from "../../../domain/model-port.js";
 import { createLogger } from "../../../../logger.js";
 
 const log = createLogger("codex-image-trace");
@@ -44,7 +44,9 @@ interface GeneratedImagePromptMetadata {
 }
 
 export interface GeneratedImageTracker {
-  collectTraceMessages(ctx: ToolTraceState & ImageTraceSessionState): Promise<AgentEvent[]>;
+  collectTraceMessages(
+    ctx: ToolTraceState & ImageTraceSessionState,
+  ): Promise<ModelTurnActivityEvent[]>;
 }
 
 export function createImageTraceSessionState(): ImageTraceSessionState {
@@ -76,7 +78,7 @@ export async function createGeneratedImageTracker(
     collectTraceMessages: async (ctx) => {
       const threadId = options.getThreadId?.();
       const files = await listGeneratedImageFiles(threadId ? join(root, threadId) : root);
-      const messages: AgentEvent[] = [];
+      const messages: ModelTurnActivityEvent[] = [];
       for (const file of files) {
         if (seen.has(file.path) || ctx.emittedGeneratedImagePaths.has(file.path)) continue;
         seen.add(file.path);
@@ -96,7 +98,7 @@ function imageGenerationFailed(value: Record<string, unknown>): boolean {
 export function translateImageGenerationStarted(
   item: { id?: unknown; [k: string]: unknown },
   ctx: ToolTraceState,
-): AgentEvent[] {
+): ModelTurnActivityEvent[] {
   const id =
     (typeof item.id === "string" ? item.id : readCodexItemId(item)) ?? syntheticImageGenerationId();
   if (ctx.emittedToolUseIds.has(id)) return [];
@@ -115,7 +117,7 @@ export function translateImageGenerationStarted(
 export async function translateImageGenerationCompleted(
   item: { id?: unknown; [k: string]: unknown },
   ctx: ToolTraceState & ImageTraceSessionState,
-): Promise<AgentEvent[]> {
+): Promise<ModelTurnActivityEvent[]> {
   const imageGenerationId = item.id ?? syntheticImageGenerationId();
   const imageGenerationOutput = await imageGenerationOutputPayload(item);
   rememberGeneratedImagePath(ctx, item);
@@ -163,7 +165,9 @@ async function listGeneratedImageFiles(root: string): Promise<GeneratedImageFile
   }
 }
 
-async function generatedImageFileTraceMessages(file: GeneratedImageFile): Promise<AgentEvent[]> {
+async function generatedImageFileTraceMessages(
+  file: GeneratedImageFile,
+): Promise<ModelTurnActivityEvent[]> {
   const id = syntheticImageGenerationId();
   const timestamp = new Date(file.mtimeMs).toISOString();
   const metadata = await readGeneratedImagePromptMetadata(file.path);
@@ -534,7 +538,7 @@ function maybeBackfillStarted(
   ctx: ToolTraceState,
   tool: string,
   input: unknown,
-): AgentEvent[] {
+): ModelTurnActivityEvent[] {
   if (ctx.emittedToolUseIds.has(item.id)) return [];
   ctx.emittedToolUseIds.add(item.id);
   return [

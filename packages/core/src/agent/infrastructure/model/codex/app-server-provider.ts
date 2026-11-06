@@ -28,6 +28,7 @@ import type {
   ModelSessionParams,
   ModelUserInput,
   ProviderId,
+  ModelPosition,
 } from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
@@ -462,6 +463,13 @@ interface CodexFailureClassification {
   pending?: Promise<void>;
 }
 
+/** The turn/start reply and turn/started can each name the turn, in either order. */
+function nameProviderTurn(turn: ActiveTurn, id: string | undefined): void {
+  if (turn.turnId || !id) return;
+  turn.turnId = id;
+  turn.sink.push({ type: "model_turn_started", modelTurnId: id });
+}
+
 /** Terminal `error` block for a classified codex failure. */
 function codexErrorEvent(
   error: string,
@@ -701,9 +709,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let activeTurn: ActiveTurn | null = null;
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
-    let lastCompletedTurnCheckpoint: string | undefined;
-    let lastProviderTurnId: string | undefined;
-    let appliedReasoningEffort: string | undefined;
+    let lastCheckpointId: string | undefined;
     const funding = this.options.funding;
     const dynamicToolOutputs = new Map<string, FacadeToolResult>();
     const usageByTurnId = new Map<
@@ -716,16 +722,10 @@ export class CodexAppServerProvider implements ModelProvider {
       providerId: this.id,
       model: params.config.model,
       events: sink.iter(),
-      providerThreadId:
-        params.thread.kind === "resume" ? params.thread.providerThreadId : undefined,
-      get lastCompletedTurnCheckpoint(): string | undefined {
-        return lastCompletedTurnCheckpoint;
-      },
-      get appliedReasoningEffort(): string | undefined {
-        return appliedReasoningEffort;
-      },
-      get lastProviderTurnId(): string | undefined {
-        return lastProviderTurnId;
+      get providerThreadId(): string | undefined {
+        return (
+          threadId ?? (params.thread.kind === "resume" ? params.thread.providerThreadId : undefined)
+        );
       },
       get funding(): UsageFunding | undefined {
         return funding?.();
@@ -851,7 +851,7 @@ export class CodexAppServerProvider implements ModelProvider {
           const p = params2 as TurnStartedNotification;
           if (activeTurn) {
             if (activeTurn.turnId && activeTurn.turnId !== p.turn?.id) return;
-            activeTurn.turnId = p.turn?.id ?? null;
+            nameProviderTurn(activeTurn, p.turn?.id);
             const update = activeTurn.turnId ? usageByTurnId.get(activeTurn.turnId) : undefined;
             if (update?.hasNewRequestUsage) updateTurnUsage(activeTurn, update.usage);
           }
@@ -1066,7 +1066,6 @@ export class CodexAppServerProvider implements ModelProvider {
       params.thread.kind === "resume" ? params.thread.providerThreadId : undefined,
     );
     threadId = openedThread.threadId;
-    session.providerThreadId = threadId;
 
     const sourceRuntime: CodexTurnRuntime = {
       ownerSessionId,
@@ -1075,9 +1074,6 @@ export class CodexAppServerProvider implements ModelProvider {
       imageTracker,
       romeTools,
       isClosed: () => closed,
-      onProviderTurn: (turnId) => {
-        lastProviderTurnId = turnId;
-      },
     };
 
     // The source dispatcher and exact forks share one app-server thread. Keep
@@ -1089,8 +1085,6 @@ export class CodexAppServerProvider implements ModelProvider {
       buildOpenAiAccounting({
         usage: toSdkUsage(turn.usage),
         model: modelName,
-        agentName: params.agentName,
-        appStoreListingId: params.appStoreListingId,
         reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
         stop: codexStop(turn.nativeStatus ?? undefined, failed),
         stopReason: failed ? "error" : "end_turn",
@@ -1166,8 +1160,8 @@ export class CodexAppServerProvider implements ModelProvider {
       const effort = normalizeEffort(
         inputs.at(-1)?.reasoningEffort ?? params.config.reasoningEffort,
       );
-      // A borrowed exact fork runs here too; only the session's own turns report.
-      if (runtime === sourceRuntime) appliedReasoningEffort = effort;
+      // A borrowed exact fork runs here too, and leaves the source's head alone.
+      if (runtime === sourceRuntime) lastCheckpointId = undefined;
       try {
         const payers = new Set(
           inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
@@ -1188,8 +1182,7 @@ export class CodexAppServerProvider implements ModelProvider {
           },
           { expectedProvider },
         )) as { turn?: { id?: string } } | undefined;
-        turn.turnId ??= started?.turn?.id ?? null;
-        if (turn.turnId) runtime.onProviderTurn?.(turn.turnId);
+        nameProviderTurn(turn, started?.turn?.id);
         // turn/start can acknowledge before the native input becomes steerable.
         // Identified chat inputs wait for their user-message confirmation.
         if (runtime === sourceRuntime && !turn.initialInputId) resolveSourceStarted?.();
@@ -1217,8 +1210,12 @@ export class CodexAppServerProvider implements ModelProvider {
               codexErrorEvent(turn.errorMessage, turnErrorInfo(turn), failedTurnAccounting(turn)),
             );
           } else {
+            let position: ModelPosition | undefined;
             if (runtime === sourceRuntime && turn.turnId) {
-              lastCompletedTurnCheckpoint = turn.turnId;
+              lastCheckpointId = turn.turnId;
+              if (turn.nativeStatus !== "interrupted") {
+                position = { provider: this.id, modelThreadId: tid, checkpointId: turn.turnId };
+              }
             }
             const accounting = turnAccounting(turn, turn.failed);
             if (params.config.outputSchema) {
@@ -1236,6 +1233,8 @@ export class CodexAppServerProvider implements ModelProvider {
                     content: JSON.stringify(structuredOutput),
                     structuredOutput,
                     accounting,
+                    reasoningEffort: effort,
+                    position,
                   });
                 }
               } catch (err) {
@@ -1248,7 +1247,13 @@ export class CodexAppServerProvider implements ModelProvider {
                 });
               }
             } else {
-              runtime.sink.push({ type: "result", content: turn.finalText, accounting });
+              runtime.sink.push({
+                type: "result",
+                content: turn.finalText,
+                accounting,
+                reasoningEffort: effort,
+                position,
+              });
             }
           }
         }
@@ -1404,7 +1409,7 @@ export class CodexAppServerProvider implements ModelProvider {
           });
           const targetIsCurrentHead =
             forkParams.sourceCheckpoint === undefined ||
-            forkParams.sourceCheckpoint === lastCompletedTurnCheckpoint;
+            forkParams.sourceCheckpoint === lastCheckpointId;
           // Borrowing runs the turn inside the source thread and reverts it
           // (a temporary workaround for openai/codex#24704 — see
           // codex/borrowed-exact-fork.ts). That leaves nothing to resume and

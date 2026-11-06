@@ -14,6 +14,7 @@
 // from core/ are the shapes it still shares with the run; they go when the
 // port is reshaped.
 
+import type { TurnErrorEvent, TurnResultEvent } from "@rome-os/app-runtime";
 import type { ActionConfig } from "../../actions/types.js";
 import type { DeferInput } from "../../core/defer.js";
 import type { FacadeToolDef, RoutineActivationGate } from "../../core/mcp-facade.js";
@@ -52,6 +53,71 @@ export type { SkillMcpDefinition };
 
 export type ModelReasoningEffort = ReasoningEffort;
 
+/**
+ * The provider's name for one of its threads. Two equal ids name the same
+ * thread, and the id outlives the process. A `resume` with it continues that
+ * thread with its history, and a provider that cannot find it fails rather
+ * than starting a new thread. Stable for the thread's lifetime and never
+ * reassigned (Claude: the SDK session id the adapter chose; Codex: the id the
+ * app-server returned). The domain stores and compares it, and reads nothing
+ * into its spelling.
+ */
+export type ModelThreadId = string;
+
+/**
+ * The provider's marker for the state of a thread right after one completed
+ * turn. Starting from it gives a history equal to the source thread's up to and
+ * including that turn, and nothing after it. Minted by the adapter when a turn
+ * completes, and meaningful only with the thread it came from (Claude: the uuid
+ * of the turn's last assistant message; Codex: the id of the turn). A failed or
+ * interrupted turn mints none. Nor does a Claude turn with no assistant message,
+ * or a Codex exact fork's turn, which leaves the source's head alone.
+ */
+export type ModelCheckpointId = string;
+
+/**
+ * The id the provider itself gave one turn, as it appears in the provider's
+ * bill, logs and events. Set only when the provider minted one (Codex), and
+ * never made up by the adapter (Claude has none). The run keeps it with the
+ * turn's usage so a charge can be matched to the turn.
+ */
+export type ModelTurnId = string;
+
+/** Where a completed turn left a provider thread. */
+export interface ModelPosition {
+  provider: ProviderId;
+  modelThreadId: ModelThreadId;
+  checkpointId: ModelCheckpointId;
+}
+
+/** The provider named a turn. A provider that mints no turn id never emits it. */
+export interface ModelTurnStartedEvent {
+  type: "model_turn_started";
+  modelTurnId: ModelTurnId;
+}
+
+/** A turn finished: how it ran, and where it left the thread. */
+export interface ModelTurnResultEvent extends TurnResultEvent {
+  /**
+   * The effort the adapter ran the turn at, in the provider's own terms. It may
+   * not be the effort the turn asked for: Claude keeps the one its session
+   * opened with.
+   */
+  reasoningEffort: string;
+  /** Absent when the turn left no checkpoint. */
+  position?: ModelPosition;
+}
+
+/** What a model session emits while a turn runs. */
+export type ModelTurnActivityEvent = Exclude<AgentEvent, TurnResultEvent | TurnErrorEvent>;
+
+/** The events a model session emits, normalized from the provider's own. */
+export type ModelSessionEvent =
+  | ModelTurnStartedEvent
+  | ModelTurnActivityEvent
+  | ModelTurnResultEvent
+  | TurnErrorEvent;
+
 export interface ModelProvider {
   /** Stable id used for telemetry and to look the provider up in the registry. */
   readonly id: ProviderId;
@@ -77,7 +143,7 @@ export interface ModelProvider {
  * `resume` continues one it named before. The branch of a thread at a
  * checkpoint joins here when `ModelSession.fork` goes.
  */
-export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: string };
+export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: ModelThreadId };
 
 /**
  * Value object. The model session's configuration: what the run fixes when
@@ -195,22 +261,22 @@ export interface ModelSessionForkParams {
    */
   configurationMode?: "isolated" | "exact";
   /** Provider-native checkpoint to include as the fork's final source turn. */
-  sourceCheckpoint?: string;
+  sourceCheckpoint?: ModelCheckpointId;
 }
 
 export interface ModelSessionForkSource {
-  sourceProviderThreadId: string;
+  sourceProviderThreadId: ModelThreadId;
   mode: ModelSessionForkMode;
-  sourceCheckpoint?: string;
+  sourceCheckpoint?: ModelCheckpointId;
 }
 
 export type ModelSessionForkOpenParams = Omit<ModelSessionParams, "thread" | "fork">;
 
 export interface ModelSessionFork {
   readonly providerId: ProviderId;
-  readonly sourceProviderThreadId: string;
+  readonly sourceProviderThreadId: ModelThreadId;
   readonly mode: ModelSessionForkMode;
-  readonly providerThreadId?: string;
+  readonly providerThreadId?: ModelThreadId;
 
   open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
 }
@@ -218,33 +284,13 @@ export interface ModelSessionFork {
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
-  /**
-   * Effort the provider applied to its most recent turn, in the provider's
-   * own terminology (for example `xhigh` for Claude and Codex). A provider
-   * that fixes effort when the session opens may report it before the first
-   * turn. Unset when the provider reports none.
-   */
-  readonly appliedReasoningEffort?: string;
   /** A disposed provider execution must be reopened before another turn. */
   readonly isClosed?: boolean;
-  /** Single, lifetime stream of AgentMessages produced by the provider. */
-  readonly events: AsyncIterable<AgentEvent>;
+  /** Single, lifetime stream of events produced by the provider. */
+  readonly events: AsyncIterable<ModelSessionEvent>;
 
-  /**
-   * Provider-specific thread id, set after the first turn for providers that
-   * generate their own (e.g. Codex). Used by the session manager to persist
-   * the id for future resume.
-   */
-  providerThreadId?: string;
-
-  /** Opaque checkpoint for the most recent successfully completed provider turn. */
-  readonly lastCompletedTurnCheckpoint?: string;
-
-  /**
-   * The provider's own id for the most recent turn that reached it, whatever
-   * its outcome. Unset for providers that mint no turn ids of their own.
-   */
-  readonly lastProviderTurnId?: string;
+  /** The thread this session runs on, once it can be resumed. Claude: after the first assistant message. */
+  readonly providerThreadId?: ModelThreadId;
 
   /** Who pays the model provider for a turn that ends now. Unset when unknown. */
   readonly funding?: UsageFunding;

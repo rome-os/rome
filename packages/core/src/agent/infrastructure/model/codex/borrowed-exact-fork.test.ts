@@ -92,7 +92,7 @@ describe("createBorrowedExactForkSession", () => {
       runTurn: async (_input, runtime) => {
         hasForkActionTool = runtime.romeTools.hasTool("execute_action");
         await runtime.beforeTerminal?.({ threadId: "source-thread", turnId: "fork-turn" });
-        runtime.sink.push({ type: "result", content: "done" });
+        runtime.sink.push({ type: "result", content: "done", reasoningEffort: "high" });
       },
       revertTurn,
       interrupt: async () => undefined,
@@ -134,7 +134,7 @@ describe("createBorrowedExactForkSession", () => {
         askRes = await runtime.romeTools.callTool("ask_question", {
           questions: [{ id: "city", question: "Which city?", type: "text" }],
         });
-        runtime.sink.push({ type: "result", content: "done" });
+        runtime.sink.push({ type: "result", content: "done", reasoningEffort: "high" });
       },
       revertTurn: async () => undefined,
       interrupt: async () => undefined,
@@ -175,7 +175,7 @@ describe("createBorrowedExactForkSession", () => {
       runTurn: async (_input, runtime) => {
         events.push("ran");
         await runtime.beforeTerminal?.({ threadId: "source-thread", turnId: "fork-turn" });
-        runtime.sink.push({ type: "result", content: "done" });
+        runtime.sink.push({ type: "result", content: "done", reasoningEffort: "high" });
       },
       revertTurn: async () => undefined,
       interrupt: async () => undefined,

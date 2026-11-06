@@ -22,16 +22,13 @@ import type {
   ModelSessionParams,
   ModelUserInput,
   ModelReasoningEffort,
+  ModelSessionEvent,
+  ModelTurnActivityEvent,
+  ModelPosition,
 } from "../../../domain/model-port.js";
 import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
 import { createLogger } from "../../../../logger.js";
-import {
-  type ModelMetricAttribution,
-  modelTokenMetricAttributes,
-  modelTurnDurationMetric,
-  modelTokensMetric,
-} from "../../../../telemetry.js";
 import type { SettingsRepository } from "../../../../db/repositories/settings.js";
 import { parseTimeZone } from "../../../../lib/timezone.js";
 import {
@@ -374,10 +371,10 @@ function normalizeTodoWritePlan(input: unknown): AgentPlan | null {
 function extractToolResultMessages(
   message: SDKUserMessage | SDKUserMessageReplay,
   toolUseNames: Map<string, string>,
-): AgentEvent[] {
+): ModelTurnActivityEvent[] {
   const payload = message.message;
   const content = Array.isArray(payload?.content) ? payload.content : [];
-  const contentResults = content.filter(isToolResultParam).map((block): AgentEvent => {
+  const contentResults = content.filter(isToolResultParam).map((block): ModelTurnActivityEvent => {
     const output =
       typeof block.is_error === "boolean"
         ? { content: block.content, isError: block.is_error }
@@ -413,34 +410,6 @@ function extractToolResultMessages(
   }
 
   return [];
-}
-
-function recordModelCallMetrics(
-  model: string,
-  accounting: ReturnType<typeof buildAnthropicAccounting>,
-  result: SDKResultMessage,
-  attribution: ModelMetricAttribution,
-): void {
-  const durationMs = readPositiveNumber(result.duration_ms);
-  if (typeof durationMs === "number") {
-    modelTurnDurationMetric().record(durationMs, { model });
-  }
-
-  const usage = accounting?.usage;
-  if (!usage) {
-    return;
-  }
-
-  const tokens = modelTokensMetric();
-  // Treat cache reads/writes as input-side tokens — they're billed on the input path
-  // and what operators want to see in the "in" series is total input work sent.
-  const inTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
-  if (inTokens > 0) {
-    tokens.add(inTokens, modelTokenMetricAttributes(model, "in", attribution));
-  }
-  if (usage.outputTokens > 0) {
-    tokens.add(usage.outputTokens, modelTokenMetricAttributes(model, "out", attribution));
-  }
 }
 
 async function getStoredTimezone(
@@ -682,11 +651,10 @@ export class AnthropicProvider implements ModelProvider {
     let establishedThreadId: string | undefined =
       params.thread.kind === "resume" ? params.thread.providerThreadId : undefined;
     let activeTurnLastAssistantMessageId: string | undefined;
-    let lastCompletedTurnCheckpoint: string | undefined;
 
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
-    const events: AsyncIterable<AgentEvent> = (async function* () {
+    const events: AsyncIterable<ModelSessionEvent> = (async function* () {
       // In-turn narration vs. closing answer. The agent SDK never sets
       // `stop_reason` on its streamed assistant messages (always null) and splits
       // a single API message into one `assistant` message per content block, so
@@ -717,7 +685,7 @@ export class AnthropicProvider implements ModelProvider {
         content: string,
         turnPhase: "commentary" | "final",
         blockId: string | undefined,
-      ): AgentEvent =>
+      ): ModelTurnActivityEvent =>
         blockId
           ? { type: "text", content, turnPhase, blockId }
           : { type: "text", content, turnPhase };
@@ -956,17 +924,20 @@ export class AnthropicProvider implements ModelProvider {
             };
 
             let terminal: AgentEvent;
+            let position: ModelPosition | undefined;
             if (isResultSuccess(message) && !apiFailed) {
               log.info("agent SDK result", resultData);
-              recordModelCallMetrics(effectiveModel, accounting, message, {
-                agentName: params.agentName,
-                appStoreListingId: params.appStoreListingId,
-              });
               // A turn that reached the API proves the credential works; drop any
               // lingering revoked marker (covers a Keychain re-login whose file
               // fingerprint we can't diff).
               void clearAnthropicAuthRevoked(authRevokedSource).catch(() => {});
-              if (!sdkOwned) lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
+              if (!sdkOwned && establishedThreadId && activeTurnLastAssistantMessageId) {
+                position = {
+                  provider: providerId,
+                  modelThreadId: establishedThreadId,
+                  checkpointId: activeTurnLastAssistantMessageId,
+                };
+              }
               if (params.config.outputSchema) {
                 if (!("structured_output" in message) || message.structured_output === undefined) {
                   terminal = {
@@ -1049,7 +1020,11 @@ export class AnthropicProvider implements ModelProvider {
               };
             }
             providerError = undefined;
-            if (!sdkOwned) yield terminal;
+            if (!sdkOwned) {
+              yield terminal.type === "result"
+                ? { ...terminal, reasoningEffort: effort, position }
+                : terminal;
+            }
           }
         }
         if (abortController.signal.aborted && running) {
@@ -1062,7 +1037,11 @@ export class AnthropicProvider implements ModelProvider {
           running = false;
           yield params.config.outputSchema
             ? { type: "error", error: "Claude structured-output turn was interrupted" }
-            : { type: "result", content: partialText || pendingText || "" };
+            : {
+                type: "result",
+                content: partialText || pendingText || "",
+                reasoningEffort: effort,
+              };
         }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
@@ -1082,7 +1061,11 @@ export class AnthropicProvider implements ModelProvider {
             running = false;
             yield params.config.outputSchema
               ? { type: "error", error: "Claude structured-output turn was interrupted" }
-              : { type: "result", content: partialText || pendingText || "" };
+              : {
+                  type: "result",
+                  content: partialText || pendingText || "",
+                  reasoningEffort: effort,
+                };
           }
           return;
         }
@@ -1119,29 +1102,23 @@ export class AnthropicProvider implements ModelProvider {
       providerId,
       model: effectiveModel,
       funding: queryContext.funding,
-      // Claude fixes effort at open and ignores a per-turn effort.
-      appliedReasoningEffort: effort,
       get isClosed(): boolean {
         return closed || abortController.signal.aborted;
       },
       get providerThreadId(): string | undefined {
         return establishedThreadId;
       },
-      get lastCompletedTurnCheckpoint(): string | undefined {
-        return lastCompletedTurnCheckpoint;
-      },
       events,
       async sendUserInput(input: ModelUserInput): Promise<void> {
         if (closed || abortController.signal.aborted) {
           throw new Error("ModelSession is closed");
         }
-        activeTurnLastAssistantMessageId = undefined;
-        // A checkpoint is publishable only after this turn reaches an SDK
+        // A position is publishable only after this turn reaches an SDK
         // success result. Assistant UUIDs observed before an abort can be
         // present in the stream without being resumable in Claude's durable
         // transcript, so never let a prior or partial UUID stand in for the
         // current turn.
-        lastCompletedTurnCheckpoint = undefined;
+        activeTurnLastAssistantMessageId = undefined;
         running = true;
         openRomeTurn();
         if (input.inputId && deferredInputs.delete(input.inputId)) {

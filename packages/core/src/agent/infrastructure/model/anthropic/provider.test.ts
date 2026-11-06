@@ -1,3 +1,4 @@
+import type { ModelSessionEvent } from "../../../domain/model-port.js";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
   rstest: "importActual",
@@ -95,10 +96,12 @@ function mockThrowingQuery(error: unknown) {
 async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
   const messages: AgentEvent[] = [];
   for await (const msg of session.events) {
-    // Strip non-deterministic timestamps so deep-equal stays stable.
+    // Strip non-deterministic timestamps so deep-equal stays stable, and the
+    // applied effort, which has its own test.
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
     delete stripped.endedAt;
+    delete stripped.reasoningEffort;
     messages.push(stripped as unknown as AgentEvent);
   }
   return messages;
@@ -251,8 +254,10 @@ describe("AnthropicProvider", () => {
       });
     }
 
-    async function nextTurn(events: AsyncIterator<AgentEvent>): Promise<AgentEvent[]> {
-      const turn: AgentEvent[] = [];
+    async function nextTurn(
+      events: AsyncIterator<ModelSessionEvent>,
+    ): Promise<ModelSessionEvent[]> {
+      const turn: ModelSessionEvent[] = [];
       for (;;) {
         const next = await events.next();
         if (next.done) return turn;
@@ -519,7 +524,7 @@ describe("AnthropicProvider", () => {
       await new Promise((resolve) => setImmediate(resolve));
       expect(delivered).toBe(false);
       await session.sendUserInput({ text: "then say BANANA", inputId: b });
-      const steerTurn = [(await next).value as AgentEvent, ...(await nextTurn(events))];
+      const steerTurn = [(await next).value as ModelSessionEvent, ...(await nextTurn(events))];
       await session.close();
 
       expect(steerTurn.filter((m) => m.type === "text")).toEqual([
@@ -531,7 +536,7 @@ describe("AnthropicProvider", () => {
 
     // A live SDK stream stays open after its last message; a turn that never
     // ends then shows as a read that times out.
-    const terminalsOf = async (events: AsyncIterator<AgentEvent>) =>
+    const terminalsOf = async (events: AsyncIterator<ModelSessionEvent>) =>
       Promise.race([
         nextTurn(events).then((turn) =>
           turn
@@ -879,7 +884,7 @@ describe("AnthropicProvider", () => {
     if (phase !== "startup") {
       expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
     }
-    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
+    expect(messages.find((m) => m.type === "result")).not.toHaveProperty("position.checkpointId");
     await expect(session.sendUserInput({ text: "next" })).rejects.toThrow("closed");
     await session.close();
   });
@@ -949,12 +954,15 @@ describe("AnthropicProvider", () => {
       type: "text",
       content: "Previous turn",
     });
-    expect((await events.next()).value).toMatchObject({ type: "result", content: "Previous turn" });
-    expect(session.lastCompletedTurnCheckpoint).toBe("assistant-previous");
+    expect((await events.next()).value).toMatchObject({
+      type: "result",
+      content: "Previous turn",
+      position: { checkpointId: "assistant-previous" },
+    });
 
     await session.sendUserInput({ text: "second" });
     const remaining = (async () => {
-      const messages: AgentEvent[] = [];
+      const messages: ModelSessionEvent[] = [];
       for (;;) {
         const next = await events.next();
         if (next.done) return messages;
@@ -963,11 +971,12 @@ describe("AnthropicProvider", () => {
     })();
     await interruptibleTurnBegun;
     await session.interrupt("user-stop");
+    // No position: the assistant message seen before the abort is no fork point.
     expect(await remaining).toContainEqual({
       type: "result",
       content: interruptedCheckpoint ? "Current turn" : "",
+      reasoningEffort: "high",
     });
-    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
     await session.close();
   });
 
@@ -1198,9 +1207,12 @@ describe("AnthropicProvider", () => {
 
       expect(session.providerThreadId).toBeUndefined();
       await session.sendUserInput({ text: "hi", inputId: SENT });
-      await collectEvents(session);
+      const messages = await collectEvents(session);
       expect(session.providerThreadId).toBe("sdk-thread-xyz");
-      expect(session.lastCompletedTurnCheckpoint).toBe("u1");
+      expect(messages.at(-1)).toMatchObject({
+        type: "result",
+        position: { provider: "anthropic", modelThreadId: "sdk-thread-xyz", checkpointId: "u1" },
+      });
 
       await session.close();
     });
@@ -1331,7 +1343,7 @@ describe("AnthropicProvider", () => {
       });
       expect(messages.at(-1)).not.toHaveProperty("code");
       // A failed turn is no fork point and proves nothing about the credential.
-      expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
+      expect(messages.at(-1)).not.toHaveProperty("position");
       expect(clearAnthropicAuthRevokedMock).not.toHaveBeenCalled();
 
       await session.close();
@@ -1629,10 +1641,12 @@ describe("AnthropicProvider", () => {
       const session = await provider.openSession(
         buildParams({ config: { reasoningEffort: configured } }),
       );
-      // Claude fixes effort at open and reports it in its own terms.
-      expect(session.appliedReasoningEffort).toBe(expected);
-      await collectEvents(session);
+      const events: ModelSessionEvent[] = [];
+      for await (const event of session.events) events.push(event);
       await session.close();
+
+      // Claude fixes effort at open, so that is the effort a turn runs at.
+      expect(events.at(-1)).toMatchObject({ reasoningEffort: expected });
 
       expect(queryMock).toHaveBeenCalledWith(
         expect.objectContaining({

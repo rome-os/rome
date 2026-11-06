@@ -1,12 +1,13 @@
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "@rstest/core";
-import { SpanStatusCode, context, propagation, trace } from "@opentelemetry/api";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { SpanStatusCode, context, metrics, propagation, trace } from "@opentelemetry/api";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { node as nodeTracing } from "@opentelemetry/sdk-node";
 import {
   buildResourceAttributes,
   modelTokenMetricAttributes,
+  recordModelTurnMetrics,
   resolveTelemetryEndpoint,
   withTracingSuppressed,
 } from "./telemetry.js";
@@ -32,6 +33,35 @@ describe("modelTokenMetricAttributes", () => {
       direction: "out",
       "agent.name": "main",
     });
+  });
+});
+
+describe("recordModelTurnMetrics", () => {
+  it("counts cached tokens as input and attributes both directions", () => {
+    const add = rs.fn();
+    const record = rs.fn();
+    const meter = rs.spyOn(metrics, "getMeter").mockReturnValue({
+      createCounter: () => ({ add }),
+      createHistogram: () => ({ record }),
+    } as unknown as ReturnType<typeof metrics.getMeter>);
+
+    recordModelTurnMetrics(
+      {
+        provider: "openai",
+        model: "gpt-test",
+        durationMs: 1200,
+        usage: { inputTokens: 5, outputTokens: 4, cacheReadTokens: 2, cacheWriteTokens: 1 },
+      },
+      { agentName: "researcher", appStoreListingId: "@rome/research" },
+    );
+    meter.mockRestore();
+
+    const attribution = { "agent.name": "researcher", "rome.app.id": "@rome/research" };
+    expect(record).toHaveBeenCalledWith(1200, { model: "gpt-test" });
+    expect(add.mock.calls).toEqual([
+      [8, { model: "gpt-test", direction: "in", ...attribution }],
+      [4, { model: "gpt-test", direction: "out", ...attribution }],
+    ]);
   });
 });
 
