@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
+import { PageShell, PageBody } from "@/shell/PageShell";
+import { ActivityHeader } from "./ActivityHeader";
 import type { ApprovalStatus, ApprovalType } from "@rome/api-types/approvals";
 
 export interface Approval {
@@ -824,12 +825,13 @@ export default function ActivityPage({
   };
 
   return (
-    <PageShell>
-      <PageBody>
-        <PageHeader
-          title={t("page.title")}
-          description={
-            <span className="flex items-center gap-2">
+    <>
+      <ActivityHeader
+        title={t("page.title")}
+        viewSwitch={viewSwitch}
+        actions={
+          <>
+            <span className="flex items-center gap-2 text-aux text-muted-foreground">
               <span
                 className="h-1.5 w-1.5 rounded-full bg-success"
                 style={{
@@ -839,130 +841,128 @@ export default function ActivityPage({
               />
               <span>{t("page.liveUpdated", { when: updatedLabel })}</span>
             </span>
-          }
-          actions={
-            <>
-              {viewSwitch}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void fetchData();
-                  void approvalsQuery.refetch();
-                }}
-              >
-                {t("page.refresh")}
-              </Button>
-            </>
-          }
-        />
-
-        {/* Stats */}
-        <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <StatTile
-            value={stats.pendingApprovals}
-            label={t("page.stats.pending")}
-            accent="bg-warning"
-            live={stats.pendingApprovals > 0}
-          />
-          <StatTile
-            value={stats.running}
-            label={t("page.stats.running")}
-            accent="bg-info"
-            live={stats.running > 0}
-          />
-          <StatTile value={stats.errors} label={t("page.stats.errors")} accent="bg-destructive" />
-          <StatTile value={stats.events} label={t("page.stats.events")} accent="bg-primary" />
-        </section>
-
-        {/* Pending callout */}
-        {stats.pendingApprovals > 0 && statusFilter === "all" && (
-          <PendingApprovalsCallout
-            count={stats.pendingApprovals}
-            onReview={() => setStatusFilter("pending")}
-          />
-        )}
-
-        <FilterChipGroup
-          aria-label={t("page.filterStatus")}
-          options={FILTER_VALUES.map((value) => ({ value, label: t(`page.filters.${value}`) }))}
-          value={statusFilter}
-          onValueChange={setStatusFilter}
-        />
-
-        {/* Content */}
-        {approvalsQuery.isError && (
-          <Alert variant="destructive">
-            <AlertDescription>{t("approvals.loadFailed")}</AlertDescription>
-          </Alert>
-        )}
-        {loading || approvalsQuery.isLoading ? (
-          <div className="py-12 text-center">
-            <div
-              className="mx-auto mb-3 h-5 w-5 rounded-full border-2 border-border-strong border-t-gray-800"
-              style={{ animation: "spin 0.9s linear infinite" }}
-              aria-hidden="true"
-            />
-            <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
-          </div>
-        ) : sorted.length === 0 ? (
-          <div className="rounded-12 border border-dashed border-border-strong bg-surface/50 py-12 text-center">
-            <p className="text-ui text-muted-foreground">{t("page.empty.title")}</p>
-            <p className="mt-1 text-aux text-subtle-foreground">{t("page.empty.hint")}</p>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-3">
-              {sorted.map((item, i) => (
-                <div
-                  key={itemKey(item)}
-                  style={{
-                    animationDelay: `${Math.min(i, 8) * 35}ms`,
-                    animationFillMode: "both",
-                  }}
-                >
-                  {item.kind === "approval" ? (
-                    <ApprovalCard
-                      approval={item.data}
-                      onAction={handleAction}
-                      onRetry={handleRetry}
-                    />
-                  ) : item.kind === "webhook_invocation" ? (
-                    <WebhookInvocationCard invocation={item.data} />
-                  ) : (
-                    <ExecutionGroupCard group={item.data} onCancel={handleCancel} />
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setOffset(Math.max(0, offset - limit))}
-                disabled={offset === 0}
-              >
-                {t("page.pagination.previous")}
-              </Button>
-              <span className="text-aux tabular-nums text-muted-foreground">
-                {t("page.pagination.page", {
-                  n: Math.floor(offset / limit) + 1,
-                })}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setOffset(offset + limit)}
-                disabled={executionGroups.length < limit && webhookInvocations.length < limit}
-              >
-                {t("page.pagination.next")}
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void fetchData();
+                void approvalsQuery.refetch();
+              }}
+            >
+              {t("page.refresh")}
+            </Button>
           </>
-        )}
-      </PageBody>
-    </PageShell>
+        }
+      />
+      <PageShell>
+        <PageBody>
+          {/* Stats */}
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatTile
+              value={stats.pendingApprovals}
+              label={t("page.stats.pending")}
+              accent="bg-warning"
+              live={stats.pendingApprovals > 0}
+            />
+            <StatTile
+              value={stats.running}
+              label={t("page.stats.running")}
+              accent="bg-info"
+              live={stats.running > 0}
+            />
+            <StatTile value={stats.errors} label={t("page.stats.errors")} accent="bg-destructive" />
+            <StatTile value={stats.events} label={t("page.stats.events")} accent="bg-primary" />
+          </section>
+
+          {/* Pending callout */}
+          {stats.pendingApprovals > 0 && statusFilter === "all" && (
+            <PendingApprovalsCallout
+              count={stats.pendingApprovals}
+              onReview={() => setStatusFilter("pending")}
+            />
+          )}
+
+          <FilterChipGroup
+            aria-label={t("page.filterStatus")}
+            options={FILTER_VALUES.map((value) => ({ value, label: t(`page.filters.${value}`) }))}
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+          />
+
+          {/* Content */}
+          {approvalsQuery.isError && (
+            <Alert variant="destructive">
+              <AlertDescription>{t("approvals.loadFailed")}</AlertDescription>
+            </Alert>
+          )}
+          {loading || approvalsQuery.isLoading ? (
+            <div className="py-12 text-center">
+              <div
+                className="mx-auto mb-3 h-5 w-5 rounded-full border-2 border-border-strong border-t-gray-800"
+                style={{ animation: "spin 0.9s linear infinite" }}
+                aria-hidden="true"
+              />
+              <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="rounded-12 border border-dashed border-border-strong bg-surface/50 py-12 text-center">
+              <p className="text-ui text-muted-foreground">{t("page.empty.title")}</p>
+              <p className="mt-1 text-aux text-subtle-foreground">{t("page.empty.hint")}</p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3">
+                {sorted.map((item, i) => (
+                  <div
+                    key={itemKey(item)}
+                    style={{
+                      animationDelay: `${Math.min(i, 8) * 35}ms`,
+                      animationFillMode: "both",
+                    }}
+                  >
+                    {item.kind === "approval" ? (
+                      <ApprovalCard
+                        approval={item.data}
+                        onAction={handleAction}
+                        onRetry={handleRetry}
+                      />
+                    ) : item.kind === "webhook_invocation" ? (
+                      <WebhookInvocationCard invocation={item.data} />
+                    ) : (
+                      <ExecutionGroupCard group={item.data} onCancel={handleCancel} />
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOffset(Math.max(0, offset - limit))}
+                  disabled={offset === 0}
+                >
+                  {t("page.pagination.previous")}
+                </Button>
+                <span className="text-aux tabular-nums text-muted-foreground">
+                  {t("page.pagination.page", {
+                    n: Math.floor(offset / limit) + 1,
+                  })}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOffset(offset + limit)}
+                  disabled={executionGroups.length < limit && webhookInvocations.length < limit}
+                >
+                  {t("page.pagination.next")}
+                </Button>
+              </div>
+            </>
+          )}
+        </PageBody>
+      </PageShell>
+    </>
   );
 }

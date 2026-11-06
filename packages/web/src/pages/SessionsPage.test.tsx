@@ -864,6 +864,45 @@ describe("SessionsPage explorer", () => {
 });
 
 describe("Activity page tabs", () => {
+  it.each([
+    "/sessions",
+    "/full/apps/sessions",
+  ])("keeps the switch in the same leading header slot across %s tabs", async (base) => {
+    await i18n.changeLanguage("en");
+    rs.mocked(getSessionMetrics).mockRejectedValue(new Error("Metrics unavailable"));
+    const view = base.startsWith("/full") ? renderFullMode(base) : renderIndex(base);
+    let headerClass: string | undefined;
+    for (const name of ["Overview", "Sessions", "Events", "Overview"]) {
+      fireEvent.click(await screen.findByRole("radio", { name, exact: true }));
+      const selected = await screen.findByRole("radio", { name, checked: true });
+      const header = selected.closest("header");
+      expect(header).not.toBeNull();
+      expect(header?.parentElement?.closest('[data-slot="page"]')).toBeNull();
+      const heading = screen.getByRole("heading", {
+        level: 1,
+        name: name === "Events" ? i18n.t("activity:page.title") : name,
+        exact: true,
+      });
+      expect(heading.classList.contains("sr-only")).toBe(true);
+      expect(header?.contains(heading)).toBe(true);
+      const switchSlot = header?.querySelector('[role="radiogroup"]')?.parentElement;
+      expect(switchSlot?.classList.contains("shrink-0")).toBe(true);
+      expect(switchSlot?.parentElement?.firstElementChild).toBe(switchSlot);
+      headerClass ??= header?.className;
+      expect(header?.className).toBe(headerClass);
+      expect(screen.getByRole("button", { name: "Refresh", exact: true })).toBeTruthy();
+      if (name === "Sessions") {
+        expect(screen.getByRole("toolbar", { name: "Filter sessions" })).toBeTruthy();
+      }
+      if (base.startsWith("/full")) {
+        const main = screen.getByRole("main");
+        expect(main.hasAttribute("data-safe-area-bounded")).toBe(true);
+        expect(main.querySelector("[data-safe-area-scroll]")).toBeTruthy();
+      }
+    }
+    view.unmount();
+  });
+
   function PathProbe() {
     const location = useLocation();
     return (

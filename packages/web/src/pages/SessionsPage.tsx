@@ -47,7 +47,8 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { ListCollection, ListFooter, ListToolbar } from "@rome-os/ui/layout-list";
 import { Spinner } from "@rome-os/ui/spinner";
-import { Page, PageActions, PageHeader, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { Page } from "@rome-os/ui/page";
+import { ActivityHeader } from "./ActivityHeader";
 import { ToolbarButton } from "@rome-os/ui/toolbar";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import {
@@ -715,22 +716,12 @@ function SessionsIndexPage({
     </Button>
   );
 
-  // The inventory is a List: the guardian searches it for one session and
-  // leaves. The header carries what the page is — its title and the switch
-  // between this view and the overview — and the toolbar carries what the
-  // reader does to the collection, which is the view switch rule in
-  // docs/ui/layouts.md.
   if (view === "sessions") {
     return (
       <TooltipProvider delayDuration={150}>
         <SessionsListFrame fullMode={fullMode}>
+          <ActivityHeader title="Sessions" viewSwitch={viewSwitch} />
           <Page>
-            <PageHeader align="end">
-              <PageHeading>
-                <PageTitle>Sessions</PageTitle>
-              </PageHeading>
-              <PageActions>{viewSwitch}</PageActions>
-            </PageHeader>
             <PendingApprovalsBanner />
             <ListToolbar aria-label="Filter sessions">
               {/* Search leads and grows: it is the only text control here, and the
@@ -1049,13 +1040,19 @@ function SessionsIndexPage({
         data-safe-area-bounded
         className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
       >
-        <header className="shrink-0 border-b border-border bg-background px-5 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <ActivityHeader
+          title="Overview"
+          viewSwitch={viewSwitch}
+          actions={
+            <>
+              {rangeSelect}
+              {refreshButton}
+            </>
+          }
+        >
+          {activeFilters.length > 0 ? (
             <div className="flex flex-wrap items-center gap-3">
-              {viewSwitch}
-              {activeFilters.length > 0 ? (
-                <Separator className="h-5" orientation="vertical" />
-              ) : null}
+              <Separator className="h-5" orientation="vertical" />
               {activeFilters.map((filter) => (
                 <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
                   {filter.label}
@@ -1063,12 +1060,8 @@ function SessionsIndexPage({
                 </Button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
-              {rangeSelect}
-              {refreshButton}
-            </div>
-          </div>
-        </header>
+          ) : null}
+        </ActivityHeader>
 
         <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
           <PendingApprovalsBanner className="px-5 pt-4" />
