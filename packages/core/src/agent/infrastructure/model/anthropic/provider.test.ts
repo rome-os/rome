@@ -154,7 +154,6 @@ function buildBranchParams(
         checkpointId: branch.checkpointId ?? "assistant-source",
       },
       lifetime: branch.lifetime ?? "ephemeral",
-      mode: "isolated",
     },
   });
 }

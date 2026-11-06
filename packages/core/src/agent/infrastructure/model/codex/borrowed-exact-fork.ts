@@ -10,6 +10,7 @@
 // provider branch that calls it. The remaining workaround seams are deliberately
 // easy to find: CodexTurnRuntime.beforeTerminal and Method.threadRevert.
 
+import { isDeepStrictEqual } from "node:util";
 import type {
   ModelSession,
   ModelSessionParams,
@@ -26,6 +27,7 @@ import { stripLegacyReasoningSuffix } from "./common.js";
 import { AgentMessageSink } from "./session.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
 import type { UsageFunding } from "../../../../usage/events.js";
+import type { DynamicToolSpec } from "./app-server-protocol.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 
 export interface BorrowedExactForkCompatibility {
@@ -33,17 +35,17 @@ export interface BorrowedExactForkCompatibility {
   sameModel: boolean;
   sameSystemPrompt: boolean;
   sameWorkingDir: boolean;
+  sameTools: boolean;
 }
 
 /**
- * Keep the workaround opt-in. Matching model/prompt/cwd is necessary but not
- * sufficient: isolated forks intentionally open a reduced tool surface, while
- * exact mode guarantees that the provider-visible configuration was copied
- * from the live source session by AgentSession.
+ * The source thread keeps its sandbox and tools, so a turn can borrow it only
+ * when the branch opens with the source's configuration and the same catalog.
  */
 export function evaluateBorrowedExactFork(args: {
-  isolated: boolean;
   openParams: ModelSessionParams;
+  sourceBuiltinTools?: readonly string[];
+  sourceDynamicTools: readonly DynamicToolSpec[];
   sourceModelName: string;
   sourceSystemPrompt: string;
   sourceWorkingDir?: string;
@@ -54,11 +56,18 @@ export function evaluateBorrowedExactFork(args: {
   const sameWorkingDir =
     (args.openParams.config.workingDir ?? process.cwd()) ===
     (args.sourceWorkingDir ?? process.cwd());
+  const sameTools =
+    isDeepStrictEqual(args.openParams.config.builtinTools ?? [], args.sourceBuiltinTools ?? []) &&
+    isDeepStrictEqual(
+      createRomeDynamicTools(args.openParams.tools).definitions,
+      args.sourceDynamicTools,
+    );
   return {
-    eligible: !args.isolated && sameModel && sameSystemPrompt && sameWorkingDir,
+    eligible: sameModel && sameSystemPrompt && sameWorkingDir && sameTools,
     sameModel,
     sameSystemPrompt,
     sameWorkingDir,
+    sameTools,
   };
 }
 

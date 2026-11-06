@@ -173,7 +173,6 @@ describe("AgentRunner", () => {
           kind: "branch",
           at: { provider: "mock", modelThreadId: "thread", checkpointId: "turn" },
           lifetime: "ephemeral",
-          mode: "isolated",
         },
       }),
     ).toThrow("Branching a thread is not supported by this provider");
@@ -1184,7 +1183,6 @@ describe("AgentRunner", () => {
         kind: "branch",
         at: { provider: "mock", modelThreadId: "model-thread", checkpointId: "provider-turn-t2" },
         lifetime: "ephemeral",
-        mode: "exact",
       });
     });
 
@@ -1610,16 +1608,15 @@ describe("AgentRunner", () => {
 
       expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
       expect(forkOpen).toBeDefined();
-      // An empty tool surface: no actions to list, no subagents, and no
-      // interactive surface to propose a routine on.
-      expect(await listActionNames(forkOpen!.tools)).toEqual([]);
-      expect(toolNames(forkOpen!.tools, "subagents")).toEqual([]);
-      expect(toolNames(forkOpen!.tools, "ask_user")).not.toContain("propose_routine");
+      // An empty tool surface: nothing to list in any group, and no builtins.
+      for (const group of ["actions", "subagents", "skills", "ask_user"] as const) {
+        expect(toolNames(forkOpen!.tools, group)).toEqual([]);
+      }
       expect(forkOpen!.config.builtinTools).toEqual([]);
       expect(forkOpen!.config.reasoningEffort).toBe("high");
       await expect(
         executeActionTool(forkOpen!.tools, "demo_action", {}, { toolUseId: "isolated-action" }),
-      ).rejects.toThrow("Actions are disabled in forked turns");
+      ).rejects.toThrow("Unknown tool: execute_action");
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
@@ -2686,7 +2683,6 @@ describe("AgentRunner", () => {
           checkpointId: "assistant-current",
         },
         lifetime: "ephemeral",
-        mode: "exact",
       });
       await manager.shutdown();
     });

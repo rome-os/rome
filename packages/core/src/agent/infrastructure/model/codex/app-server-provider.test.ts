@@ -3,7 +3,7 @@ import type { UsageFunding } from "../../../../usage/events.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { FacadeParams } from "../../../../core/mcp-facade.js";
-import type { RomeTools } from "../../../domain/rome-tools.js";
+import { NO_ROME_TOOLS, type RomeTools } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import type {
   ModelSession,
@@ -117,13 +117,13 @@ function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
   };
 }
 
+/** A branch that serves no tools, as an isolated fork opens. */
+function buildToollessBranchParams(lifetime: "ephemeral" | "kept"): ModelSessionParams {
+  return { ...buildBranchParams({ lifetime }), tools: NO_ROME_TOOLS };
+}
+
 function buildBranchParams(
-  branch: {
-    lifetime?: "ephemeral" | "kept";
-    mode?: "isolated" | "exact";
-    checkpointId?: string;
-    modelThreadId?: string;
-  } = {},
+  branch: { lifetime?: "ephemeral" | "kept"; checkpointId?: string; modelThreadId?: string } = {},
   overrides: ParamOverrides = {},
 ): ModelSessionParams {
   return buildParams({
@@ -136,7 +136,6 @@ function buildBranchParams(
         checkpointId: branch.checkpointId ?? "source-turn",
       },
       lifetime: branch.lifetime ?? "ephemeral",
-      mode: branch.mode ?? "exact",
     },
   });
 }
@@ -652,9 +651,7 @@ describe("CodexAppServerProvider", () => {
 
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(buildParams({ config: { builtinTools: ["Bash"] } }));
-    const forkSession = await provider.openSession(
-      buildBranchParams({ lifetime, mode: "isolated" }),
-    );
+    const forkSession = await provider.openSession(buildToollessBranchParams(lifetime));
 
     expect(requestMock).toHaveBeenCalledWith(
       "thread/fork",
@@ -695,9 +692,7 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({ config: { builtinTools: ["ImageGeneration"] } }),
     );
-    const forkSession = await provider.openSession(
-      buildBranchParams({ lifetime: "ephemeral", mode: "isolated" }),
-    );
+    const forkSession = await provider.openSession(buildToollessBranchParams("ephemeral"));
 
     expect(threadRequest("thread/fork")?.config).toMatchObject({
       "features.image_generation": false,
@@ -756,9 +751,7 @@ describe("CodexAppServerProvider", () => {
         },
       }),
     );
-    const forkSession = await provider.openSession(
-      buildBranchParams({ lifetime: "ephemeral", mode: "isolated" }),
-    );
+    const forkSession = await provider.openSession(buildToollessBranchParams("ephemeral"));
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "try the inherited tool" });
     await collected;

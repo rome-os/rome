@@ -10,6 +10,7 @@ import type {
 } from "../../../domain/model-port.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
+import { NO_ROME_TOOLS } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
@@ -290,7 +291,8 @@ describe("bundled Codex app-server", () => {
       await runTurn(source, "Reply with ok. (fork source)");
       const child = await provider.openSession({
         ...sessionParams(model, []),
-        thread: { kind: "branch", at: lastPosition!, lifetime: "kept", mode: "isolated" },
+        tools: NO_ROME_TOOLS,
+        thread: { kind: "branch", at: lastPosition!, lifetime: "kept" },
       });
       try {
         const tools = await runTurn(child, "Reply with ok. (isolated fork)");

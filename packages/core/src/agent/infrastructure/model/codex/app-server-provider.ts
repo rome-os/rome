@@ -1394,7 +1394,7 @@ export class CodexAppServerProvider implements ModelProvider {
 
     const liveThread: LiveCodexThread = {
       modelThreadId: () => session.modelThreadId,
-      branch: async (openParams, { at, lifetime, mode }) => {
+      branch: async (openParams, { at, lifetime }) => {
         if (closed || closing) throw new Error("Cannot branch a closed ModelSession");
         // A native thread/fork would copy the contaminated history into the
         // child; a borrowed fork would run on it directly. Refuse both.
@@ -1403,10 +1403,15 @@ export class CodexAppServerProvider implements ModelProvider {
         // The fork's turn runs under an owner of its own, whether on a borrowed
         // source thread or a native child.
         const forkOwnerId = randomUUID();
-        const isolated = mode === "isolated";
+        // A branch that serves no tools uses none, but Codex keeps the source's
+        // catalog on a forked thread, so it is told so and refuses them.
+        const isolated =
+          !openParams.config.builtinTools?.length &&
+          createRomeDynamicTools(openParams.tools).definitions.length === 0;
         const compatibility = evaluateBorrowedExactFork({
-          isolated,
           openParams,
+          sourceBuiltinTools: params.config.builtinTools,
+          sourceDynamicTools: romeTools.definitions,
           sourceModelName: modelName,
           sourceSystemPrompt: params.config.systemPrompt,
           sourceWorkingDir: params.config.workingDir,

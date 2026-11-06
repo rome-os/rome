@@ -14,6 +14,7 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import {
+  NO_ROME_TOOLS,
   Session,
   type ModelSessionEvent,
   type ModelTurnStartedEvent,
@@ -1487,18 +1488,7 @@ async function openSession(
             env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
           },
           thread: fork.thread,
-          tools: createRomeTools({
-            getActionCatalog: () => [],
-            getSkillCatalog: () => [],
-            subagentTools: [],
-            executeAction: async () => {
-              throw new Error("Actions are disabled in forked turns");
-            },
-            executeSubagent: async () => {
-              throw new Error("Subagents are disabled in forked turns");
-            },
-            supportsInteractiveSurface: false,
-          }),
+          tools: NO_ROME_TOOLS,
         },
         projectProviderMessage: async (msg) => [msg],
         dispose: async () => {},
@@ -3002,7 +2992,6 @@ class AgentSessionImpl implements AgentSession {
                 kind: "branch",
                 at,
                 lifetime: input.persistThreadKey ? "kept" : "ephemeral",
-                mode,
               },
               threadContext: input.threadContext,
               emit: (msg) => outbound.push(msg),
