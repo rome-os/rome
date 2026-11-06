@@ -10,36 +10,32 @@
 // (setModel/setPermissionMode/setMcpServers/stopTask) — that vocabulary is
 // Claude-SDK-specific and has no place in the provider contract.
 //
-// Extracted from core/agent-runner.ts with its shapes unchanged. The imports
-// from core/ are the shapes it still shares with the run; they go when the
-// port is reshaped.
+// The port imports only the SDK's event vocabulary and its own domain. The
+// shapes it hands the provider or reads back from it are declared here.
 
-import type { TurnErrorEvent, TurnResultEvent } from "@rome-os/app-runtime";
-import type { ActionConfig } from "../../actions/types.js";
-import type { SkillMcpDefinition } from "../../core/skill-catalog.js";
+import type {
+  AgentEvent,
+  ReasoningEffort,
+  TurnErrorEvent,
+  TurnResultEvent,
+} from "@rome-os/app-runtime";
 import type { RomeTools } from "./rome-tools.js";
-import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../../types.js";
-import type { UsageFunding } from "../../usage/events.js";
 
 export type ProviderId = "anthropic" | "openai" | "mock";
 
-export interface ActionMcpDefinition {
-  name: string;
-  description: string;
-  type: ActionConfig["type"];
-  complexity: ActionConfig["complexity"];
-  speed: ActionConfig["speed"];
-  reliability: ActionConfig["reliability"];
-  sideEffects: ActionConfig["sideEffects"];
-  requiresApproval: boolean;
-  cancellable: boolean;
-  inputSchema: Record<string, unknown>;
+export type ModelReasoningEffort = ReasoningEffort;
+
+/** An MCP server the provider launches and mounts next to its builtin tools. */
+export interface McpServerConfig {
+  command: string;
+  args: string[];
 }
 
-// One definition, owned by the skill catalog that produces it.
-export type { SkillMcpDefinition };
-
-export type ModelReasoningEffort = ReasoningEffort;
+/**
+ * Who pays the model provider for a turn. The provider knows its payer and
+ * reports it; Rome's usage record carries it as read.
+ */
+export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
  * The provider's name for one of its threads. Two equal ids name the same
@@ -204,7 +200,7 @@ export interface ModelSession {
   readonly modelThreadId?: ModelThreadId;
 
   /** Who pays the model provider for a turn that ends now. Unset when unknown. */
-  readonly funding?: UsageFunding;
+  readonly funding?: ModelFunding;
 
   /** Push a new user turn. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;

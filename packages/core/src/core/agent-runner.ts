@@ -2,7 +2,6 @@ import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type { AgentEvent, McpServerConfig } from "../types.js";
 import type { ActionRegistry } from "../actions/types.js";
 import type {
-  ActionMcpDefinition,
   ModelReasoningEffort,
   ModelSession,
   ModelSessionParams,
@@ -11,7 +10,6 @@ import type {
   ModelUserInput,
   ProviderId,
   RomeTools,
-  SkillMcpDefinition,
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
@@ -43,8 +41,6 @@ export type {
   ModelTier,
   RomeToolDefinition,
   ModelToolCallContext,
-  ActionMcpDefinition,
-  SkillMcpDefinition,
   ModelReasoningEffort,
   ModelProvider,
   ModelSessionParams,

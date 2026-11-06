@@ -27,10 +27,9 @@ export type {
   ReasoningEffort,
 } from "@rome-os/app-runtime";
 
-export interface McpServerConfig {
-  command: string;
-  args: string[];
-}
+import type { McpServerConfig } from "./agent/index.js";
+
+export type { McpServerConfig };
 
 export interface AgentConfig {
   name: string;

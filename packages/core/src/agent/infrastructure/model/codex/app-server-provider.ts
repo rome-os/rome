@@ -28,6 +28,7 @@ import type {
   ProviderId,
   ModelPosition,
   ThreadStart,
+  ModelFunding,
 } from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
@@ -104,7 +105,6 @@ import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
 import { CODEX_SHELL_ENV_EXCLUDE } from "./rome-credits-provider.js";
 import { createLogger } from "../../../../logger.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
-import type { UsageFunding } from "../../../../usage/events.js";
 import {
   alignRomeDynamicToolsToInheritedCatalog,
   createRomeDynamicTools,
@@ -450,7 +450,7 @@ interface CodexAppServerProviderOptions {
   /** The Rome credits gateway refused a model it no longer serves. */
   onRomeCreditsModelNotServed?: () => Promise<void> | void;
   /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
-  funding?: () => UsageFunding;
+  funding?: () => ModelFunding;
 }
 
 interface CodexFailureClassification {
@@ -744,7 +744,7 @@ export class CodexAppServerProvider implements ModelProvider {
           threadId ?? (params.thread.kind === "resume" ? params.thread.modelThreadId : undefined)
         );
       },
-      get funding(): UsageFunding | undefined {
+      get funding(): ModelFunding | undefined {
         return funding?.();
       },
     } as ModelSession;

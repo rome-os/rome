@@ -15,7 +15,7 @@
 
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import { toMcpToolShape } from "../../../../core/mcp/json-schema-zod.js";
-import type { McpServerConfig } from "../../../../types.js";
+import type { McpServerConfig } from "../../../domain/model-port.js";
 import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
 
 interface BuildAnthropicMcpServersParams {
