@@ -35,6 +35,8 @@ enum SnapshotRunner {
             return
         }
 
+        // Settings shows "Not set"; the Chat offer waits for its own screen.
+        model.push.debugSet(permission: .notSet, dismissedAt: .now)
         let styles: [(String, UIUserInterfaceStyle)] = [("light", .light), ("dark", .dark)]
         for (styleName, style) in styles {
             window?.overrideUserInterfaceStyle = style
@@ -95,6 +97,11 @@ enum SnapshotRunner {
                 model.update.debugShow(.failed(.timedOut(target: DemoBackend.releasedVersion)))
             }
             model.update.reset()
+            await capture("23-chat-push-offer", style: styleName, in: directory, wait: 2) {
+                model.push.debugSet(permission: .notSet)
+                model.openDemo()
+            }
+            model.push.debugSet(permission: .notSet, dismissedAt: .now)
             model.debugSetPhase(.signedOut)
             try? await Task.sleep(for: .seconds(0.6))
         }
