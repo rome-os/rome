@@ -16,13 +16,7 @@ import {
   surfaceKeepsLines,
   type SurfaceDeps,
 } from "../connections/session-surface.js";
-import {
-  callerFromKey,
-  callerKey,
-  callerOfRun,
-  chatOfCaller,
-  type SessionCaller,
-} from "./session-caller.js";
+import { callerFromKey, callerKey, chatOfCaller, type SessionCaller } from "./session-caller.js";
 import { catchUpBriefing, type CatchUpDeps } from "./connection-briefing.js";
 import { resetWhenDue, type ResolveConnectionReset } from "./connection-reset.js";
 import { openNamed } from "../agent-sessions/index.js";
@@ -542,9 +536,7 @@ export class AgentRunner {
     const named =
       params.caller ??
       (params.channelThreadKey ? callerFromKey(params.channelThreadKey) : undefined);
-    const caller = explicitSessionId
-      ? named
-      : (params.caller ?? callerOfRun(params.agentName, params.channelThreadKey));
+    const caller = named;
     // The conversation the run names, where Chats keeps its lines. A resume by
     // id keeps the one its session recorded unless the run names one.
     const chatId =
@@ -559,22 +551,25 @@ export class AgentRunner {
       session = await openNamed(explicitSessionId, chatId, () =>
         this.agentSessionManager.session(explicitSessionId, params.agentName, surface, options),
       );
+    } else if (!caller) {
+      // A run that names no caller is found again only by its session's id.
+      session = await openNamed(undefined, chatId, () =>
+        this.agentSessionManager.create(params.agentName, surface, options),
+      );
     } else {
-      // A run that names no conversation gets a caller of its own.
-      const runCaller = caller!;
       // A wake by a message on a connection applies the place's reset setting.
       if (params.platformMessageId) {
         await resetWhenDue(
           this.agentSessionManager,
           this.wake?.resolveReset,
           params.agentName,
-          runCaller,
+          caller,
           threadContext,
         );
       }
-      const runCallerId = callerKey(runCaller);
-      session = await openNamed(runCallerId, chatId, () =>
-        this.agentSessionManager.open(params.agentName, runCallerId, surface, options),
+      const callerId = callerKey(caller);
+      session = await openNamed(callerId, chatId, () =>
+        this.agentSessionManager.open(params.agentName, callerId, surface, options),
       );
     }
     const agentName = session.key.agentName;

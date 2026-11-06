@@ -80,7 +80,8 @@ export interface AgentConfig {
 export interface AgentSession {
   id: string;
   agentName: string;
-  channelThreadKey: string;
+  /** Absent for a session no caller opened. */
+  channelThreadKey?: string;
   /** The Rome conversation this session serves, when the caller named one. */
   chatId?: string;
   providerThreadId?: string;

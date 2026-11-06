@@ -2417,6 +2417,9 @@ describe("AgentRunner", () => {
         open: rs.fn(async () => {
           throw new Error("implicit acquire should not be used");
         }),
+        create: rs.fn(async () => {
+          throw new Error("a new session should not be made");
+        }),
         session: rs.fn(async () => session),
         live: rs.fn(() => undefined),
         reset: rs.fn(),
@@ -5260,6 +5263,66 @@ describe("AgentRunner", () => {
 
       const trace = await chats.getTraceContents("named-chat");
       expect(trace.length).toBeGreaterThan(0);
+    });
+
+    it("a live session serves the conversation a later run names", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const modelResolver = createModelResolver({
+        providers: [codexProvider([])],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+      const chats = new ChatsWebChatRepository(testDb.db);
+      await chats.createSession("named-chat", "Named chat");
+      const manager = createTestSessionManager(managerDeps(modelResolver), {
+        keepAliveAcrossTurns: true,
+      });
+      const runner = new AgentRunner(manager, agentLoader, chats);
+      const caller = { kind: "place", connection: "inbox", place: "item-1" } as const;
+
+      await collectMessages(runner.run({ agentName: "test-main", prompt: "First", caller }));
+      const live = manager.live("test-main", "inbox:item-1");
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Second",
+          caller,
+          romeSessionId: "named-chat",
+        }),
+      );
+      expect(manager.live("test-main", "inbox:item-1")?.sessionId).toBe(live?.sessionId);
+      await manager.shutdown();
+
+      const trace = await chats.getTraceContents("named-chat");
+      expect(JSON.stringify(trace)).toContain("Second");
+      expect(JSON.stringify(trace)).not.toContain("First");
+    });
+
+    it("a run that names no caller gets a session stored without one, found again by its id", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const modelResolver = createModelResolver({
+        providers: [codexProvider([])],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+      const manager = createTestSessionManager(managerDeps(modelResolver));
+      const runner = new AgentRunner(manager, agentLoader);
+
+      const first = await collectMessages(runner.run({ agentName: "test-main", prompt: "One" }));
+      const sessionId = first.find((m) => m.type === "turn_start")?.sessionId;
+      expect(sessionId).toBeDefined();
+      const row = await new SessionsRepository(testDb.db).findById(sessionId!);
+      expect(row?.channelThreadKey).toBeNull();
+
+      const second = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Two", sessionId: sessionId! }),
+      );
+      expect(second.find((m) => m.type === "turn_start")?.sessionId).toBe(sessionId);
+      await manager.shutdown();
     });
 
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {

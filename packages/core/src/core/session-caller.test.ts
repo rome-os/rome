@@ -1,10 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
 import {
-  adhocCaller,
   callerConnection,
   callerFromKey,
   callerKey,
-  childCaller,
   type SessionCaller,
 } from "./session-caller.js";
 
@@ -22,13 +20,9 @@ describe("session caller keys", () => {
     expect(callerKey({ kind: "fork-point", source: chat, forkSessionId: "fork-1" })).toBe(
       "webchat:chat-1#fork:fork-1",
     );
-    expect(callerKey(childCaller(chat))).toMatch(/^webchat:chat-1:subagent:[0-9a-f-]{36}$/);
-    expect(callerKey(childCaller(chat))).not.toBe(callerKey(childCaller(chat)));
-  });
-
-  it("gives each ad-hoc run a fresh key under its agent", () => {
-    expect(callerKey(adhocCaller("main"))).toMatch(/^main:[0-9a-f-]{36}$/);
-    expect(callerKey(adhocCaller("main"))).not.toBe(callerKey(adhocCaller("main")));
+    expect(callerKey({ kind: "parent-turn", parent: chat, childId: "child-1" })).toBe(
+      "webchat:chat-1:subagent:child-1",
+    );
   });
 
   it("reads every stored key back to the same key", () => {

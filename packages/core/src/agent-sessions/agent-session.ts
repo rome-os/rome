@@ -127,8 +127,9 @@ export type CallerId = string;
 
 export interface AgentSessionKey {
   agentName: string;
-  /** Whatever hands this session its next input. */
-  caller: CallerId;
+  /** Whatever hands this session its next input. Absent for a session made
+   *  by `create`, which its opener finds again only by its id. */
+  caller?: CallerId;
 }
 
 /**
@@ -165,6 +166,8 @@ export interface SessionOpenOptions {
 interface AgentSessionInit extends SessionOpenOptions {
   surface: SessionSurface;
   resumeSessionId?: string;
+  /** The id `create` minted for a session no caller opens. */
+  createdSessionId?: string;
 }
 
 /** The conversation the log keeps a turn in, as the log names it. The session
@@ -196,7 +199,7 @@ export interface TurnBriefing {
 export interface LoggedTurn {
   agentName: string;
   sessionId: string;
-  caller: CallerId;
+  caller?: CallerId;
   turnId: string;
   prompt: string;
   /** The label the turn's input is kept under, for a turn Rome started. */
@@ -220,7 +223,7 @@ export interface TurnLogEntry {
 /** A forked turn as the session hands it to its log. */
 export interface LoggedFork {
   agentName: string;
-  caller: CallerId;
+  caller?: CallerId;
   sourceSessionId: string;
   /** The source's own conversation, when it records one. */
   sourceConversation?: string;
@@ -248,8 +251,9 @@ export interface SessionLog {
   /** The conversation a session's row recorded, when it still exists. */
   findConversation?(id: string): Promise<RecordedConversation | undefined>;
   /** The conversation today's rows keep a session's turns in, when its
-   *  opener names one: by its caller, or by its id on a resume. */
-  conversationOf?(opener: string): string | undefined;
+   *  opener names one: by its caller, by its id on a resume, or by nothing
+   *  for a session `create` makes. */
+  conversationOf?(opener: string | undefined): string | undefined;
   /** Where one turn is kept, and its writer. The log decides the
    *  conversation and what of the turn it writes. */
   turn?(turn: LoggedTurn): TurnLogEntry;
@@ -372,8 +376,8 @@ export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => voi
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  /** Whatever opened this session. */
-  readonly caller: CallerId;
+  /** Whatever opened this session. Absent for one made by `create`. */
+  readonly caller?: CallerId;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -453,6 +457,13 @@ export interface AgentSessionManager {
   open(
     agentName: string,
     caller: CallerId,
+    surface: SessionSurface,
+    options?: SessionOpenOptions,
+  ): Promise<AgentSession>;
+  /** A new session of `agentName` that no caller opens. Its opener finds it
+   *  again only by its id, through `session`. */
+  create(
+    agentName: string,
     surface: SessionSurface,
     options?: SessionOpenOptions,
   ): Promise<AgentSession>;
@@ -560,7 +571,9 @@ export function createAgentSessionManager(
   const idleTtlMs = options.idleTtlMs ?? 30 * 60 * 1000;
   const isSubagent = options.isSubagent === true;
 
-  const keyOf = (k: AgentSessionKey) => `${k.agentName}::${k.caller}`;
+  // A session no caller opens is held under its own id.
+  const keyOf = (k: AgentSessionKey, sessionId?: string) =>
+    k.caller ? `${k.agentName}::${k.caller}` : `${k.agentName}::@${sessionId}`;
   const canonicalizeKey = (key: AgentSessionKey): AgentSessionKey => ({
     ...key,
     agentName: deps.agentLoader.getCanonicalName(key.agentName),
@@ -585,7 +598,7 @@ export function createAgentSessionManager(
   }
 
   const onSessionClosed = (sess: AgentSessionImpl) => {
-    sessions.delete(keyOf(sess.key));
+    sessions.delete(keyOf(sess.key, sess.sessionId));
   };
 
   /** Generations a reset prepared for the next open of their key. */
@@ -599,7 +612,7 @@ export function createAgentSessionManager(
     const key = canonicalizeKey({ agentName, caller });
     const k = keyOf(key);
     await lifecycleMutex.runExclusive(k, async () => {
-      const active = await deps.sessionManager.findReusableSession(key.caller, key.agentName);
+      const active = await deps.sessionManager.findReusableSession(caller, key.agentName);
       // The next generation keeps the conversation the current one recorded.
       const chatId = active?.chatId ?? undefined;
       const decision = active ? rule.when(active) : { due: false as const };
@@ -623,7 +636,7 @@ export function createAgentSessionManager(
       }
       const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
-        channelThreadKey: key.caller,
+        channelThreadKey: caller,
         newSessionId: uuidv7(),
         chatId,
       });
@@ -649,7 +662,7 @@ export function createAgentSessionManager(
     span: Span,
     init: AgentSessionInit,
   ): Promise<AgentSession> => {
-    const k = keyOf(key);
+    const k = keyOf(key, init.resumeSessionId ?? init.createdSessionId);
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -699,6 +712,7 @@ export function createAgentSessionManager(
         // in the open chat applies from the next turn.
         existing.lend(init.surface);
         if (init.model !== undefined) existing.selectModel(init.model);
+        if (!isSubagent) await existing.serveNamed(init.resumeSessionId ?? key.caller);
         recordAcquire("reuse");
         return lentTo(existing, init.surface);
       }
@@ -707,6 +721,7 @@ export function createAgentSessionManager(
     if (current && current.status !== "closed") {
       current.lend(init.surface);
       if (init.model !== undefined) current.selectModel(init.model);
+      if (!isSubagent) await current.serveNamed(init.resumeSessionId ?? key.caller);
       recordAcquire("reuse");
       return lentTo(current, init.surface);
     }
@@ -764,7 +779,7 @@ export function createAgentSessionManager(
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
     return acquire(
-      { agentName, caller: row.channelThreadKey },
+      { agentName, ...(row.channelThreadKey ? { caller: row.channelThreadKey } : {}) },
       { ...init, resumeSessionId: sessionId },
     );
   };
@@ -772,6 +787,8 @@ export function createAgentSessionManager(
   return {
     open: (agentName, caller, surface, options) =>
       acquire({ agentName, caller }, { ...options, surface }),
+    create: (agentName, surface, options) =>
+      acquire({ agentName }, { ...options, surface, createdSessionId: uuidv7() }),
     session: (id, agentName, surface, options) =>
       acquireBySessionId(id, agentName, { ...options, surface }),
     live(agentName, caller) {
@@ -856,13 +873,6 @@ interface TurnExecRefs {
    * create — a child session the source's turns reuse.
    */
   getChildManager: () => AgentSessionManager;
-  /**
-   * The caller this owner's children are named under. A fork names its fork
-   * point: splitting the in-memory manager alone would not stop the fork
-   * child's open from resuming the *source* child's persisted session, which
-   * would contaminate the same provider thread the source resumes later.
-   */
-  childCaller: CallerId;
   /** Attach the Child execution to this owner's provider tool call. */
   attachSubagentExecution: (toolUseId: string, execution: SubagentExecution) => void;
   /** Bind an async tool callback into the owner's OTel context. */
@@ -907,19 +917,6 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
-// A child's and a fork point's callers are the session's own names, made by
-// adding to the parent's. Sessions only adds to a caller, never reads one.
-
-/** A fresh child of `parent`. */
-function childOf(parent: CallerId): CallerId {
-  return `${parent}:subagent:${uuidv4()}`;
-}
-
-/** The point a fork of `source` continues from. */
-function forkPointOf(source: CallerId, forkSessionId: string): CallerId {
-  return `${source}#fork:${forkSessionId}`;
-}
-
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */
 async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
   if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
@@ -933,8 +930,9 @@ async function reachableRecordedWorkingDir(recorded: string): Promise<string | u
 /** A channel-thread key maps to one conversation, so a stored row that names
  *  another one than the caller means the stored value cannot be trusted yet.
  *  The live session records turns under the caller's conversation, and the
- *  next rotation writes the caller's value onto the new row. Checked only when
- *  a row is read (cold open and rotation); a cached live session reads none. */
+ *  next rotation writes the caller's value onto the new row. Checked when a
+ *  row is read (cold open and rotation) and when a live session is reused by
+ *  an opener that names a conversation. */
 function warnOnConversationMismatch(
   key: AgentSessionKey,
   sessionId: string | undefined,
@@ -1018,7 +1016,7 @@ async function openSession(
       // The transcript is unreachable. An explicit resume names that exact
       // conversation, so it fails. An implicit reuse by channel-thread key
       // retires the row and starts a fresh generation, so the thread keeps working.
-      if (init.resumeSessionId) {
+      if (init.resumeSessionId || !storedKey) {
         throw new Error(
           `Agent session "${resumeResult.id}" ran in "${resumeResult.workingDir}", which no ` +
             "longer exists; it cannot be resumed there",
@@ -1078,7 +1076,9 @@ async function openSession(
     init.model !== undefined
       ? (init.model ?? undefined)
       : init.resumeSessionId
-        ? await deps.rememberedModel?.(key.caller, key.agentName, !!sessionPin)
+        ? key.caller
+          ? await deps.rememberedModel?.(key.caller, key.agentName, !!sessionPin)
+          : undefined
         : undefined;
 
   if (isNewSession && !preparedSessionId) {
@@ -1229,7 +1229,6 @@ async function openSession(
     // place_widget) read this, not the facade flag on ModelSessionParams.
     supportsInteractiveSurface,
     getChildManager: () => impl.childManager,
-    childCaller: key.caller,
     attachSubagentExecution: (toolUseId, execution) =>
       impl.addSubagentExecution(toolUseId, execution),
     bindTurnCtx: inCurrentTurnCtx,
@@ -1400,7 +1399,6 @@ async function openSession(
             parentTurnId,
             parentToolUseId: toolContext.toolUseId,
             parentAgentName: key.agentName,
-            childCaller: childOf(refs.childCaller),
             childManager: refs.getChildManager(),
             workingDir,
             threadContext: refs.getThreadContext(),
@@ -1477,7 +1475,6 @@ async function openSession(
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
     const sessionTools = await deps.sessionTools?.({
       agentName: key.agentName,
-      channelThreadKey: storedKey,
       sessionId,
       isSubagent: opts.isSubagent === true,
       getTurnId: sessionExecRefs.getTurnId,
@@ -1611,7 +1608,6 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childCaller: forkPointOf(key.caller, fork.forkSessionId),
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
           parent: {
@@ -2012,7 +2008,24 @@ class AgentSessionImpl implements AgentSession {
   private conversation?: SessionConversation;
   /** What the last open lent. */
   surface: SessionSurface;
-  get caller(): CallerId {
+
+  /**
+   * Serves the conversation the log names for this session's `opener`, when
+   * it names one, from the next turn on. A live session reused by an opener
+   * that names a conversation serves it as a cold open would: a row that
+   * recorded none records it, and a row that recorded another is warned about.
+   */
+  async serveNamed(opener: string | undefined): Promise<void> {
+    const named = this.deps.log?.conversationOf?.(opener);
+    if (!named || (this.conversation?.origin === "named" && this.conversation.id === named)) return;
+    const recorded = this.conversation?.id;
+    const type = (await this.deps.log?.findConversation?.(named))?.type;
+    this.conversation = { origin: "named", id: named, ...(type ? { type } : {}) };
+    if (!recorded) await this.deps.sessionsRepo.fillChatId(this.sessionId, named);
+    else warnOnConversationMismatch(this.key, this.sessionId, recorded, named);
+  }
+
+  get caller(): CallerId | undefined {
     return this.key.caller;
   }
 
@@ -3635,7 +3648,7 @@ class AgentSessionImpl implements AgentSession {
         session: {
           id: this.sessionId,
           agentName: this.key.agentName,
-          channelThreadKey: this.key.caller,
+          channelThreadKey: this.key.caller ?? "",
         },
         emit: (event) => {
           if (sink.done) return;

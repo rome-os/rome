@@ -18,7 +18,7 @@ import {
 import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
-import { callerOfRun } from "./session-caller.js";
+import { callerFromKey } from "./session-caller.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 
 const log = createLogger("rpc-agent-runner");
@@ -71,13 +71,11 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     const req: RunTurnRequest = {
       key: {
         agentName: params.agentName,
-        // A resume by id that names no caller stays without one, so main reads
-        // the chat it replies into and the session's own caller.
+        // A run that names no caller sends none: main makes it a session of
+        // its own, or resumes the one it names by id.
         caller:
           params.caller ??
-          (params.sessionId && !params.channelThreadKey
-            ? undefined
-            : callerOfRun(params.agentName, params.channelThreadKey)),
+          (params.channelThreadKey ? callerFromKey(params.channelThreadKey) : undefined),
       },
       init: {
         workingDir: params.workingDir,

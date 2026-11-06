@@ -109,7 +109,8 @@ describe("SubagentExecutionService", () => {
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
     const childManager = {
-      open: rs.fn(async () => children.shift()!),
+      open: rs.fn(),
+      create: rs.fn(async () => children.shift()!),
       session: rs.fn(),
       live: rs.fn(),
       shutdown: rs.fn(async () => undefined),
@@ -126,7 +127,6 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "parent-turn-1",
       parentToolUseId: "tool-1",
       parentAgentName: "main",
-      childCaller: "webchat:parent-1:subagent:child",
       childManager,
       workingDir: "/tmp/project-a",
     };
@@ -215,7 +215,6 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "new-parent-turn",
       parentToolUseId: "tool-resume",
       parentAgentName: "main",
-      childCaller: "webchat:parent-1:subagent:child",
       childManager,
       workingDir: "/tmp/project-a",
     };

@@ -29,7 +29,7 @@ import type { AgentTurnStreamRegistry } from "../agent-sessions/index.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { linkPromptToTurn, runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 import { sessionSurfaceOf } from "../connections/session-surface.js";
-import { adhocCaller, callerKey, chatOfCaller, type SessionCaller } from "./session-caller.js";
+import { callerKey, chatOfCaller, type SessionCaller } from "./session-caller.js";
 import { openNamed } from "../agent-sessions/index.js";
 import type { ThreadContext } from "./types.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -143,9 +143,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
         const thread = req.init?.threadContext;
         const caller = req.key.caller;
-        // A run that opens a session by its caller always names one.
-        const opener = caller ?? adhocCaller(req.key.agentName);
-        const callerId = callerKey(opener);
         // The conversation the run names. A resume by id keeps the
         // conversation its session recorded unless the run names one, so the
         // caller it names picks none, as in the runner.
@@ -169,6 +166,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             session = await openNamed(sessionId, named, () =>
               this.manager.session(sessionId, req.key.agentName, surface, { workingDir }),
             );
+          } else if (!caller) {
+            // A run that names no caller is found again only by its session's id.
+            session = await openNamed(undefined, named, () =>
+              this.manager.create(req.key.agentName, surface, { workingDir }),
+            );
           } else {
             // A wake by a message on a connection applies the place's reset setting.
             if (req.platformMessageId) {
@@ -176,10 +178,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 this.manager,
                 this.wake?.resolveReset,
                 req.key.agentName,
-                opener,
+                caller,
                 thread,
               );
             }
+            const callerId = callerKey(caller);
             session = await openNamed(callerId, named, () =>
               this.manager.open(req.key.agentName, callerId, surface, { workingDir }),
             );

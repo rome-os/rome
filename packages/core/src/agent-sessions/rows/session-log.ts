@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import { channelChatId } from "../../db/session-kind.js";
@@ -18,29 +19,31 @@ import { callerFromKey, chatOfCaller } from "../../core/session-caller.js";
 const log = createLogger("session-log");
 
 /**
- * Conversations Chats named for sessions while they open, by the caller that
- * opens one or by the id a resume names. A chat's own caller names its chat;
- * a place or a run that Chats keeps in a conversation is named here.
+ * The conversation Chats named for the session an opener is opening, held
+ * for that open's own async work only, so overlapping opens never read each
+ * other's. A chat's own caller names its chat; a place or a run that Chats
+ * keeps in a conversation is named here.
  */
-const named = new Map<string, string>();
+const named = new AsyncLocalStorage<{ opener?: string; chatId: string }>();
 
 /**
- * Opens a session, by its caller or by its id, with `chatId` as the
+ * Opens a session, by its caller, by its id, or with no opener for one
+ * `create` makes, with `chatId` as the
  * conversation today's rows keep its turns in. Storage keeps that link on the
  * session's row, so it is only needed while the session opens.
  */
 export async function openNamed<T>(
-  caller: string,
+  opener: string | undefined,
   chatId: string | undefined,
   open: () => Promise<T>,
 ): Promise<T> {
   if (!chatId) return await open();
-  named.set(caller, chatId);
-  try {
-    return await open();
-  } finally {
-    if (named.get(caller) === chatId) named.delete(caller);
-  }
+  return await named.run({ opener, chatId }, open);
+}
+
+function namedFor(opener: string | undefined): string | undefined {
+  const scope = named.getStore();
+  return scope && scope.opener === opener ? scope.chatId : undefined;
 }
 
 /**
@@ -52,7 +55,8 @@ export async function openNamed<T>(
 export function createSessionLog(webchatRepo: WebChatRepository | undefined): SessionLog {
   return {
     findConversation: (id) => findRecordedConversation(webchatRepo, id),
-    conversationOf: (opener) => named.get(opener) ?? chatOfCaller(callerFromKey(opener)),
+    conversationOf: (opener) =>
+      namedFor(opener) ?? (opener ? chatOfCaller(callerFromKey(opener)) : undefined),
     turn: (turn) => turnEntry(webchatRepo, turn),
     fork: webchatRepo ? (fork) => forkWriter(webchatRepo, fork) : undefined,
     resumableChild: webchatRepo ? (child) => resumableChild(webchatRepo, child) : undefined,
@@ -64,6 +68,7 @@ export function createSessionLog(webchatRepo: WebChatRepository | undefined): Se
 }
 
 const MAX_WRITE_ATTEMPTS = 3;
+const FINAL_RETRY_PAUSES_MS = [25, 100];
 
 function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string): TurnLogWriter {
   // Events a write failed to keep. Each write tries them again ahead of its
@@ -73,8 +78,7 @@ function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string):
   // that can never be written does not hold back the rest of the turn.
   let pending: StreamAgentEvent[] = [];
   let failures = 0;
-  const record = async (event: StreamAgentEvent) => {
-    pending.push(event);
+  const writePending = async () => {
     try {
       await recorder.recordBatch(pending);
       pending = [];
@@ -90,6 +94,19 @@ function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string):
         ...(dropped ? { dropped: dropped.type } : {}),
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  };
+  const record = async (event: StreamAgentEvent) => {
+    pending.push(event);
+    await writePending();
+  };
+  // Nothing follows a turn's end to carry what is still pending, so the end
+  // retries on its own, a few times with a short pause.
+  const finish = async () => {
+    for (const pause of FINAL_RETRY_PAUSES_MS) {
+      if (pending.length === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, pause));
+      await writePending();
     }
   };
   // Text streamed since the last complete text block. A turn that ends before
@@ -113,6 +130,7 @@ function writerOf(recorder: AgentTraceRecorder, turnId: string, source: string):
       streamedBlockId = undefined;
     }
     await record(event);
+    if (event.type === "turn_end") await finish();
   };
   return {
     write: (event) => {

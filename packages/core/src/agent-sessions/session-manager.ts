@@ -59,7 +59,8 @@ export class SessionManager {
   ): Promise<
     | {
         id: string;
-        channelThreadKey: string;
+        /** Absent for a session no caller opened. */
+        channelThreadKey?: string;
         provider: string | null;
         providerThreadId: string | null;
         model: string | null;
@@ -70,10 +71,10 @@ export class SessionManager {
   > {
     const row = await this.sessionsRepository.findById(sessionId);
     if (row && agentName && !this.sameAgent(row.agentName, agentName)) return undefined;
-    if (!row || row.status !== "active" || !row.channelThreadKey) return undefined;
+    if (!row || row.status !== "active") return undefined;
     return {
       id: row.id,
-      channelThreadKey: row.channelThreadKey,
+      ...(row.channelThreadKey ? { channelThreadKey: row.channelThreadKey } : {}),
       provider: row.provider,
       providerThreadId: row.providerThreadId,
       model: row.model,

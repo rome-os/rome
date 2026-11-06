@@ -67,15 +67,14 @@ describe("createCodexImageGenerationProvider", () => {
         provider.generate({ prompt: "two" }),
       ]);
 
-      const callers = runner.run.mock.calls.map(([params]) => params.caller);
-      expect(callers).toHaveLength(2);
-      for (const caller of callers) {
-        expect(caller).toMatchObject({
-          kind: "execution",
-          id: expect.stringMatching(/^image_gen:/),
-        });
+      // A run that names no caller and no session gets a session of its own.
+      const runs = runner.run.mock.calls.map(([params]) => params);
+      expect(runs).toHaveLength(2);
+      for (const run of runs) {
+        expect(run.caller).toBeUndefined();
+        expect(run.channelThreadKey).toBeUndefined();
+        expect(run.sessionId).toBeUndefined();
       }
-      expect(callers[0]).not.toEqual(callers[1]);
     });
 
     it("returns the provider-saved path when no inline data is present", async () => {

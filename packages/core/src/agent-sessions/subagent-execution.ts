@@ -40,8 +40,6 @@ export interface StartSubagentContext {
   parentTurnId: string;
   parentToolUseId: string;
   parentAgentName: string;
-  /** The caller a fresh child opens under, which the parent's session named. */
-  childCaller: CallerId;
   childManager: AgentSessionManager;
   workingDir: string;
   threadContext?: ThreadContext;
@@ -90,7 +88,8 @@ export function createSubagentExecutionService(deps: {
         });
       } else {
         isFresh = true;
-        child = await context.childManager.open(name, context.childCaller, surface, {
+        // A child is found again only by its id, so no caller opens it.
+        child = await context.childManager.create(name, surface, {
           workingDir: context.workingDir,
         });
       }

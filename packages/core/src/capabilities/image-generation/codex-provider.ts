@@ -6,7 +6,6 @@ import type {
   ImageProviderAvailability,
   ImageProviderGenerateResult,
 } from "@rome-os/app-runtime";
-import { adhocCaller } from "../../core/session-caller.js";
 import { createLogger } from "../../logger.js";
 
 const log = createLogger("codex-image-provider");
@@ -165,10 +164,10 @@ export function createCodexImageGenerationProvider(
       try {
         for await (const msg of deps.agentRunner.run({
           agentName: IMAGE_GEN_AGENT,
-          // A fresh session per call. Concurrent calls (generate_image batches)
-          // rely on it: the generated-images backstop is scoped to the Codex
-          // thread, so a shared thread could hand one call another's image.
-          caller: adhocCaller(IMAGE_GEN_AGENT),
+          // No caller, so a fresh session per call. Concurrent calls
+          // (generate_image batches) rely on it: the generated-images backstop
+          // is scoped to the Codex thread, so a shared thread could hand one
+          // call another's image.
           prompt: `${instruction} Use this prompt verbatim:\n\n${request.prompt}`,
           ...(inputImages.length > 0 ? { images: inputImages } : {}),
           sharedContext: ctx?.sharedContext,

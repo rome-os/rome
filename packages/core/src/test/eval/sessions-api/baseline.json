@@ -1,4 +1,0 @@
-{
-  "typecheckErrors": 0,
-  "unitFailures": ["src/api/routes/projects-files.test.ts"]
-}

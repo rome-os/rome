@@ -5,7 +5,6 @@ import type { ThreadContext } from "../core/types.js";
 export interface SessionToolContext {
   /** Canonical agent id, e.g. `core:main`. */
   agentName: string;
-  channelThreadKey: string;
   /** Runtime session id. */
   sessionId: string;
   isSubagent: boolean;

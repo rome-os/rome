@@ -1,5 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
-
 import type { SessionCaller } from "@rome-os/app-runtime";
 
 // The caller is the SDK's, so apps and the host name a session the same way.
@@ -32,10 +30,10 @@ export function callerKey(caller: SessionCaller): string {
 }
 
 /**
- * The caller a stored key names. A run that named no conversation was stored
- * as `<agent>:<uuid>`, the same shape as a place's key, so it reads back as a
- * place whose connection is the agent's name. That is how the old parser read
- * it too.
+ * The caller a stored key names. A run that named no caller was once stored
+ * as `<agent>:<uuid>`, the same shape as a place's key, so such a row reads
+ * back as a place whose connection is the agent's name. Sessions no caller
+ * opens are now stored without one.
  */
 export function callerFromKey(key: string): SessionCaller {
   const child = CHILD_SUFFIX.exec(key);
@@ -57,16 +55,6 @@ export function callerFromKey(key: string): SessionCaller {
   return { kind: "place", connection: head, place: rest };
 }
 
-/** A fresh child of `parent`. */
-export function childCaller(parent: SessionCaller): SessionCaller {
-  return { kind: "parent-turn", parent, childId: uuidv4() };
-}
-
-/** A run of `agentName` that names no conversation. */
-export function adhocCaller(agentName: string): SessionCaller {
-  return { kind: "execution", id: `${agentName}:${uuidv4()}` };
-}
-
 /**
  * The connection a caller's turns are delivered on. A child and a fork take
  * their parent's. Undefined for a watcher, which answers nowhere, and for an
@@ -85,11 +73,6 @@ export function callerConnection(caller: SessionCaller): string | undefined {
     case "execution":
       return undefined;
   }
-}
-
-/** The caller a stored key names, or a fresh run's when there is none. */
-export function callerOfRun(agentName: string, key: string | undefined): SessionCaller {
-  return key ? callerFromKey(key) : adhocCaller(agentName);
 }
 
 /** The chat a caller is when it is a dashboard chat's own session. */

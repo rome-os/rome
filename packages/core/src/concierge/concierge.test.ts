@@ -253,7 +253,6 @@ function setup(
   service.attachDashboard({ chats, send });
   const context = (agentName = CONCIERGE_AGENT_ID): SessionToolContext => ({
     agentName,
-    channelThreadKey: `webchat:${CONCIERGE_CHAT}`,
     sessionId: "runtime-1",
     isSubagent: false,
     getTurnId: () => "concierge-turn-1",

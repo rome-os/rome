@@ -340,6 +340,7 @@ describe("Webchat API", () => {
     };
     deps.agentSessionManager = {
       open: rs.fn(async () => agent),
+      create: rs.fn(async () => agent),
       reset: async () => undefined,
       session: rs.fn(async () => agent),
       live: () => agent,
@@ -436,6 +437,7 @@ describe("Webchat API", () => {
     });
     deps.agentSessionManager = {
       open: rs.fn(async () => agent),
+      create: rs.fn(async () => agent),
       reset: async () => undefined,
       session: rs.fn(async () => agent),
       live: () => agent,
@@ -499,6 +501,7 @@ describe("Webchat API", () => {
     });
     deps.agentSessionManager = {
       open: rs.fn(async () => agent),
+      create: rs.fn(async () => agent),
       reset: async () => undefined,
       session: rs.fn(async () => agent),
       live: () => agent,
@@ -6735,6 +6738,9 @@ function fakeSessionManager(
           ),
         ),
     ),
+    create: async () => {
+      throw new Error("fake manager makes no session without a caller");
+    },
     session: async () => {
       throw new Error("fake manager cannot resume by session id");
     },

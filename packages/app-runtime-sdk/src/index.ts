@@ -519,10 +519,12 @@ export interface LifecycleThreadContext {
  *   follows the place without answering in it.
  * - `parent-turn`: a subagent's parent turn.
  * - `fork-point`: a session at one completed turn.
- * - `execution`: a trigger execution, or a run that names no conversation.
- *   Such a run's session is stored under its agent's name and a fresh id, so
- *   a hook or an action that reads its caller back sees a `place` whose
- *   `connection` is the agent's name.
+ * - `execution`: a trigger execution.
+ *
+ * A run that names no caller gets a session no caller opens, found again only
+ * by its session id, and a hook or an action reads no caller back for it.
+ * Subagents and forks are such sessions too. `parent-turn` and `fork-point`
+ * read back only for sessions stored before that.
  *
  * A caller is identity only. The conversation a run's turns are recorded in
  * is its own field, `RunParams.romeSessionId`.
