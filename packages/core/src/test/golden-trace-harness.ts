@@ -13,11 +13,10 @@ import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
-import { SessionManager } from "../core/session-manager.js";
+import { SessionRepository } from "../sessions/session-repository.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
@@ -79,9 +78,8 @@ export interface GoldenTraceOptions {
 
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
-  const sessionsRepo = new SessionsRepository(testDb.db);
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
@@ -110,8 +108,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   });
   const manager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
+    sessionRepository,
     promptBuilder,
     actionRegistry,
     modelResolver,

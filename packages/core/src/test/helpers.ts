@@ -33,6 +33,7 @@ import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { SessionManager } from "../core/session-manager.js";
+import { SessionRepository } from "../sessions/session-repository.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
@@ -688,6 +689,7 @@ export async function buildTestDeps(
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
   const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new SessionRepository(db, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: CodexAccountService = {
@@ -748,8 +750,7 @@ export async function buildTestDeps(
   });
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
+    sessionRepository,
     promptBuilder,
     actionRegistry,
     modelResolver,
