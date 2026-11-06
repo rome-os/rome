@@ -1,5 +1,19 @@
 // Import boundaries of the agent bounded context. The layout and the
-// direction of dependencies: DEVELOPMENT.md, "Established patterns".
+// direction of dependencies: DEVELOPMENT.md, "Established patterns", the
+// bullet on laying out a bounded context as `<context>/<layer>`. The rules,
+// numbered as the violations report them:
+//
+// 1. agent/domain/ imports only agent/domain/.
+// 2. agent/application/ imports only agent/domain/ and agent/application/.
+// 3. agent/infrastructure/ never imports agent/application/ or agent/index.ts.
+// 4. Code outside agent/ imports only agent/index.ts, never a layer path.
+// 5. Of agent/index.ts's exports, the ones re-exported from
+//    agent/infrastructure/ are adapters; outside agent/, only src/index.ts
+//    (the composition root) and tests import them. Everything else uses the
+//    ports.
+//
+// Package imports (`node:*`, `@rome-os/*`, third-party) never break a rule.
+// Tests (`*.test.ts`, src/test/) are exempt from rules 4 and 5.
 //
 // The scan reads source text with regular expressions instead of a parser, so
 // the check stays dependency-free. It finds static `import` and `export … from`

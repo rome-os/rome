@@ -118,16 +118,15 @@ export interface ModelUserInput {
   injectedToolResult?: { toolUseId: ToolUseId; content: unknown };
 }
 
-/** Value. Who paid the provider for a turn. `unknown` when the provider has not said. */
+/** Value. Who pays the provider for a session's turns. `unknown` when the provider has not said. */
 export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
  * Value object. What a turn cost, with what the usage recorder needs beyond
- * what apps see: the three members below stay inside Rome and leave the
- * event before it reaches an app's turn hooks.
+ * what apps see: the two members below stay inside Rome and leave the event
+ * before it reaches an app's turn hooks.
  */
 export interface ModelTurnAccounting extends AgentAccounting {
-  funding?: ModelFunding;
   /** The provider's own id for the turn, for reconciliation with its bill. */
   providerTurnId?: ProviderTurnId;
   /** The effort the provider applied, in its own terms (`xhigh`, `max`). */
@@ -146,9 +145,10 @@ export interface ModelTurnErrorEvent extends Omit<TurnErrorEvent, "accounting"> 
  * The events a model session emits, in Rome's vocabulary. Provider-native
  * units become these inside the adapter and nowhere else. No turn brackets:
  * `turn_start`, `turn_end`, the subagent events, the interactive cards,
- * usage and spans are the run's. A turn's events end with exactly one
- * `result` or `error`, whose accounting carries what the turn cost and who
- * paid.
+ * usage and spans are the run's. Every turn the adapter started ends with
+ * exactly one `result` or `error` carrying its accounting, after an
+ * interrupt too. Only a stream that throws ends a turn without one; the run
+ * then records the session's `funding` and nothing else.
  */
 export type ModelSessionEvent =
   | AgentBlockEvent
@@ -171,6 +171,12 @@ export interface ModelSession {
   /** Disposed by an interrupt or a close; a new turn needs a new session. */
   readonly isClosed: boolean;
   readonly events: AsyncIterable<ModelSessionEvent>;
+  /**
+   * Who pays for this session's turns. Known when the session opens, from
+   * the credentials or process it runs on, so a turn with no terminal event
+   * is still recorded against the right payer.
+   */
+  readonly funding: ModelFunding;
   /**
    * Where the most recent completed turn left the thread. Set at the turn's
    * `result`, cleared when the next turn starts, readable after `close()`.
