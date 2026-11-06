@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "@rstest/core";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/helpers.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
+import { DashboardAccessStore } from "./dashboard-access-store.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./visitor-allowlist-sync.js";
 
 const ORIGIN = "https://cloud.test";
@@ -14,9 +15,11 @@ interface Sent {
 }
 
 // A fake Rome Cloud that records each PUT and answers with the next queued
-// status (200 once the queue is empty). `hold` keeps the next send in flight
-// until the test releases it.
-function fakeCloud(statuses: Array<number | "throw"> = []) {
+// status (200 once the queue is empty). Like Rome Cloud, it keeps the highest
+// revision it has seen, starting from `held`, and answers with it. `hold`
+// keeps the next send in flight until the test releases it.
+function fakeCloud(statuses: Array<number | "throw"> = [], opts: { held?: number } = {}) {
+  let held = opts.held ?? 0;
   const sent: Sent[] = [];
   let release: (() => void) | null = null;
   let holdNext = false;
@@ -34,7 +37,12 @@ function fakeCloud(statuses: Array<number | "throw"> = []) {
     }
     const status = statuses.shift() ?? 200;
     if (status === "throw") throw new Error("connect ECONNREFUSED");
-    return new Response(JSON.stringify({ revision: 0, count: 0 }), { status });
+    const { emails, revision } = JSON.parse(String(init?.body)) as Sent["body"];
+    if (status >= 200 && status < 300) held = Math.max(held, revision);
+    return new Response(
+      JSON.stringify({ revision: held, count: emails.length, unmatched: emails.slice(0, 1) }),
+      { status },
+    );
   }) as typeof fetch;
   return {
     sent,
@@ -331,7 +339,7 @@ describe("VisitorAllowListSync", () => {
 
     expect(lines).toContainEqual({
       message: "visitor allow-list synced",
-      data: { revision: 6, count: 2, outcome: "ok" },
+      data: { revision: 6, count: 2, outcome: "ok", cloudRevision: 6, unmatched: 1 },
     });
     expect(lines).toContainEqual({
       message: "visitor allow-list sync failed",
@@ -353,8 +361,74 @@ describe("syncStoredVisitorAllowList", () => {
     });
     const pushed: unknown[] = [];
 
-    await syncStoredVisitorAllowList(settingsRepo, { push: (list) => pushed.push(list) });
+    await syncStoredVisitorAllowList(new DashboardAccessStore(settingsRepo), {
+      push: (list) => pushed.push(list),
+    });
 
     expect(pushed).toEqual([{ emails: ["ada@example.com"], revision: 9 }]);
+  });
+});
+
+describe("VisitorAllowListSync — Rome Cloud ahead", () => {
+  const testDb = createTestDb();
+  afterAll(() => testDb.close());
+
+  it("raises the stored revision past Rome Cloud's and sends the list again", async () => {
+    // This instance's database was restored from a backup at revision 2, and
+    // Rome Cloud still holds revision 7 from before.
+    const settingsRepo = new SettingsRepository(testDb.db);
+    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
+      cloudEmailAccess: ["ada@example.com"],
+      revision: 2,
+    });
+    const store = new DashboardAccessStore(settingsRepo);
+    const cloud = fakeCloud([], { held: 7 });
+    const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
+      getToken: () => "inst-token",
+      getOrigin: () => ORIGIN,
+      onLinkChanged: () => () => {},
+      raiseRevisionPast: (floor) => store.raisePast(floor),
+      fetchImpl: cloud.fetchImpl,
+    });
+
+    await syncStoredVisitorAllowList(store, sync);
+    await settle(sync);
+
+    expect(cloud.sent.map((s) => s.body)).toEqual([
+      { emails: ["ada@example.com"], revision: 2 },
+      { emails: ["ada@example.com"], revision: 8 },
+    ]);
+    expect(await settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
+      cloudEmailAccess: ["ada@example.com"],
+      revision: 8,
+    });
+
+    // The next save continues from there.
+    expect((await store.save({ cloudEmailAccess: [] })).revision).toBe(9);
+  });
+});
+
+describe("DashboardAccessStore", () => {
+  const testDb = createTestDb();
+  afterAll(() => testDb.close());
+
+  it("gives concurrent saves and raises their own revisions in order", async () => {
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db));
+
+    const results = await Promise.all([
+      store.save({ cloudEmailAccess: ["a@example.com"] }),
+      store.raisePast(4),
+      store.save({ cloudEmailAccess: ["b@example.com"] }),
+      store.raisePast(2),
+    ]);
+
+    expect(results).toEqual([
+      { emails: ["a@example.com"], revision: 1 },
+      { emails: ["a@example.com"], revision: 5 },
+      { emails: ["b@example.com"], revision: 6 },
+      { emails: ["b@example.com"], revision: 6 },
+    ]);
+    expect(await store.read()).toEqual({ emails: ["b@example.com"], revision: 6 });
   });
 });

@@ -1,10 +1,5 @@
-import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger, type Logger } from "../logger.js";
-import {
-  DASHBOARD_ACCESS_SETTING_KEY,
-  normalizeDashboardAccessConfig,
-  readDashboardAccessRevision,
-} from "./dashboard-access-config.js";
+import type { DashboardAccessStore, VisitorAllowList } from "./dashboard-access-store.js";
 import {
   cloudBearer,
   getInstanceToken,
@@ -14,10 +9,7 @@ import {
 import { normalizePublicAccessEmail } from "./public-access-config.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
-export interface VisitorAllowList {
-  emails: readonly string[];
-  revision: number;
-}
+export type { VisitorAllowList } from "./dashboard-access-store.js";
 
 export interface VisitorAllowListSyncDeps {
   /** The stable name of this instance's Rome Cloud enrollment, or null when it has none. */
@@ -27,6 +19,11 @@ export interface VisitorAllowListSyncDeps {
   getOrigin?: () => string | null;
   /** Subscribes to the instance linking, unlinking, or changing its credential. */
   onLinkChanged?: (listener: () => void) => () => void;
+  /**
+   * Stores a revision past `floor` and returns the list under it. Called when
+   * Rome Cloud holds a higher revision than the one sent.
+   */
+  raiseRevisionPast?: (floor: number) => Promise<VisitorAllowList>;
   fetchImpl?: typeof fetch;
   logger?: Pick<Logger, "debug" | "info" | "warn">;
   /** Wait before each retry. The last entry repeats until a send settles. */
@@ -34,7 +31,9 @@ export interface VisitorAllowListSyncDeps {
   timeoutMs?: number;
 }
 
-type SendOutcome = "ok" | "rejected" | "skipped" | "retry";
+type SendOutcome =
+  | { kind: "ok"; cloudRevision: number | null }
+  | { kind: "rejected" | "skipped" | "retry" };
 
 const DEFAULT_RETRY_DELAYS_MS = [5_000, 30_000, 120_000, 600_000, 1_800_000];
 
@@ -75,7 +74,15 @@ export class VisitorAllowListSync {
 
   /** Queues a list for delivery and returns at once. An older revision than the queued one is dropped. */
   push(list: VisitorAllowList): void {
-    if (this.latest && list.revision < this.latest.revision) return;
+    if (!this.queue(list)) return;
+    this.failures = 0;
+    this.clearRetry();
+    this.kick();
+  }
+
+  // Makes `list` the one to send. False when a newer one is already queued.
+  private queue(list: VisitorAllowList): boolean {
+    if (this.latest && list.revision < this.latest.revision) return false;
     const emails = Array.from(
       new Set(
         list.emails
@@ -84,9 +91,7 @@ export class VisitorAllowListSync {
       ),
     ).sort();
     this.latest = { emails, revision: list.revision };
-    this.failures = 0;
-    this.clearRetry();
-    this.kick();
+    return true;
   }
 
   /** Resolves when no send is in flight. A scheduled retry does not count. */
@@ -125,19 +130,50 @@ export class VisitorAllowListSync {
           this.enrollmentId() !== enrollment
         )
           continue;
-        if (outcome === "retry") {
+        if (outcome.kind === "retry") {
+          this.scheduleRetry();
+          return;
+        }
+        // Rome Cloud holds a higher revision than this instance stored, so it
+        // ignored the list. Store a revision past it and send the list again.
+        if (
+          outcome.kind === "ok" &&
+          outcome.cloudRevision !== null &&
+          outcome.cloudRevision > list.revision &&
+          this.deps.raiseRevisionPast
+        ) {
+          if (await this.raisePast(outcome.cloudRevision)) continue;
           this.scheduleRetry();
           return;
         }
         // Only an accepted list settles. A skipped or refused one is sent again
         // on the next push: a save, a boot, or the instance linking.
-        if (outcome === "ok" && enrollment) {
+        if (outcome.kind === "ok" && enrollment) {
           this.settled = { enrollment, generation, revision: list.revision };
         }
         return;
       }
     } finally {
       this.draining = false;
+    }
+  }
+
+  // Queues the stored list under a revision past `floor`. False when storing it failed.
+  private async raisePast(floor: number): Promise<boolean> {
+    try {
+      const raised = await this.deps.raiseRevisionPast?.(floor);
+      if (raised) this.queue(raised);
+      this.log.info("visitor allow-list revision raised past Rome Cloud's", {
+        revision: raised?.revision ?? null,
+        cloudRevision: floor,
+      });
+      return true;
+    } catch (err) {
+      this.log.warn("visitor allow-list revision raise failed", {
+        cloudRevision: floor,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
     }
   }
 
@@ -181,7 +217,7 @@ export class VisitorAllowListSync {
         ...fields,
         outcome: origin ? "not_linked" : "no_origin",
       });
-      return "skipped";
+      return { kind: "skipped" };
     }
 
     let token: string | null;
@@ -193,7 +229,7 @@ export class VisitorAllowListSync {
         outcome: "credential_error",
         error: err instanceof Error ? err.message : String(err),
       });
-      return "retry";
+      return { kind: "retry" };
     }
     if (!token) {
       this.log.warn("visitor allow-list sync failed", {
@@ -201,7 +237,7 @@ export class VisitorAllowListSync {
         outcome: "no_bearer",
         attempt: this.failures + 1,
       });
-      return "retry";
+      return { kind: "retry" };
     }
 
     let response: Response;
@@ -224,14 +260,28 @@ export class VisitorAllowListSync {
         attempt: this.failures + 1,
         error: err instanceof Error ? err.message : String(err),
       });
-      return "retry";
+      return { kind: "retry" };
+    }
+    if (response.ok) {
+      // `revision` is what Rome Cloud now holds. `unmatched` lists emails with no
+      // Rome Cloud account, and only its size is logged.
+      const body = (await response.json().catch(() => null)) as {
+        revision?: unknown;
+        unmatched?: unknown;
+      } | null;
+      const cloudRevision =
+        typeof body?.revision === "number" && Number.isSafeInteger(body.revision)
+          ? body.revision
+          : null;
+      this.log.info("visitor allow-list synced", {
+        ...fields,
+        outcome: "ok",
+        cloudRevision,
+        unmatched: Array.isArray(body?.unmatched) ? body.unmatched.length : null,
+      });
+      return { kind: "ok", cloudRevision };
     }
     await response.body?.cancel().catch(() => {});
-
-    if (response.ok) {
-      this.log.info("visitor allow-list synced", { ...fields, outcome: "ok" });
-      return "ok";
-    }
     const transient = response.status >= 500 || response.status === 408 || response.status === 429;
     this.log.warn("visitor allow-list sync failed", {
       ...fields,
@@ -239,18 +289,14 @@ export class VisitorAllowListSync {
       status: response.status,
       attempt: this.failures + 1,
     });
-    return transient ? "retry" : "rejected";
+    return { kind: transient ? "retry" : "rejected" };
   }
 }
 
 /** Queues the stored allow-list. Boot and instance linking call this. */
 export async function syncStoredVisitorAllowList(
-  settingsRepo: Pick<SettingsRepository, "get">,
+  store: Pick<DashboardAccessStore, "read">,
   sync: Pick<VisitorAllowListSync, "push">,
 ): Promise<void> {
-  const stored = await settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-  sync.push({
-    emails: normalizeDashboardAccessConfig(stored).cloudEmailAccess,
-    revision: readDashboardAccessRevision(stored),
-  });
+  sync.push(await store.read());
 }

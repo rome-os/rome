@@ -205,6 +205,7 @@ import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
@@ -1907,7 +1908,10 @@ async function main() {
     });
   }
   const dashboardAccessState = new DashboardAccessState();
-  const visitorAllowListSync = new VisitorAllowListSync();
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const visitorAllowListSync = new VisitorAllowListSync({
+    raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
+  });
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
@@ -2036,6 +2040,7 @@ async function main() {
       codexAccountService,
       publicAccessState,
       dashboardAccessState,
+      dashboardAccessStore,
       visitorAllowListSync,
       relayDrainer,
       bootVersionReport,
@@ -2075,7 +2080,7 @@ async function main() {
       provisionNodeCaller,
       () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
       () => favorDispatchRunner.runOnce(),
-      () => syncStoredVisitorAllowList(settingsRepo, visitorAllowListSync),
+      () => syncStoredVisitorAllowList(dashboardAccessStore, visitorAllowListSync),
     ];
     for (const step of steps) {
       await step().catch((err) => {

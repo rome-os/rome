@@ -40,6 +40,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
 import { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import { DashboardAccessStore } from "../lib/dashboard-access-store.js";
 import { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
@@ -812,6 +813,7 @@ export async function buildTestDeps(
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
   const visitorAllowListSync = new VisitorAllowListSync({
     getEnrollmentId: () => null,
     onLinkChanged: () => () => {},
@@ -897,6 +899,7 @@ export async function buildTestDeps(
     codexAccountService,
     publicAccessState,
     dashboardAccessState,
+    dashboardAccessStore,
     visitorAllowListSync,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
