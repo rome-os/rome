@@ -364,6 +364,8 @@ const sessionSelectFields = {
   // The sidebar groups a device-folder chat under its folder, not its project.
   deviceFolder: romeSessions.deviceFolder,
   agentName: romeSessions.agentName,
+  // Read to keep a Concierge or task chat from everyone but its owner.
+  ownerKey: romeSessions.ownerKey,
   triggerKind: romeSessions.triggerKind,
   archivedAt: romeSessions.archivedAt,
   pinnedAt: romeSessions.pinnedAt,

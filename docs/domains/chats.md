@@ -64,12 +64,14 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 
 ## Concierge chat
 
-A dashboard chat where its owner talks with the Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat talks to the same Concierge, with one memory, one list of follows and one list of tasks.
+A dashboard chat where its owner talks with their Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat of one owner talks to the same Concierge, with one list of follows and one list of tasks. Memory is one for every owner.
 
 - A Concierge chat is a chat of its own, not a thread. What is said in one does not show in another, and each has its own agent session.
 - The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
-- A Concierge chat belongs to its owner, as every dashboard chat does. Today the guardian is the only owner.
-- Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One thing is followed once, whatever chat asks for it.
+- While the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge. App users have none.
+- A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist.
+- Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
+- Digest times, quiet hours and the time zone they are read in are each owner's own.
 - A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat.
 
 ## Main chat
@@ -93,7 +95,7 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 
 A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
 
-- A task chat has a row in the Concierge's task list. The owner of the Concierge chat that started it can open it and write in it.
+- A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
 - A task chat carries one piece of work. It gets no alerts and no digest.
 
 ## Reply rule

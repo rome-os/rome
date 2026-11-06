@@ -83,6 +83,7 @@ import { ConnectedAccountsRepository } from "../db/repositories/connected-accoun
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
+import { canOpenChat } from "../concierge/service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
 const log = createLogger("api");
@@ -340,12 +341,14 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardAccessState,
         {
           subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
-          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          hasChatSession: async (sessionId, owner) =>
+            (await webchatRuntime.hasStoredSession(sessionId)) &&
+            (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
+          subscribeConciergeTasks: (owner, emit) =>
+            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
         },
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);

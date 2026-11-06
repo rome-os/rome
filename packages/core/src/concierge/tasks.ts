@@ -4,6 +4,7 @@
 
 import { CONCIERGE_DONE_DAYS, type ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { LiveEventEmit } from "../lib/live-event.js";
+import { type ConciergeOwner, GUARDIAN_OWNER } from "./owner.js";
 import type {
   ConciergeTasksRepository,
   ConciergeTaskWithChat,
@@ -42,18 +43,21 @@ export class ConciergeTasks {
     };
   }
 
-  /** The panel's rows: every open row, and the finished ones of the last `doneDays` days. */
+  /** One owner's panel rows: every open row, and the finished ones of the last `doneDays` days. */
   async listForPanel(
+    owner: ConciergeOwner = GUARDIAN_OWNER,
     doneDays = CONCIERGE_DONE_DAYS,
     now = Date.now(),
   ): Promise<ConciergeTaskDto[]> {
     const rows = await this.repo.listForPanel(new Date(now - doneDays * DAY_MS));
-    return rows.map((row) => this.toDto(row));
+    return rows.filter((row) => row.owner === owner).map((row) => this.toDto(row));
   }
 
-  /** Emits `task_upsert` for every write. Returns the unsubscribe. */
-  subscribe(emit: LiveEventEmit): () => void {
-    return this.repo.onChange((task) => emit("task_upsert", { task: this.toDto(task) }));
+  /** Emits `task_upsert` for every write to one owner's rows. Returns the unsubscribe. */
+  subscribe(emit: LiveEventEmit, owner: ConciergeOwner = GUARDIAN_OWNER): () => void {
+    return this.repo.onChange((task) => {
+      if (task.owner === owner) emit("task_upsert", { task: this.toDto(task) });
+    });
   }
 
   /** Marks a row the Concierge did not pick up events for. A write clears the mark. */

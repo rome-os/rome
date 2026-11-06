@@ -1,3 +1,4 @@
+import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   useCallback,
@@ -101,7 +102,6 @@ import {
   ConciergeTopicEmptyState,
 } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -330,6 +330,8 @@ export interface ChatProps {
    * trace, turn summary, pickers, and Stop.
    */
   variant?: ChatVariant;
+  /** The signed-in person's main Concierge chat, which shows the starters a topic chat does not. The guardian's by default. */
+  conciergeMainChatId?: string;
 }
 
 export function Chat({
@@ -349,6 +351,7 @@ export function Chat({
   composerRef: hostComposerRef,
   navbarSlot,
   variant = "default",
+  conciergeMainChatId = CONCIERGE_CHAT_ID,
 }: ChatProps) {
   const concierge = variant === "concierge";
   const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
@@ -2122,13 +2125,14 @@ export function Chat({
               )}
             >
               {conciergeEmpty ? (
-                mainSessionId === CONCIERGE_CHAT_ID ? (
+                mainSessionId === conciergeMainChatId ? (
                   <ConciergeEmptyState
                     onPick={(prompt) => composerRef.current?.insertText(prompt)}
                   />
                 ) : (
                   // A topic chat: its starters send themselves as its first message.
                   <ConciergeTopicEmptyState
+                    mainChatId={conciergeMainChatId}
                     onStart={(prompt) => composerRef.current?.submit(prompt)}
                   />
                 )

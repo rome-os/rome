@@ -1,11 +1,16 @@
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { conciergeChatLine, isConciergeChat } from "../../concierge/service.js";
+import {
+  canOpenChat,
+  conciergeChatLine,
+  isConciergeChat,
+  isMainConciergeChat,
+  privateOwnerOf,
+} from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
@@ -762,9 +767,9 @@ export interface WebchatRuntime {
   hasStoredSession(sessionId: string): Promise<boolean>;
   /** The dashboard's side of a send into one of its chats (connections/send.ts). */
   post: DashboardInbox["post"];
-  /** Start a chat for the guardian, as `POST /chat/sessions` does, and answer
+  /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
-  startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
   /** Whether the chat is running a turn now. */
@@ -2073,6 +2078,33 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const app = new Hono();
 
+  // A Concierge chat and the task chats it starts are their owner's alone:
+  // to anyone else they do not exist (docs/domains/chats.md#concierge-chat).
+  // No actor at all is in-process work, never a request from outside, and
+  // acts as the guardian.
+  const callerOwner = async () => {
+    const actor = await currentSessionActor();
+    return actor ? sessionOwnerKey(actor) : "guardian";
+  };
+  const privateChatGate: MiddlewareHandler = async (c, next) => {
+    const sessionId = c.req.param("id") ?? c.req.param("sessionId");
+    if (
+      sessionId &&
+      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, await callerOwner()))
+    ) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+    await next();
+  };
+  for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
+    app.use(path, privateChatGate);
+  }
+  /** Leaves out the chats private to someone other than the caller. */
+  const visibleTo = (owner: string | null) => (session: Parameters<typeof privateOwnerOf>[0]) => {
+    const privateTo = privateOwnerOf(session);
+    return privateTo === null || privateTo === owner;
+  };
+
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
     const session = await deps.webchatRepo.getSession(sessionId);
@@ -2137,7 +2169,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const ownerKey =
       c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
-    const sessions = await deps.webchatRepo.listSessions(status, ownerKey);
+    const sessions = (await deps.webchatRepo.listSessions(status, ownerKey)).filter(
+      visibleTo(await callerOwner()),
+    );
     return c.json(
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
@@ -2190,7 +2224,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    const matches = await deps.webchatRepo.searchSessionMessages(query, { sessionLimit: 20 });
+    const visible = visibleTo(await callerOwner());
+    const matches = (
+      await deps.webchatRepo.searchSessionMessages(query, { sessionLimit: 20 })
+    ).filter((match) => visible(match.session));
     return c.json(
       matches.map((match) => ({
         session: toWebchatSessionResponse(match.session, match.session.messageCount),
@@ -2493,7 +2530,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     // The main Concierge chat stays; a topic chat hands its follows and open
     // tasks to it first (docs/domains/chats.md#topic-chat).
-    if (sessionId === CONCIERGE_CHAT_ID) {
+    if (isMainConciergeChat(session)) {
       return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
     if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
@@ -2536,7 +2573,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (typeof body.archived !== "boolean") {
       return c.json({ error: "archived must be a boolean" }, 400);
     }
-    if (body.archived && sessionId === CONCIERGE_CHAT_ID) {
+    if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
     if (body.archived) {
@@ -3567,7 +3604,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // message, as an ordinary chat is.
     const autoTitle =
       policy.autoTitle ||
-      (isConciergeChat(session) && sessionId !== CONCIERGE_CHAT_ID && session.name === "");
+      (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === "");
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
@@ -4338,9 +4375,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return { ok: true, messageId: inputId, at: new Date() };
     },
-    async startChat(input) {
-      // A chat an agent starts on the guardian's dashboard is the guardian's.
-      const started = await startChat(input, "guardian");
+    async startChat(input, ownerKey) {
+      // A task chat is the owner's whose Concierge started it.
+      const started = await startChat(input, ownerKey);
       const id = started.body.id;
       if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
       return id;

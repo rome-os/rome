@@ -10,6 +10,7 @@ import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.js";
+import { CONCIERGE_AGENT_ID, canOpenChat } from "./concierge/service.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { guardianAuth } from "./db/schema.js";
@@ -143,11 +144,13 @@ describe("live events WebSocket", () => {
     };
     const sources: LiveEventSources = {
       subscribeChatStatus: (emit) => track(runtime.subscribeStatusEvents(emit)),
-      hasChatSession: (sessionId) => runtime.hasStoredSession(sessionId),
+      hasChatSession: async (sessionId, owner) =>
+        (await runtime.hasStoredSession(sessionId)) &&
+        (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
-      subscribeConciergeTasks: (emit) => track(conciergeTasks.subscribe(emit)),
+      subscribeConciergeTasks: (owner, emit) => track(conciergeTasks.subscribe(emit, owner)),
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
@@ -206,7 +209,7 @@ describe("live events WebSocket", () => {
     expect(await upgradeStatus(port, {})).toBe(101);
   });
 
-  it("gives an allow-listed dashboard visitor the chat topics but not the app catalog", async () => {
+  it("gives an allow-listed dashboard visitor every topic but the app catalog", async () => {
     const proxied = {
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -245,11 +248,45 @@ describe("live events WebSocket", () => {
     });
     expect(activeSubscriptions).toBe(2);
     expect(catalogHandlers.size).toBe(0);
+  });
 
-    client.send({ type: "subscribe", topic: "concierge.tasks" });
+  it("gives a visitor their own Concierge rows and hides the guardian's Concierge chat", async () => {
+    const client = await connect({
+      "x-forwarded-for": "203.0.113.1",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+      cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
+      origin: "http://rome.example",
+    });
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        CONCIERGE_AGENT_ID,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:account-1");
+    client.send({ type: "subscribe", topic: "chat.session:concierge" });
     expect(
-      await client.next((m) => m.type === "error" && m.topic === "concierge.tasks"),
-    ).toMatchObject({ message: "Forbidden" });
+      await client.next((m) => m.type === "error" && m.topic === "chat.session:concierge"),
+    ).toMatchObject({ message: "Not found" });
+    await client.subscribe("chat.session:visitor-main");
+
+    await client.subscribe("concierge.tasks");
+    await conciergeTasks.repo.upsertMany([{ title: "The guardian's", state: "next" }]);
+    const [mine] = await conciergeTasks.repo.upsertMany([
+      { title: "Mine", state: "next", chatId: "visitor-main" },
+    ]);
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
+    ).toMatchObject({ data: { task: { id: mine.id, title: "Mine" } } });
   });
 
   it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {

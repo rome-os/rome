@@ -15,6 +15,7 @@ import {
   type WatchSource,
 } from "./following.js";
 import type { ConnectionView } from "../api/routes/connections.js";
+import { GUARDIAN_OWNER, mainChatIdOf } from "./owner.js";
 import type { ConciergeService } from "./service.js";
 
 const repoTrigger = (type: string) => ({
@@ -184,6 +185,8 @@ function setup(
     ["concierge", { id: "concierge", name: "Concierge", main: true }],
     ["calendar", { id: "calendar", name: "Calendar", main: false }],
   ]);
+  /** Each visitor's Concierge chat and its owner; any other chat is the guardian's. */
+  const chatOwners = new Map<string, string>();
   /** The chat whose turn calls the follow actions. */
   const calling = { chat: null as string | null };
   /** The chat each Concierge turn ran in, in order. */
@@ -338,12 +341,15 @@ function setup(
     agentRunner,
     callingChat: () => calling.chat,
   };
+  const ownerOfChat = async (id: string | null | undefined) =>
+    (id && chatOwners.get(id)) || GUARDIAN_OWNER;
   const service = {
     isEnabled: async () => true,
-    findChatId: async () => "concierge",
+    findChatId: async (owner = GUARDIAN_OWNER) => mainChatIdOf(owner),
+    ownerOfChat,
     conciergeChat: async (id: string) => liveChats.get(id) ?? null,
     deliveryChat: async (id: string | null | undefined) =>
-      id && liveChats.has(id) ? id : "concierge",
+      id && liveChats.has(id) ? id : mainChatIdOf(await ownerOfChat(id)),
     runSystemTurn: async (
       chatId: string,
       prompt: string,
@@ -372,6 +378,7 @@ function setup(
     omitted,
     items,
     liveChats,
+    chatOwners,
     calling,
     turnChats,
     following: () => following!,
@@ -1257,6 +1264,93 @@ describe("follows in several Concierge chats", () => {
     expect(await s.following().moveToMainChat("calendar")).toBe(1);
     expect(await chatOf(s, "acme/widgets")).toMatchObject({ id: "concierge", main: true });
     expect((await s.items.owedToDigest()).map((i) => i.chatId)).toEqual([null]);
+    s.stop();
+  });
+
+  const ANN = "visitor:acct-ann";
+  const annMain = mainChatIdOf(ANN);
+  /** Ann, a dashboard visitor, with her own main Concierge chat. */
+  const withAnn = (s: ReturnType<typeof setup>) => {
+    s.liveChats.set(annMain, { id: annMain, name: "Concierge", main: true });
+    s.chatOwners.set(annMain, ANN);
+    return s;
+  };
+
+  it("tells a visitor's follow only to them, and digests it in their main chat at their times", async () => {
+    rs.useFakeTimers();
+    const s = withAnn(setup({ triage: { e1: "important", e2: "digest" } }));
+    s.calling.chat = annMain;
+    await s
+      .action("core:concierge_follow")
+      .execute({ source: "github", target: "acme/widgets" }, {} as never);
+    s.calling.chat = null;
+    // The guardian follows nothing, and Ann's follow is not in their list.
+    expect(await chatOf(s, "acme/widgets")).toBeUndefined();
+    await fire(s, "e1");
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats).toEqual([annMain]);
+    expect(s.turns.at(-1)).toContain("line for e1");
+
+    // Her digest routines are her own, and only her digest holds her items.
+    const digestKeys = [...s.routines.values()]
+      .map((r) => r.key)
+      .filter((k) => k?.startsWith("concierge-digest:"))
+      .sort();
+    expect(digestKeys).toEqual([
+      `concierge-digest:${annMain}:09:00`,
+      `concierge-digest:${annMain}:18:00`,
+    ]);
+    s.turnChats.length = 0;
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.turns.at(-1)).not.toContain("line for e2");
+    await s.action("core:concierge_digest").execute({ owner: ANN }, {} as never);
+    expect(s.turnChats.at(-1)).toBe(annMain);
+    expect(s.turns.at(-1)).toContain("line for e2");
+    s.stop();
+  });
+
+  it("tells one event to each person who follows it, and keeps the routine while anyone does", async () => {
+    rs.useFakeTimers();
+    const s = withAnn(setup());
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = annMain;
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    s.calling.chat = null;
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect([...s.turnChats].sort()).toEqual([annMain, "concierge"].sort());
+    for (const turn of s.turns) expect(turn).toContain("line for e1");
+
+    // Ann stops following; the guardian's follow keeps the routine and still hears.
+    await s.following().unfollow("github", "acme/widgets", ANN);
+    expect(
+      [...s.routines.values()].some((r) =>
+        r.key?.startsWith("concierge-follow:github:acme/widgets:"),
+      ),
+    ).toBe(true);
+    s.turnChats.length = 0;
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats).toEqual(["concierge"]);
+    s.stop();
+  });
+
+  it("keeps each person's quiet hours to themselves", async () => {
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T23:00:00.000Z"));
+    const s = withAnn(setup());
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = annMain;
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    await s.following().setRules({ quietHours: { start: "22:00", end: "08:00" } }, ANN);
+    await s.following().setTimezone(ANN, "UTC");
+    s.calling.chat = null;
+    expect((await s.following().list()).rules.quietHours).toBeNull();
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    // Ann is in her quiet hours; the guardian is not.
+    expect(s.turnChats).toEqual(["concierge"]);
     s.stop();
   });
 });

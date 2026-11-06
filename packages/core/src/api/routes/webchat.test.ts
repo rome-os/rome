@@ -147,6 +147,90 @@ describe("Webchat API", () => {
     expect(await list(visitor, "all")).toEqual(all);
   });
 
+  it("keeps each person's Concierge and task chats from everyone else", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:a");
+    await deps.webchatRepo.createSession(
+      "guardian-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("guardian-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    await deps.webchatRepo.createSession(
+      "shared",
+      "Shared",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    const status = async (
+      actor: typeof guardian | typeof visitor,
+      path: string,
+      init?: RequestInit,
+    ) => (await runWithSessionActor(actor, () => app.request(path, init))).status;
+    const post = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    };
+
+    // The visitor can neither read nor post to the guardian's Concierge or task chat.
+    for (const id of ["concierge", "guardian-task"]) {
+      expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
+    }
+    // Nor the guardian the visitor's.
+    expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
+    expect(await status(guardian, "/chat/sessions/visitor-main/turns", post)).toBe(404);
+    // Each opens their own, and both open an ordinary chat.
+    expect(await status(visitor, "/chat/sessions/visitor-main")).toBe(200);
+    expect(await status(guardian, "/chat/sessions/concierge")).toBe(200);
+    expect(await status(visitor, "/chat/sessions/shared")).toBe(200);
+
+    const listed = async (actor: typeof guardian | typeof visitor) =>
+      (
+        (await (
+          await runWithSessionActor(actor, () => app.request("/chat/sessions?status=all"))
+        ).json()) as { id: string }[]
+      )
+        .map((chat) => chat.id)
+        .sort();
+    expect(await listed(visitor)).toEqual(["shared", "visitor-main"]);
+    expect(await listed(guardian)).toEqual(["concierge", "guardian-task", "shared"]);
+  });
+
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
     const sessionId = "automation-senders";
     await deps.webchatRepo.createSession(sessionId, "Automation");
@@ -494,7 +578,7 @@ describe("Webchat API", () => {
     rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
-    const id = await runtime.startChat({});
+    const id = await runtime.startChat({}, "guardian");
     try {
       const posted = await runtime.post(id, { text: "Find flights" }, concierge);
 
@@ -2348,7 +2432,7 @@ describe("Webchat API", () => {
     rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
-    const id = await runtime.startChat({});
+    const id = await runtime.startChat({}, "guardian");
 
     expect(await runtime.post(id, { text: "Find flights" }, concierge)).toMatchObject({ ok: true });
     const turnId = (await deps.webchatRepo.getMessages(id)).find((m) => m.role === "user")?.turnId;

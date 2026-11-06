@@ -38,6 +38,7 @@ const item = (over: Partial<ConciergeFollowItemRow> = {}): ConciergeFollowItemRo
   kind: "review_requested",
   target: "acme/widgets",
   decision: "important",
+  ownerKey: "guardian",
   reason: "asked of you",
   line: "alice asked you to review #7",
   url: "https://github.com/acme/widgets/pull/7",

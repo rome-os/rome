@@ -5,6 +5,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { DrizzleDb } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
+import { GUARDIAN_OWNER, mainChatIdOf, ownerOf } from "../../concierge/owner.js";
 import { conciergeTasks, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
@@ -18,8 +19,10 @@ type ConciergeTaskState = ConciergeTaskRow["state"];
 export interface ConciergeTaskWithChat {
   row: ConciergeTaskRow;
   chat: { id: string; name: string } | null;
-  /** The Concierge chat the row came from: the main chat when the row names none or its chat is gone. */
+  /** The Concierge chat the row came from: its owner's main chat when the row names none or its chat is gone. */
   conciergeChat: { id: string; name: string; main: boolean };
+  /** Whose Concierge the row is: the owner of the chat it came from. Never sent to a client. */
+  owner: string;
   sourceMessageId: string | null;
 }
 
@@ -69,13 +72,14 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Moves the unfinished rows of Concierge chat `from` to the main chat, as
-   * when that chat is archived or deleted. Answers how many moved.
+   * Moves the unfinished rows of Concierge chat `from` to its owner's main
+   * chat `to` (null for the guardian's), as when that chat is archived or
+   * deleted. Answers how many moved.
    */
-  async moveToMainChat(from: string): Promise<number> {
+  async moveToMainChat(from: string, to: string | null = null): Promise<number> {
     const moved = await this.db
       .update(conciergeTasks)
-      .set({ chatId: null })
+      .set({ chatId: to })
       .where(
         and(
           eq(conciergeTasks.chatId, from),
@@ -272,49 +276,61 @@ export class ConciergeTasksRepository {
         chatName: romeSessions.name,
         originName: origin.name,
         originArchivedAt: origin.archivedAt,
+        originOwner: origin.ownerKey,
       })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
       .leftJoin(origin, eq(origin.id, conciergeTasks.chatId))
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
-    const mainName =
-      rows.length > 0
-        ? ((
+    // A row whose chat is archived or gone belongs to its owner's main chat,
+    // so its buttons and results reach a chat that owner can write in. A row
+    // that names no chat is the guardian's main chat's.
+    type Origin = {
+      originName: string | null;
+      originArchivedAt: Date | null;
+      originOwner: string | null;
+    };
+    const ownerOfRow = (task: ConciergeTaskRow, origin: Origin) =>
+      task.chatId && origin.originName !== null
+        ? ownerOf({ ownerKey: origin.originOwner })
+        : GUARDIAN_OWNER;
+    const mainIds = [...new Set(rows.map((row) => mainChatIdOf(ownerOfRow(row.task, row))))];
+    const mainNames = new Map(
+      mainIds.length > 0
+        ? (
             await this.db
-              .select({ name: romeSessions.name })
+              .select({ id: romeSessions.id, name: romeSessions.name })
               .from(romeSessions)
-              .where(eq(romeSessions.id, CONCIERGE_CHAT_ID))
-          )[0]?.name ?? "Concierge")
-        : "Concierge";
-    // A row whose chat is archived or gone belongs to the main chat, so its
-    // buttons and results reach a chat the guardian can write in.
-    const conciergeChatOf = (
-      task: ConciergeTaskRow,
-      originName: string | null,
-      originArchivedAt: Date | null,
-    ) =>
-      task.chatId && originName !== null && originArchivedAt === null
-        ? { id: task.chatId, name: originName, main: false }
-        : { id: CONCIERGE_CHAT_ID, name: mainName, main: true };
+              .where(inArray(romeSessions.id, mainIds))
+          ).map((row) => [row.id, row.name] as const)
+        : [],
+    );
+    const conciergeChatOf = (task: ConciergeTaskRow, origin: Origin) => {
+      const owner = ownerOfRow(task, origin);
+      const main = mainChatIdOf(owner);
+      return task.chatId && origin.originName !== null && origin.originArchivedAt === null
+        ? { id: task.chatId, name: origin.originName, main: task.chatId === main }
+        : { id: main, name: mainNames.get(main) ?? "Concierge", main: true };
+    };
     // Only a message the row's Concierge chat still holds counts as a source.
     const sources = this.sources.keysOf(
-      rows.flatMap(({ task, originName, originArchivedAt }) =>
-        task.sourceMessageId
-          ? [
-              {
-                id: task.sourceMessageId,
-                chatId: conciergeChatOf(task, originName, originArchivedAt).id,
-              },
-            ]
+      rows.flatMap((row) =>
+        row.task.sourceMessageId
+          ? [{ id: row.task.sourceMessageId, chatId: conciergeChatOf(row.task, row).id }]
           : [],
       ),
     );
-    return rows.map(({ task, chatName, originName, originArchivedAt }) => ({
-      row: task,
-      chat: task.sessionId && chatName !== null ? { id: task.sessionId, name: chatName } : null,
-      conciergeChat: conciergeChatOf(task, originName, originArchivedAt),
-      sourceMessageId: (task.sourceMessageId && sources.get(task.sourceMessageId)) || null,
+    return rows.map((origin) => ({
+      row: origin.task,
+      chat:
+        origin.task.sessionId && origin.chatName !== null
+          ? { id: origin.task.sessionId, name: origin.chatName }
+          : null,
+      conciergeChat: conciergeChatOf(origin.task, origin),
+      owner: ownerOfRow(origin.task, origin),
+      sourceMessageId:
+        (origin.task.sourceMessageId && sources.get(origin.task.sourceMessageId)) || null,
     }));
   }
 }

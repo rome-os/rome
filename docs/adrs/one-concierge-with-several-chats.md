@@ -25,7 +25,7 @@ Rome has one Concierge per owner, with a main chat and any number of topic chats
 - **Following the same thing from two chats.** Rejected because each event would then be triaged and deduplicated per chat, and "stop following Gmail" would need to ask which follow. Splitting by target or kind covers the real cases: one repository here, another there.
 - **One follow sending to several chats.** Deferred, not rejected: Muse supports it and reports almost no use, and the main-chat digest already shows every chat's items. A list of chats in place of one chat changes neither triage nor dedupe.
 - **A digest in every chat.** Rejected because a topic chat the guardian does not open would hide its items, the failure Muse's users report. The main chat is the one overview.
-- **An owner column on follows, tasks and follow items.** Rejected because the owner already lives on the chat, and a second copy could disagree with it.
+- **An owner column on follows and tasks.** Rejected because the owner already lives on the chat, and a second copy could disagree with it. Follow items are the one exception: each keeps its owner so that a stored event is unique per owner, as [a Concierge for each person](a-concierge-for-each-person.md) needs.
 
 ## Consequences
 
@@ -33,10 +33,10 @@ Adding a chat adds no triage, no subscription and no dedupe work. The guardian s
 
 Future diffs must respect:
 
-- Triage runs once per batch, whatever number of chats there are.
+- Triage runs once per batch for each owner, whatever number of chats that owner has.
 - A follow has one chat. Its alerts go there, or to the main chat when that chat is archived or gone.
 - Archiving or deleting a Concierge chat moves its follows and unfinished tasks to the main chat and says so there. The main chat cannot be archived or deleted.
-- Only a chat records its owner. Follows, tasks and follow items reach their owner through their chat, and no owner means the guardian.
+- Only a chat records its owner. Follows and tasks reach their owner through their chat, and no owner means the guardian.
 - A rule for "the Concierge chat" applies to every Concierge chat, unless it names the main chat.
 
 The delivery invariants live in [Concierge following](../architecture/concierge-following.md).

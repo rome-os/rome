@@ -25,6 +25,7 @@ import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
+import { mainChatIdOf } from "./owner.js";
 import {
   CONCIERGE_ACCOUNT,
   CONCIERGE_AGENT_ID,
@@ -529,10 +530,10 @@ describe("Concierge tools", () => {
         brief: "Fix it",
         project: join(root, "rome-oss"),
       });
-      expect(s.chats.startChat).toHaveBeenCalledWith({
-        agentName: undefined,
-        projectPath: "rome-oss",
-      });
+      expect(s.chats.startChat).toHaveBeenCalledWith(
+        { agentName: undefined, projectPath: "rome-oss" },
+        "guardian",
+      );
     } finally {
       rs.unstubAllEnvs();
       rmSync(root, { recursive: true, force: true });
@@ -1788,6 +1789,7 @@ describe("Concierge system turns", () => {
     const service = new ConciergeService({
       sessionRepository: { current: async () => session },
       webchatRepo: { getSession: async () => null },
+      settingsRepo: { get: async () => null },
       runBackendTurn: async (params: BackendTurnParams) => {
         turns.push(params);
         return outcome;
@@ -1849,6 +1851,28 @@ describe("Concierge chat", () => {
       "gpt-6-luna",
       undefined,
       CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      {},
+    );
+  });
+
+  it("creates a visitor's own main chat on first open, owned by them", async () => {
+    const { service, createSession } = serviceWith(codexOnly, false);
+    const id = await service.ensureChatId("visitor:acct-ann");
+    expect(id).toBe(mainChatIdOf("visitor:acct-ann"));
+    expect(id).toMatch(/^concierge-v-[0-9a-f]{24}$/);
+    expect(createSession).toHaveBeenCalledWith(
+      id,
+      "Concierge",
+      undefined,
+      undefined,
+      "gpt-6-luna",
+      undefined,
+      CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
     );
   });
 

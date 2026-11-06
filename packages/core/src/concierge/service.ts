@@ -32,6 +32,13 @@ import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
+import {
+  type ConciergeOwner,
+  GUARDIAN_OWNER,
+  mainChatIdOf,
+  ownerOf,
+  storedChatId,
+} from "./owner.js";
 
 import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
 
@@ -58,6 +65,68 @@ export function isConciergeChat(
 ): boolean {
   return !!chat && (chat.id === CONCIERGE_CHAT_ID || isConciergeAgent(chat.agentName));
 }
+
+/**
+ * The one person a chat is private to: a Concierge chat's owner, and the
+ * owner of a task chat a Concierge started. Null for any other chat, which
+ * every dashboard user may open.
+ */
+export function privateOwnerOf(
+  chat:
+    | {
+        id: string;
+        agentName?: string | null;
+        ownerKey?: string | null;
+        triggerKind?: string | null;
+      }
+    | null
+    | undefined,
+): ConciergeOwner | null {
+  if (!chat) return null;
+  if (isConciergeChat(chat) || chat.triggerKind === TASK_CHAT_TRIGGER_KIND) return ownerOf(chat);
+  return null;
+}
+
+/** Whether a chat is its owner's main Concierge chat. */
+export function isMainConciergeChat(chat: {
+  id: string;
+  agentName?: string | null;
+  ownerKey?: string | null;
+}): boolean {
+  return isConciergeChat(chat) && chat.id === mainChatIdOf(ownerOf(chat));
+}
+
+/** How far up a chain of forks the privacy check looks. */
+const MAX_FORK_DEPTH = 8;
+
+/**
+ * Whether `owner` may open chat `chatId`: no for another owner's Concierge
+ * chat or Concierge task chat, or a fork of one. Yes for any other chat,
+ * and for one that does not exist, which the caller answers as it does today.
+ */
+export async function canOpenChat(
+  getSession: (id: string) => Promise<{
+    id: string;
+    agentName?: string | null;
+    ownerKey?: string | null;
+    triggerKind?: string | null;
+    parentSessionId?: string | null;
+  } | null>,
+  chatId: string,
+  owner: string | null,
+): Promise<boolean> {
+  let id: string | null | undefined = chatId;
+  for (let depth = 0; id && depth < MAX_FORK_DEPTH; depth++) {
+    const chat = await getSession(id);
+    const privateTo = privateOwnerOf(chat);
+    if (privateTo !== null) return privateTo === owner;
+    id = chat?.parentSessionId;
+  }
+  return true;
+}
+
+/** The setting that keeps the owner of each visitor's deleted Concierge chat. */
+const RETIRED_CHATS_SETTING_KEY = "conciergeRetiredChats";
 
 /** How a Concierge chat was retired. */
 export type RetiredHow = "archived" | "deleted";
@@ -86,7 +155,8 @@ export function conciergeChatLine(chat: ConciergeChatRef): string {
  */
 export interface TaskChats {
   /** Start a chat for the guardian and answer its id. */
-  startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  /** Starts a dashboard chat owned by `ownerKey`. */
+  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
   /**
    * Opens the runtime session of a chat that has had no turn yet, as its
    * first message would, and answers its id.
@@ -108,7 +178,7 @@ export interface ConciergeDashboard {
 
 export interface ConciergeDeps {
   skillCatalog: Pick<SkillCatalog, "get">;
-  settingsRepo: Pick<SettingsRepository, "get">;
+  settingsRepo: Pick<SettingsRepository, "get" | "set">;
   webchatRepo: Pick<
     WebChatRepository,
     | "createSession"
@@ -140,7 +210,8 @@ export interface ConciergeDeps {
 
 export class ConciergeService {
   private readonly leftModels = new Map<string, number>();
-  private creating: Promise<string> | null = null;
+  /** The main chat being created, per owner, so concurrent calls share one. */
+  private readonly creating = new Map<ConciergeOwner, Promise<string>>();
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
@@ -170,84 +241,114 @@ export class ConciergeService {
     }
   }
 
-  /** The main Concierge chat's id, or null when it does not exist yet. */
-  async findChatId(): Promise<string | null> {
-    return (await this.deps.webchatRepo.getSession(CONCIERGE_CHAT_ID)) ? CONCIERGE_CHAT_ID : null;
+  /** An owner's main Concierge chat's id, or null when it does not exist yet. */
+  async findChatId(owner: ConciergeOwner = GUARDIAN_OWNER): Promise<string | null> {
+    const id = mainChatIdOf(owner);
+    return (await this.deps.webchatRepo.getSession(id)) ? id : null;
   }
 
   /**
-   * The main Concierge chat's id. Creates the chat on first use; concurrent calls
-   * share one creation. The initial model is picked here; later selections
-   * and quota failover are stored on the chat. A chat created before any
-   * provider was signed in has no model, so it gets one the first time a
-   * provider is available.
+   * An owner's main Concierge chat's id. Creates the chat on first use, for a
+   * visitor when they first open the Concierge; concurrent calls share one
+   * creation. The initial model is picked here; later selections and quota
+   * failover are stored on the chat. A chat created before any provider was
+   * signed in has no model, so it gets one the first time a provider is
+   * available.
    */
-  async ensureChatId(): Promise<string> {
-    const existing = await this.deps.webchatRepo.getSession(CONCIERGE_CHAT_ID);
+  async ensureChatId(owner: ConciergeOwner = GUARDIAN_OWNER): Promise<string> {
+    const id = mainChatIdOf(owner);
+    const existing = await this.deps.webchatRepo.getSession(id);
     if (existing) {
       if (!existing.largeModelSelection) {
         const picked = this.pickModel();
-        if (picked) {
-          await this.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT_ID, picked);
-        }
+        if (picked) await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked);
       }
-      return CONCIERGE_CHAT_ID;
+      return id;
     }
-    this.creating ??= this.createChat().finally(() => {
-      this.creating = null;
-    });
-    return await this.creating;
+    let creating = this.creating.get(owner);
+    if (!creating) {
+      creating = this.createChat(owner).finally(() => this.creating.delete(owner));
+      this.creating.set(owner, creating);
+    }
+    return await creating;
   }
 
-  private async createChat(): Promise<string> {
+  private async createChat(owner: ConciergeOwner): Promise<string> {
+    const id = mainChatIdOf(owner);
     await this.deps.webchatRepo.createSession(
-      CONCIERGE_CHAT_ID,
+      id,
       "Concierge",
       undefined,
       undefined,
       this.pickModel(),
       undefined,
       CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      // The guardian's chat keeps no owner, as before; a visitor's names them.
+      owner === GUARDIAN_OWNER ? {} : { ownerKey: owner },
     );
-    log.info("concierge chat created", { chatId: CONCIERGE_CHAT_ID });
-    return CONCIERGE_CHAT_ID;
+    log.info("concierge chat created", { chatId: id });
+    return id;
+  }
+
+  /** Whether a chat is its owner's main Concierge chat. */
+  isMainChat(chat: { id: string; ownerKey?: string | null }): boolean {
+    return chat.id === mainChatIdOf(ownerOf(chat));
+  }
+
+  /**
+   * Whose Concierge a chat is: the owner it records, or, for a visitor's
+   * chat that was deleted, the owner kept for it then. The guardian otherwise.
+   */
+  async ownerOfChat(chatId: string | null | undefined): Promise<ConciergeOwner> {
+    if (!chatId) return GUARDIAN_OWNER;
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (chat) return ownerOf(chat);
+    const retired = (await this.deps.settingsRepo.get(RETIRED_CHATS_SETTING_KEY)) as Record<
+      string,
+      string
+    > | null;
+    return retired?.[chatId] ?? GUARDIAN_OWNER;
   }
 
   /** A Concierge chat that is not archived, as a list shows it, or null. */
   async conciergeChat(chatId: string): Promise<ConciergeChatRef | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (!chat || !isConciergeChat(chat) || chat.archivedAt) return null;
-    return { id: chat.id, name: chat.name, main: chat.id === CONCIERGE_CHAT_ID };
+    return { id: chat.id, name: chat.name, main: this.isMainChat(chat) };
   }
 
   /**
    * Where something that reports to Concierge chat `chatId` goes: that chat
-   * while it is a live Concierge chat, else the main chat. Null names the main
-   * chat. Answers null only while the main chat does not exist.
+   * while it is a live Concierge chat, else its owner's main chat. Null names
+   * the guardian's main chat. Answers null only while that main chat does not
+   * exist.
    */
   async deliveryChat(chatId: string | null | undefined): Promise<string | null> {
     if (chatId && (await this.conciergeChat(chatId))) return chatId;
-    return this.findChatId();
+    return this.findChatId(await this.ownerOfChat(chatId));
   }
 
-  /** The owner's Concierge chats: the main chat first, then the topic chats, oldest first. */
-  async listChats(): Promise<ConciergeChatRef[]> {
-    const main = await this.conciergeChat(await this.ensureChatId());
-    const topics = (await this.deps.webchatRepo.listSessions("active", "guardian"))
-      .filter((chat) => isConciergeChat(chat) && chat.id !== CONCIERGE_CHAT_ID)
+  /** An owner's Concierge chats: the main chat first, then the topic chats, oldest first. */
+  async listChats(owner: ConciergeOwner = GUARDIAN_OWNER): Promise<ConciergeChatRef[]> {
+    const main = await this.conciergeChat(await this.ensureChatId(owner));
+    const topics = (await this.deps.webchatRepo.listSessions("active", owner))
+      .filter((chat) => isConciergeChat(chat) && !this.isMainChat(chat))
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .map((chat) => ({ id: chat.id, name: chat.name, main: false }));
     return [...(main ? [main] : []), ...topics];
   }
 
   /**
-   * Starts a topic chat on the model the main chat uses, and answers it. With
-   * no name it is untitled (an empty name), and its first message names it.
+   * Starts a topic chat of `owner` on the model their main chat uses, and
+   * answers it. With no name it is untitled (an empty name), and its first
+   * message names it.
    */
-  async startTopicChat(name?: string): Promise<ConciergeChatRef> {
+  async startTopicChat(owner: ConciergeOwner, name?: string): Promise<ConciergeChatRef> {
     const trimmed = name?.trim() ?? "";
     if (name !== undefined && !trimmed) throw new Error("A topic chat needs a name");
-    const main = await this.deps.webchatRepo.getSession(await this.ensureChatId());
+    const main = await this.deps.webchatRepo.getSession(await this.ensureChatId(owner));
     const id = uuidv7();
     await this.deps.webchatRepo.createSession(
       id,
@@ -259,7 +360,7 @@ export class ConciergeService {
       CONCIERGE_AGENT_ID,
       "webchat",
       null,
-      { ownerKey: "guardian" },
+      { ownerKey: owner },
     );
     log.info("concierge topic chat started", { chatId: id });
     return { id, name: trimmed, main: false };
@@ -267,23 +368,33 @@ export class ConciergeService {
 
   /**
    * A Concierge chat is being archived or deleted. Its follows, its unfinished
-   * tasks and the events owed to it move to the main chat, and the Concierge
-   * says so there. The main chat is never retired: this throws for it.
+   * tasks and the events owed to it move to its owner's main chat, and the
+   * Concierge says so there. A main chat is never retired: this throws for one.
    */
   async retireChat(chatId: string, how: RetiredHow): Promise<void> {
-    if (chatId === CONCIERGE_CHAT_ID)
-      throw new Error("The main Concierge chat cannot be archived or deleted");
     const chat = await this.deps.webchatRepo.getSession(chatId);
-    if (!isConciergeChat(chat)) return;
-    const follows = (await this.attachedFollowing?.moveToMainChat(chatId)) ?? 0;
-    const tasks = await this.deps.tasks.repo.moveToMainChat(chatId);
+    if (chatId === CONCIERGE_CHAT_ID || (chat && this.isMainChat(chat)))
+      throw new Error("The main Concierge chat cannot be archived or deleted");
+    if (!chat || !isConciergeChat(chat)) return;
+    const owner = ownerOf(chat);
+    // A deleted chat's row goes; its owner stays known, so what still names it
+    // (a defer's wake-up) reaches that owner's main chat, never another's.
+    if (how === "deleted" && owner !== GUARDIAN_OWNER) {
+      const retired =
+        ((await this.deps.settingsRepo.get(RETIRED_CHATS_SETTING_KEY)) as Record<
+          string,
+          string
+        > | null) ?? {};
+      await this.deps.settingsRepo.set(RETIRED_CHATS_SETTING_KEY, { ...retired, [chatId]: owner });
+    }
+    const main = await this.ensureChatId(owner);
+    const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
+    const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     if (follows === 0 && tasks === 0) return;
-    const main = await this.findChatId();
-    if (!main) return;
     void this.runSystemTurn(
       main,
-      `<concierge_chat_retired name="${attr(chat?.name ?? "")}" how="${how}" follows="${follows}" tasks="${tasks}"/>`,
+      `<concierge_chat_retired name="${attr(chat.name)}" how="${how}" follows="${follows}" tasks="${tasks}"/>`,
       { quiet: true, inputLabel: "Concierge chat retired" },
     ).catch((error: unknown) =>
       log.warn("retired chat notice failed", {

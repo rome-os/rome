@@ -15,8 +15,10 @@ export interface FollowItemInput {
   reason: string;
   line: string;
   url?: string | null;
-  /** The Concierge chat its follow reports to. Null or absent is the main chat. */
+  /** The Concierge chat its follow reports to. Null or absent is the guardian's main chat. */
   chatId?: string | null;
+  /** Whose follow kept it. Absent is the guardian. */
+  ownerKey?: string;
 }
 
 /**
@@ -44,20 +46,28 @@ export class ConciergeFollowItemsRepository {
           line: item.line,
           url: item.url ?? null,
           chatId: item.chatId ?? null,
+          ownerKey: item.ownerKey ?? "guardian",
           createdAt: at,
         })),
       )
-      .onConflictDoNothing({ target: conciergeFollowItems.eventId })
+      .onConflictDoNothing({
+        target: [conciergeFollowItems.ownerKey, conciergeFollowItems.eventId],
+      })
       .returning();
   }
 
-  /** The event ids among `eventIds` that are already stored. */
-  async known(eventIds: string[]): Promise<Set<string>> {
+  /** The event ids among `eventIds` that are already stored for `owner`. */
+  async known(eventIds: string[], owner = "guardian"): Promise<Set<string>> {
     if (eventIds.length === 0) return new Set();
     const rows = await this.db
       .select({ eventId: conciergeFollowItems.eventId })
       .from(conciergeFollowItems)
-      .where(inArray(conciergeFollowItems.eventId, eventIds));
+      .where(
+        and(
+          eq(conciergeFollowItems.ownerKey, owner),
+          inArray(conciergeFollowItems.eventId, eventIds),
+        ),
+      );
     return new Set(rows.map((row) => row.eventId));
   }
 
@@ -72,20 +82,20 @@ export class ConciergeFollowItemsRepository {
       .orderBy(asc(conciergeFollowItems.createdAt));
   }
 
-  /** Every item no digest has included yet, important or not, oldest first. */
-  async owedToDigest(): Promise<ConciergeFollowItemRow[]> {
+  /** Every item of `owner` no digest has included yet, important or not, oldest first. */
+  async owedToDigest(owner = "guardian"): Promise<ConciergeFollowItemRow[]> {
     return this.db
       .select()
       .from(conciergeFollowItems)
-      .where(isNull(conciergeFollowItems.digestedAt))
+      .where(and(isNull(conciergeFollowItems.digestedAt), eq(conciergeFollowItems.ownerKey, owner)))
       .orderBy(asc(conciergeFollowItems.createdAt));
   }
 
-  /** Moves the items of Concierge chat `from` to the main chat. */
-  async moveToMainChat(from: string): Promise<void> {
+  /** Moves the items of Concierge chat `from` to its owner's main chat `to` (null for the guardian's). */
+  async moveToMainChat(from: string, to: string | null = null): Promise<void> {
     await this.db
       .update(conciergeFollowItems)
-      .set({ chatId: null })
+      .set({ chatId: to })
       .where(eq(conciergeFollowItems.chatId, from));
   }
 
@@ -111,12 +121,17 @@ export class ConciergeFollowItemsRepository {
    * Important items the Concierge had since `since`, newest first, so triage
    * knows what was already raised.
    */
-  async recentImportant(since: Date, limit: number): Promise<ConciergeFollowItemRow[]> {
+  async recentImportant(
+    since: Date,
+    limit: number,
+    owner = "guardian",
+  ): Promise<ConciergeFollowItemRow[]> {
     return this.db
       .select()
       .from(conciergeFollowItems)
       .where(
         and(
+          eq(conciergeFollowItems.ownerKey, owner),
           eq(conciergeFollowItems.decision, "important"),
           isNotNull(conciergeFollowItems.offeredAt),
           gte(conciergeFollowItems.createdAt, since),
