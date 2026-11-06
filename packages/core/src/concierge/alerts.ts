@@ -136,6 +136,8 @@ export class FollowBatcher {
 export interface ImportantDeliveryDeps {
   now(): number;
   isEnabled(): Promise<boolean>;
+  /** Whether Rome serves `owner` now. One who is not is told nothing, and their items stay owed. */
+  isServed?(owner: string): Promise<boolean>;
   /** When `owner`'s quiet window `at` falls in ends, or null when `at` is not quiet for them. */
   quietUntil(at: number, owner: string): Promise<number | null>;
   /** The important items owed, oldest first. */
@@ -226,8 +228,11 @@ export class ImportantDelivery {
     let failed = false;
     let quietEnd: number | null = null;
     const quietOf = new Map<string, number | null>();
+    const servedOf = new Map<string, boolean>();
     for (const group of groups.values()) {
       const owner = ownerOfItem(group[0]!);
+      if (!servedOf.has(owner)) servedOf.set(owner, (await this.deps.isServed?.(owner)) ?? true);
+      if (!servedOf.get(owner)) continue;
       if (!quietOf.has(owner)) quietOf.set(owner, await this.deps.quietUntil(now, owner));
       const ends = quietOf.get(owner) ?? null;
       if (ends !== null && ends > now) {

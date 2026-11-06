@@ -90,7 +90,6 @@ Diffs still owed to the model, each a change of its own:
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
-- A Concierge chat or a task chat it started is kept from other dashboard users when reached by its own id, but not yet when one of its turns or messages is reached by that turn's or message's id.
 - One group is one chat across all of Rome's accounts in it.
 - A Feishu person is one account across all of Rome's Feishu accounts, by the tenant-wide id.
 - The participants of a chat are the platform's member list.

@@ -252,7 +252,8 @@ export class IpcRpc {
     const actionContext = actionExecutionContext.getStore();
     if (actionContext?.actionName) {
       request.callerActionName = actionContext.actionName;
-      if (method.startsWith("connections.app.")) {
+      // A history read carries the chat it is made from, so private chats stay private.
+      if (method.startsWith("connections.app.") || method === "channels.query") {
         request.callerActionContext = {
           actor: actionContext.actor,
           channelContext: actionContext.channelContext,

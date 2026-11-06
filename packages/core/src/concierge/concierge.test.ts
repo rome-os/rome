@@ -26,6 +26,7 @@ import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./owner.js";
+import { createConciergeOwners } from "./owners.js";
 import {
   CONCIERGE_ACCOUNT,
   CONCIERGE_AGENT_ID,
@@ -84,7 +85,8 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
 }
 
 /** The line that opens every Concierge turn's input in the main chat. */
-const MAIN_LINE = '<concierge_chat id="concierge" name="Concierge" main="true"/>\n\n';
+const MAIN_LINE =
+  '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian"/>\n\n';
 
 /** What the Concierge has already said in its running turn, unless a test says it has not. */
 const ACKNOWLEDGEMENT: Row = {
@@ -1874,6 +1876,47 @@ describe("Concierge chat", () => {
       null,
       { ownerKey: "visitor:acct-ann" },
     );
+  });
+
+  it("opens every turn with the person the chat serves, who may be a visitor", async () => {
+    const allowed = new Set(["ann@example.com"]);
+    const owners = createConciergeOwners({
+      settingsRepo: {
+        get: (async (key: string) => (key === "guardianName" ? "Eric" : null)) as never,
+      },
+      visitorProfiles: {
+        getMany: async (ids: readonly string[]) =>
+          new Map(
+            ids.includes("acct-ann")
+              ? [["acct-ann", { email: "ann@example.com", avatarUrl: null }]]
+              : [],
+          ),
+      },
+      dashboardAccess: { isCloudEmailAllowed: (email: string) => allowed.has(email) },
+    });
+    const annMain = mainChatIdOf("visitor:acct-ann");
+    const service = new ConciergeService({
+      settingsRepo: { get: async () => null },
+      webchatRepo: {
+        getSession: async (id: string) =>
+          id === annMain
+            ? { id, agentName: CONCIERGE_AGENT_ID, ownerKey: "visitor:acct-ann" }
+            : { id, agentName: CONCIERGE_AGENT_ID, ownerKey: null },
+      },
+      owners,
+    } as unknown as ConciergeDeps);
+    expect(await service.turnHeader({ id: annMain, name: "Concierge", main: true })).toBe(
+      `<concierge_chat id="${annMain}" name="Concierge" main="true"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
+    );
+    expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toBe(
+      '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian" name="Eric"/>',
+    );
+    // A visitor is served while on the dashboard allow-list, the guardian always.
+    expect(await service.isServed("visitor:acct-ann")).toBe(true);
+    expect(await service.isServed("visitor:acct-unknown")).toBe(false);
+    allowed.clear();
+    expect(await service.isServed("visitor:acct-ann")).toBe(false);
+    expect(await service.isServed("guardian")).toBe(true);
   });
 
   it("leaves an existing chat and its model alone", async () => {

@@ -2806,6 +2806,26 @@ export class WebChatRepository {
     );
   }
 
+  /** The chat a turn ran in, by any of its stored messages; null when none is stored yet. */
+  async sessionIdOfTurn(turnId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ sessionId: romeAgentMessages.sessionId })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.turnId, turnId))
+      .limit(1);
+    return row?.sessionId ?? null;
+  }
+
+  /** The chat a stored message belongs to, or null. */
+  async sessionIdOfMessage(messageId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ sessionId: romeAgentMessages.sessionId })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, messageId))
+      .limit(1);
+    return row?.sessionId ?? null;
+  }
+
   async hasTurnInSession(sessionId: string, turnId: string): Promise<boolean> {
     const rows = await this.db
       .select({ id: romeAgentMessages.id })

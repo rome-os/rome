@@ -178,7 +178,11 @@ export function startConciergeEvents(
     deliver: async ({ chatId: from, prompt, quiet }) => {
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from);
-      return chatId !== null && (await service.runSystemTurn(chatId, prompt, { quiet }));
+      if (!chatId) return false;
+      // A visitor dropped from the dashboard allow-list is told nothing; their
+      // rows wait, and reach them once they are back.
+      if (!(await service.isServed(await service.ownerOfChat(chatId)))) return false;
+      return await service.runSystemTurn(chatId, prompt, { quiet });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });

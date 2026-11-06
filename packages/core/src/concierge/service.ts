@@ -39,91 +39,36 @@ import {
   ownerOf,
   storedChatId,
 } from "./owner.js";
+import {
+  CONCIERGE_AGENT_ID,
+  canOpenChat,
+  isConciergeAgent,
+  isConciergeChat,
+  isMainConciergeChat,
+  privateOwnerOf,
+  TASK_CHAT_TRIGGER_KIND,
+} from "./privacy.js";
+import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 
 import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
 
 const log = createLogger("concierge");
 
-/** The canonical id of the core agent behind the Concierge conversation. */
-export const CONCIERGE_AGENT_ID = "core:concierge";
 export { CONCIERGE_CHAT_ID };
+export {
+  CONCIERGE_AGENT_ID,
+  canOpenChat,
+  isConciergeAgent,
+  isConciergeChat,
+  isMainConciergeChat,
+  privateOwnerOf,
+  TASK_CHAT_TRIGGER_KIND,
+};
 /** The guardian setting that turns Concierge on. Any value but `true` is off. */
 const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
-/** `rome_sessions.trigger_kind` of a task chat Concierge started. */
-export const TASK_CHAT_TRIGGER_KIND = "concierge";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
-
-export function isConciergeAgent(agentName: string | null | undefined): boolean {
-  return agentName === CONCIERGE_AGENT_ID || agentName === "concierge";
-}
-
-/** Whether a dashboard chat is a Concierge chat: the main chat, or a topic chat. */
-export function isConciergeChat(
-  chat: { id: string; agentName?: string | null } | null | undefined,
-): boolean {
-  return !!chat && (chat.id === CONCIERGE_CHAT_ID || isConciergeAgent(chat.agentName));
-}
-
-/**
- * The one person a chat is private to: a Concierge chat's owner, and the
- * owner of a task chat a Concierge started. Null for any other chat, which
- * every dashboard user may open.
- */
-export function privateOwnerOf(
-  chat:
-    | {
-        id: string;
-        agentName?: string | null;
-        ownerKey?: string | null;
-        triggerKind?: string | null;
-      }
-    | null
-    | undefined,
-): ConciergeOwner | null {
-  if (!chat) return null;
-  if (isConciergeChat(chat) || chat.triggerKind === TASK_CHAT_TRIGGER_KIND) return ownerOf(chat);
-  return null;
-}
-
-/** Whether a chat is its owner's main Concierge chat. */
-export function isMainConciergeChat(chat: {
-  id: string;
-  agentName?: string | null;
-  ownerKey?: string | null;
-}): boolean {
-  return isConciergeChat(chat) && chat.id === mainChatIdOf(ownerOf(chat));
-}
-
-/** How far up a chain of forks the privacy check looks. */
-const MAX_FORK_DEPTH = 8;
-
-/**
- * Whether `owner` may open chat `chatId`: no for another owner's Concierge
- * chat or Concierge task chat, or a fork of one. Yes for any other chat,
- * and for one that does not exist, which the caller answers as it does today.
- */
-export async function canOpenChat(
-  getSession: (id: string) => Promise<{
-    id: string;
-    agentName?: string | null;
-    ownerKey?: string | null;
-    triggerKind?: string | null;
-    parentSessionId?: string | null;
-  } | null>,
-  chatId: string,
-  owner: string | null,
-): Promise<boolean> {
-  let id: string | null | undefined = chatId;
-  for (let depth = 0; id && depth < MAX_FORK_DEPTH; depth++) {
-    const chat = await getSession(id);
-    const privateTo = privateOwnerOf(chat);
-    if (privateTo !== null) return privateTo === owner;
-    id = chat?.parentSessionId;
-  }
-  return true;
-}
 
 /** The setting that keeps the owner of each visitor's deleted Concierge chat. */
 const RETIRED_CHATS_SETTING_KEY = "conciergeRetiredChats";
@@ -148,13 +93,22 @@ export function conciergeChatLine(chat: ConciergeChatRef): string {
   return `<concierge_chat id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"/>`;
 }
 
+/** The line naming the person a Concierge chat serves. */
+export function conciergeOwnerLine(owner: OwnerProfile): string {
+  const fields = [
+    `role="${owner.role}"`,
+    ...(owner.name ? [`name="${attr(owner.name)}"`] : []),
+    ...(owner.email ? [`email="${attr(owner.email)}"`] : []),
+  ];
+  return `<concierge_owner ${fields.join(" ")}/>`;
+}
+
 /**
  * The dashboard's chat operations a task chat needs beyond saying something
  * in it: starting the chat, and its turns' state. They belong to the
  * dashboard and to Agents, not to Chats.
  */
 export interface TaskChats {
-  /** Start a chat for the guardian and answer its id. */
   /** Starts a dashboard chat owned by `ownerKey`. */
   startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
   /**
@@ -179,6 +133,8 @@ export interface ConciergeDashboard {
 export interface ConciergeDeps {
   skillCatalog: Pick<SkillCatalog, "get">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
+  /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
+  owners?: ConciergeOwners;
   webchatRepo: Pick<
     WebChatRepository,
     | "createSession"
@@ -290,6 +246,25 @@ export class ConciergeService {
     );
     log.info("concierge chat created", { chatId: id });
     return id;
+  }
+
+  /** Who each owner is, and whether Rome still serves them. */
+  get owners(): ConciergeOwners {
+    return this.deps.owners ?? ALL_OWNERS_SERVED;
+  }
+
+  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a visitor while on the dashboard allow-list. */
+  isServed(owner: ConciergeOwner): Promise<boolean> {
+    return this.owners.isServed(owner);
+  }
+
+  /**
+   * What every turn in a Concierge chat opens with: the chat it runs in, and
+   * the person it serves, who may not be the guardian.
+   */
+  async turnHeader(chat: ConciergeChatRef): Promise<string> {
+    const owner = await this.owners.profileOf(await this.ownerOfChat(chat.id));
+    return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}`;
   }
 
   /** Whether a chat is its owner's main Concierge chat. */
@@ -526,7 +501,7 @@ export class ConciergeService {
     const chat = await this.conciergeChat(chatId);
     const prompt =
       chat && !params.prompt.startsWith("<concierge_chat ")
-        ? `${conciergeChatLine(chat)}\n\n${params.prompt}`
+        ? `${await this.turnHeader(chat)}\n\n${params.prompt}`
         : params.prompt;
     return { ...params, threadId: chatId, sessionId, prompt };
   }

@@ -70,6 +70,7 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 - The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
 - While the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge. App users have none.
 - A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist.
+- A visitor dropped from the dashboard allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
 - Digest times, quiet hours and the time zone they are read in are each owner's own.
 - A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat.

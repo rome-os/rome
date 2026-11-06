@@ -62,7 +62,9 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 ### Owners
 
 - **The guardian and every visitor on the dashboard allow-list each have their own Concierge while it is on.** Each one's main chat is made the first time they open it. App users have none.
-- **A Concierge chat, and every task chat it starts, answers as not found to anyone but its owner,** the guardian included, whether read, written, listed or searched.
+- **A Concierge chat, and every task chat it starts, answers as not found to anyone but its owner,** the guardian included, whether read, written, listed or searched, and whether reached by the chat's id or by the id of one of its turns or messages. A history read made from one person's chat leaves out every other person's Concierge and task chats.
+- **Every Concierge turn's input names the person the chat serves,** right after the chat it runs in. Memory is shared and describes the guardian, so the Concierge never takes what it says as true of a visitor.
+- **A visitor dropped from the dashboard allow-list is served nothing:** their events are not triaged or kept, and no alert, digest or task event reaches their chats. Their follows stay, and the next event after they are back on the list is served again.
 - **Only a chat records its owner.** Follows and task rows reach their owner through the chat they report to, and a chat with no owner is the guardian's. A kept event also records its owner, so that one event is kept once per owner.
 - **Triage runs once per batch for each owner,** with that owner's follows, what that owner was told recently and that owner's time zone. Two owners who follow the same thing each hear its events, and the subscription at the source stays while anyone follows it.
 - **Quiet hours, the hourly cap of important turns and the digest are each owner's own.** One owner's quiet hours never hold another's alerts.

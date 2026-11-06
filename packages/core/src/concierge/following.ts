@@ -550,6 +550,7 @@ export function startConciergeFollowing(
   const delivery = new ImportantDelivery({
     now,
     isEnabled: () => service.isEnabled(),
+    isServed: (owner) => service.isServed(owner),
     quietUntil,
     owed: () => deps.items.owedToConcierge(),
     // One turn per Concierge chat, each counted against the hourly cap.
@@ -595,7 +596,15 @@ export function startConciergeFollowing(
       const owner = event.owner ?? GUARDIAN_OWNER;
       byOwner.set(owner, [...(byOwner.get(owner) ?? []), event]);
     }
-    for (const [owner, ownerEvents] of byOwner) await triageFor(owner, ownerEvents);
+    for (const [owner, ownerEvents] of byOwner) {
+      // A visitor dropped from the dashboard allow-list keeps their follows,
+      // but their events are not triaged or kept until they are back.
+      if (!(await service.isServed(owner))) {
+        log.info("following skipped an owner no longer served", { events: ownerEvents.length });
+        continue;
+      }
+      await triageFor(owner, ownerEvents);
+    }
     await delivery.deliver();
   };
 
@@ -698,6 +707,7 @@ export function startConciergeFollowing(
   /** Hands an owner's owed digest to their main chat as one turn, an empty one included. */
   const deliverDigest = async (owner: ConciergeOwner): Promise<{ items: number }> => {
     if (!(await service.isEnabled())) return { items: 0 };
+    if (!(await service.isServed(owner))) return { items: 0 };
     // An empty digest still runs, with count="0", so the person hears that
     // nothing new came in.
     const owed = await deps.items.owedToDigest(owner);

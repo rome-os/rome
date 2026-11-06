@@ -1,6 +1,5 @@
 import {
   canOpenChat,
-  conciergeChatLine,
   isConciergeChat,
   isMainConciergeChat,
   privateOwnerOf,
@@ -2099,6 +2098,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
     app.use(path, privateChatGate);
   }
+  // A turn or a message reached by its own id is its chat's, and kept the same way.
+  const privateByIdGate =
+    (chatOf: (id: string) => Promise<string | null>): MiddlewareHandler =>
+    async (c, next) => {
+      const chatId = await chatOf(c.req.param("id") ?? c.req.param("turnId") ?? "");
+      if (
+        chatId &&
+        !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, await callerOwner()))
+      ) {
+        return c.json({ error: "Not found" }, 404);
+      }
+      await next();
+    };
+  const chatOfTurn = async (turnId: string) =>
+    streamsByTurnId.get(turnId)?.sessionId ?? (await deps.webchatRepo.sessionIdOfTurn(turnId));
+  const chatOfMessage = (messageId: string) => deps.webchatRepo.sessionIdOfMessage(messageId);
+  app.use("/chat/turns/:turnId/*", privateByIdGate(chatOfTurn));
+  app.use("/chat/messages/:id/*", privateByIdGate(chatOfMessage));
+  app.use("/sessions/messages/:id/*", privateByIdGate(chatOfMessage));
   /** Leaves out the chats private to someone other than the caller. */
   const visibleTo = (owner: string | null) => (session: Parameters<typeof privateOwnerOf>[0]) => {
     const privateTo = privateOwnerOf(session);
@@ -3507,14 +3525,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const noticedPrompt = automated
       ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
       : contextPrompt;
-    // A Concierge turn opens with the chat it runs in, on each turn, so a
-    // rename reaches a running session (rome-os/rome#1739).
+    // A Concierge turn opens with the chat it runs in and the person it
+    // serves, on each turn, so a rename reaches a running session (rome-os/rome#1739).
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;
-    const promptText = conciergeChat
-      ? `${conciergeChatLine(conciergeChat)}\n\n${noticedPrompt}`
-      : noticedPrompt;
+    const promptText =
+      conciergeChat && deps.concierge
+        ? `${await deps.concierge.turnHeader(conciergeChat)}\n\n${noticedPrompt}`
+        : noticedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 

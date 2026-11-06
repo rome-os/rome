@@ -187,6 +187,8 @@ function setup(
   ]);
   /** Each visitor's Concierge chat and its owner; any other chat is the guardian's. */
   const chatOwners = new Map<string, string>();
+  /** Visitors dropped from the dashboard allow-list. */
+  const dropped = new Set<string>();
   /** The chat whose turn calls the follow actions. */
   const calling = { chat: null as string | null };
   /** The chat each Concierge turn ran in, in order. */
@@ -347,6 +349,7 @@ function setup(
     isEnabled: async () => true,
     findChatId: async (owner = GUARDIAN_OWNER) => mainChatIdOf(owner),
     ownerOfChat,
+    isServed: async (owner: string) => !dropped.has(owner),
     conciergeChat: async (id: string) => liveChats.get(id) ?? null,
     deliveryChat: async (id: string | null | undefined) =>
       id && liveChats.has(id) ? id : mainChatIdOf(await ownerOfChat(id)),
@@ -379,6 +382,7 @@ function setup(
     items,
     liveChats,
     chatOwners,
+    dropped,
     calling,
     turnChats,
     following: () => following!,
@@ -1333,6 +1337,33 @@ describe("follows in several Concierge chats", () => {
     await fire(s, "e2");
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     expect(s.turnChats).toEqual(["concierge"]);
+    s.stop();
+  });
+
+  it("serves a visitor dropped from the allow-list nothing, and resumes once they are back", async () => {
+    rs.useFakeTimers();
+    const s = withAnn(setup({ triage: { e1: "important", e2: "important", e3: "digest" } }));
+    s.calling.chat = annMain;
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    s.calling.chat = null;
+    s.dropped.add(ANN);
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    // Not triaged, not kept, not told, and nothing waits in their digest.
+    expect(s.triaged.flat()).toEqual([]);
+    expect(s.turnChats).toEqual([]);
+    expect(await s.items.owedToDigest(ANN)).toEqual([]);
+    await s.action("core:concierge_digest").execute({ owner: ANN }, {} as never);
+    expect(s.turnChats).toEqual([]);
+    // Their follow stays, and the next event after they are back is told.
+    const watch = (await s.following().list(ANN)).connectors.find((c) => c.service === "github")
+      ?.capabilities.watch;
+    expect(watch?.follows?.map((f) => f.target)).toEqual(["acme/widgets"]);
+    s.dropped.delete(ANN);
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats).toEqual([annMain]);
+    expect(s.turns.at(-1)).toContain("line for e2");
     s.stop();
   });
 

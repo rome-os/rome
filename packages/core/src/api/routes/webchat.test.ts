@@ -19,6 +19,7 @@ import {
   type SubmitInputOptions,
 } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
+import { webchatChannel, webchatHistoryReader } from "../../chats/dashboard/dashboard-account.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import type {
@@ -229,6 +230,74 @@ describe("Webchat API", () => {
         .sort();
     expect(await listed(visitor)).toEqual(["shared", "visitor-main"]);
     expect(await listed(guardian)).toEqual(["concierge", "guardian-task", "shared"]);
+  });
+
+  it("keeps a Concierge chat's turns, messages and history private when reached by their own ids", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:a");
+    // Each turn keeps a trace, which the message routes read by its id, and a line said.
+    const said = async (chatId: string, turnId: string) => {
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${chatId}-trace`,
+        sessionId: chatId,
+        turnId,
+        startSeq: 0,
+        blocks: [{ type: "result", content: `said in ${chatId}` }],
+      });
+      await deps.webchatRepo.addBackendMessage(chatId, turnId, [
+        { type: "text", content: `said in ${chatId}` },
+      ]);
+      return `${chatId}-trace`;
+    };
+    const guardianMessage = await said("concierge", "turn-g");
+    const visitorMessage = await said("visitor-main", "turn-v");
+    const status = async (actor: typeof guardian | typeof visitor, path: string, method = "GET") =>
+      (await runWithSessionActor(actor, () => app.request(path, { method }))).status;
+
+    for (const [actor, turn, message] of [
+      [visitor, "turn-g", guardianMessage],
+      [guardian, "turn-v", visitorMessage],
+    ] as const) {
+      const stream = await runWithSessionActor(actor, () =>
+        app.request(`/chat/turns/${turn}/stream`),
+      );
+      // Refused as another person's, not merely a turn with no stream.
+      expect(stream.status).toBe(404);
+      expect(await stream.json()).toEqual({ error: "Not found" });
+      expect(await status(actor, `/chat/turns/${turn}/interrupt`, "POST")).toBe(404);
+      expect(await status(actor, `/chat/messages/${message}/content`)).toBe(404);
+      expect(await status(actor, `/sessions/messages/${message}/content`)).toBe(404);
+    }
+    // The owner still reaches their own.
+    expect(await status(visitor, `/chat/messages/${visitorMessage}/content`)).toBe(200);
+    expect(await status(guardian, `/chat/messages/${guardianMessage}/content`)).toBe(200);
+
+    // A history read made from the visitor's chat leaves the guardian's out.
+    const channel = webchatChannel(deps.webchatRepo);
+    const read = (from: string) =>
+      webchatHistoryReader.run({ chatId: from }, () =>
+        channel.messages!.query({ since: new Date(0) }),
+      );
+    const chatsOf = async (from: string) =>
+      [...new Set((await read(from)).map((m) => m.chatId))].sort();
+    expect(await chatsOf("visitor-main")).toEqual(["visitor-main"]);
+    expect(await chatsOf("concierge")).toEqual(["concierge"]);
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
@@ -3934,6 +4003,8 @@ describe("Webchat API", () => {
         switchIfExhausted: async () => null,
         conciergeChat: async (id: string) =>
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
+        turnHeader: async (chat: { id: string; name: string; main: boolean }) =>
+          `<concierge_chat id="${chat.id}" name="${chat.name}" main="${chat.main}"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
       } as never;
       await deps.webchatRepo.createSession(
         "topic-1",
@@ -3956,7 +4027,7 @@ describe("Webchat API", () => {
         await drainTurn(app, sent);
       }
       expect(sentTurns[0]?.prompt).toBe(
-        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n\nhello',
+        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n\nhello',
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
     });

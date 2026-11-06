@@ -1,3 +1,4 @@
+import { WEBCHAT_CHANNEL, webchatHistoryReader } from "../chats/dashboard/dashboard-account.js";
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
@@ -322,7 +323,7 @@ export class WorkerRpcServer {
           this.services.sendApprovalCard(
             parseParams("approvals.sendCard", ApprovalCardParams, params),
           ),
-        "channels.query": (params) => this.handleChannelsQuery(params),
+        "channels.query": (params, context) => this.handleChannelsQuery(params, context),
         "agentNames.resolve": (params) => {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
           return this.services.agentNames.resolve(name);
@@ -536,18 +537,27 @@ export class WorkerRpcServer {
     return await this.services.channelsService.send(channel, chatId as ChatId, message);
   }
 
-  private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
+  private async handleChannelsQuery(
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<ChannelMessage[]> {
     const { channel, chatId, since, after, limit } = parseParams(
       "channels.query",
       ChannelsQueryParams,
       params,
     );
-    return await this.services.channelsService.query(channel, {
-      ...(chatId ? { chatId: chatId as ChatId } : {}),
-      ...(since ? { since: new Date(since) } : {}),
-      ...(after ? { after } : {}),
-      ...(limit ? { limit } : {}),
-    });
+    // The dashboard chat reads as the chat the calling action's turn runs in.
+    const caller = context?.callerActionContext?.channelContext;
+    const readingChat =
+      caller?.channel === WEBCHAT_CHANNEL && caller.threadId ? caller.threadId : null;
+    return await webchatHistoryReader.run({ chatId: readingChat }, () =>
+      this.services.channelsService.query(channel, {
+        ...(chatId ? { chatId: chatId as ChatId } : {}),
+        ...(since ? { since: new Date(since) } : {}),
+        ...(after ? { after } : {}),
+        ...(limit ? { limit } : {}),
+      }),
+    );
   }
 
   private async handleEmailIngestInbound(params: unknown): Promise<EmailInboundResult> {
