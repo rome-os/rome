@@ -7,7 +7,8 @@ import type { ModelSession, ModelSessionParams } from "../../../../core/agent-ru
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
-import { ROME_CREDITS_MODEL_PROVIDER_ID, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
+import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
+import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "../../../../core/model-selector.js";
 
 const codexModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)

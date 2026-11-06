@@ -1,8 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import {
-  codexAppServerConfigArgs,
-  ROME_CREDITS_MODEL_PROVIDER_ID,
-} from "./rome-credits-provider.js";
+import { codexAppServerConfigArgs } from "./rome-credits-provider.js";
+import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 
 const BASE_ARGS = [
   "-c",
