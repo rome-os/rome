@@ -473,9 +473,10 @@ export async function buildConciergeTools(
           const brief = requireString(args, "brief");
           const requestedSkill = optionalString(args, "skill");
           const skill = requestedSkill ? service.deps.skillCatalog.get(requestedSkill) : undefined;
-          if (args.skill !== undefined && !skill) {
+          // Like the other optional fields, null or empty means no skill.
+          if (requestedSkill && !skill) {
             throw new Error(
-              `Unknown skill: ${String(args.skill)}. Pass the exact name from the slash command.`,
+              `Unknown skill: ${requestedSkill}. Pass the exact name from the slash command.`,
             );
           }
           const taskId = optionalString(args, "taskId");

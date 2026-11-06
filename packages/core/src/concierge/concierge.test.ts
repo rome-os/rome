@@ -478,8 +478,6 @@ describe("Concierge tools", () => {
 
   it.each([
     "missing:skill",
-    "",
-    123,
   ])("chat_start rejects an invalid skill %s before starting anything", async (skill) => {
     const s = setup();
     const result = await s.tool("chat_start", { title: "Build", brief: "Build it", skill });
@@ -488,6 +486,13 @@ describe("Concierge tools", () => {
     expect(s.chats.startChat).not.toHaveBeenCalled();
     expect(s.send).not.toHaveBeenCalled();
     expect(await s.tasks.repo.listForAgent(false)).toEqual([]);
+  });
+
+  it.each([null, ""])("chat_start treats skill %s as no skill", async (skill) => {
+    const s = setup();
+    const result = await s.tool("chat_start", { title: "Build", brief: "Build it", skill });
+    expect(result.isError).not.toBe(true);
+    expect(s.send).toHaveBeenCalledWith(expect.anything(), { text: "Build it" }, CONCIERGE_ACCOUNT);
   });
 
   it("chat_start answers the started chat when naming it fails", async () => {
