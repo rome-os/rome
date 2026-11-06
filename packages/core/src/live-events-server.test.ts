@@ -337,6 +337,7 @@ describe("live events WebSocket", () => {
     await deps.webchatRepo.createSession("sess-running", "Running");
     const turn = deps.agentTurnStreamRegistry.register({
       sessionId: "sess-running",
+      chatId: "sess-running",
       turnId: "turn-1",
       agentName: "main",
     });

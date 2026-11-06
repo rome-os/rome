@@ -298,15 +298,21 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
           try {
             for await (const msg of handle.events) {
+              // Recorded first, so a turn that opens its conversation has its
+              // row before its stream can be asked for.
+              if (recorder) {
+                await recordAgentTraceBestEffort(recorder, msg, log, {
+                  turnId: handle.turnId,
+                  source: "agent-session-bridge",
+                });
+              }
               if (!liveStream && msg.type === "turn_start" && this.turnStreams) {
                 try {
                   liveStream = this.turnStreams.register({
                     sessionId: msg.sessionId,
-                    // A dashboard turn's chat is its thread; the session id is
-                    // the agent's runtime session, not a chat.
-                    ...(thread?.channel === "webchat" && thread.threadId
-                      ? { chatId: thread.threadId }
-                      : {}),
+                    // The conversation the turn is recorded in; the session id
+                    // is the agent's runtime session, not a chat.
+                    chatId: romeSessionId,
                     turnId: msg.turnId,
                     agentName: session.key.agentName,
                     ...(thread?.connectionId
@@ -328,12 +334,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 }
               }
               liveStream?.publish(msg);
-              if (recorder) {
-                await recordAgentTraceBestEffort(recorder, msg, log, {
-                  turnId: handle.turnId,
-                  source: "agent-session-bridge",
-                });
-              }
               stream.send(msg);
             }
             stream.close();

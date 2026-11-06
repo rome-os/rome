@@ -85,15 +85,17 @@ export function canOpen(chat: ChatPrivacyRow | null | undefined, owner: string |
 }
 
 /**
- * Whether `owner` may open chat `chatId`. One that does not exist is open,
- * and its caller answers as it does today.
+ * Whether `owner` may open chat `chatId`. It fails closed: only a chat that
+ * exists and passes {@link canOpen} is open, and one that cannot be found is
+ * not found to anyone.
  */
 export async function canOpenChat(
   getSession: (id: string) => Promise<ChatPrivacyRow | null>,
   chatId: string,
   owner: string | null,
 ): Promise<boolean> {
-  return canOpen(await getSession(chatId), owner);
+  const chat = await getSession(chatId);
+  return chat !== null && canOpen(chat, owner);
 }
 
 /** The columns of a chat row the policy reads, for a query to filter by. */

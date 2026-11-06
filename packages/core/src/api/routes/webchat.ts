@@ -1,5 +1,4 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
-import { canOpen } from "../../concierge/privacy.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -2076,10 +2075,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // A Concierge chat and the task chats it starts are their owner's alone:
   // to anyone else they do not exist (docs/domains/chats.md#concierge-chat).
   const callerOwner = currentChatOwner;
+  // Fails closed: only a chat that exists and the caller may open passes.
+  // Two routes share the pattern without naming a chat, and pass through.
   const privateChatGate: MiddlewareHandler = async (c, next) => {
-    const sessionId = c.req.param("id") ?? c.req.param("sessionId");
+    if (/\/chat\/sessions\/search$|\/sessions\/messages\//.test(c.req.path)) return next();
+    const sessionId = c.req.param("id") ?? c.req.param("sessionId") ?? "";
     if (
-      sessionId &&
       !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, await callerOwner()))
     ) {
       return c.json({ error: "Session not found" }, 404);
@@ -2098,30 +2099,33 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (!(await openTo(id, await callerOwner()))) return c.json({ error: "Not found" }, 404);
       await next();
     };
+  // Fails closed: open only when the chats found are all ones the caller may
+  // open, and at least one is found.
   const chatsOpenTo = async (chatIds: (string | null | undefined)[], owner: string | null) => {
-    for (const chatId of chatIds) {
-      if (chatId && !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
+    const found = chatIds.filter((chatId): chatId is string => Boolean(chatId));
+    if (found.length === 0) return false;
+    for (const chatId of found) {
+      if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
         return false;
       }
     }
     return true;
   };
-  // A turn answers for the chat it runs in: a dashboard turn's, a fork's or a
-  // subagent's, as its stream records it from its start, else the stored
-  // turn's. A turn whose chat is gone is not found to anyone, so a buffered
-  // turn of a deleted private chat cannot be replayed.
+  // A turn answers for the chat it runs in: its dashboard stream's, its
+  // registered stream's (every one names the chat it is recorded in), else
+  // its stored messages'. A turn whose chat is gone, or that names none, is
+  // not found to anyone.
   const turnOpenTo = async (turnId: string, owner: string | null) => {
-    const chatIds = [
-      streamsByTurnId.get(turnId)?.sessionId,
-      deps.agentTurnStreamRegistry.get(turnId)?.chatId,
-      await deps.webchatRepo.sessionIdOfTurn(turnId),
-    ];
-    for (const chatId of chatIds) {
-      if (!chatId) continue;
-      const chat = await deps.webchatRepo.getSession(chatId);
-      if (!chat || !canOpen(chat, owner)) return false;
-    }
-    return true;
+    const registered = deps.agentTurnStreamRegistry.get(turnId);
+    if (registered && !registered.chatId) return false;
+    return chatsOpenTo(
+      [
+        streamsByTurnId.get(turnId)?.sessionId,
+        registered?.chatId,
+        await deps.webchatRepo.sessionIdOfTurn(turnId),
+      ],
+      owner,
+    );
   };
   const messageOpenTo = async (messageId: string, owner: string | null) =>
     chatsOpenTo([await deps.webchatRepo.sessionIdOfMessage(messageId)], owner);

@@ -133,9 +133,6 @@ export function createSubagentExecutionService(deps: {
           projectPath: parentSession?.projectPath,
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
-          // A parent deleted while the child was being opened takes its owner
-          // and privacy with it, so the child is not made.
-          requireParent: parentSession !== null,
         });
         // A subagent's conversation is minted under its own session id.
         try {

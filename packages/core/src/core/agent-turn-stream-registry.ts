@@ -2,8 +2,8 @@ import type { ChatRef, StreamAgentEvent } from "@rome-os/app-runtime";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;
-  /** The dashboard chat (rome session) the turn runs in, when it runs in one. */
-  chatId?: string;
+  /** The conversation (rome session) the turn is recorded in. */
+  chatId: string;
   turnId: string;
   agentName: string;
   conversation?: ChatRef;
@@ -25,7 +25,7 @@ interface MutableAgentTurnStream extends ActiveAgentTurnStream {
 export interface AgentTurnStreamRegistry {
   register(input: {
     sessionId: string;
-    chatId?: string;
+    chatId: string;
     turnId: string;
     agentName: string;
     conversation?: ChatRef;

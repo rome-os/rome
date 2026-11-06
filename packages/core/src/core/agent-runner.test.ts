@@ -603,6 +603,61 @@ describe("AgentRunner", () => {
     }
   });
 
+  it("does not run a fork of a chat that is gone, and publishes no stream for it", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const turnStreams = createAgentTurnStreamRegistry();
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn() {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: "x",
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Noted", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo, turnStreams);
+      // The task chat the fork is of was deleted before the fork was saved.
+      await expect(
+        collectMessages(
+          runner.runForked({
+            agentName: "main",
+            sourceSessionId: "source-session",
+            channelThreadKey: "webchat:task-chat",
+            prompt: "a note",
+            threadContext: {
+              channel: "webchat",
+              threadId: "task-chat",
+              romeSessionId: "task-chat",
+            },
+            label: "feedback",
+          }),
+        ),
+      ).rejects.toThrow("was not found");
+      expect(await repo.getSession("fork-session")).toBeNull();
+      expect(turnStreams.get("fork-turn")).toBeUndefined();
+    } finally {
+      testDb.close();
+    }
+  });
+
   it("stamps a fork of a visitor's task chat private to them when it is made", async () => {
     const testDb = createTestDb();
     try {
@@ -2097,7 +2152,9 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
-      const runner = new AgentRunner(manager, agentLoader);
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession("fork-iso", "Fork source");
+      const runner = new AgentRunner(manager, agentLoader, repo);
       const first = await collectMessages(
         runner.run({ agentName: "test-main", prompt: "Hi", channelThreadKey: "webchat:fork-iso" }),
       );
@@ -2209,7 +2266,8 @@ describe("AgentRunner", () => {
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
-    return new AgentRunner(manager, agentLoader);
+    // A recorded run has its conversation's row, which its subagents need.
+    return new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
@@ -3747,6 +3805,7 @@ describe("AgentRunner", () => {
         openSession: makeOpenSessionFromRun("mock", runImplNested),
       };
       const runner = createRunner(provider, lifecycle, { keepAliveAcrossTurns: true });
+      await new ChatsWebChatRepository(testDb.db).createSession("session-subagents", "Chat");
 
       await collectMessages(
         runner.run({

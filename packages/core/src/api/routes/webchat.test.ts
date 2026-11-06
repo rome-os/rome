@@ -251,6 +251,32 @@ describe("Webchat API", () => {
     expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
   });
 
+  it("finds no chat, turn or message it cannot place in a chat that exists", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const status = async (path: string) =>
+      (await runWithSessionActor(guardian, () => app.request(path))).status;
+    // A chat that does not exist, and a turn and a message that name none.
+    expect(await status("/chat/sessions/missing-chat/messages")).toBe(404);
+    expect(await status("/chat/turns/unknown-turn/stream")).toBe(404);
+    expect(await status("/chat/messages/unknown-message/content")).toBe(404);
+    // A registered turn whose chat is gone.
+    const turn = deps.agentTurnStreamRegistry.register({
+      sessionId: "runtime",
+      chatId: "deleted-chat",
+      turnId: "orphan-turn",
+      agentName: "main",
+    });
+    turn.finish();
+    const orphan = await runWithSessionActor(guardian, () =>
+      app.request("/chat/turns/orphan-turn/stream"),
+    );
+    expect(orphan.status).toBe(404);
+    expect(await orphan.json()).toEqual({ error: "Not found" });
+    // Search and message content share the gated patterns, and still answer.
+    expect(await status("/chat/sessions/search?q=x")).toBe(200);
+  });
+
   it("refuses another person's live private turn before any of its messages is stored", async () => {
     const app = createWebchatRuntime(deps).routes;
     const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
@@ -4187,7 +4213,7 @@ describe("Webchat API", () => {
       expect(asGuardian.status).toBe(404);
     });
 
-    it("keeps a deleted private chat's registered fork turn from everyone, and an agent's runtime turn open", async () => {
+    it("keeps a deleted private chat's registered fork turn from everyone, and an ordinary chat's turn open", async () => {
       await deps.webchatRepo.createSession(
         "guardian-task",
         "Task",
@@ -4218,10 +4244,12 @@ describe("Webchat API", () => {
         turnId: "fork-turn",
         agentName: "main",
       });
-      // A turn whose stream names only the agent's runtime session, as a
-      // channel turn's does, belongs to no chat and stays as before.
+      // A channel turn's stream names its runtime session and the ordinary
+      // chat it is recorded in, which everyone may open.
+      await deps.webchatRepo.createSession("channel-chat", "Channel chat");
       const channelTurn = deps.agentTurnStreamRegistry.register({
         sessionId: "runtime-session",
+        chatId: "channel-chat",
         turnId: "channel-turn",
         agentName: "main",
       });
@@ -5911,6 +5939,8 @@ describe("Webchat API", () => {
       }) as unknown as Session;
 
     beforeEach(async () => {
+      // A fork is a child of the chat it came from, which must exist.
+      await deps.webchatRepo.createSession("parent-chat", "Parent chat");
       for (const id of [FORK_ID, LEGACY_FORK_ID]) {
         await deps.webchatRepo.ensureRomeSession({
           id,
@@ -6351,7 +6381,12 @@ describe("Webchat API", () => {
       const running = `event: session_running\ndata: {"sessionId":"${sessionId}","running":true}`;
       const stopped = `event: session_running\ndata: {"sessionId":"${sessionId}","running":false}`;
       const register = (turnId: string, id = sessionId) =>
-        deps.agentTurnStreamRegistry.register({ sessionId: id, turnId, agentName: "main" });
+        deps.agentTurnStreamRegistry.register({
+          sessionId: id,
+          chatId: id,
+          turnId,
+          agentName: "main",
+        });
 
       const first = register("turn-1");
       let streamed = await readSseUntil(reader, running);
@@ -6390,6 +6425,7 @@ describe("Webchat API", () => {
 
       const turn = deps.agentTurnStreamRegistry.register({
         sessionId,
+        chatId: sessionId,
         turnId: "branch-turn",
         agentName: "main",
       });
@@ -6414,6 +6450,7 @@ describe("Webchat API", () => {
       // session without the detached surface, so the refusal is deliberate and
       // keeps the failure loud.
       const forkId = "sess-fork-backend-continuation";
+      await deps.webchatRepo.createSession("parent-chat", "Parent chat");
       await deps.webchatRepo.ensureRomeSession({
         id: forkId,
         type: "fork",

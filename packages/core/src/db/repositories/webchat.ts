@@ -250,9 +250,6 @@ export interface AddTurnRecapMessageInput {
 
 export interface EnsureRomeSessionInput {
   id: string;
-  /** Refuse to make the child when its parent no longer exists, so it never
-   *  loses the owner and privacy it would have taken from that parent. */
-  requireParent?: boolean;
   type: RomeSessionType;
   name: string;
   agentName: string | null;
@@ -1001,53 +998,67 @@ export class WebChatRepository {
     });
   }
 
+  /**
+   * Saves a session row unless it exists. A child session (a fork, a
+   * subagent: anything naming `parentSessionId`) is saved in one transaction
+   * with the read of its parent, and takes the parent's owner, and its
+   * privacy when the parent is private. A parent that no longer exists makes
+   * this throw and saves nothing, so no child is ever made without them.
+   */
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
-    // A child session (a fork, a subagent) takes its parent's owner. A child of
-    // a private chat is private to that owner from the start, whatever it is,
-    // and stays so after its parent is gone.
-    const parent = input.parentSessionId ? await this.getSession(input.parentSessionId) : null;
-    if (input.requireParent && !parent) {
-      throw new Error(`Parent Rome session "${input.parentSessionId}" was not found`);
-    }
-    const privateChild = privateOwnerOf(parent) !== null;
     // A chat is a channel row on the webchat channel, at its own address,
     // whichever of the two types the caller names it by.
     const chat =
       input.type === "webchat" || (input.type === "channel" && input.sourceChannel === "webchat");
-    await this.db
-      .insert(romeSessions)
-      .values({
-        id: input.id,
-        ownerKey: parent?.ownerKey ?? null,
-        name: input.name,
-        personaId: null,
-        projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
-        projectPath: input.projectPath ?? null,
-        deviceFolder: input.deviceFolder ?? null,
-        largeModelSelection: null,
-        agentName: input.agentName,
-        type: storedSessionType(input.type),
-        sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
-        sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
-        sourceThreadName: input.sourceThreadName ?? null,
-        sourceThreadType: input.sourceThreadType ?? null,
-        triggerKind: privateChild
+    const row = (parent: typeof romeSessions.$inferSelect | null) => ({
+      id: input.id,
+      ownerKey: parent?.ownerKey ?? null,
+      name: input.name,
+      personaId: null,
+      projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
+      projectPath: input.projectPath ?? null,
+      deviceFolder: input.deviceFolder ?? null,
+      largeModelSelection: null,
+      agentName: input.agentName,
+      type: storedSessionType(input.type),
+      sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
+      sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
+      sourceThreadName: input.sourceThreadName ?? null,
+      sourceThreadType: input.sourceThreadType ?? null,
+      triggerKind:
+        privateOwnerOf(parent) !== null
           ? PRIVATE_CHILD_TRIGGER_KIND
           : (input.trigger?.triggerKind ?? null),
-        triggerName: input.trigger?.triggerName ?? null,
-        triggerActionName: input.trigger?.triggerActionName ?? null,
-        triggerExecutionId: input.trigger?.triggerExecutionId ?? null,
-        rootActionExecutionId: input.trigger?.rootActionExecutionId ?? null,
-        parentActionExecutionId: input.trigger?.parentActionExecutionId ?? null,
-        parentSessionId: input.parentSessionId ?? null,
-        parentTurnId: input.parentTurnId ?? null,
-        handoffSpec: null,
-        createdAt: now,
-        activityAt: now,
-        lastSeenActivityAt: chat ? now : null,
-      })
-      .onConflictDoNothing({ target: romeSessions.id });
+      triggerName: input.trigger?.triggerName ?? null,
+      triggerActionName: input.trigger?.triggerActionName ?? null,
+      triggerExecutionId: input.trigger?.triggerExecutionId ?? null,
+      rootActionExecutionId: input.trigger?.rootActionExecutionId ?? null,
+      parentActionExecutionId: input.trigger?.parentActionExecutionId ?? null,
+      parentSessionId: input.parentSessionId ?? null,
+      parentTurnId: input.parentTurnId ?? null,
+      handoffSpec: null,
+      createdAt: now,
+      activityAt: now,
+      lastSeenActivityAt: chat ? now : null,
+    });
+    const parentId = input.parentSessionId;
+    if (!parentId) {
+      await this.db.insert(romeSessions).values(row(null)).onConflictDoNothing({
+        target: romeSessions.id,
+      });
+      return;
+    }
+    // `transaction` is synchronous on better-sqlite3: nothing can delete the
+    // parent between this read and the insert.
+    this.db.transaction((tx) => {
+      const parent = tx.select().from(romeSessions).where(eq(romeSessions.id, parentId)).get();
+      if (!parent) throw new Error(`Parent Rome session "${parentId}" was not found`);
+      tx.insert(romeSessions)
+        .values(row(parent))
+        .onConflictDoNothing({ target: romeSessions.id })
+        .run();
+    });
   }
 
   async ensureChannelChat(input: {

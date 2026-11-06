@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { type ChatPrivacyRow, canOpen, PRIVATE_CHILD_TRIGGER_KIND } from "./privacy.js";
+import {
+  type ChatPrivacyRow,
+  canOpen,
+  canOpenChat,
+  PRIVATE_CHILD_TRIGGER_KIND,
+} from "./privacy.js";
 
 const VISITOR = "visitor:a";
 
@@ -75,6 +80,23 @@ describe("chat privacy, read off the chat's own row", () => {
         expect(canOpen(row, VISITOR)).toBe(true);
         expect(canOpen(row, "guardian")).toBe(false);
       }
+    });
+
+    it("is not made when its parent is gone, and saves nothing", async () => {
+      await expect(
+        repo.ensureRomeSession({
+          id: "orphan",
+          type: "subagent",
+          name: "orphan",
+          agentName: "researcher",
+          parentSessionId: "deleted-task",
+        }),
+      ).rejects.toThrow("was not found");
+      expect(await repo.getSession("orphan")).toBeNull();
+    });
+
+    it("a chat that cannot be found is open to no one", async () => {
+      expect(await canOpenChat((id) => repo.getSession(id), "missing", "guardian")).toBe(false);
     });
 
     it("of an ordinary chat stays open", async () => {
