@@ -46,10 +46,10 @@ describe("AgentSessionManager working dirs", () => {
       }),
     );
     const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
+    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",
