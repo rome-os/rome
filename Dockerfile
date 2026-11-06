@@ -161,20 +161,6 @@ ARG COMPOSIO_CLI_VERSION=@composio/cli@0.2.32
 # Vendored standalone CLIs (see the Slack/Notion install step below).
 ARG SLACK_CLI_VERSION=4.4.0
 ARG NTN_CLI_VERSION=0.19.0
-# Build identity, surfaced in the dashboard's Advanced settings footer. The
-# production image ships without a .git directory (see .dockerignore), so these
-# freeze the running build's SHA + build time at image-build time. ROME_VERSION
-# is the release semver (no v prefix, matching the image's docker tag); it is
-# empty on non-release builds.
-ARG ROME_VERSION
-ARG ROME_BUILD_SHA
-ARG ROME_BUILD_TIME
-# GA4 measurement ID, consumed at container RUNTIME only: the boot
-# script writes it into the SPA's runtime-config.js and the gateway page. The
-# build-arg merely sets the image's default ENV (CI secret on published images,
-# empty everywhere else) — starting a container with ROME_GA_MEASUREMENT_ID
-# overridden or emptied changes/disables analytics without a rebuild (R7).
-ARG ROME_GA_MEASUREMENT_ID=""
 ARG APT_MIRROR=""
 ARG NPM_REGISTRY=""
 # When non-empty, install the Debian-repo `chromium` on amd64 instead of pulling
@@ -455,6 +441,23 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PANTHEON_BASE_ORIGIN=https://romeos.cc
 ENV INTERNAL_API_WEB_ROOT=/app/packages/web/dist
+# Declared here, right before their only use, on purpose: every RUN after an
+# ARG carries its value in its build-cache key, so declaring these per-release
+# values at the top of the stage rebuilt every system layer on every release.
+# Build identity, surfaced in the dashboard's Advanced settings footer. The
+# production image ships without a .git directory (see .dockerignore), so these
+# freeze the running build's SHA + build time at image-build time. ROME_VERSION
+# is the release semver (no v prefix, matching the image's docker tag); it is
+# empty on non-release builds.
+ARG ROME_VERSION
+ARG ROME_BUILD_SHA
+ARG ROME_BUILD_TIME
+# GA4 measurement ID, consumed at container RUNTIME only: the boot
+# script writes it into the SPA's runtime-config.js and the gateway page. The
+# build-arg merely sets the image's default ENV (CI secret on published images,
+# empty everywhere else) — starting a container with ROME_GA_MEASUREMENT_ID
+# overridden or emptied changes/disables analytics without a rebuild (R7).
+ARG ROME_GA_MEASUREMENT_ID=""
 ENV ROME_VERSION=${ROME_VERSION}
 ENV ROME_BUILD_SHA=${ROME_BUILD_SHA}
 ENV ROME_BUILD_TIME=${ROME_BUILD_TIME}
