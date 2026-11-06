@@ -68,6 +68,17 @@ export interface SessionState {
   chatId: string | null;
 }
 
+/** The facts a session can change after it is created. The repository writes
+ *  only the ones that changed, so two instances of one session, each changing
+ *  a different fact, never undo each other's write. */
+export type SessionChange =
+  | "turn"
+  | "reasoningEffort"
+  | "workingDir"
+  | "lastActiveAt"
+  | "status"
+  | "chat";
+
 /**
  * One agent's conversation from one reset to the next: the agent, what it last
  * ran on and where, and whether it is still open. It holds nothing about
@@ -76,6 +87,7 @@ export interface SessionState {
 export class Session {
   private state: SessionState;
   private checkpoint: TurnCheckpoint | undefined;
+  private readonly changes = new Set<SessionChange>();
 
   private constructor(state: SessionState) {
     this.state = state;
@@ -166,7 +178,11 @@ export class Session {
     this.state.provider = run.provider;
     this.state.providerThreadId = run.providerThreadId ?? null;
     this.state.model = run.model ?? null;
-    if (run.reasoningEffort !== undefined) this.state.reasoningEffort = run.reasoningEffort;
+    this.changes.add("turn");
+    if (run.reasoningEffort !== undefined) {
+      this.state.reasoningEffort = run.reasoningEffort;
+      this.changes.add("reasoningEffort");
+    }
     if (run.checkpoint && run.providerThreadId) {
       this.checkpoint = {
         sessionId: this.state.id,
@@ -181,12 +197,14 @@ export class Session {
   /** The provider's transcript now lives here. */
   moveTo(workingDir: string): void {
     this.state.workingDir = workingDir;
+    this.changes.add("workingDir");
   }
 
   /** The session was just active. The reset policy reads `lastActiveAt` to
    *  measure how long a session has been idle. */
   touch(): void {
     this.state.lastActiveAt = new Date();
+    this.changes.add("lastActiveAt");
   }
 
   /** Ends the session. It stops being the current session of its continuity
@@ -194,6 +212,8 @@ export class Session {
   complete(): void {
     this.state.status = "completed";
     this.state.lastActiveAt = new Date();
+    this.changes.add("status");
+    this.changes.add("lastActiveAt");
   }
 
   /**
@@ -215,6 +235,7 @@ export class Session {
   deprecatedRecordChat(chatId: string): boolean {
     if (this.state.chatId !== null) return false;
     this.state.chatId = chatId;
+    this.changes.add("chat");
     return true;
   }
 
@@ -223,11 +244,16 @@ export class Session {
     return { ...this.state };
   }
 
-  /** The checkpoint recorded since the last save, if any, handed over once.
-   *  Only the repository calls this. */
-  takeCheckpoint(): TurnCheckpoint | undefined {
-    const checkpoint = this.checkpoint;
+  /** The facts changed since the last save, and the checkpoint recorded since
+   *  then, if any. Only the repository calls this, and `markSaved` once they
+   *  are written. */
+  pendingChanges(): { changes: ReadonlySet<SessionChange>; checkpoint?: TurnCheckpoint } {
+    return { changes: new Set(this.changes), checkpoint: this.checkpoint };
+  }
+
+  /** Only the repository calls this, after a save. */
+  markSaved(): void {
+    this.changes.clear();
     this.checkpoint = undefined;
-    return checkpoint;
   }
 }

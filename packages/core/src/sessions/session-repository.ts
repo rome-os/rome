@@ -1,14 +1,15 @@
 // The Sessions repository over `sessions` and `session_turn_checkpoints`.
 // Aggregate: sessions/session.ts. Vocabulary: docs/concepts/sessions.md.
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
-import type { DrizzleDb } from "../db/index.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { sessions, sessionTurnCheckpoints } from "../db/schema.js";
 import {
   Session,
   type AgentName,
   type ContinuityKey,
+  type SessionChange,
   type SessionId,
   type SessionState,
   type TurnCheckpoint,
@@ -86,20 +87,27 @@ export class SessionRepository {
     });
   }
 
-  /** Writes the session's state, and the checkpoint recorded since it was
-   *  last saved, if any. The session must have been added. */
+  /**
+   * Writes the facts the session changed since it was last saved, and the
+   * checkpoint recorded since then, if any. Only changed facts are written, so
+   * two instances of one session that change different facts both keep their
+   * writes. A chat is recorded only on a session that still has none, and a
+   * completion is never undone. The session must have been added.
+   */
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
-    const checkpoint = session.takeCheckpoint();
+    const pending = session.pendingChanges();
     this.db.transaction((tx) => {
-      const result = tx
-        .update(sessions)
-        .set(mutableColumns(state))
+      const stored = tx
+        .select({ id: sessions.id })
+        .from(sessions)
         .where(eq(sessions.id, state.id))
-        .run();
-      if (result.changes === 0) throw new Error(`Session "${state.id}" was never added`);
-      if (checkpoint) upsertCheckpoint(tx, checkpoint);
+        .get();
+      if (!stored) throw new Error(`Session "${state.id}" was never added`);
+      writeChanges(tx, state, pending.changes);
+      if (pending.checkpoint) upsertCheckpoint(tx, pending.checkpoint);
     });
+    session.markSaved();
   }
 
   /**
@@ -121,11 +129,10 @@ export class SessionRepository {
     ) {
       throw new Error(`Session "${successorState.id}" does not succeed "${retiredState.id}"`);
     }
+    const pending = retired.pendingChanges();
     this.db.transaction((tx) => {
-      tx.update(sessions)
-        .set(mutableColumns(retiredState))
-        .where(eq(sessions.id, retiredState.id))
-        .run();
+      writeChanges(tx, retiredState, pending.changes);
+      if (pending.checkpoint) upsertCheckpoint(tx, pending.checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
           .set({ status: "completed", lastActiveAt: retiredState.lastActiveAt })
@@ -134,6 +141,7 @@ export class SessionRepository {
       }
       tx.insert(sessions).values(toRow(successorState)).run();
     });
+    retired.markSaved();
   }
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back
@@ -172,8 +180,6 @@ export class SessionRepository {
   }
 }
 
-type Tx = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
-
 function exactlyActive(continuityKey: ContinuityKey, agentName: AgentName) {
   return and(
     eq(sessions.channelThreadKey, continuityKey),
@@ -182,7 +188,7 @@ function exactlyActive(continuityKey: ContinuityKey, agentName: AgentName) {
   );
 }
 
-function upsertCheckpoint(tx: Tx, checkpoint: TurnCheckpoint): void {
+function upsertCheckpoint(tx: DrizzleTx, checkpoint: TurnCheckpoint): void {
   const now = new Date();
   tx.insert(sessionTurnCheckpoints)
     .values({ ...checkpoint, createdAt: now })
@@ -215,17 +221,29 @@ function restore(row: SessionRow): Session {
   });
 }
 
-function mutableColumns(state: SessionState) {
-  return {
-    status: state.status,
-    provider: state.provider,
-    providerThreadId: state.providerThreadId,
-    model: state.model,
-    reasoningEffort: state.reasoningEffort,
-    workingDir: state.workingDir,
-    lastActiveAt: state.lastActiveAt,
-    chatId: state.chatId,
-  };
+/** Writes each changed fact as its own targeted update, as today's callers do. */
+function writeChanges(tx: DrizzleTx, state: SessionState, changes: ReadonlySet<SessionChange>): void {
+  const columns: Partial<SessionRow> = {};
+  if (changes.has("turn")) {
+    columns.provider = state.provider;
+    columns.providerThreadId = state.providerThreadId;
+    columns.model = state.model;
+  }
+  if (changes.has("reasoningEffort")) columns.reasoningEffort = state.reasoningEffort;
+  if (changes.has("workingDir")) columns.workingDir = state.workingDir;
+  if (changes.has("lastActiveAt")) columns.lastActiveAt = state.lastActiveAt;
+  // A completion is final. A stale instance that still believes the session is
+  // active never writes that belief back.
+  if (changes.has("status") && state.status !== "active") columns.status = state.status;
+  if (Object.keys(columns).length > 0) {
+    tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
+  }
+  if (changes.has("chat") && state.chatId !== null) {
+    tx.update(sessions)
+      .set({ chatId: state.chatId })
+      .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
+      .run();
+  }
 }
 
 function toRow(state: SessionState): SessionRow {

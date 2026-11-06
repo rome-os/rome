@@ -10,13 +10,23 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ActiveSessionExistsError, SessionRepository } from "./session-repository.js";
 import { Session } from "./session.js";
 
+const seconds = (date: Date) => Math.floor(date.getTime() / 1000);
+/** A snapshot as the database keeps it: timestamps to the second. */
+const stored = (state: ReturnType<Session["snapshot"]>) => ({
+  ...state,
+  createdAt: seconds(state.createdAt),
+  lastActiveAt: seconds(state.lastActiveAt),
+});
+
 describe("SessionRepository", () => {
   let testDb: TestDb;
   let repo: SessionRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new SessionRepository(testDb.db, { legacyBindings: createEmptyLegacyArtifactBindings() });
+    repo = new SessionRepository(testDb.db, {
+      legacyBindings: createEmptyLegacyArtifactBindings(),
+    });
   });
 
   afterEach(() => testDb.close());
@@ -31,7 +41,8 @@ describe("SessionRepository", () => {
 
     const found = await repo.session(session.id);
     expect(found).not.toBeNull();
-    expect(found!.snapshot()).toEqual(session.snapshot());
+    // Timestamps are stored to the second.
+    expect(stored(found!.snapshot())).toEqual(stored(session.snapshot()));
     expect(await repo.session("nobody")).toBeNull();
   });
 
@@ -163,6 +174,58 @@ describe("SessionRepository", () => {
 
   it("save() refuses a session that was never added", async () => {
     await expect(repo.save(Session.create("main"))).rejects.toThrow(/never added/);
+  });
+
+  it("save() writes only the facts each instance changed, so two instances keep both", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await repo.add(session);
+    const streaming = (await repo.session(session.id))!;
+    const recording = (await repo.session(session.id))!;
+
+    recording.recordTurn({ provider: "openai", providerThreadId: "t-1", model: "gpt-5" });
+    await repo.save(recording);
+    streaming.touch();
+    await repo.save(streaming);
+
+    const found = (await repo.session(session.id))!;
+    expect(found.provider).toBe("openai");
+    expect(found.providerThreadId).toBe("t-1");
+    expect(seconds(found.lastActiveAt)).toBe(seconds(streaming.lastActiveAt));
+  });
+
+  it("save() never records a chat over one another instance recorded first", async () => {
+    const session = Session.create("main");
+    await repo.add(session);
+    const first = (await repo.session(session.id))!;
+    const second = (await repo.session(session.id))!;
+    first.deprecatedRecordChat("chat-1");
+    second.deprecatedRecordChat("chat-2");
+    await repo.save(first);
+    await repo.save(second);
+    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
+  });
+
+  it("save() never brings a completed session back to active", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await repo.add(session);
+    const stale = (await repo.session(session.id))!;
+    session.complete();
+    await repo.save(session);
+
+    stale.touch();
+    stale.recordTurn({ provider: "openai" });
+    await repo.save(stale);
+    expect((await repo.session(session.id))!.status).toBe("completed");
+    expect(await repo.current("k", "main")).toBeNull();
+  });
+
+  it("save() writes nothing when nothing changed", async () => {
+    const session = Session.create("main");
+    await repo.add(session);
+    const before = (await repo.session(session.id))!.snapshot();
+    await repo.save((await repo.session(session.id))!);
+    expect((await repo.session(session.id))!.snapshot()).toEqual(before);
+    // Both reads come from the database, so no rounding is needed here.
   });
 
   it("save() records a chat only once", async () => {

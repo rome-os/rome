@@ -45,24 +45,42 @@ describe("Session", () => {
     expect(session.reasoningEffort).toBe("xhigh");
   });
 
-  it("recordTurn() hands the checkpoint to the repository once, and only with a thread", () => {
+  it("recordTurn() hands the checkpoint to the repository, and only with a thread", () => {
     const session = Session.create("main");
     session.recordTurn({ provider: "openai", checkpoint: { turnId: "turn-1", checkpointId: "c" } });
-    expect(session.takeCheckpoint()).toBeUndefined();
+    expect(session.pendingChanges().checkpoint).toBeUndefined();
 
     session.recordTurn({
       provider: "openai",
       providerThreadId: "t-1",
       checkpoint: { turnId: "turn-2", checkpointId: "c-2" },
     });
-    expect(session.takeCheckpoint()).toEqual({
+    expect(session.pendingChanges().checkpoint).toEqual({
       sessionId: session.id,
       turnId: "turn-2",
       provider: "openai",
       providerThreadId: "t-1",
       checkpointId: "c-2",
     });
-    expect(session.takeCheckpoint()).toBeUndefined();
+    session.markSaved();
+    expect(session.pendingChanges().checkpoint).toBeUndefined();
+  });
+
+  it("tracks which facts changed since the last save", () => {
+    const session = Session.create("main");
+    expect([...session.pendingChanges().changes]).toEqual([]);
+    session.recordTurn({ provider: "openai", reasoningEffort: "high" });
+    session.moveTo("/w");
+    expect([...session.pendingChanges().changes].sort()).toEqual([
+      "reasoningEffort",
+      "turn",
+      "workingDir",
+    ]);
+    session.markSaved();
+    session.touch();
+    expect([...session.pendingChanges().changes]).toEqual(["lastActiveAt"]);
+    session.complete();
+    expect([...session.pendingChanges().changes].sort()).toEqual(["lastActiveAt", "status"]);
   });
 
   it("deprecatedHasProviderThread follows the provider thread", () => {
