@@ -1,12 +1,10 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
-import AppKeysPage from "./AppKeysPage";
-import SettingsPage from "./SettingsTabPage";
+import { AppKeysSection } from "./app-keys-section";
 
 // The Toaster mounts in App.tsx, outside this tree — spy on the calls instead.
 rs.mock("sonner", () => ({
@@ -57,6 +55,7 @@ function mockAppKeysFetch(
     if (url === "/api/settings") return ok({});
     if (url === "/api/integrations/composio/status") return ok({});
     if (url === "/api/connections") return ok({ connections: [] });
+    if (url === "/api/dashboard-access") return ok({ cloudEmailAccess: [] });
     if (url.startsWith("/api/app-keys")) {
       if (method === "GET") return loadKeys();
       const call: AppKeysCall = {
@@ -73,30 +72,20 @@ function mockAppKeysFetch(
   return writes;
 }
 
-function renderAppKeysPage() {
+function renderSection() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/settings/connections/app-keys"]}>
-        <Routes>
-          <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AppKeysSection />
     </QueryClientProvider>,
   );
 }
 
-function renderConnectionsSettings() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/settings/connections"]}>
-        <Routes>
-          <Route path="/settings/:tab" element={<SettingsPage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+/** Renders the Advanced tab's App keys row and opens its sheet. */
+function renderAppKeysSheet() {
+  const view = renderSection();
+  fireEvent.click(screen.getByRole("button", { name: "Open App keys" }));
+  return view;
 }
 
 const storedKey = {
@@ -106,54 +95,53 @@ const storedKey = {
   overridden: false,
 };
 
-describe("Connections tab app keys entry row", () => {
-  it("links to the app keys page and shows the stored-key count", async () => {
+describe("App keys row", () => {
+  it("shows the stored-key count and keeps the management in the sheet", async () => {
     mockAppKeysFetch(() => ok({ keys: [storedKey] }));
 
-    renderConnectionsSettings();
+    renderSection();
 
-    const row = await screen.findByRole("link", { name: "Open App keys" });
-    expect(row.getAttribute("href")).toBe("/settings/connections/app-keys");
-    expect(await within(row).findByText("1 key")).toBeTruthy();
-    // The management ceremony lives on the page, not the tab.
+    expect(await screen.findByText("1 key")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add key" })).toBeNull();
   });
 
   it("reads 'None yet' when no keys are stored", async () => {
     mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderConnectionsSettings();
+    renderSection();
 
-    const row = await screen.findByRole("link", { name: "Open App keys" });
-    expect(await within(row).findByText("None yet")).toBeTruthy();
+    expect(await screen.findByText("None yet")).toBeTruthy();
   });
 });
 
-describe("App keys page", () => {
+describe("App keys sheet", () => {
   it("lists stored keys with label and name — never the value, no badge unless overridden", async () => {
     mockAppKeysFetch(() => ok({ keys: [storedKey] }));
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "App keys" })).toBeTruthy();
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("heading", { name: "App keys" })).toBeTruthy();
     expect(await screen.findByText("My shop database password")).toBeTruthy();
     expect(screen.getByText("SHOP_DB_PASSWORD")).toBeTruthy();
     expect(screen.queryByText("Overridden by server settings")).toBeNull();
   });
 
-  it("links back to the connections list", async () => {
-    mockAppKeysFetch(() => ok({ keys: [] }));
+  it("shows the form in place of the list and goes back to it", async () => {
+    mockAppKeysFetch(() => ok({ keys: [storedKey] }));
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
-    const back = await screen.findByRole("link", { name: "Connections" });
-    expect(back.getAttribute("href")).toBe("/settings/connections");
+    await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    expect(screen.queryByText("My shop database password")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Back to app keys" }));
+    expect(await screen.findByText("My shop database password")).toBeTruthy();
   });
 
   it("shows the empty state when no keys exist", async () => {
     mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
     expect(await screen.findByText("No app keys yet")).toBeTruthy();
   });
@@ -161,7 +149,7 @@ describe("App keys page", () => {
   it("saves a new key through the add form with the all-apps consent visible", async () => {
     const writes = mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
 
@@ -195,7 +183,7 @@ describe("App keys page", () => {
   it("rejects a reserved name client-side without calling the API", async () => {
     const writes = mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.type(screen.getByLabelText("Name apps use"), "ROME_PROFILE");
@@ -224,7 +212,7 @@ describe("App keys page", () => {
         return ok({ ok: true, overridden: false });
       },
     );
-    renderAppKeysPage();
+    renderAppKeysSheet();
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
     await userEvent.click(screen.getByLabelText(".env content"));
@@ -245,7 +233,7 @@ describe("App keys page", () => {
 
   it("validates the entire .env input before writing any keys", async () => {
     const writes = mockAppKeysFetch(() => ok({ keys: [] }));
-    renderAppKeysPage();
+    renderAppKeysSheet();
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
     await userEvent.click(screen.getByLabelText(".env content"));
@@ -258,7 +246,7 @@ describe("App keys page", () => {
   it("waits for the pending key list before saving a replacement label", async () => {
     const { promise, resolve } = Promise.withResolvers<Response>();
     const writes = mockAppKeysFetch(async () => (await promise).clone());
-    renderAppKeysPage();
+    renderAppKeysSheet();
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
     await userEvent.click(screen.getByLabelText(".env content"));
@@ -284,7 +272,7 @@ describe("App keys page", () => {
       if (recovered || (hasCachedList && loadCount === 1)) return ok({ keys: [storedKey] });
       return new Response(JSON.stringify({ error: "Cannot load existing keys" }), { status: 503 });
     });
-    renderAppKeysPage();
+    renderAppKeysSheet();
     if (hasCachedList) await screen.findByText(storedKey.label);
     else await screen.findByText("App keys couldn't be loaded");
     await userEvent.click(screen.getByRole("button", { name: "Add key" }));
@@ -325,7 +313,7 @@ describe("App keys page", () => {
         return ok({ ok: true, overridden: true });
       },
     );
-    renderAppKeysPage();
+    renderAppKeysSheet();
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
     await userEvent.click(screen.getByLabelText(".env content"));
@@ -365,7 +353,7 @@ describe("App keys page", () => {
           finish = resolve;
         }),
     );
-    renderAppKeysPage();
+    renderAppKeysSheet();
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
     await userEvent.click(screen.getByLabelText(".env content"));
@@ -378,8 +366,13 @@ describe("App keys page", () => {
     await userEvent.paste("NEW_KEY=secret");
     await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
     expect(screen.getByLabelText(".env content").matches(":disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Close" }).matches(":disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Replace" }).matches(":disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Back to app keys" }).matches(":disabled")).toBe(
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Cancel" }).matches(":disabled")).toBe(true);
+    // Escape cannot close the sheet mid-save and drop the entries that fail.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByLabelText(".env content")).toBeTruthy();
     finish(ok({ ok: true, overridden: false }));
     await screen.findByRole("button", { name: "Add key" });
   });
@@ -390,7 +383,7 @@ describe("App keys page", () => {
       () => ok({ ok: true }),
     );
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
     await userEvent.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -411,7 +404,7 @@ describe("App keys page", () => {
       () => ok({ ok: true, overridden: true }),
     );
 
-    renderAppKeysPage();
+    renderAppKeysSheet();
 
     expect(await screen.findByText("Overridden by server settings")).toBeTruthy();
 
