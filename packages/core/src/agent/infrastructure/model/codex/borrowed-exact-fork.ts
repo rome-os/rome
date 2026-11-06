@@ -13,6 +13,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type {
   ModelSession,
+  ModelSessionConfig,
   ModelSessionParams,
   ModelUserInput,
   ProviderId,
@@ -36,43 +37,44 @@ export interface BorrowedExactForkCompatibility {
   sameSystemPrompt: boolean;
   sameWorkingDir: boolean;
   sameTools: boolean;
+  sameTurnSettings: boolean;
 }
 
 /**
- * The source thread keeps its sandbox and tools, so a turn can borrow it only
- * when the branch opens with the source's configuration and the same catalog.
+ * A borrowed turn runs on the source thread under the source's configuration,
+ * so a turn can borrow it only when the branch opens with that same
+ * configuration and catalog.
  */
 export function evaluateBorrowedExactFork(args: {
   openParams: ModelSessionParams;
-  sourceBuiltinTools?: readonly string[];
+  sourceConfig: ModelSessionConfig;
   sourceDynamicTools: readonly DynamicToolSpec[];
-  sourceExternalMcpServers?: ModelSessionParams["config"]["externalMcpServers"];
-  sourceModelName: string;
-  sourceSystemPrompt: string;
-  sourceWorkingDir?: string;
 }): BorrowedExactForkCompatibility {
+  const branch = args.openParams.config;
+  const source = args.sourceConfig;
   const sameModel =
-    stripLegacyReasoningSuffix(args.openParams.config.model) === args.sourceModelName;
-  const sameSystemPrompt = args.openParams.config.systemPrompt === args.sourceSystemPrompt;
+    stripLegacyReasoningSuffix(branch.model) === stripLegacyReasoningSuffix(source.model);
+  const sameSystemPrompt = branch.systemPrompt === source.systemPrompt;
   const sameWorkingDir =
-    (args.openParams.config.workingDir ?? process.cwd()) ===
-    (args.sourceWorkingDir ?? process.cwd());
+    (branch.workingDir ?? process.cwd()) === (source.workingDir ?? process.cwd());
   const sameTools =
-    isDeepStrictEqual(args.openParams.config.builtinTools ?? [], args.sourceBuiltinTools ?? []) &&
-    isDeepStrictEqual(
-      args.openParams.config.externalMcpServers ?? {},
-      args.sourceExternalMcpServers ?? {},
-    ) &&
+    isDeepStrictEqual(branch.builtinTools ?? [], source.builtinTools ?? []) &&
+    isDeepStrictEqual(branch.externalMcpServers ?? {}, source.externalMcpServers ?? {}) &&
     isDeepStrictEqual(
       createRomeDynamicTools(args.openParams.tools).definitions,
       args.sourceDynamicTools,
     );
+  const sameTurnSettings =
+    branch.reasoningEffort === source.reasoningEffort &&
+    isDeepStrictEqual(branch.outputSchema, source.outputSchema) &&
+    isDeepStrictEqual(branch.env ?? {}, source.env ?? {});
   return {
-    eligible: sameModel && sameSystemPrompt && sameWorkingDir && sameTools,
+    eligible: sameModel && sameSystemPrompt && sameWorkingDir && sameTools && sameTurnSettings,
     sameModel,
     sameSystemPrompt,
     sameWorkingDir,
     sameTools,
+    sameTurnSettings,
   };
 }
 

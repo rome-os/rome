@@ -42,12 +42,8 @@ function openParams(overrides: OpenOverrides = {}): ModelSessionParams {
 function evaluate(openOverrides: OpenOverrides = {}, sourceExternalMcpServers?: McpServers) {
   return evaluateBorrowedExactFork({
     openParams: openParams(openOverrides),
-    sourceExternalMcpServers,
-    sourceBuiltinTools: [],
+    sourceConfig: { ...openParams().config, externalMcpServers: sourceExternalMcpServers },
     sourceDynamicTools: createRomeDynamicTools(openParams().tools).definitions,
-    sourceModelName: "gpt-5.6-terra",
-    sourceSystemPrompt: "system",
-    sourceWorkingDir: "/workspace",
   });
 }
 
@@ -59,6 +55,7 @@ describe("evaluateBorrowedExactFork", () => {
       sameSystemPrompt: true,
       sameWorkingDir: true,
       sameTools: true,
+      sameTurnSettings: true,
     });
   });
 
@@ -67,6 +64,9 @@ describe("evaluateBorrowedExactFork", () => {
     ["system prompt", { config: { systemPrompt: "different" } }, "sameSystemPrompt"],
     ["working directory", { config: { workingDir: "/other" } }, "sameWorkingDir"],
     ["builtin tool set", { config: { builtinTools: ["Bash"] } }, "sameTools"],
+    ["output schema", { config: { outputSchema: { type: "object" } } }, "sameTurnSettings"],
+    ["reasoning effort", { config: { reasoningEffort: "high" } }, "sameTurnSettings"],
+    ["shell environment", { config: { env: { ROME_CHANNEL: "webchat" } } }, "sameTurnSettings"],
     [
       "tools catalog",
       {

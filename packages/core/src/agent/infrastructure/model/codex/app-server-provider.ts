@@ -1410,12 +1410,8 @@ export class CodexAppServerProvider implements ModelProvider {
           createRomeDynamicTools(openParams.tools).definitions.length === 0;
         const compatibility = evaluateBorrowedExactFork({
           openParams,
-          sourceBuiltinTools: params.config.builtinTools,
+          sourceConfig: params.config,
           sourceDynamicTools: romeTools.definitions,
-          sourceExternalMcpServers: params.config.externalMcpServers,
-          sourceModelName: modelName,
-          sourceSystemPrompt: params.config.systemPrompt,
-          sourceWorkingDir: params.config.workingDir,
         });
         const targetIsCurrentHead = at.checkpointId === lastCheckpointId;
         // Borrowing runs the turn inside the source thread and reverts it
@@ -1436,6 +1432,7 @@ export class CodexAppServerProvider implements ModelProvider {
           sameModel: compatibility.sameModel,
           sameSystemPrompt: compatibility.sameSystemPrompt,
           sameWorkingDir: compatibility.sameWorkingDir,
+          sameTurnSettings: compatibility.sameTurnSettings,
           sourceHistoryMode: openedThread.historyMode,
         });
 
