@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/helpers.js";
+import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/db.js";
 import { PeopleRepository } from "../../db/repositories/people.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
 import type { LinkedInHistoryMessage } from "../../connections/kinds/linkedin/linkedin-sync.js";

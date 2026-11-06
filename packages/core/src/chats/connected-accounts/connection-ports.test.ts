@@ -9,7 +9,7 @@ import { AccountNotConnected } from "./connected-account.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { makePasteTalk } from "../../connections/test-fixtures.js";
-import { createTestDb, kindChannelOf } from "../../test/helpers.js";
+import { createTestDb, kindChannelOf } from "../../test/db.js";
 
 const HOUR = 3_600_000;
 

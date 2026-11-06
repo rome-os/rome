@@ -5,7 +5,7 @@ import { PeopleRepository } from "../db/repositories/people.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { persons } from "../db/schema.js";
 import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
-import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/db.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 
 /** A message from an agent, by default one of this Rome's own dots. */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { countingDb, createTestDb, type TestDb } from "../../test/helpers.js";
+import { countingDb, createTestDb, type TestDb } from "../../test/db.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../../db/index.js";
 import { waChats, waContacts, waMessages } from "../../db/schema.js";

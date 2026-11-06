@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { ConciergeFollowItemsRepository, type FollowItemInput } from "./concierge-follow-items.js";
 
 const item = (eventId: string, decision: FollowItemInput["decision"]): FollowItemInput => ({

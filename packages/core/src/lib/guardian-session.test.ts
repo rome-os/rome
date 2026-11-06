@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { createSession } from "./auth.js";
 import { resolveGuardianSessionFromMaterial } from "./guardian-session.js";
 import { guardianAuth } from "../db/schema.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());

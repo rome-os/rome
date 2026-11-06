@@ -33,7 +33,7 @@ rs.mock("../../lib/provider-token-files.js", () => ({
 }));
 
 import type { OAuthProvider } from "../../lib/oauth-providers.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import type { ConnectionsRepository } from "../repository.js";
 import { ConnectionRegistry } from "../registry.js";

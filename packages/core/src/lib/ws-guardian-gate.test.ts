@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { guardianAuth } from "../db/schema.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { createSession, createVisitorSession } from "./auth.js";
 import { DashboardAccessState } from "./dashboard-access-state.js";
 import { gateGuardianUpgrade, gateUpgrade } from "./ws-guardian-gate.js";

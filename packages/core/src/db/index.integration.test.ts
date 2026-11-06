@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import {
   persons,
   links,

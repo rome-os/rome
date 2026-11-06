@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import type Database from "better-sqlite3";
 import type { DrizzleDb } from "../../db/index.js";
-import { countingDb, createTestDb, type TestDb } from "../../test/helpers.js";
+import { countingDb, createTestDb, type TestDb } from "../../test/db.js";
 import { sqlMessages } from "./messages-sql.js";
 
 const ACCOUNT = [{ channel: "whatsapp", addresses: ["a"] }];

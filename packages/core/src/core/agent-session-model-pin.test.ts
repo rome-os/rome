@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import {

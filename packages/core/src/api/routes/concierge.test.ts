@@ -8,7 +8,7 @@ import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { chatMessages } from "../../db/schema.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
 
 describe("GET /concierge/session", () => {

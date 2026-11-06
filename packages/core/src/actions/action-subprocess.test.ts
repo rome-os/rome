@@ -32,7 +32,7 @@ import {
 } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import { createActionEngineRepos } from "../test/db.js";
 
 interface TransportPair {
   a: IpcTransport;
@@ -159,7 +159,7 @@ describe("main-owned action subprocess", () => {
     const program = `
       import { ActionEngine } from ${moduleUrl("./engine.js")};
       import { ActionRegistryImpl } from ${moduleUrl("./registry.js")};
-      import { createActionEngineRepos, createTestDb } from ${moduleUrl("../test/helpers.js")};
+      import { createActionEngineRepos, createTestDb } from ${moduleUrl("../test/db.js")};
       import { getCurrentActionContext } from "@rome-os/app-runtime";
       const db = createTestDb();
       const registry = new ActionRegistryImpl();

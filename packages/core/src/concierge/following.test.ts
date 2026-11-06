@@ -3,7 +3,7 @@ import type { ConciergeWatchCapability } from "@rome/api-types/concierge";
 import type { Action } from "../actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import type { Routine } from "../routines/types.js";
 import {
   type ConciergeFollowing,

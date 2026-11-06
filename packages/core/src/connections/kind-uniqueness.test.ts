@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { SqliteExec } from "../db/index.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { NO_GRANT } from "./grant.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import type { StoredConnection } from "./repository.js";

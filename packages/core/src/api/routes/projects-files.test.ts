@@ -19,7 +19,7 @@ import type {
 import { projectsFilesRoutes } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { readArchivePaths } from "../../test/file-browser.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 

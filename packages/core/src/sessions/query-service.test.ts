@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { GrantRecord } from "../connections/grant.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { createTestDb, type TestDb, testAccountLinkOf } from "../test/helpers.js";
+import { createTestDb, type TestDb, testAccountLinkOf } from "../test/db.js";
 import { claimChannels, recordChannelAccounts } from "./boot.js";
 import { domainOfGrant } from "../connections/platform.js";
 
