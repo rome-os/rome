@@ -40,6 +40,15 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
 
 - [x] Block the app with a full-screen "Update your Rome" page while the instance is not on the latest release, with one "Update now" action; track the upgrade until the new version answers (`1e0d7f18`, `4cef5d7d`, `588bd463`, `8868c7e5`: never blocks when the check cannot decide; resumes waiting after a relaunch; checked on demo data and a local Rome that answers `unversioned_build`. Result: [`mobile-app-mvp-forced-update.md`](mobile-app-mvp-forced-update.md))
 
+## Push notifications
+
+Agreed design: the instance decides when to push and sends `{body, level, chatId}` to Rome Cloud; Rome Cloud adds the instance id and delivers through APNs with Amantru's team key; the app asks permission at a good moment, registers its token, and routes a tap to the right instance and Concierge.
+
+- [x] App side (`e0f99310`, `592fd834`, `2edf23e7`, `924b9349`): Debug signs with team `4YWXB26F39` like Release; `aps-environment` development/production; a quiet "Turn on" card in Chat (Not now waits 7 days); token registered with Rome Cloud `POST /api/devices` on each launch, refusals retried quietly; `DELETE` before sign-out clears credentials; no banner in the foreground; a tap switches to its instance and opens Concierge, also from a cold launch; Settings row On / Off / Not set. 72 Mac Catalyst tests pass; card and Settings snapshots light and dark. Result: [`mobile-app-mvp-push.md`](mobile-app-mvp-push.md)
+- [ ] Simulator: system prompt, foreground suppression and tap routing with `xcrun simctl push` (waiting on Simulator access for taps)
+- [ ] Rome Cloud side (`amantru/rome-cloud`) and instance side merged; then a real push end to end on the phone
+- [ ] Concierge topic chats: open the push's `chatId` (parsed, not used yet)
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
