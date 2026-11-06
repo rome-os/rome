@@ -27,7 +27,7 @@ export interface CreateSessionOptions {
 export interface ReplaceSessionOptions {
   workingDir?: string;
   /** @deprecated The chat the successor records into. Omitted, the successor
-   *  carries the retired session's chat over. */
+   *  inherits the retired session's stored chat when the reset is written. */
   deprecatedChatId?: string;
 }
 
@@ -89,8 +89,6 @@ export class Session {
   private readonly changes = new Set<SessionChange>();
   /** Checkpoints recorded since the last save, one per turn. */
   private readonly checkpoints = new Map<string, TurnCheckpoint>();
-  /** Whether `replace` carried the chat over from the retired session. */
-  private chatCarriedOver = false;
 
   private constructor(state: SessionState) {
     this.state = state;
@@ -226,19 +224,17 @@ export class Session {
    */
   replace(options: ReplaceSessionOptions = {}): Session {
     this.complete();
-    const successor = Session.create(this.state.agentName, {
+    // The successor has no chat unless one is named: the repository gives it
+    // the retired session's stored chat when it writes the reset.
+    return Session.create(this.state.agentName, {
       continuityKey: this.state.continuityKey ?? undefined,
       workingDir: options.workingDir,
-      deprecatedChatId: options.deprecatedChatId ?? this.state.chatId ?? undefined,
+      deprecatedChatId: options.deprecatedChatId,
     });
-    successor.chatCarriedOver = options.deprecatedChatId === undefined;
-    return successor;
   }
 
   /** @deprecated Records the chat only when none is recorded yet. Answers
-   *  whether it did, as this instance sees it. Another instance can record a
-   *  chat first; then the save keeps the stored chat, so after the save
-   *  `deprecatedChatId` is the chat that stuck. */
+   *  whether it did. */
   deprecatedRecordChat(chatId: string): boolean {
     if (this.state.chatId !== null) return false;
     this.state.chatId = chatId;
@@ -246,18 +242,9 @@ export class Session {
     return true;
   }
 
-  /** @deprecated Only the repository reads this: whether the chat came from
-   *  the retired session rather than being named on the reset. Equal chats
-   *  do not tell the two apart, and only a carried-over chat follows the
-   *  stored one. */
-  get deprecatedChatCarriedOver(): boolean {
-    return this.chatCarriedOver;
-  }
-
-  /** @deprecated Only the repository calls this, after a save found that
-   *  another instance recorded a chat first: the stored chat replaces the one
-   *  this instance tried to record, so the two agree again. */
-  deprecatedKeepStoredChat(chatId: string): void {
+  /** @deprecated Only the repository calls this, on a successor that named
+   *  no chat, with the chat the retired session's row held. */
+  deprecatedInheritChat(chatId: string): void {
     this.state.chatId = chatId;
   }
 

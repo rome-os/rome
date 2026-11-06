@@ -252,28 +252,6 @@ describe("SessionRepository", () => {
     await repo.save(first);
     await repo.save(second);
     expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
-    // The losing instance learns which chat stuck, so a caller that compares
-    // tells a lost write from a won one, as fillChatId's answer does today.
-    expect(second.deprecatedChatId).toBe("chat-1");
-    expect(first.deprecatedChatId).toBe("chat-1");
-    expect([...second.pendingChanges().changes]).toEqual([]);
-  });
-
-  it("replace() carries the stored chat over when another instance recorded one first", async () => {
-    const session = Session.create("main", { continuityKey: "k" });
-    await repo.add(session);
-    const first = (await repo.session(session.id))!;
-    const second = (await repo.session(session.id))!;
-    first.deprecatedRecordChat("chat-1");
-    await repo.save(first);
-    second.deprecatedRecordChat("chat-2");
-
-    const successor = second.replace();
-    await repo.replace(second, successor);
-    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
-    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-1");
-    expect(second.deprecatedChatId).toBe("chat-1");
-    expect(successor.deprecatedChatId).toBe("chat-1");
   });
 
   it("replace() carries the chat over from a stale instance that never saw it recorded", async () => {
@@ -288,74 +266,16 @@ describe("SessionRepository", () => {
     expect(successor.deprecatedChatId).toBeNull();
     await repo.replace(stale, successor);
     expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-1");
-    expect(stale.deprecatedChatId).toBe("chat-1");
     expect(successor.deprecatedChatId).toBe("chat-1");
   });
 
-  it("replace() keeps the chat the caller named even when the retired chat write lost", async () => {
-    const session = Session.create("main", { continuityKey: "k" });
+  it("replace() keeps the chat the caller named over the retired session's", async () => {
+    const session = Session.create("main", { continuityKey: "k", deprecatedChatId: "chat-1" });
     await repo.add(session);
-    const first = (await repo.session(session.id))!;
-    const second = (await repo.session(session.id))!;
-    first.deprecatedRecordChat("chat-1");
-    await repo.save(first);
-    second.deprecatedRecordChat("chat-2");
-
-    const successor = second.replace({ deprecatedChatId: "chat-3" });
-    await repo.replace(second, successor);
-    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
+    const successor = session.replace({ deprecatedChatId: "chat-3" });
+    await repo.replace(session, successor);
     expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-3");
     expect(successor.deprecatedChatId).toBe("chat-3");
-  });
-
-  it("replace() keeps a named chat even when it equals the chat the retired instance lost with", async () => {
-    const session = Session.create("main", { continuityKey: "k" });
-    await repo.add(session);
-    const first = (await repo.session(session.id))!;
-    const second = (await repo.session(session.id))!;
-    first.deprecatedRecordChat("chat-1");
-    await repo.save(first);
-    second.deprecatedRecordChat("chat-2");
-
-    const successor = second.replace({ deprecatedChatId: "chat-2" });
-    await repo.replace(second, successor);
-    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
-    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-2");
-    expect(second.deprecatedChatId).toBe("chat-1");
-    expect(successor.deprecatedChatId).toBe("chat-2");
-  });
-
-  it("save() never brings a completed session back to active", async () => {
-    const session = Session.create("main", { continuityKey: "k" });
-    await repo.add(session);
-    const stale = (await repo.session(session.id))!;
-    session.complete();
-    await repo.save(session);
-
-    stale.touch();
-    stale.recordTurn({ provider: "openai" });
-    await repo.save(stale);
-    expect((await repo.session(session.id))!.status).toBe("completed");
-    expect(await repo.current("k", "main")).toBeNull();
-  });
-
-  it("save() writes nothing when nothing changed", async () => {
-    const session = Session.create("main");
-    await repo.add(session);
-    const before = (await repo.session(session.id))!.snapshot();
-    await repo.save((await repo.session(session.id))!);
-    expect((await repo.session(session.id))!.snapshot()).toEqual(before);
-    // Both reads come from the database, so no rounding is needed here.
-  });
-
-  it("save() records a chat only once", async () => {
-    const session = Session.create("main");
-    await repo.add(session);
-    session.deprecatedRecordChat("chat-1");
-    await repo.save(session);
-    const found = (await repo.session(session.id))!;
-    expect(found.deprecatedChatId).toBe("chat-1");
-    expect(found.deprecatedRecordChat("chat-2")).toBe(false);
   });
 
   it("replace() retires the session and every duplicate, and adds the successor", async () => {

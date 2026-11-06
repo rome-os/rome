@@ -99,21 +99,17 @@ export class SessionRepository {
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    const storedChat = this.db.transaction((tx) => {
+    this.db.transaction((tx) => {
       const stored = tx
         .select({ id: sessions.id })
         .from(sessions)
         .where(eq(sessions.id, state.id))
         .get();
       if (!stored) throw new Error(`Session "${state.id}" was never added`);
-      const storedChat = writeChanges(tx, state, pending.changes);
+      writeChanges(tx, state, pending.changes);
       for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-      return storedChat;
     });
     session.markSaved();
-    if (storedChat !== null && storedChat !== state.chatId) {
-      session.deprecatedKeepStoredChat(storedChat);
-    }
   }
 
   /**
@@ -121,7 +117,8 @@ export class SessionRepository {
    * adds its successor from `retired.replace()`, with any turn the successor
    * recorded before the reset was written. Every other session still
    * active for the same continuity key and exact agent is completed too, so
-   * the successor is the only one. Whoever resets serializes this per
+   * the successor is the only one. A successor that named no chat inherits
+   * the retired session's stored chat. Whoever resets serializes this per
    * continuity key.
    */
   async replace(retired: Session, successor: Session): Promise<void> {
@@ -138,8 +135,7 @@ export class SessionRepository {
     }
     const retiredPending = retired.pendingChanges();
     const successorPending = successor.pendingChanges();
-    const carriedOver = successor.deprecatedChatCarriedOver;
-    const storedChat = this.db.transaction((tx) => {
+    this.db.transaction((tx) => {
       writeChanges(tx, retiredState, retiredPending.changes);
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
@@ -148,26 +144,23 @@ export class SessionRepository {
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
-      // The chat is read from the row, not the instance, as today's reset
-      // does: the instance can predate the chat's recording, or have lost
-      // its own write to another instance. A successor that carried the chat
-      // over carries the stored one.
-      const storedChat =
-        tx
-          .select({ chatId: sessions.chatId })
-          .from(sessions)
-          .where(eq(sessions.id, retiredState.id))
-          .get()?.chatId ?? null;
-      if (carriedOver) successorState.chatId = storedChat;
+      // The inherited chat is the row's, not the instance's, as today's reset
+      // reads it: the instance can predate the chat's recording.
+      if (successorState.chatId === null) {
+        successorState.chatId =
+          tx
+            .select({ chatId: sessions.chatId })
+            .from(sessions)
+            .where(eq(sessions.id, retiredState.id))
+            .get()?.chatId ?? null;
+      }
       tx.insert(sessions).values(toRow(successorState)).run();
       for (const checkpoint of successorPending.checkpoints) upsertCheckpoint(tx, checkpoint);
-      return storedChat;
     });
     retired.markSaved();
     successor.markSaved();
-    if (storedChat !== null && storedChat !== retiredState.chatId) {
-      retired.deprecatedKeepStoredChat(storedChat);
-      if (carriedOver) successor.deprecatedKeepStoredChat(storedChat);
+    if (successorState.chatId !== null && successor.deprecatedChatId === null) {
+      successor.deprecatedInheritChat(successorState.chatId);
     }
   }
 
@@ -251,17 +244,12 @@ function restore(row: SessionRow): Session {
   });
 }
 
-/**
- * Writes each changed fact as its own targeted update, as today's callers do.
- * Answers the chat the row holds afterwards when one was to be recorded,
- * which is another instance's when it recorded a chat first, and null when
- * no chat was to be recorded.
- */
+/** Writes each changed fact as its own targeted update, as today's callers do. */
 function writeChanges(
   tx: DrizzleTx,
   state: SessionState,
   changes: ReadonlySet<SessionChange>,
-): string | null {
+): void {
   const columns: Partial<SessionRow> = {};
   if (changes.has("turn")) {
     columns.provider = state.provider;
@@ -277,20 +265,12 @@ function writeChanges(
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
-  if (!changes.has("chat") || state.chatId === null) return null;
-  const written = tx
-    .update(sessions)
-    .set({ chatId: state.chatId })
-    .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
-    .run();
-  if (written.changes > 0) return state.chatId;
-  // The guard held, so the row already has a chat, and it is not this one.
-  const row = tx
-    .select({ chatId: sessions.chatId })
-    .from(sessions)
-    .where(eq(sessions.id, state.id))
-    .get();
-  return row?.chatId ?? state.chatId;
+  if (changes.has("chat") && state.chatId !== null) {
+    tx.update(sessions)
+      .set({ chatId: state.chatId })
+      .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
+      .run();
+  }
 }
 
 function toRow(state: SessionState): SessionRow {

@@ -134,18 +134,14 @@ describe("Session", () => {
     // The working dir is the provider's, so the successor starts without one
     // until it opens, as a reset does today.
     expect(successor.workingDir).toBeNull();
-    expect(successor.deprecatedChatId).toBe("chat-1");
+    // The chat is inherited from the stored row when the repository writes
+    // the reset, not copied from this instance.
+    expect(successor.deprecatedChatId).toBeNull();
   });
 
-  it("replace() takes the chat named over the one carried over, and tells the two apart", () => {
+  it("replace() gives the successor only a chat that is named", () => {
     const session = Session.create("main", { continuityKey: "k", deprecatedChatId: "chat-1" });
-    const named = session.replace({ deprecatedChatId: "chat-2" });
-    expect(named.deprecatedChatId).toBe("chat-2");
-    expect(named.deprecatedChatCarriedOver).toBe(false);
-    expect(session.replace().deprecatedChatCarriedOver).toBe(true);
-    // Naming the same chat is still naming it.
-    expect(session.replace({ deprecatedChatId: "chat-1" }).deprecatedChatCarriedOver).toBe(false);
-    expect(Session.create("main").deprecatedChatCarriedOver).toBe(false);
+    expect(session.replace({ deprecatedChatId: "chat-2" }).deprecatedChatId).toBe("chat-2");
   });
 
   it("deprecatedRecordChat() fills a missing chat and never overwrites one", () => {
