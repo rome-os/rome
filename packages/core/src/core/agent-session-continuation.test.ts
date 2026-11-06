@@ -35,6 +35,7 @@ import type { ModelSelectionId } from "./model-selector.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
+import { SessionRepository } from "../sessions/session-repository.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -99,6 +100,7 @@ describe("continuation notice through AgentSessionManager", () => {
   let loader: AgentLoader;
   let sessionManager: SessionManager;
   let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let webchatRepo: WebChatRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
@@ -127,8 +129,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager,
-        sessionsRepo,
+        sessionRepository,
         webchatRepo,
         promptBuilder,
         actionRegistry,
@@ -194,6 +195,7 @@ describe("continuation notice through AgentSessionManager", () => {
     loader = new AgentLoader(artifactIdentity);
     sessionsRepo = new SessionsRepository(testDb.db);
     sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");

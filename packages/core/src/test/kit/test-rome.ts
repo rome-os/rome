@@ -38,7 +38,7 @@ import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
-import { SessionManager } from "../../core/session-manager.js";
+import { SessionRepository } from "../../sessions/session-repository.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
@@ -278,13 +278,12 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions, artifactIdentity);
+  const sessionRepository = new SessionRepository(db, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
-      sessionManager,
-      sessionsRepo: repos.sessions,
+      sessionRepository,
       promptBuilder,
       actionRegistry,
       modelResolver,

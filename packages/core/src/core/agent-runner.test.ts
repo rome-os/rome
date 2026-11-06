@@ -3,6 +3,7 @@ import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
 import { SessionManager } from "./session-manager.js";
+import { SessionRepository } from "../sessions/session-repository.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
 import {
@@ -121,6 +122,7 @@ describe("AgentRunner", () => {
   let artifactIdentity: ArtifactIdentityContext;
   let sessionManager: SessionManager;
   let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let promptBuilder: PromptBuilder;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
@@ -138,6 +140,7 @@ describe("AgentRunner", () => {
     await agentLoader.loadAll(FIXTURES_DIR);
 
     sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     promptBuilder = new PromptBuilder();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
@@ -262,15 +265,12 @@ describe("AgentRunner", () => {
     const legacyBindings = createEmptyLegacyArtifactBindings();
     const namespacedLoader = new AgentLoader({ legacyBindings });
     await namespacedLoader.loadAll(FIXTURES_DIR);
-    const namespacedSessionManager = new SessionManager(new SessionsRepository(testDb.db), {
-      legacyBindings,
-    });
     const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
     const modelResolver = createTestModelResolver({ providers: [provider] });
     const manager = createAgentSessionManager({
       ...managerDeps(modelResolver),
       agentLoader: namespacedLoader,
-      sessionManager: namespacedSessionManager,
+      sessionRepository: new SessionRepository(testDb.db, { legacyBindings }),
     });
 
     const session = await manager.acquire({
@@ -2092,8 +2092,7 @@ describe("AgentRunner", () => {
     return {
       agentLoader,
       appCatalog,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       promptBuilder,
       actionRegistry,
       modelResolver,
