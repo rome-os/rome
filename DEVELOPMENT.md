@@ -59,7 +59,7 @@ For standalone design pages, run `pnpm storybook`. Startup, source HMR, static b
 - Builds the Rome dev image and brings up the worktree's Compose project.
 - Writes `.obs/env` with discovery URLs and attaches to `docker compose logs`.
 
-`ROME_DEV_SIGNER=1 pnpm dev:all` also starts the signer, so the stack authenticates to Rome Cloud with short-lived signed tokens instead of the instance token. It is off by default, because a signed stack registers its instance's key with Rome Cloud, and a dev token that gets registered stops working for any stack without the signer. After you change `packages/signer`, run `./r pnpm --filter @rome/signer build` and restart the signer.
+`pnpm dev:all` also starts the signer, so the stack authenticates to Rome Cloud with short-lived signed tokens, as a deployed instance does. Rome Cloud accepts only signed tokens from an instance that has registered its key, so a stack without the signer stops working once it is registered. `dev:all` builds `packages/signer` on every run; after you change it, run `pnpm dev:all` again and `docker compose -f compose.dev.yml -p "$(scripts/worktree-slug.sh)" restart signer`. `ROME_DEV_SIGNER=0 pnpm dev:all` leaves the signer out and uses the legacy instance token.
 
 For other flows:
 
@@ -145,7 +145,7 @@ sibling worktrees cannot race on shared state.
 Reset a worktree:
 
 ```bash
-docker compose -f compose.dev.yml -p "$(scripts/worktree-slug.sh)" down -v
+docker compose -f compose.dev.yml -p "$(scripts/worktree-slug.sh)" --profile signer down -v
 rm -rf ~/.rome-worktrees/<slug>
 ```
 
