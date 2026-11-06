@@ -172,7 +172,10 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace,
   }: {
     onOpenStoredTrace: (target: unknown) => void;
-    live: { identity: { name: string } };
+    live: {
+      identity: { name: string };
+      snapshot: { segments: unknown[]; summary: { totalSteps: number } } | null;
+    };
     rows: {
       kind: string;
       key: string;
@@ -186,6 +189,13 @@ rs.mock("@/components/chat/MessageList", () => ({
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
+      {live.snapshot ? (
+        <div
+          data-testid="live-snapshot"
+          data-steps={live.snapshot.summary.totalSteps}
+          data-segments={live.snapshot.segments.length}
+        />
+      ) : null}
       <div data-testid="agent-anchor" data-timeline-anchor="a1 a2" />
       <ReplyJump />
       <button
@@ -1057,6 +1067,7 @@ describe("Chat turn poll", () => {
 
   afterEach(() => {
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
     delete (document as { visibilityState?: unknown }).visibilityState;
   });
 
@@ -1164,6 +1175,59 @@ describe("Chat turn poll", () => {
       onBehalf ? "guardian" : null,
     );
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("keeps the saved trace summary on the live entry while reattaching, then lets the replay update it", async () => {
+    // The turn's saved trace is already in the transcript when the poll reattaches.
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "trace-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "trace",
+        createdAt: "2026-10-24T12:00:00Z",
+        content: "",
+        traceSummary: { distinctApps: [], totalSteps: 3, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    rs.mocked(openTurnStream).mockImplementationOnce(
+      async (_id, signal) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+              signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        ),
+    );
+    await renderIdle();
+    await flush();
+
+    // Reattached, nothing replayed yet: the live entry carries the saved summary
+    // rather than an empty snapshot, so the bubble never flashes "0 steps".
+    const snapshot = () => screen.getByTestId("live-snapshot");
+    expect(snapshot().getAttribute("data-steps")).toBe("3");
+    expect(snapshot().getAttribute("data-segments")).toBe("0");
+
+    // A replayed segment lands before any summary_update: the summary stays put.
+    const send = (chunk: string) =>
+      act(async () => stream.enqueue(new TextEncoder().encode(chunk)));
+    await send(
+      'event: segment_upsert\ndata: {"id":"seg-1","ordinal":0,"kind":"block","block":{"type":"thinking","content":"x"}}\n\n',
+    );
+    await flush();
+    expect(snapshot().getAttribute("data-steps")).toBe("3");
+    expect(snapshot().getAttribute("data-segments")).toBe("1");
+
+    // The replayed summary replaces the saved one.
+    await send(
+      'event: summary_update\ndata: {"distinctApps":[],"totalSteps":4,"invocationCounts":{}}\n\n',
+    );
+    await flush();
+    expect(snapshot().getAttribute("data-steps")).toBe("4");
   });
 
   it("asks for the turns again once the socket comes back", async () => {

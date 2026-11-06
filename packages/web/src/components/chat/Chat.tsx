@@ -332,6 +332,18 @@ export interface ChatProps {
   variant?: ChatVariant;
 }
 
+// The summary persisted for a turn's trace, once the turn has one.
+function savedTraceSummary(
+  messages: readonly ChatMessage[] | undefined,
+  turnId: string | null,
+): TraceSummary | null {
+  if (!turnId) return null;
+  return (
+    messages?.find((m) => m.role === "trace" && m.turnId === turnId && m.traceSummary)
+      ?.traceSummary ?? null
+  );
+}
+
 export function Chat({
   sessionId,
   mainAgentDisplayName,
@@ -734,12 +746,24 @@ export function Chat({
   }, [viewer]);
   const isReadVisibleSession = useCallback((id: string) => id === mainSessionIdRef.current, []);
   const activeSessionStream = streamingSessions.get(activeSessionId) ?? null;
-  const currentSnapshot = activeSessionStream?.snapshot ?? null;
   // The `turnId` the stream was opened under addresses the follower and Stop.
   // The transcript matches the turn by its runningTurnId, which differs for a
   // backend task.
   const activeStreamTurnId = activeSessionStream?.turnId ?? null;
   const runningTurnId = runningTurnIdOf(activeSessionStream);
+  // A reattached turn has no replayed snapshot yet, but its saved trace is
+  // already in the transcript. The live row replaces that trace, so it starts
+  // from the saved summary instead of an empty bubble; the replay then fills in
+  // the segments and `summary_update` replaces the summary. Derived at render
+  // so it holds whichever of the messages and the turn lookup lands first.
+  const streamSnapshot = activeSessionStream?.snapshot ?? null;
+  const savedSummary = streamSnapshot
+    ? null
+    : savedTraceSummary(messages.get(activeSessionId), runningTurnId);
+  const currentSnapshot = useMemo<TraceSnapshot | null>(
+    () => streamSnapshot ?? (savedSummary ? { segments: [], summary: savedSummary } : null),
+    [streamSnapshot, savedSummary],
+  );
   const isActiveSessionStreaming = !!activeSessionStream;
   const awaitingGuardian = useMemo(
     () => isAwaitingGuardian(view, runningTurnId),
@@ -1015,12 +1039,20 @@ export function Chat({
       // segment's first upsert in ordinal order.
       const segArr: TraceSegment[] = [];
       const segIdx = new Map<string, number>();
-      let summary: TraceSnapshot["summary"] = {
-        distinctApps: [],
-        totalSteps: 0,
-        invocationCounts: {},
-      };
+      // The last `summary_update`. Until one arrives, a reattached turn keeps
+      // its saved summary, looked up at each flush because the transcript may
+      // still be loading when the stream opens.
+      let replayedSummary: TraceSnapshot["summary"] | null = null;
       const flushSnapshot = () => {
+        const summary = replayedSummary ??
+          savedTraceSummary(
+            messagesRef.current.get(sessionId),
+            runningTurnIdOf(streamingSessionsRef.current.get(sessionId)) ?? turnId,
+          ) ?? {
+            distinctApps: [],
+            totalSteps: 0,
+            invocationCounts: {},
+          };
         updateSessionSnapshot(sessionId, turnId, { segments: segArr.slice(), summary });
       };
       let shouldStop = false;
@@ -1134,7 +1166,7 @@ export function Chat({
           }
           if (evt.event === "summary_update") {
             try {
-              summary = JSON.parse(evt.data) as TraceSnapshot["summary"];
+              replayedSummary = JSON.parse(evt.data) as TraceSnapshot["summary"];
               flushSnapshot();
             } catch {
               // ignore parse errors
@@ -1237,6 +1269,7 @@ export function Chat({
     },
     [
       t,
+      streamingSessionsRef,
       updateSessionSnapshot,
       updateSessionAssistantText,
       adoptSessionAgentTurn,
