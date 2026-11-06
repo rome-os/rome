@@ -23,6 +23,7 @@ describe("useResolvedSelection", () => {
       expect(result.current).toEqual({
         selection: { path: "projects/docs", type: "directory" },
         missing: false,
+        settled: true,
       }),
     );
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
@@ -41,15 +42,17 @@ describe("useResolvedSelection", () => {
   it("selects nothing without a path", () => {
     const fetchMock = stubResolve("file");
     const { result } = renderHook(() => useResolvedSelection("/api/projects", null));
-    expect(result.current).toEqual({ selection: null, missing: false });
+    expect(result.current).toEqual({ selection: null, missing: false, settled: true });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reports a missing path only once /resolve says so", async () => {
     stubResolve("missing");
     const { result } = renderHook(() => useResolvedSelection("/api/projects", "projects/gone"));
-    expect(result.current).toEqual({ selection: null, missing: false });
-    await waitFor(() => expect(result.current).toEqual({ selection: null, missing: true }));
+    expect(result.current).toEqual({ selection: null, missing: false, settled: false });
+    await waitFor(() =>
+      expect(result.current).toEqual({ selection: null, missing: true, settled: true }),
+    );
   });
 
   it("does not treat a failed lookup as missing", async () => {
@@ -57,8 +60,9 @@ describe("useResolvedSelection", () => {
     rs.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useResolvedSelection("/api/projects", "projects/a.md"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(result.current).toEqual({ selection: null, missing: false });
+    await waitFor(() =>
+      expect(result.current).toEqual({ selection: null, missing: false, settled: true }),
+    );
   });
 
   it("keeps the previous selection while the next path resolves", async () => {
