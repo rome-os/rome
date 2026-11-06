@@ -372,7 +372,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     return { clients, manager };
   };
 
-  it("gives the app-server the proxy key and credits provider, and no Rome Cloud credential", async () => {
+  it("gives the app-server the proxy secret and credits provider, and no Rome Cloud credential", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     setInstanceTokenInMemory("romeinst_wiring_test");
     const { clients, manager } = capture();
