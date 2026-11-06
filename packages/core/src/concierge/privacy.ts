@@ -66,36 +66,80 @@ export interface ChatLineageRow {
 /**
  * The one privacy policy for dashboard chats: a chat is private to the owner
  * of the first Concierge chat or Concierge task chat on its line of forks,
- * itself included, and open to everyone when there is none. Every path that
- * reads, lists or searches chats asks it, so a fork, even one promoted to an
- * ordinary chat, stays as private as the chat it came from.
+ * itself included, and open to everyone when the line ends with none. Every
+ * path that reads, lists or searches chats asks it, so a fork, even one
+ * promoted to an ordinary chat, stays as private as the chat it came from.
+ *
+ * It fails closed. When the line cannot be followed to its end (a parent that
+ * no longer exists, a cycle, or more than {@link MAX_FORK_DEPTH} forks), the
+ * chat is private to the owner its last readable row records, never open.
  */
 export function chatAccess(
   getRow: (id: string) => Promise<ChatLineageRow | null | undefined>,
   owner: string | null,
 ) {
-  const privateTo = new Map<string, Promise<string | null>>();
-  const lineOwner = (id: string, depth: number): Promise<string | null> => {
-    const known = privateTo.get(id);
-    if (known) return known;
-    const found = (async () => {
-      const chat = await getRow(id);
-      const own = privateOwnerOf(chat);
-      if (own !== null || !chat?.parentSessionId || depth >= MAX_FORK_DEPTH) return own;
-      return lineOwner(chat.parentSessionId, depth + 1);
-    })();
-    privateTo.set(id, found);
-    return found;
+  const settled = new Map<string, string | null>();
+  const lineOwner = async (chatId: string): Promise<string | null> => {
+    const known = settled.get(chatId);
+    if (known !== undefined || settled.has(chatId)) return known ?? null;
+    const first = await getRow(chatId);
+    // A chat that does not exist is open, and its caller answers as it does today.
+    if (!first) return null;
+    let current: ChatLineageRow = first;
+    const path: string[] = [];
+    let result: string | null;
+    for (;;) {
+      if (settled.has(current.id)) {
+        result = settled.get(current.id) ?? null;
+        break;
+      }
+      path.push(current.id);
+      const own = privateOwnerOf(current);
+      if (own !== null) {
+        result = own;
+        break;
+      }
+      const parentId: string | null | undefined = current.parentSessionId;
+      if (!parentId) {
+        result = null;
+        break;
+      }
+      const parent =
+        path.length > MAX_FORK_DEPTH || path.includes(parentId) ? null : await getRow(parentId);
+      if (!parent) {
+        result = ownerOf(current);
+        break;
+      }
+      current = parent;
+    }
+    for (const id of path) settled.set(id, result);
+    return result;
   };
   return {
     /** The person a chat is private to along its line of forks, or null when it is open to all. */
-    privateOwner: (chatId: string) => lineOwner(chatId, 0),
+    privateOwner: lineOwner,
     /** Whether the owner may open the chat. One that does not exist is open, and its caller answers as it does today. */
     async canOpen(chatId: string): Promise<boolean> {
-      const to = await lineOwner(chatId, 0);
+      const to = await lineOwner(chatId);
       return to === null || to === owner;
     },
   };
+}
+
+/**
+ * Records on a fork's own row the owner its line of forks is private to, if
+ * any, so it stays private to them after the chat it came from is gone.
+ * Called when a fork becomes an ordinary chat.
+ */
+export async function stampForkOwner(
+  repo: {
+    getSession(id: string): Promise<ChatLineageRow | null>;
+    setSessionOwnerKey(id: string, ownerKey: string): Promise<void>;
+  },
+  forkId: string,
+): Promise<void> {
+  const privateTo = await chatAccess((id) => repo.getSession(id), null).privateOwner(forkId);
+  if (privateTo !== null) await repo.setSessionOwnerKey(forkId, privateTo);
 }
 
 /** Whether `owner` may open chat `chatId`, by {@link chatAccess}. */

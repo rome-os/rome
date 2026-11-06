@@ -1,5 +1,5 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
-import { callerChatOwner, chatAccessOver } from "../../concierge/privacy.js";
+import { callerChatOwner, chatAccessOver, stampForkOwner } from "../../concierge/privacy.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -1580,6 +1580,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         );
         void generateAndPersistConversationTitle(forkSessionId, fallbackTitle, input.prompt);
       }
+      // A fork of a private chat records that chat's owner on its own row, so
+      // it stays private to them after the chat it came from is gone.
+      await stampForkOwner(deps.webchatRepo, forkSessionId);
       await deps.webchatRepo.promoteForkToChat(forkSessionId);
     }
     void (async () => {

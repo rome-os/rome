@@ -1370,6 +1370,11 @@ export class WebChatRepository {
     tx.delete(romeSessions).where(inArray(romeSessions.id, ids)).run();
   }
 
+  /** Records whose a chat is. */
+  async setSessionOwnerKey(id: string, ownerKey: string): Promise<void> {
+    await this.db.update(romeSessions).set({ ownerKey }).where(eq(romeSessions.id, id));
+  }
+
   async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
     if (!sessionId) return null;
     const [row] = await this.db
