@@ -3,6 +3,7 @@ import {
   type DirtyTask,
   MIN_FLUSH_SPACING_MS,
   QUIET_DELAY_MS,
+  RETRY_MS,
   TaskEventCoalescer,
   URGENT_DELAY_MS,
 } from "./task-events.js";
@@ -16,30 +17,43 @@ const quiet = (taskId: string, kind = "guardian_message") => ({ taskId, kind, ur
 
 function setup() {
   const flushes: Array<{ ids: string[]; quiet: boolean; at: number }> = [];
+  const rendered: string[][] = [];
   const gaveUp: string[] = [];
+  /** Whether the next turns run to their end. */
+  let runs = true;
   /** Settles the running flush's turn. */
   let endTurn: (() => void) | null = null;
   let holdTurns = false;
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     isEnabled: async () => true,
-    render: async (tasks: DirtyTask[]) => [
-      {
-        chatId: null,
-        prompt: tasks.map((task) => task.taskId).join(","),
-        quiet: tasks.every((task) => task.quiet),
-      },
-    ],
+    render: async (tasks: DirtyTask[]) => {
+      rendered.push(tasks.flatMap((task) => task.changes.map((change) => change.kind)));
+      return [
+        {
+          chatId: null,
+          taskIds: tasks.map((task) => task.taskId),
+          prompt: tasks.map((task) => task.taskId).join(","),
+          quiet: tasks.every((task) => task.quiet),
+        },
+      ];
+    },
     deliver: async ({ prompt, quiet }) => {
       flushes.push({ ids: prompt.split(","), quiet, at: Date.now() });
       if (holdTurns) await new Promise<void>((resolve) => (endTurn = resolve));
+      return runs;
     },
     giveUp: (taskId) => gaveUp.push(taskId),
   });
   return {
     coalescer,
     flushes,
+    rendered,
     gaveUp,
+    /** Makes the next turns fail, as when the Concierge is out of quota, or run again. */
+    turnsRun: (value: boolean) => {
+      runs = value;
+    },
     holdTurns: () => {
       holdTurns = true;
     },
@@ -184,14 +198,87 @@ describe("TaskEventCoalescer", () => {
     expect(s.gaveUp).toEqual([]);
   });
 
+  it("tries a row again 5 min after a turn that did not run, without spending its retries", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.flushes).toHaveLength(1);
+    await rs.advanceTimersByTimeAsync(RETRY_MS - 1);
+    expect(s.flushes).toHaveLength(1);
+    await rs.advanceTimersByTimeAsync(1);
+    expect(s.flushes).toHaveLength(2);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.flushes).toHaveLength(3);
+    expect(s.gaveUp).toEqual([]);
+
+    // Turns run again: the row still has its flush and its retry before it is given up.
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.flushes).toHaveLength(4);
+    expect(s.gaveUp).toEqual([]);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(5);
+    expect(s.gaveUp).toEqual(["a"]);
+  });
+
+  it("keeps changes that arrive while turns fail, and a write still settles what a turn carried", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.coalescer.mark(urgent("a", "turn_end:error by=concierge"));
+    s.coalescer.mark(urgent("b"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.coalescer.mark(urgent("a", "turn_end:completed by=concierge"));
+    // The Concierge wrote both rows in a turn of its own: only "a" has a change no turn carried.
+    s.coalescer.settle("a");
+    s.coalescer.settle("b");
+    expect(s.coalescer.pending).toEqual(["a"]);
+
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a", "b"], ["a"]]);
+    expect(s.rendered[1]).toEqual([
+      "turn_end:error by=concierge",
+      "turn_end:completed by=concierge",
+    ]);
+  });
+
+  it("waits to retry only the rows of a chat whose turn did not run", async () => {
+    const delivered: string[] = [];
+    const coalescer = new TaskEventCoalescer({
+      now: () => Date.now(),
+      isEnabled: async () => true,
+      render: async (tasks) =>
+        tasks.map((task) => ({
+          chatId: task.taskId === "a" ? "topic-1" : null,
+          taskIds: [task.taskId],
+          prompt: task.taskId,
+          quiet: false,
+        })),
+      deliver: async ({ chatId, prompt }) => {
+        delivered.push(prompt);
+        return chatId !== "topic-1";
+      },
+      giveUp: () => {},
+    });
+    coalescer.mark(urgent("a"));
+    coalescer.mark(urgent("b"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS + MIN_FLUSH_SPACING_MS);
+    // "b" ran and was not written, so it gets its retry now; "a" waits.
+    expect(delivered).toEqual(["a", "b", "b"]);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(delivered).toEqual(["a", "b", "b", "a"]);
+  });
+
   it("drops marks when the setting turns off, without delivering", async () => {
     const delivered: string[] = [];
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
       isEnabled: async () => false,
-      render: async () => [{ chatId: null, prompt: "x", quiet: false }],
+      render: async () => [{ chatId: null, taskIds: ["a"], prompt: "x", quiet: false }],
       deliver: async ({ prompt }) => {
         delivered.push(prompt);
+        return true;
       },
       giveUp: () => {},
     });
@@ -207,12 +294,13 @@ describe("TaskEventCoalescer", () => {
       now: () => Date.now(),
       isEnabled: async () => true,
       render: async () => [
-        { chatId: "topic-1", prompt: "a", quiet: false },
-        { chatId: null, prompt: "b", quiet: false },
+        { chatId: "topic-1", taskIds: ["a"], prompt: "a", quiet: false },
+        { chatId: null, taskIds: ["b"], prompt: "b", quiet: false },
       ],
       deliver: async ({ chatId }) => {
         if (chatId === "topic-1") throw new Error("no runtime");
         delivered.push(chatId);
+        return true;
       },
       giveUp: () => {},
     });
@@ -232,13 +320,21 @@ describe("TaskEventCoalescer", () => {
         const main = tasks.filter((task) => task.taskId === "c");
         return [
           ...(topic.length
-            ? [{ chatId: "topic-1", prompt: topic.map((t) => t.taskId).join(","), quiet: false }]
+            ? [
+                {
+                  chatId: "topic-1",
+                  taskIds: topic.map((t) => t.taskId),
+                  prompt: topic.map((t) => t.taskId).join(","),
+                  quiet: false,
+                },
+              ]
             : []),
-          ...(main.length ? [{ chatId: null, prompt: "c", quiet: true }] : []),
+          ...(main.length ? [{ chatId: null, taskIds: ["c"], prompt: "c", quiet: true }] : []),
         ];
       },
       deliver: async (delivery) => {
         delivered.push(delivery);
+        return true;
       },
       giveUp: () => {},
     });
@@ -247,8 +343,8 @@ describe("TaskEventCoalescer", () => {
     coalescer.mark(quiet("c"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(delivered).toEqual([
-      { chatId: "topic-1", prompt: "a,b", quiet: false },
-      { chatId: null, prompt: "c", quiet: true },
+      { chatId: "topic-1", taskIds: ["a", "b"], prompt: "a,b", quiet: false },
+      { chatId: null, taskIds: ["c"], prompt: "c", quiet: true },
     ]);
   });
 });
