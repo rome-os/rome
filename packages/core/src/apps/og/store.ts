@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getProfileAppsDir } from "../../paths.js";
@@ -22,12 +23,25 @@ function isEnoent(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
 
-/** One PNG per app under `<profile>/apps/og/`, keyed by the encoded app id. */
+/**
+ * One PNG per app under `<profile>/apps/og/`, keyed by the encoded app id and,
+ * when the instance has one, the public host the card prints. The host is part
+ * of the name for the same reason as the format version: a card drawn for
+ * another host (an instance that took its tenant address after the card was
+ * rendered) is simply never read again, and the next event renders a fresh one.
+ * `host` is read on every call, so the store follows a host that changes.
+ */
 export function createOgImageStore(
   rootDir: string = join(getProfileAppsDir(), "og"),
+  host: () => string | null = () => null,
 ): OgImageStore {
-  const path = (appId: string) =>
-    join(rootDir, `${appIdToPathSegment(appId)}.v${CARD_FORMAT_VERSION}.png`);
+  const path = (appId: string) => {
+    const current = host();
+    const hostKey = current
+      ? `.${createHash("sha256").update(current).digest("hex").slice(0, 8)}`
+      : "";
+    return join(rootDir, `${appIdToPathSegment(appId)}.v${CARD_FORMAT_VERSION}${hostKey}.png`);
+  };
   return {
     path,
     async write(appId, png) {

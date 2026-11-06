@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { guardianAuth } from "../../db/schema.js";
 import {
   getInstanceToken,
+  hydrateInstanceToken,
   type ProveIdentityResult,
   setInstanceTokenInMemory,
 } from "../../lib/instance-identity.js";
@@ -17,10 +18,11 @@ const ENV_KEYS = [
   "PANTHEON_INSTANCE_ORIGIN",
   "ROME_SIGNER_SOCKET",
 ] as const;
+const POOL_RECORD = { from: "pool-7", to: "acme" };
 const savedEnv: Record<string, string | undefined> = {};
 
-function memoryStore() {
-  const data = new Map<string, unknown>();
+function memoryStore(initial: Record<string, unknown> = {}) {
+  const data = new Map<string, unknown>(Object.entries(initial));
   return {
     data,
     async get<T = unknown>(key: string): Promise<T | null> {
@@ -40,6 +42,22 @@ let store: ReturnType<typeof memoryStore>;
 let restartWorkers: ReturnType<typeof rs.fn>;
 let provisionAfterLink: ReturnType<typeof rs.fn>;
 
+type Persist = NonNullable<Parameters<typeof instanceAdoptRoutes>[1]>["persistInstanceToken"];
+
+// Stands in for the signer-mode persist: stores the token, then reports how
+// registering the key went.
+function link(status: ProveIdentityResult["status"] = "ok"): NonNullable<Persist> {
+  return async (settings, token) => {
+    await settings.set("instanceToken", token);
+    setInstanceTokenInMemory(token);
+    return (
+      status === "ok"
+        ? { status, identity: { accountId: "acct_1", instanceId: "inst_1" } }
+        : { status }
+    ) as ProveIdentityResult;
+  };
+}
+
 function mount(seams: Parameters<typeof instanceAdoptRoutes>[1] = {}): Hono {
   const deps = {
     db: testDb.db,
@@ -47,7 +65,10 @@ function mount(seams: Parameters<typeof instanceAdoptRoutes>[1] = {}): Hono {
     actionEngine: { restartWorkerWarmPool: restartWorkers },
     provisionAfterLink,
   } as unknown as ApiDeps;
-  return new Hono().route("/", instanceAdoptRoutes(deps, seams));
+  return new Hono().route(
+    "/",
+    instanceAdoptRoutes(deps, { persistInstanceToken: link(), ...seams }),
+  );
 }
 
 function adopt(app: Hono, body: unknown) {
@@ -72,21 +93,21 @@ function insertGuardian(): void {
     .run();
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_DOMAIN = "romeos.cc";
   process.env.PANTHEON_SLUG = "pool-7";
   process.env.PANTHEON_INSTANCE_ORIGIN = "https://pool-7.romeos.cc";
-  delete process.env.ROME_SIGNER_SOCKET;
-  setInstanceTokenInMemory(null);
+  process.env.ROME_SIGNER_SOCKET = "/run/signer.sock";
   testDb = createTestDb();
   store = memoryStore();
   restartWorkers = rs.fn(async () => {});
   provisionAfterLink = rs.fn(async () => {});
+  await hydrateInstanceToken(memoryStore());
 });
 
-afterEach(() => {
-  setInstanceTokenInMemory(null);
+afterEach(async () => {
+  await hydrateInstanceToken(memoryStore());
   testDb.close();
   for (const key of ENV_KEYS) {
     if (savedEnv[key] === undefined) delete process.env[key];
@@ -110,7 +131,7 @@ describe("POST /instance/adopt", () => {
     expect(await res.json()).toEqual({ ok: true, slug: "acme", origin: "https://acme.romeos.cc" });
     expect(process.env.PANTHEON_SLUG).toBe("acme");
     expect(process.env.PANTHEON_INSTANCE_ORIGIN).toBe("https://acme.romeos.cc");
-    expect(store.data.get("instanceSlug")).toBe("acme");
+    expect(store.data.get("instanceSlug")).toEqual(POOL_RECORD);
     expect(store.data.get("instanceToken")).toBe(TOKEN);
     expect(getInstanceToken()).toBe(TOKEN);
     expect(restartWorkers).toHaveBeenCalledTimes(1);
@@ -137,13 +158,13 @@ describe("POST /instance/adopt", () => {
   });
 
   it("refuses an instance that is already linked", async () => {
-    setInstanceTokenInMemory("romeinst_existing");
+    // In signer mode a registered key is what links the instance.
+    await hydrateInstanceToken(memoryStore({ instanceKeyId: "key_existing" }));
 
     const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "not_blank" });
-    expect(getInstanceToken()).toBe("romeinst_existing");
     expectUntouched();
   });
 
@@ -155,6 +176,50 @@ describe("POST /instance/adopt", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "not_blank" });
     expect(getInstanceToken()).toBeNull();
+    expectUntouched();
+  });
+
+  it("refuses without a signer, where the token would only be stored", async () => {
+    delete process.env.ROME_SIGNER_SOCKET;
+
+    const res = await adopt(mount(), { slug: "acme", instanceToken: TOKEN });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "signer_required" });
+    expect(getInstanceToken()).toBeNull();
+    expectUntouched();
+  });
+
+  it("writes the slug record before it links the token", async () => {
+    let recordWhenLinking: unknown;
+    const persist: NonNullable<Persist> = async (settings, token) => {
+      recordWhenLinking = store.data.get("instanceSlug");
+      return link()(settings, token);
+    };
+
+    const res = await adopt(mount({ persistInstanceToken: persist }), {
+      slug: "acme",
+      instanceToken: TOKEN,
+    });
+
+    expect(res.status).toBe(200);
+    expect(recordWhenLinking).toEqual(POOL_RECORD);
+  });
+
+  it("undoes the token and the slug record when linking throws", async () => {
+    const persist: NonNullable<Persist> = async (settings, token) => {
+      await settings.set("instanceToken", token);
+      throw new Error("store unavailable");
+    };
+
+    const res = await adopt(mount({ persistInstanceToken: persist }), {
+      slug: "acme",
+      instanceToken: TOKEN,
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "adopt_failed" });
+    expect(store.data.has("instanceToken")).toBe(false);
     expectUntouched();
   });
 
@@ -211,28 +276,15 @@ describe("POST /instance/adopt", () => {
     expectUntouched();
   });
 
-  describe("signer mode link failure", () => {
-    // The real persist stores the token and then registers the key; a failed
-    // registration leaves the token behind for the route to undo.
-    function failingLink(status: ProveIdentityResult["status"]) {
-      return async (
-        settings: { set(key: string, value: unknown): Promise<void> },
-        token: string,
-      ): Promise<ProveIdentityResult> => {
-        await settings.set("instanceToken", token);
-        setInstanceTokenInMemory(token);
-        return { status } as ProveIdentityResult;
-      };
-    }
-
+  describe("link failure", () => {
     it.each([
       "unreachable",
       "signer_unavailable",
       "clock_skew",
       "audience_mismatch",
       "unconfigured",
-    ] as const)("answers 502 for the transient status %s and undoes the token", async (status) => {
-      const res = await adopt(mount({ persistInstanceToken: failingLink(status) }), {
+    ] as const)("answers 502 for the transient status %s and undoes token and slug record", async (status) => {
+      const res = await adopt(mount({ persistInstanceToken: link(status) }), {
         slug: "acme",
         instanceToken: TOKEN,
       });
@@ -249,8 +301,8 @@ describe("POST /instance/adopt", () => {
       "revoked",
       "key_conflict",
       "upgrade_required",
-    ] as const)("answers 409 for the terminal status %s and undoes the token", async (status) => {
-      const res = await adopt(mount({ persistInstanceToken: failingLink(status) }), {
+    ] as const)("answers 409 for the terminal status %s and undoes token and slug record", async (status) => {
+      const res = await adopt(mount({ persistInstanceToken: link(status) }), {
         slug: "acme",
         instanceToken: TOKEN,
       });
@@ -260,28 +312,6 @@ describe("POST /instance/adopt", () => {
       expect(store.data.has("instanceToken")).toBe(false);
       expect(getInstanceToken()).toBeNull();
       expectUntouched();
-    });
-
-    it("adopts when the key registers", async () => {
-      const persist = async (
-        settings: { set(key: string, value: unknown): Promise<void> },
-        token: string,
-      ): Promise<ProveIdentityResult> => {
-        await settings.set("instanceToken", token);
-        setInstanceTokenInMemory(token);
-        return {
-          status: "ok",
-          identity: { accountId: "acct_1", instanceId: "inst_1" },
-        };
-      };
-
-      const res = await adopt(mount({ persistInstanceToken: persist }), {
-        slug: "acme",
-        instanceToken: TOKEN,
-      });
-
-      expect(res.status).toBe(200);
-      expect(process.env.PANTHEON_SLUG).toBe("acme");
     });
   });
 });

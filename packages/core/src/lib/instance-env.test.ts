@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import {
   applyInstanceSlug,
+  decideAdoptedSlug,
   deriveInstanceOrigin,
   isInstanceSlug,
   readEnvInstanceOrigin,
@@ -108,5 +109,45 @@ describe("applyInstanceSlug", () => {
     expect(applyInstanceSlug("acme", env)).toBeNull();
 
     expect(env).toEqual({ PANTHEON_SLUG: "local" });
+  });
+});
+
+describe("decideAdoptedSlug", () => {
+  const stored = { from: "pool-7", to: "acme" };
+
+  it("does nothing without a stored adoption", () => {
+    expect(decideAdoptedSlug(null, "pool-7")).toEqual({ action: "none" });
+    expect(decideAdoptedSlug(undefined, undefined)).toEqual({ action: "none" });
+  });
+
+  it("applies the adopted slug while the env still holds the slug it replaced", () => {
+    expect(decideAdoptedSlug(stored, "pool-7")).toEqual({ action: "apply", slug: "acme" });
+  });
+
+  it("applies when the pool had no slug and the env has none", () => {
+    expect(decideAdoptedSlug({ from: null, to: "acme" }, undefined)).toEqual({
+      action: "apply",
+      slug: "acme",
+    });
+  });
+
+  it("drops the record when the container was recreated with the adopted slug", () => {
+    expect(decideAdoptedSlug(stored, "acme")).toEqual({ action: "discard" });
+  });
+
+  it("drops the record, leaving the env alone, after a later address change", () => {
+    expect(decideAdoptedSlug(stored, "acme-2")).toEqual({ action: "discard" });
+    expect(decideAdoptedSlug(stored, undefined)).toEqual({ action: "discard" });
+  });
+
+  it.each([
+    "acme",
+    42,
+    {},
+    { from: "pool-7" },
+    { from: "pool-7", to: "Not A Label" },
+    { from: 7, to: "acme" },
+  ])("drops a malformed record %j", (record) => {
+    expect(decideAdoptedSlug(record, "pool-7")).toEqual({ action: "discard" });
   });
 });

@@ -59,6 +59,36 @@ describe("createAppOgImageSubscriber", () => {
     expect(await store.read("reddit")).not.toBeNull();
   });
 
+  it("regenerates a card drawn for another host once the instance host changes", async () => {
+    let host: string | null = "pool-7.romeos.cc";
+    const store = createOgImageStore(root, () => host);
+    const links: Array<string | null> = [];
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: () => host,
+      generate: async (_app, link) => {
+        links.push(link);
+        return Buffer.from(link ?? "none");
+      },
+    });
+    const event = { appId: "reddit", change: "changed", current: resolvedApp() } as const;
+
+    await handler(event);
+    await tick();
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit"]);
+
+    // Same host, newer card than the app: the replay is a no-op.
+    await handler(event);
+    await tick();
+    expect(links).toHaveLength(1);
+
+    host = "acme.romeos.cc";
+    await handler(event);
+    await tick();
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit", "acme.romeos.cc/full/apps/reddit"]);
+    expect((await store.read("reddit"))?.toString()).toBe("acme.romeos.cc/full/apps/reddit");
+  });
+
   it("skips when the image is newer than the app's updatedAt, and regenerates when older", async () => {
     const store = createOgImageStore(root);
     let calls = 0;

@@ -13,17 +13,29 @@
  * here lets the source of these values change in one place.
  *
  * A blank hosted instance (a warm-pool VM) receives its identity at runtime
- * through `POST /api/instance/adopt` (api/routes/instance-adopt.ts): the token
- * goes through instance-identity.ts, and the slug is written back here with
- * {@link applyInstanceSlug}, which updates `process.env` and so reaches
- * children forked later. The slug is also stored in the settings table
- * ({@link INSTANCE_SLUG_SETTING_KEY}) and re-applied at boot (index.ts), so a
- * respawned process, which inherits the container's original env, keeps it.
+ * through `POST /api/instance/adopt` (api/routes/instance-adopt.ts). The route
+ * is private: Caddy's forward_auth needs a guardian session and a blank box has
+ * none, so only a caller inside the container, on core's loopback port, can
+ * reach it. The token goes through instance-identity.ts, and the slug is written
+ * back here with {@link applyInstanceSlug}, which updates `process.env` and so
+ * reaches children forked later.
+ *
+ * The slug is also stored in the settings table as `{ from, to }`
+ * ({@link INSTANCE_SLUG_SETTING_KEY}), written before the token is linked. A
+ * respawned backend inherits the container's original env (the pool slug); at
+ * boot {@link decideAdoptedSlug} re-applies `to` only while the env slug is still
+ * `from`. Once the container is recreated with a newer `.env` (the adopted slug,
+ * or a later address change), the env has moved on, the stored value is dropped
+ * and the env wins. The control plane never retries adopt on a VM whose claim
+ * failed (it quarantines the VM), so no resumable pending state is needed.
  *
  * Read live, so they follow an adopted identity:
  *   - lib/cloud-auth-gate.ts and lib/auto-upgrade-gate.ts (statsig gates):
  *     `resolveInstanceSlug()` at evaluation time.
  *   - index.ts `createAppOgImageSubscriber({ host })`: a getter, read per render.
+ *     Social cards carry the host in their cache name (apps/og/store.ts), and the
+ *     provisioning step after a link re-renders them, so cards drawn with the
+ *     pool host are never served after adoption.
  *   - index.ts `new PromptBuilder(...)`: `romePublicOrigin` is a getter. Note
  *     the main-agent prefix is cached on the first turn, so an origin adopted
  *     after a turn only shows once the cache is dropped.
@@ -34,8 +46,9 @@
  *
  * Deliberately still captured at boot:
  *   - telemetry.ts `buildResourceAttributes()`: `service.instance.id` keeps the
- *     slug the process started with until the next restart. The adopt route logs
- *     `instance adopted` with `{ from, to }` so operators can map the two.
+ *     boot (pool) slug until the container is recreated, including after a
+ *     backend respawn. The adopt route logs `instance adopted` with
+ *     `{ from, to }` so operators can map the two.
  *
  * Readers outside core (not routed through here):
  *   - rome_apps/connector/src/api/github-webhook.ts `resolveInstanceWebhookUrl`:
@@ -44,8 +57,35 @@
  *     `ROME_INSTANCE_TOKEN` in its own process.
  */
 
-/** The settings-table key holding a slug adopted at runtime. */
+/** The settings-table key holding the {@link AdoptedSlug} of a runtime adoption. */
 export const INSTANCE_SLUG_SETTING_KEY = "instanceSlug";
+
+/** The stored record of a runtime adoption: the slug before it, and the one adopted. */
+export interface AdoptedSlug {
+  from: string | null;
+  to: string;
+}
+
+export type AdoptedSlugDecision =
+  | { action: "none" }
+  | { action: "discard" }
+  | { action: "apply"; slug: string };
+
+/**
+ * What boot does with the stored adoption. Apply `to` only while the env slug is
+ * still `from` (a respawn inside the container that was adopted); if the env has
+ * moved on, or the record is malformed, drop it and leave the env alone.
+ */
+export function decideAdoptedSlug(
+  stored: unknown,
+  envSlug: string | undefined,
+): AdoptedSlugDecision {
+  if (stored === null || stored === undefined) return { action: "none" };
+  const { from, to } = (typeof stored === "object" ? stored : {}) as Partial<AdoptedSlug>;
+  const wellFormed = isInstanceSlug(to) && (from === null || typeof from === "string");
+  if (!wellFormed || (from ?? undefined) !== envSlug) return { action: "discard" };
+  return { action: "apply", slug: to };
+}
 
 /** A DNS label: lowercase a-z, 0-9 and "-", 1-63 chars, no leading or trailing "-". */
 export function isInstanceSlug(value: unknown): value is string {
