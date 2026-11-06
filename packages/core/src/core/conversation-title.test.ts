@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { validatePortableOutputSchema } from "../apps/packaging/output-schema-validator.js";
 import type { ModelProvider, ModelSession, ModelSessionParams } from "./agent-runner.js";
+import { executeActionTool } from "../test/tool-calls.js";
 import {
   CONVERSATION_TITLE_INPUT_MAX_LENGTH,
   CONVERSATION_TITLE_OUTPUT_SCHEMA,
@@ -77,8 +78,11 @@ describe("conversation title generation", () => {
       agentName: "conversation-title",
       thread: { kind: "new" },
     });
-    expect(openParams?.getActionCatalog()).toEqual([]);
-    expect(openParams?.getSkillCatalog()).toEqual([]);
+    // The title session serves the model no actions, skills or subagents.
+    expect(openParams?.tools.listTools("subagents")).toEqual([]);
+    await expect(executeActionTool(openParams!.tools, "any_action")).rejects.toThrow(
+      "cannot execute actions",
+    );
     expect(session.sendUserInput).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(

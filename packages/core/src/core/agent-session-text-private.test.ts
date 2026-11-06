@@ -106,12 +106,16 @@ describe("AgentSessionManager textPrivate", () => {
   it.each([
     ["texter", true],
     ["worker", false],
-  ])("opens %s's model session with textPrivate %s", async (agentName, textPrivate) => {
+  ])("opens %s's model session with a defer tool that asks for a confirmation line: %s", async (agentName, textPrivate) => {
     await manager.acquire(
       { agentName, channelThreadKey: `webchat:${agentName}` },
       { workingDir: directory },
     );
     expect(opened).toHaveLength(1);
-    expect(opened[0]!.textPrivate).toBe(textPrivate);
+    // A private-text agent's words never reach the guardian, so `defer` asks
+    // it for no confirmation line.
+    const defer = opened[0]!.tools.listTools("ask_user").find((tool) => tool.name === "defer");
+    expect(defer).toBeDefined();
+    expect(defer!.description.includes("write one short line confirming")).toBe(!textPrivate);
   });
 });

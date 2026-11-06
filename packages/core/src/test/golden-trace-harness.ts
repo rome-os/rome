@@ -22,6 +22,7 @@ import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
 import type { AgentEvent } from "../types.js";
+import { executeActionTool } from "./tool-calls.js";
 import {
   createTestConnections,
   createTestDb,
@@ -190,7 +191,7 @@ export function makeSingleActionProvider(
   const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentEvent> {
     const id = randomUUID();
     yield { type: "tool_use", id, tool: actionName, input };
-    await params.executeAction(actionName, input);
+    await executeActionTool(params.tools, actionName, input, { toolUseId: id });
     yield { type: "tool_result", toolUseId: id, tool: actionName, output: { success: true } };
     yield {
       type: "result",

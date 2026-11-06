@@ -91,13 +91,12 @@ export async function createBorrowedExactForkSession(
     ...createImageTraceSessionState(),
   };
   const imageTracker = await createGeneratedImageTracker();
-  // Exact-fork open params carry interactiveSurfaceDetached: nothing drains
-  // this session's stream into webchat, so the interactive tools must take
-  // their non-interactive fallbacks while the advertised catalog stays
-  // byte-identical to the source (prefix identity — the reason this module
-  // exists). The shared mapping keeps that flag (and any future facade
-  // capability) in lockstep with openSession's wiring.
-  const romeTools = createRomeDynamicTools(args.openParams);
+  // The run built the fork's tools with the interactive surface detached:
+  // nothing drains this session's stream into webchat, so the interactive
+  // tools take their non-interactive fallbacks while the advertised catalog
+  // stays byte-identical to the source (prefix identity — the reason this
+  // module exists). Flattening them here changes nothing in them.
+  const romeTools = createRomeDynamicTools(args.openParams.tools);
 
   let closed = false;
   let closing = false;

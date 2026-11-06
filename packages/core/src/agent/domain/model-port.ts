@@ -16,24 +16,12 @@
 
 import type { TurnErrorEvent, TurnResultEvent } from "@rome-os/app-runtime";
 import type { ActionConfig } from "../../actions/types.js";
-import type { DeferInput } from "../../core/defer.js";
-import type { FacadeToolDef, RoutineActivationGate } from "../../core/mcp-facade.js";
 import type { SkillMcpDefinition } from "../../core/skill-catalog.js";
+import type { RomeTools } from "./rome-tools.js";
 import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../../types.js";
 import type { UsageFunding } from "../../usage/events.js";
 
 export type ProviderId = "anthropic" | "openai" | "mock";
-
-export interface ModelToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
-export interface ModelToolCallContext {
-  /** Provider-issued identity of the model tool call. */
-  toolUseId: string;
-}
 
 export interface ActionMcpDefinition {
   name: string;
@@ -181,61 +169,15 @@ export interface ModelSessionParams {
   /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
   appStoreListingId?: string;
   /**
-   * Live getter the MCP facade reads on every tool request, so actions added
-   * mid-session (e.g. by `app_management`) become callable in-session. No
-   * static-snapshot fallback exists — every caller must supply a real getter.
+   * The tools Rome serves the model for this session. The provider mounts
+   * each group and calls back with what the model sent; what a tool does and
+   * which surface answers it are the run's.
    */
-  getActionCatalog: () => ActionMcpDefinition[];
-  /**
-   * Live getter the MCP facade reads on every tool request, so skills from
-   * apps installed mid-session (e.g. via `app_management`) become
-   * discoverable in-session.
-   */
-  getSkillCatalog: () => SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
-  /**
-   * The agent's text stays in its trace (`policy.finalText: private`), so it
-   * reaches the guardian only through its tools. Read by the tool facade for
-   * the `defer` tool's wording; it leaves with the other tool fields.
-   */
-  textPrivate?: boolean;
+  tools: RomeTools;
   /** The thread the session runs on. The provider names the thread. */
   thread: ThreadStart;
   /** Provider-owned fork source. Normal application code should not set this. */
   fork?: ModelSessionForkSource;
-  /** Execute callbacks; the provider invokes these as MCP tools. */
-  executeAction: (name: string, input: unknown) => Promise<unknown>;
-  executeSubagent: (
-    name: string,
-    input: unknown,
-    context: ModelToolCallContext,
-  ) => Promise<unknown>;
-  /** Invoked when the agent calls the `defer` tool: schedules a
-   * one-off wakeup back into this same thread. Absent for sessions with no
-   * live thread to wake. */
-  executeDefer?: (input: DeferInput) => Promise<unknown>;
-  /** See FacadeParams.sessionTools. */
-  sessionTools?: FacadeToolDef[];
-  /** See FacadeParams.routineActivation. */
-  routineActivation?: RoutineActivationGate;
-  /**
-   * Whether the consuming surface can render interactive inline UI
-   * (`propose_routine` cards, app components). True only for webchat-bound
-   * sessions (dashboard + desktop); other channels skip the tools so the model
-   * doesn't dead-end waiting for UI no one will deliver.
-   */
-  supportsInteractiveSurface?: boolean;
-  /**
-   * True when the session must keep advertising the interactive-surface tool
-   * catalog but nothing drains its stream to mount UI — exact-mode forked
-   * turns, whose model-visible prefix (system prompt + tools) must stay
-   * byte-identical to their webchat source while no webchat drain exists to
-   * render cards. The interactive tools' *runtime*
-   * degrades to the non-interactive fallbacks (ask_question relays prose;
-   * propose_routine refuses) instead of claiming UI was
-   * delivered. See FacadeParams.interactiveSurfaceDetached.
-   */
-  interactiveSurfaceDetached?: boolean;
 }
 
 export interface ModelUserInput {

@@ -12,7 +12,7 @@ import { createAgentSessionManager } from "../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
-import { createRomeMcpServer, type RomeMcpGroup, type RomeMcpServer } from "../core/mcp/server.js";
+import type { RomeToolGroup, RomeTools } from "../agent/index.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import {
@@ -431,21 +431,14 @@ async function writeAppWithSkillFixture(
 }
 
 class McpSessionModelProvider extends MockModelProvider {
-  readonly mcpServers: RomeMcpServer[] = [];
+  readonly mcpServers: RomeTools[] = [];
 
   override async openSession(params: ModelSessionParams) {
-    const server = createRomeMcpServer({
-      getActionCatalog: params.getActionCatalog,
-      getSkillCatalog: params.getSkillCatalog,
-      subagentTools: params.subagentTools,
-      executeAction: params.executeAction,
-      executeSubagent: params.executeSubagent,
-    });
-    this.mcpServers.push(server);
+    this.mcpServers.push(params.tools);
     return await super.openSession(params);
   }
 
-  lastMcpServer(): RomeMcpServer {
+  lastMcpServer(): RomeTools {
     const server = this.mcpServers[this.mcpServers.length - 1];
     if (!server) throw new Error("no MCP server opened yet");
     return server;
@@ -458,8 +451,8 @@ interface McpToolResult {
 }
 
 async function callMcpTool(
-  server: RomeMcpServer,
-  group: RomeMcpGroup,
+  server: RomeTools,
+  group: RomeToolGroup,
   name: string,
   args: Record<string, unknown> = {},
 ): Promise<McpToolResult> {

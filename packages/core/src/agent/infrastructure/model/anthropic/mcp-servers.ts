@@ -1,62 +1,26 @@
-// Anthropic-side adapter for the provider-agnostic MCP facade.
+// Anthropic-side mount of the Rome tools.
 //
-// The actual tool definitions (list_actions / read_action / … and the
-// skill / subagent counterparts) live in `mcp-facade.ts`. This module's job
-// is to wrap each facade tool into the Claude Agent SDK's `tool()` shape and
-// group them under `createSdkMcpServer()` instances, then attach any
-// external (stdio) MCP servers the agent declared.
+// The tool definitions and handlers are the run's (`core/mcp-facade.ts`,
+// served as `RomeTools`). This module's job is to wrap each tool into the
+// Claude Agent SDK's `tool()` shape and group them under `createSdkMcpServer()`
+// instances, then attach any external (stdio) MCP servers the agent declared.
 //
 // Conversion notes:
 //   - The Claude SDK's `tool()` wants a zod shape, not raw JSON Schema. We
 //     reconstruct one via `zod-from-json-schema` so nested arrays/objects
 //     keep their item/property shape — flattening to `z.array(z.any())` would
 //     hide structure from clients that re-serialize the advertised schema.
-//   - The facade handler already returns `{ content, isError? }` (the MCP
-//     standard `CallToolResult`), so we pass that through unchanged.
+//   - A Rome tool already answers `{ content, isError? }` (the MCP standard
+//     `CallToolResult`), so we pass that through unchanged.
 
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import { toMcpToolShape } from "../../../../core/mcp/json-schema-zod.js";
 import type { McpServerConfig } from "../../../../types.js";
-import type { DeferInput } from "../../../../core/defer.js";
-import type {
-  ActionMcpDefinition,
-  ModelToolCallContext,
-  ModelToolDefinition,
-  SkillMcpDefinition,
-} from "../../../domain/model-port.js";
-import type { FacadeToolDef, RoutineActivationGate } from "../../../../core/mcp-facade.js";
-import {
-  createRomeMcpServer,
-  type RomeMcpGroup,
-  type RomeMcpServer,
-  type RomeMcpToolDefinition,
-} from "../../../../core/mcp/server.js";
+import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
 
 interface BuildAnthropicMcpServersParams {
-  /** See FacadeParams.getActionCatalog. */
-  getActionCatalog: () => ActionMcpDefinition[];
-  /** See FacadeParams.getSkillCatalog. */
-  getSkillCatalog: () => SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
+  tools: RomeTools;
   externalMcpServers?: Record<string, McpServerConfig>;
-  executeAction: (name: string, input: unknown) => Promise<unknown>;
-  executeSubagent: (
-    name: string,
-    input: unknown,
-    context: ModelToolCallContext,
-  ) => Promise<unknown>;
-  /** See FacadeParams.supportsInteractiveSurface. */
-  supportsInteractiveSurface?: boolean;
-  /** See FacadeParams.interactiveSurfaceDetached. */
-  interactiveSurfaceDetached?: boolean;
-  /** See FacadeParams.executeDefer. */
-  executeDefer?: (input: DeferInput) => Promise<unknown>;
-  /** See FacadeParams.sessionTools. */
-  sessionTools?: FacadeToolDef[];
-  /** See FacadeParams.routineActivation. */
-  routineActivation?: RoutineActivationGate;
-  /** See FacadeParams.textPrivate. */
-  textPrivate?: boolean;
 }
 
 export type AnthropicMcpServers = Record<
@@ -64,15 +28,16 @@ export type AnthropicMcpServers = Record<
   ReturnType<typeof createSdkMcpServer> | McpServerConfig
 >;
 
+/** The name Claude Code gives a Rome tool: `mcp__<group>__<tool>`. */
+export function anthropicToolName(group: RomeToolGroup, tool: RomeToolDefinition): string {
+  return `mcp__${group}__${tool.name}`;
+}
+
 // The Claude Agent SDK's `tool()` callback is generically typed against the
 // zod shape it's given, and its return type covers the full
-// `text/image/audio/resource` block union. Our facade always emits text
-// blocks. Pipe through an `unknown`-cast `sdkTool` to skirt the inference.
-function wrapFacadeTool(
-  server: RomeMcpServer,
-  group: RomeMcpGroup,
-  toolDef: RomeMcpToolDefinition,
-) {
+// `text/image/audio/resource` block union. Rome's tools always answer with
+// text blocks. Pipe through an `unknown`-cast `sdkTool` to skirt the inference.
+function wrapRomeTool(tools: RomeTools, group: RomeToolGroup, toolDef: RomeToolDefinition) {
   const wrappedSdkTool = sdkTool as unknown as (
     name: string,
     description: string,
@@ -92,7 +57,7 @@ function wrapFacadeTool(
       // this metadata key. Re-check it whenever upgrading the SDK: changing or
       // removing the key breaks parent-child subagent association.
       const toolUseId = meta?.["claudecode/toolUseId"];
-      return server.callTool(
+      return tools.callTool(
         group,
         toolDef.name,
         args ?? {},
@@ -103,66 +68,31 @@ function wrapFacadeTool(
 }
 
 export function buildAnthropicMcpServers({
-  getActionCatalog,
-  getSkillCatalog,
-  subagentTools,
+  tools,
   externalMcpServers,
-  executeAction,
-  executeSubagent,
-  supportsInteractiveSurface,
-  interactiveSurfaceDetached,
-  executeDefer,
-  sessionTools,
-  routineActivation,
-  textPrivate,
 }: BuildAnthropicMcpServersParams): AnthropicMcpServers {
-  const server = createRomeMcpServer({
-    getActionCatalog,
-    getSkillCatalog,
-    subagentTools,
-    executeAction,
-    executeSubagent,
-    supportsInteractiveSurface,
-    interactiveSurfaceDetached,
-    executeDefer,
-    sessionTools,
-    routineActivation,
-    textPrivate,
-  });
+  const server = (group: RomeToolGroup) =>
+    createSdkMcpServer({
+      name: group,
+      tools: tools.listTools(group).map((toolDef) => wrapRomeTool(tools, group, toolDef)),
+    });
 
   // The actions + skills MCP servers always register so the agent can list
-  // them mid-session even when the live getters currently return [] — that's
+  // them mid-session even when the live catalogs are currently empty — that's
   // how `app_management` installs become discoverable in-session.
   const mcpServers: AnthropicMcpServers = {
-    actions: createSdkMcpServer({
-      name: "actions",
-      tools: server
-        .listTools("actions")
-        .map((toolDef) => wrapFacadeTool(server, "actions", toolDef)),
-    }),
-    skills: createSdkMcpServer({
-      name: "skills",
-      tools: server.listTools("skills").map((toolDef) => wrapFacadeTool(server, "skills", toolDef)),
-    }),
+    actions: server("actions"),
+    skills: server("skills"),
   };
 
-  // Built-in tools that hand interactive inline UI back to the human
-  // (propose_routine). Only register when the consuming surface can actually
-  // render it — see FacadeParams.supportsInteractiveSurface.
-  const interactiveTools = server.listTools("ask_user");
-  if (interactiveTools.length > 0) {
-    mcpServers.ask_user = createSdkMcpServer({
-      name: "ask_user",
-      tools: interactiveTools.map((toolDef) => wrapFacadeTool(server, "ask_user", toolDef)),
-    });
+  // Built-in tools that hand something back to the human to answer
+  // (ask_question, propose_routine). Registered when the run serves any.
+  if (tools.listTools("ask_user").length > 0) {
+    mcpServers.ask_user = server("ask_user");
   }
 
-  const subagentToolsBundle = server.listTools("subagents");
-  if (subagentToolsBundle.length > 0) {
-    mcpServers.subagents = createSdkMcpServer({
-      name: "subagents",
-      tools: subagentToolsBundle.map((toolDef) => wrapFacadeTool(server, "subagents", toolDef)),
-    });
+  if (tools.listTools("subagents").length > 0) {
+    mcpServers.subagents = server("subagents");
   }
 
   if (externalMcpServers) {

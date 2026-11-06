@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { buildFacadeBundle, type FacadeParams } from "./mcp-facade.js";
-import { createRomeMcpServerForSession } from "./mcp/server.js";
+import { createRomeTools } from "./mcp/server.js";
 
 function baseParams(overrides: Partial<FacadeParams> = {}): FacadeParams {
   return {
@@ -51,14 +51,13 @@ describe("defer facade tool", () => {
     expect(description).toContain("end your turn");
   });
 
-  it("carries textPrivate from the session params into the Codex tool server", () => {
-    const server = createRomeMcpServerForSession({
+  it("carries textPrivate into the Rome tools a session serves", () => {
+    const tools = createRomeTools({
       ...baseParams(),
-      config: { model: "gpt-test", systemPrompt: "system", builtinTools: [] },
       executeDefer: rs.fn().mockResolvedValue({ ok: true }),
       textPrivate: true,
     });
-    const defer = server.listTools("ask_user").find((tool) => tool.name === "defer");
+    const defer = tools.listTools("ask_user").find((tool) => tool.name === "defer");
     expect(defer?.description).not.toContain("write one short line confirming");
   });
 

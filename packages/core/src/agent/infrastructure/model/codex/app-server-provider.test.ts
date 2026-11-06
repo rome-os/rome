@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { UsageFunding } from "../../../../usage/events.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
+import { createRomeTools } from "../../../../core/mcp/server.js";
+import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import type { RomeTools } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import type {
   ModelSession,
@@ -88,20 +91,29 @@ rs.mock("./app-server-client.js", () => ({
   }),
 }));
 
-type ParamOverrides = Partial<Omit<ModelSessionParams, "config">> & {
+type ParamOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
+  /** What the session's Rome tools are built from. */
+  tools?: Partial<FacadeParams>;
 };
 
-function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
-  const { config, ...rest } = overrides;
-  return {
-    config: { model: "gpt-5.4", systemPrompt: "system", builtinTools: [], ...config },
+function buildTools(overrides: Partial<FacadeParams> = {}): RomeTools {
+  return createRomeTools({
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
-    thread: { kind: "new" },
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "delegated",
+    ...overrides,
+  });
+}
+
+function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
+  const { config, tools, ...rest } = overrides;
+  return {
+    config: { model: "gpt-5.4", systemPrompt: "system", builtinTools: [], ...config },
+    tools: buildTools(tools),
+    thread: { kind: "new" },
     ...rest,
   };
 }
@@ -469,8 +481,10 @@ describe("CodexAppServerProvider", () => {
           config: {
             systemPrompt: "alpha",
           },
-          subagentTools: [tool("alpha_researcher")],
-          executeSubagent: alphaExecute,
+          tools: {
+            subagentTools: [tool("alpha_researcher")],
+            executeSubagent: alphaExecute,
+          },
         }),
       ),
       provider.openSession(
@@ -478,8 +492,10 @@ describe("CodexAppServerProvider", () => {
           config: {
             systemPrompt: "beta",
           },
-          subagentTools: [tool("beta_researcher")],
-          executeSubagent: betaExecute,
+          tools: {
+            subagentTools: [tool("beta_researcher")],
+            executeSubagent: betaExecute,
+          },
         }),
       ),
     ]);
@@ -562,7 +578,9 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const provider = new CodexAppServerProvider();
-    const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+    const session = await provider.openSession(
+      buildParams({ tools: { supportsInteractiveSurface: true } }),
+    );
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "ask" });
     const messages = await collected;
@@ -690,14 +708,16 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        subagentTools: [
-          {
-            name: "source_researcher",
-            description: "Research for the source",
-            inputSchema: { type: "object", properties: {} },
-          },
-        ],
-        executeSubagent: sourceExecuteSubagent,
+        tools: {
+          subagentTools: [
+            {
+              name: "source_researcher",
+              description: "Research for the source",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+          executeSubagent: sourceExecuteSubagent,
+        },
       }),
     );
     const fork = await source.fork({ mode: "ephemeral" });
@@ -764,13 +784,15 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        subagentTools: [
-          {
-            name: "source_researcher",
-            description: "Research for the source",
-            inputSchema: { type: "object", properties: {} },
-          },
-        ],
+        tools: {
+          subagentTools: [
+            {
+              name: "source_researcher",
+              description: "Research for the source",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+        },
       }),
     );
     const fork = await source.fork({
@@ -783,13 +805,15 @@ describe("CodexAppServerProvider", () => {
         config: {
           model: "gpt-5.4-mini",
         },
-        subagentTools: [
-          {
-            name: "fork_reviewer",
-            description: "Review for the fork",
-            inputSchema: { type: "object", properties: {} },
-          },
-        ],
+        tools: {
+          subagentTools: [
+            {
+              name: "fork_reviewer",
+              description: "Review for the fork",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+        },
       }),
     );
 
@@ -1152,8 +1176,10 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({
         thread: { kind: "new" },
-        subagentTools,
-        executeSubagent: sourceExecuteSubagent,
+        tools: {
+          subagentTools,
+          executeSubagent: sourceExecuteSubagent,
+        },
       }),
     );
     const fork = await source.fork({
@@ -1161,7 +1187,7 @@ describe("CodexAppServerProvider", () => {
       configurationMode: "exact",
     });
     const forkSession = await fork.open(
-      buildForkOpenParams({ subagentTools, executeSubagent: forkExecuteSubagent }),
+      buildForkOpenParams({ tools: { subagentTools, executeSubagent: forkExecuteSubagent } }),
     );
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "feedback" });
@@ -1678,18 +1704,20 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const session = await provider.openSession(
       buildParams({
-        subagentTools: [
-          {
-            name: "researcher",
-            description: "Research a topic",
-            inputSchema: {
-              type: "object",
-              properties: { prompt: { type: "string" } },
-              required: ["prompt"],
+        tools: {
+          subagentTools: [
+            {
+              name: "researcher",
+              description: "Research a topic",
+              inputSchema: {
+                type: "object",
+                properties: { prompt: { type: "string" } },
+                required: ["prompt"],
+              },
             },
-          },
-        ],
-        executeSubagent,
+          ],
+          executeSubagent,
+        },
       }),
     );
 

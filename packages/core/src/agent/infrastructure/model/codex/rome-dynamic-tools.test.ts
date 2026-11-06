@@ -1,11 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { RomeMcpGroup, RomeMcpServer } from "../../../../core/mcp/server.js";
+import type { RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
 import {
   alignRomeDynamicToolsToInheritedCatalog,
-  createRomeDynamicToolsFromServer,
+  createRomeDynamicTools,
 } from "./rome-dynamic-tools.js";
 
-function fakeServer(definitions: Partial<Record<RomeMcpGroup, readonly string[]>>): RomeMcpServer {
+function fakeTools(definitions: Partial<Record<RomeToolGroup, readonly string[]>>): RomeTools {
   return {
     listTools(group) {
       return (definitions[group] ?? []).map((name) => ({
@@ -22,14 +22,14 @@ function fakeServer(definitions: Partial<Record<RomeMcpGroup, readonly string[]>
 }
 
 describe("Rome dynamic tools", () => {
-  it("flattens every facade group and preserves schemas, errors, trace output, and call ids", async () => {
-    const server = fakeServer({
+  it("flattens every tool group and preserves schemas, errors, trace output, and call ids", async () => {
+    const romeTools = fakeTools({
       actions: ["execute_action"],
       subagents: ["researcher"],
       skills: ["read_skill"],
       ask_user: ["ask_question"],
     });
-    const tools = createRomeDynamicToolsFromServer(server);
+    const tools = createRomeDynamicTools(romeTools);
 
     expect(tools.definitions.map((definition) => definition.name)).toEqual([
       "execute_action",
@@ -48,7 +48,7 @@ describe("Rome dynamic tools", () => {
       { value: 1 },
       { toolUseId: "call-question" },
     );
-    expect(server.callTool).toHaveBeenCalledWith(
+    expect(romeTools.callTool).toHaveBeenCalledWith(
       "ask_user",
       "ask_question",
       { value: 1 },
@@ -64,15 +64,15 @@ describe("Rome dynamic tools", () => {
     });
   });
 
-  it("rejects duplicate names across facade groups", () => {
-    const server = fakeServer({ actions: ["duplicate"], skills: ["duplicate"] });
-    expect(() => createRomeDynamicToolsFromServer(server)).toThrow(
+  it("rejects duplicate names across tool groups", () => {
+    const romeTools = fakeTools({ actions: ["duplicate"], skills: ["duplicate"] });
+    expect(() => createRomeDynamicTools(romeTools)).toThrow(
       "Duplicate Rome dynamic tool name: duplicate (actions, skills)",
     );
   });
 
   it("fails closed for unknown tools and non-object arguments", async () => {
-    const tools = createRomeDynamicToolsFromServer(fakeServer({ actions: ["known"] }));
+    const tools = createRomeDynamicTools(fakeTools({ actions: ["known"] }));
     await expect(tools.callTool("missing", {})).resolves.toMatchObject({
       response: { success: false },
       traceOutput: { isError: true },
@@ -84,12 +84,10 @@ describe("Rome dynamic tools", () => {
   });
 
   it("keeps a native fork aligned with its inherited catalog but fails closed for disabled tools", async () => {
-    const sourceTools = createRomeDynamicToolsFromServer(
-      fakeServer({ subagents: ["source_researcher"] }),
-    );
-    const forkServer = fakeServer({ actions: ["fork_action"] });
+    const sourceTools = createRomeDynamicTools(fakeTools({ subagents: ["source_researcher"] }));
+    const forkRomeTools = fakeTools({ actions: ["fork_action"] });
     const forkTools = alignRomeDynamicToolsToInheritedCatalog(
-      createRomeDynamicToolsFromServer(forkServer),
+      createRomeDynamicTools(forkRomeTools),
       sourceTools.definitions,
     );
 
@@ -113,6 +111,6 @@ describe("Rome dynamic tools", () => {
         isError: true,
       },
     });
-    expect(forkServer.callTool).not.toHaveBeenCalled();
+    expect(forkRomeTools.callTool).not.toHaveBeenCalled();
   });
 });

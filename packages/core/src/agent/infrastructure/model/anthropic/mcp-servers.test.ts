@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
+import { createRomeTools } from "../../../../core/mcp/server.js";
 import type {
   ActionMcpDefinition,
   ModelToolCallContext,
-  ModelToolDefinition,
+  RomeToolDefinition,
   SkillMcpDefinition,
 } from "../../../../core/agent-runner.js";
 
@@ -35,7 +36,7 @@ interface BuildArgs {
   getActionCatalog?: () => ActionMcpDefinition[];
   skillCatalog?: SkillMcpDefinition[];
   getSkillCatalog?: () => SkillMcpDefinition[];
-  subagentTools?: ModelToolDefinition[];
+  subagentTools?: RomeToolDefinition[];
   executeAction?: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent?: (
     name: string,
@@ -90,11 +91,13 @@ function build(args: BuildArgs = {}) {
   const actionSnapshot = args.actionCatalog ?? baseActionCatalog;
   const skillSnapshot = args.skillCatalog ?? [];
   return buildAnthropicMcpServers({
-    getActionCatalog: args.getActionCatalog ?? (() => actionSnapshot),
-    getSkillCatalog: args.getSkillCatalog ?? (() => skillSnapshot),
-    subagentTools: args.subagentTools ?? [],
-    executeAction: args.executeAction ?? (async () => ({ ok: true })),
-    executeSubagent: args.executeSubagent ?? (async () => "delegated"),
+    tools: createRomeTools({
+      getActionCatalog: args.getActionCatalog ?? (() => actionSnapshot),
+      getSkillCatalog: args.getSkillCatalog ?? (() => skillSnapshot),
+      subagentTools: args.subagentTools ?? [],
+      executeAction: args.executeAction ?? (async () => ({ ok: true })),
+      executeSubagent: args.executeSubagent ?? (async () => "delegated"),
+    }),
   });
 }
 

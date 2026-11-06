@@ -98,11 +98,11 @@ import {
   ROME_CREDITS_USED_UP_MESSAGE,
 } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./tool-result-error.js";
-import type { FacadeToolResult } from "../../../../core/mcp-facade.js";
+import type { RomeToolResult } from "../../../domain/rome-tools.js";
 import { codexStop } from "../../../../core/stop-reason.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
 import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
-import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
+import { CODEX_SHELL_ENV_EXCLUDE } from "./rome-credits-provider.js";
 import { createLogger } from "../../../../logger.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
 import type { UsageFunding } from "../../../../usage/events.js";
@@ -203,15 +203,15 @@ function buildThreadConfigurationOverrides(
     config.mcp_servers = params.config.externalMcpServers;
   }
   // A dotted key adds one variable each. A nested shell_environment_policy
-  // table would replace the server-wide exclude that hides ROME_CREDITS_TOKEN,
-  // so a cleared variable joins that exclude instead of replacing it.
+  // table would replace the server-wide exclude, so a cleared variable joins
+  // that exclude instead of replacing it.
   const cleared: string[] = [];
   for (const [name, value] of Object.entries(params.config.env ?? {})) {
     if (value === undefined) cleared.push(name);
     else config[`shell_environment_policy.set.${name}`] = value;
   }
   if (cleared.length > 0) {
-    config["shell_environment_policy.exclude"] = [ROME_CREDITS_TOKEN_ENV, ...cleared];
+    config["shell_environment_policy.exclude"] = [...CODEX_SHELL_ENV_EXCLUDE, ...cleared];
   }
   return {
     model,
@@ -640,7 +640,7 @@ export class CodexAppServerProvider implements ModelProvider {
     // app-server dynamic tools. The provider-visible catalog is thread-scoped;
     // execution is selected from the active turn runtime so a borrowed exact
     // fork can reuse the source thread with fork callbacks.
-    const configuredRomeTools = createRomeDynamicTools(params);
+    const configuredRomeTools = createRomeDynamicTools(params.tools);
     const romeTools = inheritedFork
       ? alignRomeDynamicToolsToInheritedCatalog(
           configuredRomeTools,
@@ -711,7 +711,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let resolveSourceStarted: (() => void) | undefined;
     let lastCheckpointId: string | undefined;
     const funding = this.options.funding;
-    const dynamicToolOutputs = new Map<string, FacadeToolResult>();
+    const dynamicToolOutputs = new Map<string, RomeToolResult>();
     const usageByTurnId = new Map<
       string,
       { usage: ThreadTokenUsage; hasNewRequestUsage: boolean }

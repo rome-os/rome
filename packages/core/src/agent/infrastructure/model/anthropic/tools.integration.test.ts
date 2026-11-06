@@ -5,11 +5,12 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@rstest/core";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
 import { AnthropicProvider, CLAUDE_AGENT_SDK_ENV, CLAUDE_AGENT_SDK_SETTINGS } from "./provider.js";
-import { createRomeMcpServer, type RomeMcpGroup } from "../../../../core/mcp/server.js";
+import { createRomeTools } from "../../../../core/mcp/server.js";
+import type { RomeToolGroup } from "../../../domain/rome-tools.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "../../../../core/model-selector.js";
 
-// Every Rome MCP group, so a group the builder stops registering still counts.
-const ROME_MCP_GROUPS: readonly RomeMcpGroup[] = ["actions", "subagents", "skills", "ask_user"];
+// Every Rome tool group, so a group the builder stops registering still counts.
+const ROME_TOOL_GROUPS: readonly RomeToolGroup[] = ["actions", "subagents", "skills", "ask_user"];
 
 const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
   .filter((selection) => selection.providerId === "anthropic")
@@ -24,21 +25,20 @@ const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
 describe("bundled Claude Code", () => {
   const builtinTools = [...new AnthropicProvider().builtinTools];
   // A web chat's Rome tools: actions, skills and the interactive ones.
-  const facade = {
+  const tools = createRomeTools({
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "unused",
     supportsInteractiveSurface: true,
-  };
+  });
 
   it.each(claudeModels)("gives %s every tool Rome requests", async (model) => {
     // SDK MCP servers hold one connection each, so build them per query.
-    const mcpServers = buildAnthropicMcpServers(facade);
-    const romeServer = createRomeMcpServer(facade);
-    const romeTools = ROME_MCP_GROUPS.flatMap((group) =>
-      romeServer.listTools(group).map((tool) => `mcp__${group}__${tool.name}`),
+    const mcpServers = buildAnthropicMcpServers({ tools });
+    const romeTools = ROME_TOOL_GROUPS.flatMap((group) =>
+      tools.listTools(group).map((tool) => `mcp__${group}__${tool.name}`),
     );
     const home = await mkdtemp(join(tmpdir(), "rome-claude-tools-"));
     const abortController = new AbortController();

@@ -21,7 +21,15 @@ import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
-import type { ModelSessionEvent } from "../agent/index.js";
+import type { ModelSessionEvent, RomeTools } from "../agent/index.js";
+import {
+  executeActionTool,
+  executeSubagentTool,
+  listActionNames,
+  noRomeTools,
+  parseToolText,
+  toolNames,
+} from "../test/tool-calls.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -149,12 +157,8 @@ describe("AgentRunner", () => {
   it("mock sessions reject fork with a clear unsupported error", async () => {
     const session = createSessionFromRun("mock", async function* () {}, {
       config: { model: "mock-model", systemPrompt: "system", builtinTools: [] },
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
+      tools: noRomeTools(),
       thread: { kind: "new" },
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
     });
 
     await expect(session.fork({})).rejects.toThrow(
@@ -166,12 +170,8 @@ describe("AgentRunner", () => {
   it("code-backed null session parks until close and never resumes a provider", async () => {
     const session = createNullModelSession({
       config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
+      tools: noRomeTools(),
       thread: { kind: "new" },
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
     });
     expect(session.providerId).toBe("mock");
     expect(session.modelThreadId).toBeUndefined();
@@ -195,12 +195,8 @@ describe("AgentRunner", () => {
     // must terminate rather than hang: a fallback text + error land on events.
     const session = createNullModelSession({
       config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
+      tools: noRomeTools(),
       thread: { kind: "new" },
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
     });
     const drained: ModelSessionEvent[] = [];
     const collector = (async () => {
@@ -1383,8 +1379,8 @@ describe("AgentRunner", () => {
       await runFork({});
 
       expect(openParams).toHaveLength(2);
-      expect(openParams[0].executeDefer).toBeUndefined();
-      expect(openParams[1].executeDefer).toBeDefined();
+      expect(toolNames(openParams[0].tools, "ask_user")).not.toContain("defer");
+      expect(toolNames(openParams[1].tools, "ask_user")).toContain("defer");
     });
 
     it("stays one-shot when the fork borrowed the source's thread", async () => {
@@ -1604,22 +1600,16 @@ describe("AgentRunner", () => {
 
       expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
       expect(forkOpen).toBeDefined();
-      expect(forkOpen!.getActionCatalog()).toEqual([]);
-      expect(forkOpen!.getSkillCatalog()).toEqual([]);
-      expect(forkOpen!.subagentTools).toEqual([]);
+      // An empty tool surface: no actions to list, no subagents, and no
+      // interactive surface to propose a routine on.
+      expect(await listActionNames(forkOpen!.tools)).toEqual([]);
+      expect(toolNames(forkOpen!.tools, "subagents")).toEqual([]);
+      expect(toolNames(forkOpen!.tools, "ask_user")).not.toContain("propose_routine");
       expect(forkOpen!.config.builtinTools).toEqual([]);
       expect(forkOpen!.config.reasoningEffort).toBe("high");
-      expect(forkOpen!.supportsInteractiveSurface).toBe(false);
-      await expect(forkOpen!.executeAction("demo_action", {})).rejects.toThrow(
-        "Actions are disabled in forked turns",
-      );
       await expect(
-        forkOpen!.executeSubagent(
-          EXPLORE_TOOL,
-          { prompt: "x" },
-          { toolUseId: "isolated-subagent" },
-        ),
-      ).rejects.toThrow("Subagents are disabled in forked turns");
+        executeActionTool(forkOpen!.tools, "demo_action", {}, { toolUseId: "isolated-action" }),
+      ).rejects.toThrow("Actions are disabled in forked turns");
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
@@ -1691,30 +1681,36 @@ describe("AgentRunner", () => {
       const sourceOpen = provider.sessions[0];
       expect(forkOpen).toBeDefined();
       expect(forkOpen!.config.systemPrompt).toBe(sourceOpen.config.systemPrompt);
-      // Same getter references, not equal copies: both sessions must
-      // serialize the same catalog snapshot for the tool block to match.
-      expect(forkOpen!.getActionCatalog).toBe(sourceOpen.getActionCatalog);
-      expect(forkOpen!.getSkillCatalog).toBe(sourceOpen.getSkillCatalog);
-      expect(forkOpen!.getActionCatalog().map((a) => a.name)).toEqual(["demo_action"]);
-      expect(forkOpen!.subagentTools).toBe(sourceOpen.subagentTools);
-      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain(EXPLORE_TOOL);
+      // The same catalog as the source: both sessions serialize the same tool
+      // block.
+      expect(await listActionNames(forkOpen!.tools)).toEqual(["demo_action"]);
+      expect(toolNames(forkOpen!.tools, "subagents")).toEqual(
+        toolNames(sourceOpen.tools, "subagents"),
+      );
+      expect(toolNames(forkOpen!.tools, "subagents")).toContain(EXPLORE_TOOL);
       // test-main declares Read + Edit; Bash stays provider-only in both.
       expect(forkOpen!.config.builtinTools).toBe(sourceOpen.config.builtinTools);
       expect(forkOpen!.config.builtinTools).toEqual(["Read", "Edit"]);
       // The advertised surface stays identical (prefix identity with the
-      // source); only the interactive *runtime* is marked detached, since no
-      // webchat drain reads a fork stream.
-      expect(forkOpen!.supportsInteractiveSurface).toBe(true);
-      expect(forkOpen!.interactiveSurfaceDetached).toBe(true);
+      // source); only the interactive *runtime* is detached, since no webchat
+      // drain reads a fork stream: ask_question relays prose there instead of
+      // parking the turn on a card.
+      expect(toolNames(forkOpen!.tools, "ask_user")).toEqual(
+        toolNames(sourceOpen.tools, "ask_user"),
+      );
+      const askQuestion = (tools: RomeTools) =>
+        tools.listTools("ask_user").find((tool) => tool.name === "ask_question");
+      expect(askQuestion(sourceOpen.tools)?.endsTurn).toBe(true);
+      expect(askQuestion(forkOpen!.tools)?.endsTurn).toBe(false);
       expect(forkOpen!.config.maxTurns).toBe(sourceOpen.config.maxTurns);
       expect(forkOpen!.config.workingDir).toBe(sourceOpen.config.workingDir);
       expect(forkOpen!.config.externalMcpServers).toBe(sourceOpen.config.externalMcpServers);
       expect(forkOpen!.config.reasoningEffort).toBe(sourceOpen.config.reasoningEffort);
       // Model follows the source's live model when no tier override is given.
       expect(forkOpen!.config.model).toBe(sourceOpen.config.model);
-      // Callbacks must be fresh fork-bound closures, never the source's.
-      expect(forkOpen!.executeAction).not.toBe(sourceOpen.executeAction);
-      expect(forkOpen!.executeSubagent).not.toBe(sourceOpen.executeSubagent);
+      // The fork's tools run through fresh fork-bound callbacks, never the
+      // source's.
+      expect(forkOpen!.tools).not.toBe(sourceOpen.tools);
     });
 
     it("exact forks execute actions attributed to the fork session, not the source", async () => {
@@ -1732,7 +1728,7 @@ describe("AgentRunner", () => {
         (openParams) =>
           forkSessionStub({
             events: (async function* (): AsyncIterable<ModelSessionEvent> {
-              await openParams.executeAction("demo_action", {});
+              await executeActionTool(openParams.tools, "demo_action", {});
               yield { type: "result", reasoningEffort: "high", content: "acted" };
             })(),
           }),
@@ -1775,7 +1771,8 @@ describe("AgentRunner", () => {
                 tool: EXPLORE_TOOL,
                 input: { prompt: "dig" },
               };
-              const completion = (await openParams.executeSubagent(
+              const completion = (await executeSubagentTool(
+                openParams.tools,
                 EXPLORE_TOOL,
                 { prompt: "dig" },
                 { toolUseId: "fork-subagent-1" },
@@ -1918,7 +1915,7 @@ describe("AgentRunner", () => {
         (openParams) =>
           forkSessionStub({
             events: (async function* (): AsyncIterable<ModelSessionEvent> {
-              actionResult = await openParams.executeAction("demo_action", {});
+              actionResult = await executeActionTool(openParams.tools, "demo_action", {});
               yield { type: "result", reasoningEffort: "high", content: "done" };
             })(),
           }),
@@ -1952,7 +1949,7 @@ describe("AgentRunner", () => {
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
       ): AsyncIterable<AgentEvent> {
-        actionResult = await params.executeAction("demo_action", {});
+        actionResult = await executeActionTool(params.tools, "demo_action", {});
         yield { type: "result", content: "done" };
       };
       const provider: ModelProvider = {
@@ -1993,7 +1990,8 @@ describe("AgentRunner", () => {
                 tool: EXPLORE_TOOL,
                 input: { prompt: "fork dig" },
               };
-              const completion = (await openParams.executeSubagent(
+              const completion = (await executeSubagentTool(
+                openParams.tools,
                 EXPLORE_TOOL,
                 { prompt: "fork dig" },
                 { toolUseId: "fork-subagent-2" },
@@ -3554,7 +3552,7 @@ describe("AgentRunner", () => {
           tool: "demo_action",
           input: {},
         };
-        await params.executeAction("demo_action", {});
+        await executeActionTool(params.tools, "demo_action", {});
         yield {
           type: "tool_result",
           toolUseId: `tu-${params.prompt}`,
@@ -3669,7 +3667,8 @@ describe("AgentRunner", () => {
             tool: EXPLORE_TOOL,
             input: { prompt: `Inspect ${nestedCalls.length}` },
           };
-          const output = await params.executeSubagent(
+          const output = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: `Inspect ${nestedCalls.length}` },
             { toolUseId: id },
@@ -3933,7 +3932,7 @@ describe("AgentRunner", () => {
           tool: "demo_action",
           input: { name: "standup" },
         };
-        await params.executeAction("demo_action", { name: "standup" });
+        await executeActionTool(params.tools, "demo_action", { name: "standup" });
         yield {
           type: "tool_result",
           toolUseId: "tu-shared-1",
@@ -5625,7 +5624,7 @@ describe("AgentRunner", () => {
         params: import("./agent-runner.js").ModelRunParams,
       ): AsyncIterable<AgentEvent> {
         yield { type: "tool_use", id: "tu-send-1", tool: "send_message", input: { text: "hello" } };
-        await params.executeAction("send_message", { text: "hello" });
+        await executeActionTool(params.tools, "send_message", { text: "hello" });
         yield { type: "result", content: "Done" };
       };
       const provider: ModelProvider = {
@@ -5692,10 +5691,12 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Use tools" }));
 
       expect(provider.calls).toHaveLength(1);
-      const toolNames = provider.calls[0].actionCatalog.map((t) => t.name);
+      const listed = (await parseToolText(
+        await provider.calls[0].tools.callTool("actions", "list_actions", {}),
+      )) as Array<Record<string, unknown>>;
       // demo_action is in test-main's tools list and registered in registry
-      expect(toolNames).toContain("demo_action");
-      expect(provider.calls[0].actionCatalog[0]).toMatchObject({
+      expect(listed.map((action) => action.name)).toContain("demo_action");
+      expect(listed[0]).toMatchObject({
         description: "Schedule an event",
         sideEffects: "write",
         requiresApproval: false,
@@ -5757,48 +5758,63 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
-      let sessionParams: ModelSessionParams | undefined;
-      let keyDuringTurn: string | undefined;
+      const proposals: Record<string, string> = {};
+      const routineDraft = (actionName: string) => ({
+        sentence: "Every morning, run it",
+        name: "Morning run",
+        watchLabel: "Run now",
+        thenSummary: `Run ${actionName}`,
+        kind: "manual",
+        actionName,
+        args: {},
+        activate: true,
+      });
       const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
-        keyDuringTurn = sessionParams?.routineActivation?.routineKeyFor("tu-1");
-        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-          "demo_action",
-          "send_message",
-        ]);
-        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-          /Unknown action: internal_action/,
-        );
+        expect(await listActionNames(params.tools)).toEqual(["demo_action", "send_message"]);
+        await expect(
+          executeActionTool(params.tools, "internal_action", {}, { toolUseId: "tu-0" }),
+        ).rejects.toThrow(/Unknown action: internal_action/);
         executionWasRejected = true;
+        // propose_routine's auto-enable gate mirrors the same allow-list: a
+        // routine on an action the agent may not call stays a draft, one on
+        // an unregistered action is refused, and one on a permitted action
+        // gets past the target check under this turn's key.
+        for (const actionName of ["internal_action", "no_such_action", "demo_action"]) {
+          const result = await params.tools.callTool(
+            "ask_user",
+            "propose_routine",
+            routineDraft(actionName),
+            { toolUseId: "tu-1" },
+          );
+          proposals[actionName] = result.content.map((item) => item.text).join("\n");
+        }
         yield { type: "result", content: "Done" };
       });
       const provider: ModelProvider = {
         id: "mock",
         displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: async (params) => {
-          sessionParams = params;
-          return openFromRun(params);
-        },
+        openSession: openFromRun,
       };
       const runner = createRunner(provider);
 
       const messages = await collectMessages(
-        runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }),
+        runner.run({
+          agentName: "test-all-actions",
+          prompt: "Use all tools",
+          channelThreadKey: "webchat:routine-gate",
+        }),
       );
 
       expect(executionWasRejected).toBe(true);
-      // The activation key is scoped by the same turn id the stream reports,
-      // which is how the webchat drain derives the card's key.
-      const turnStart = messages.find((m) => m.type === "turn_start") as
-        | { turnId: string }
-        | undefined;
-      expect(turnStart).toBeDefined();
-      expect(keyDuringTurn).toBe(`chat-routine:${turnStart?.turnId}:tu-1`);
-      // propose_routine's auto-enable gate mirrors the same allow-list.
-      const gate = sessionParams?.routineActivation;
-      expect(gate?.canCallAction("demo_action")).toBe("permitted");
-      expect(gate?.canCallAction("internal_action")).toBe("denied");
-      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(proposals.internal_action).toContain(
+        '"internal_action" is not an action you are permitted to call',
+      );
+      expect(proposals.no_such_action).toContain('"no_such_action" is not a registered action');
+      // demo_action is permitted and the call carried its id, so the gate only
+      // stops at create_routine, which this agent may not call.
+      expect(proposals.demo_action).toContain("not permitted to create routines directly");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {
@@ -5843,8 +5859,7 @@ describe("AgentRunner", () => {
 
       expect(captured).toHaveLength(1);
       const sessionParams = captured[0];
-      expect(sessionParams.getActionCatalog).toBeDefined();
-      expect(sessionParams.getActionCatalog!().map((a) => a.name)).toEqual(["demo_action"]);
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action"]);
 
       // Simulate `app_management` install finishing and the lifecycle manager
       // resync registering a new app action mid-session.
@@ -5869,16 +5884,12 @@ describe("AgentRunner", () => {
       // The live getter now reports both actions to anything that reads it
       // (the facade tools' list_actions / search_actions / read_action).
       // Order is registry-insertion-order; sort for stable comparison.
-      expect(
-        sessionParams.getActionCatalog!()
-          .map((a) => a.name)
-          .sort(),
-      ).toEqual(["demo_action", "repro_hello"]);
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action", "repro_hello"]);
 
       // executeAction looks up against the same live, allow-list-filtered set
       // — so the agent can call the freshly-installed action from inside the
       // same conversation without rebinding the MCP token.
-      const result = await sessionParams.executeAction("repro_hello", { name: "world" });
+      const result = await executeActionTool(sessionParams.tools, "repro_hello", { name: "world" });
       expect(result).toEqual({ ok: true });
       expect(newActionExecutes).toEqual([{ name: "world" }]);
     });
@@ -5937,10 +5948,10 @@ describe("AgentRunner", () => {
         execute: async () => ({ status: "ok", data: { ok: true } }),
       });
 
-      expect(sessionParams.getActionCatalog!().map((a) => a.name)).toEqual(["demo_action"]);
-      await expect(sessionParams.executeAction("send_message", { text: "x" })).rejects.toThrow(
-        /Unknown action: send_message/,
-      );
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action"]);
+      await expect(
+        executeActionTool(sessionParams.tools, "send_message", { text: "x" }),
+      ).rejects.toThrow(/Unknown action: send_message/);
     });
 
     it("executeAction resolves a legacy name before checking the allow-list", async () => {
@@ -6000,9 +6011,9 @@ describe("AgentRunner", () => {
         createRunner(provider).run({ agentName: "test-main", prompt: "Review" }),
       );
 
-      expect(captured[0].getActionCatalog!().map((action) => action.name)).toEqual([actionId]);
+      expect(await listActionNames(captured[0].tools)).toEqual([actionId]);
       await expect(
-        captured[0].executeAction("demo_action", { path: "src/index.ts" }),
+        executeActionTool(captured[0].tools, "demo_action", { path: "src/index.ts" }),
       ).resolves.toEqual({ reviewed: true });
       expect(executed).toEqual([{ path: "src/index.ts" }]);
     });
@@ -6048,11 +6059,12 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Delegate" }));
 
       expect(provider.calls).toHaveLength(1);
-      const toolNames = provider.calls[0].subagentTools.map((t) => t.name);
       // test-main has allowedSubagents: ["test-explore"]
-      expect(toolNames).toContain(EXPLORE_TOOL);
+      expect(toolNames(provider.calls[0].tools, "subagents")).toContain(EXPLORE_TOOL);
 
-      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === EXPLORE_TOOL);
+      const subagentTool = provider.calls[0].tools
+        .listTools("subagents")
+        .find((t) => t.name === EXPLORE_TOOL);
       expect(subagentTool).toBeDefined();
       expect(subagentTool!.description).toContain("test-explore");
       expect(subagentTool!.inputSchema).toHaveProperty("properties");
@@ -6088,7 +6100,8 @@ describe("AgentRunner", () => {
           tool: EXPLORE_TOOL,
           input: { prompt: "Inspect" },
         };
-        const output = await params.executeSubagent(
+        const output = await executeSubagentTool(
+          params.tools,
           EXPLORE_TOOL,
           { prompt: "Inspect" },
           { toolUseId: "tu-explore-1" },
@@ -6133,14 +6146,16 @@ describe("AgentRunner", () => {
             tool: EXPLORE_TOOL,
             input: { prompt: "Inspect" },
           };
-          const output = await params.executeSubagent(
+          const output = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: "Inspect" },
             { toolUseId: "tu-explore-1" },
           );
           delegatedOutput = output;
           yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
-          const earlyOutput = await params.executeSubagent(
+          const earlyOutput = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: "Inspect before provider event" },
             { toolUseId: "tu-explore-2" },
