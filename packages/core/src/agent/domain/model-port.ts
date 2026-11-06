@@ -6,12 +6,11 @@
 // The port knows models, threads, positions and builtin tools. It knows
 // nothing of agents, sessions, chats or connected accounts: the resolver
 // picks the provider and model in front of it, the session stores what it
-// returns, and what a turn cost travels on the terminal event's accounting.
+// returns, and what a turn cost travels on the terminal event.
 // Until the adapters implement this port they implement
 // ./deprecated-model-port.ts.
 
 import type {
-  AgentAccounting,
   AgentBlockEvent,
   AgentDeltaEvent,
   InputStatusEvent,
@@ -122,23 +121,23 @@ export interface ModelUserInput {
 export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
- * Value object. What a turn cost, with what the usage recorder needs beyond
- * what apps see: the two members below stay inside Rome and leave the event
- * before it reaches an app's turn hooks.
+ * Value object. What the provider says about a turn beyond what apps see.
+ * Beside `accounting`, not inside it: core forwards `accounting` whole to
+ * the wire, the trace and app hooks, and this stays in the run.
  */
-export interface ModelTurnAccounting extends AgentAccounting {
+export interface ModelTurnReport {
   /** The provider's own id for the turn, for reconciliation with its bill. */
   providerTurnId?: ProviderTurnId;
   /** The effort the provider applied, in its own terms (`xhigh`, `max`). */
   reasoningEffort?: string;
 }
 
-export interface ModelTurnResultEvent extends Omit<TurnResultEvent, "accounting"> {
-  accounting?: ModelTurnAccounting;
+export interface ModelTurnResultEvent extends TurnResultEvent {
+  report?: ModelTurnReport;
 }
 
-export interface ModelTurnErrorEvent extends Omit<TurnErrorEvent, "accounting"> {
-  accounting?: ModelTurnAccounting;
+export interface ModelTurnErrorEvent extends TurnErrorEvent {
+  report?: ModelTurnReport;
 }
 
 /**
@@ -146,9 +145,9 @@ export interface ModelTurnErrorEvent extends Omit<TurnErrorEvent, "accounting"> 
  * units become these inside the adapter and nowhere else. No turn brackets:
  * `turn_start`, `turn_end`, the subagent events, the interactive cards,
  * usage and spans are the run's. Every turn the adapter started ends with
- * exactly one `result` or `error` carrying its accounting, after an
- * interrupt too. Only a stream that throws ends a turn without one; the run
- * then records the session's `funding` and nothing else.
+ * exactly one `result` or `error` carrying its accounting and report, after
+ * an interrupt too. Only a stream that throws ends a turn without one; the
+ * run then records the session's `funding` and nothing else.
  */
 export type ModelSessionEvent =
   | AgentBlockEvent
