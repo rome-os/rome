@@ -1,5 +1,16 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, rename, rm, stat, symlink } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { createLogger } from "../logger.js";
 import { getProjectRoot } from "../paths.js";
@@ -185,16 +196,33 @@ async function installProductionDeps(stagingRoot: string): Promise<void> {
     cwd: stagingRoot,
     depCount,
   });
-  // `--no-frozen-lockfile`: apps may not ship per-app lockfiles, so the
-  // install host is allowed to solve prod deps once for this content hash.
-  //
-  // Do not pass `--ignore-workspace` when the artifact carries its own
-  // pnpm-workspace.yaml: pnpm 11 stores `allowBuilds` approvals there, and
-  // approved runtime postinstalls must still run during materialization.
-  const installArgs = buildProductionInstallArgs(stagingRoot);
-  await runPnpm(installArgs, {
-    cwd: stagingRoot,
-  });
+  // `pnpm install --prod` skips linking devDependencies, but when it has to
+  // solve the graph (no lockfile) it still resolves and downloads them into
+  // the store. They are build-time only, so hide them from pnpm for this
+  // install, then restore the artifact's own package.json and lockfile: the
+  // installed root is also what Remix copies into a new source app, which
+  // needs the authored build toolchain.
+  const lockPath = join(stagingRoot, "pnpm-lock.yaml");
+  const originalPkg = await readFile(pkgPath, "utf-8");
+  const originalLock = existsSync(lockPath) ? await readFile(lockPath, "utf-8") : null;
+  try {
+    const { devDependencies: _dev, ...prodOnly } = JSON.parse(originalPkg) as Record<
+      string,
+      unknown
+    >;
+    await writeFile(pkgPath, JSON.stringify(prodOnly, null, 2), "utf-8");
+    // `--no-frozen-lockfile`: apps may not ship per-app lockfiles, so the
+    // install host is allowed to solve prod deps once for this content hash.
+    //
+    // Do not pass `--ignore-workspace` when the artifact carries its own
+    // pnpm-workspace.yaml: pnpm 11 stores `allowBuilds` approvals there, and
+    // approved runtime postinstalls must still run during materialization.
+    await runPnpm(buildProductionInstallArgs(stagingRoot), { cwd: stagingRoot });
+  } finally {
+    await writeFile(pkgPath, originalPkg, "utf-8");
+    if (originalLock === null) await rm(lockPath, { force: true });
+    else await writeFile(lockPath, originalLock, "utf-8");
+  }
   await linkWorkspaceRuntimeDependency(stagingRoot, pkg);
 }
 
