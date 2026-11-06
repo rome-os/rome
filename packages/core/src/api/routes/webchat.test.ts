@@ -2430,6 +2430,9 @@ describe("Webchat API", () => {
         expect.objectContaining({ type: "turn_end", status: "error", turnId: turn.turnId }),
       ]);
     });
+    // The chat reads as failed, as the sidebar and the Concierge's task tools show it.
+    const listed = await deps.webchatRepo.listSessions("all");
+    expect(listed.find((chat) => chat.id === session.id)?.lastTurnFailed).toBe(true);
 
     const streamRes = await app.request(`/chat/turns/${turn.turnId}/stream`);
     expect(streamRes.status).toBe(200);
