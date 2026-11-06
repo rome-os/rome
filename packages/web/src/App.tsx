@@ -50,7 +50,6 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
 const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
-const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 // Dev-only pages (src/pages/dev/). import.meta.env.DEV is statically false in
 // production builds, so the route entries below are dropped AND — because each
 // registry entry's lazy() dynamic import is only referenced from inside the
@@ -197,9 +196,18 @@ export default function App() {
             {/* More-specific static-segment path must win over the wildcard
                 `:tab` route: `/settings/connections` (no id) still falls through
                 to SettingsTabPage. */}
-            {/* Static segment outranks `:serviceId`, so "app-keys" never
-                reaches ConnectionDetailPage's unknown-id redirect. */}
-            <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
+            {/* App keys moved from its own page into a sheet on the Advanced
+                tab; keep the old paths working. The static segment outranks
+                `:serviceId`, so it never reaches ConnectionDetailPage's
+                unknown-id redirect. */}
+            <Route
+              path="/settings/connections/app-keys"
+              element={<Navigate to="/settings/advanced" replace />}
+            />
+            <Route
+              path="/settings/advanced/app-keys"
+              element={<Navigate to="/settings/advanced" replace />}
+            />
             <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
             <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
             <Route path="/settings/:tab" element={<SettingsTabPage />} />

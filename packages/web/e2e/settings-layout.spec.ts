@@ -55,25 +55,13 @@ for (const width of [390, 1440]) {
   }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
-    for (const [route, title] of [
-      ["app-keys", "App keys"],
-      ["github", "GitHub"],
-    ]) {
-      await page.goto(`/settings/connections/${route}`);
-      await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
-      await expect(page.locator("main h1")).toHaveCount(1);
-      const back = page.locator("main").getByRole("link", { name: "Connections", exact: true });
-      await expect(back).toHaveAttribute("href", "/settings/connections");
-      expect(
-        await page.locator('[data-slot="page"]').evaluate((el) => el.getBoundingClientRect().right),
-      ).toBeLessThanOrEqual(width);
-      if (route === "app-keys") {
-        const scroll = page.locator('[data-slot="table-container"]');
-        await expect(scroll).toBeVisible();
-        expect(await scroll.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(
-          width,
-        );
-      }
-    }
+    await page.goto("/settings/connections/github");
+    await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+    await expect(page.locator("main h1")).toHaveCount(1);
+    const back = page.locator("main").getByRole("link", { name: "Connections", exact: true });
+    await expect(back).toHaveAttribute("href", "/settings/connections");
+    expect(
+      await page.locator('[data-slot="page"]').evaluate((el) => el.getBoundingClientRect().right),
+    ).toBeLessThanOrEqual(width);
   });
 }

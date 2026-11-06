@@ -2,14 +2,14 @@ import { DevicesSection } from "@/components/devices-section";
 import {
   Measure,
   Section,
+  SectionDescription,
   SectionHeader,
   SectionHeading,
   SectionTitle,
-  SectionDescription,
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
-import { SpokenRecapsSection } from "@/components/spoken-recaps-section";
+import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -99,6 +99,7 @@ import {
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
+import { AppKeysSection } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
@@ -336,11 +337,15 @@ export default function SettingsPage() {
               onFlash={(message) => toast.error(message)}
             />
           )}
-          {activeTab === "Devices" && <DevicesSection />}
+          {activeTab === "Devices" && (
+            <Measure>
+              <DevicesSection />
+            </Measure>
+          )}
           {activeTab === "Channels" && (
-            <div className="max-w-3xl">
+            <Measure>
               <ChannelsSettingsPage />
-            </div>
+            </Measure>
           )}
           {activeTab === "Favors" && (
             <Measure>
@@ -726,15 +731,6 @@ function FavorsSection() {
 
   return (
     <Section>
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>Favors</SectionTitle>
-          <SectionDescription>
-            Balance, payments, and paid app actions settled through Rome Cloud.
-          </SectionDescription>
-        </SectionHeading>
-      </SectionHeader>
-
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent>
@@ -924,43 +920,29 @@ function AdvancedSection({
 
   return (
     <Measure>
-      <Section className="gap-6">
-        <SectionHeader>
-          <SectionTitle>{t("advanced.title")}</SectionTitle>
-        </SectionHeader>
-        {/* Not rendered in the Mac app. Its check and upgrade actions relay to
-          Rome Cloud, which resolves them against the account's *hosted*
-          instance — a machine other than the one showing the page. The version
-          card above them is read from the local build and is correct on
-          desktop, but it is not worth splitting the section to keep: the Mac
-          app has its own version surface, and a panel whose only button acts
-          on somewhere else is worse than an absent one.
-
-          This is a mitigation. It keys on which window is rendering, not on
-          what kind of backend is behind the page, so the same dashboard opened
-          in a browser at the loopback port still shows it. */}
-        {!isElectronShell() && <SystemUpgradeSection />}
-        <AccessControlSection />
-        <SystemDiagnosisSection />
+      <Section className="gap-8">
         <Section>
           <SectionHeader>
-            <SectionTitle>{t("advanced.feedback.title")}</SectionTitle>
+            <SectionTitle>{t("system.title")}</SectionTitle>
           </SectionHeader>
-          <FormRows>
-            <SettingsToggleRow
-              title={t("advanced.feedback.agentReports.title")}
-              description={t("advanced.feedback.agentReports.description")}
-              label={t("advanced.feedback.agentReports.toggleLabel")}
-              checked={settings["feedback.agentReportsEnabled"] ?? true}
-              onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
-              disabled={saving}
-            />
-          </FormRows>
+          {/* Not rendered in the Mac app. Its check and upgrade actions relay to
+            Rome Cloud, which resolves them against the account's *hosted*
+            instance — a machine other than the one showing the page. The version
+            card above them is read from the local build and is correct on
+            desktop, but it is not worth splitting the section to keep: the Mac
+            app has its own version surface, and a panel whose only button acts
+            on somewhere else is worse than an absent one.
+
+            This is a mitigation. It keys on which window is rendering, not on
+            what kind of backend is behind the page, so the same dashboard opened
+            in a browser at the loopback port still shows it. */}
+          {!isElectronShell() && <SystemUpgradeSection />}
+          <SystemDiagnosisSection details={<RelayHealthSection />} />
         </Section>
-        <SpokenRecapsSection />
+        <AppKeysSection />
+        <FeaturesSection settings={settings} onSave={onSave} saving={saving} />
+        <AccessControlSection settings={settings} onSave={onSave} saving={saving} />
         <ComputerUseSection />
-        <PresentationModeSection />
-        <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -972,25 +954,24 @@ function AdvancedSection({
  * `@/lib/presentation-mode`), not a guardian setting — deliberately no `onSave`,
  * nothing goes to `/api/settings`. It masks pinned-agent identity across chat
  * surfaces so screen recordings look like a normal conversation. */
-function PresentationModeSection() {
+function PresentationModeRow() {
   const { t } = useTranslation("settings");
   const enabled = usePresentationMode();
 
   return (
-    <FormRows>
-      <SettingsToggleRow
-        title={t("advanced.presentationMode.title")}
-        description={t("advanced.presentationMode.description")}
-        label={t("advanced.presentationMode.toggleLabel")}
-        checked={enabled}
-        onChange={setPresentationMode}
-      />
-    </FormRows>
+    <SettingsToggleRow
+      title={t("advanced.presentationMode.title")}
+      description={t("advanced.presentationMode.description")}
+      label={t("advanced.presentationMode.toggleLabel")}
+      checked={enabled}
+      onChange={setPresentationMode}
+    />
   );
 }
 
 function SettingsToggleRow({
   title,
+  badge,
   description,
   label,
   checked,
@@ -998,6 +979,7 @@ function SettingsToggleRow({
   disabled,
 }: {
   title: string;
+  badge?: string;
   description?: string;
   label: string;
   checked: boolean;
@@ -1008,11 +990,15 @@ function SettingsToggleRow({
   return (
     <FormRow>
       <FormRowHeading>
-        <FormRowLabel htmlFor={id}>{title}</FormRowLabel>
-        {description && <FormRowDescription>{description}</FormRowDescription>}
-        <FormRowLabel htmlFor={id} className="text-aux text-muted-foreground">
-          {label}
+        <FormRowLabel htmlFor={id}>
+          {title}
+          {badge && (
+            <Badge variant="muted" className="ml-2 align-middle">
+              {badge}
+            </Badge>
+          )}
         </FormRowLabel>
+        {description && <FormRowDescription>{description}</FormRowDescription>}
       </FormRowHeading>
       <FormRowControl>
         <Switch
@@ -1037,27 +1023,21 @@ function DeveloperSettingsSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  // Mount the relay widget only while the section is expanded so its status
-  // polling doesn't run for everyone who merely opens the Advanced tab.
-  const [open, setOpen] = useState(false);
 
   return (
-    <details className="group" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="list-none rounded-8 py-1 text-left [&::-webkit-details-marker]:hidden">
-        <span className="block text-section text-foreground">
-          {t("advanced.developerSettings.title")}
-        </span>
-      </summary>
-      <Section className="mt-3">
+    <>
+      <Section>
+        <SectionHeader>
+          <SectionTitle>{t("advanced.developerSettings.title")}</SectionTitle>
+        </SectionHeader>
         <FormRows>
-          <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
         </FormRows>
-        {open && <RelayHealthSection />}
       </Section>
-    </details>
+      <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+    </>
   );
 }
 
@@ -1125,12 +1105,14 @@ function TierModelMappingsAdvancedSection({
   }
 
   return (
-    <FormRow className="block">
-      <FormRowHeading>
-        <FormRowLabel>{t("advanced.tierModelMappings.title")}</FormRowLabel>
-        <FormRowDescription>{t("advanced.tierModelMappings.description")}</FormRowDescription>
-      </FormRowHeading>
-      <FormRows className="mt-3 max-w-none">
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("advanced.tierModelMappings.title")}</SectionTitle>
+          <SectionDescription>{t("advanced.tierModelMappings.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <FormRows>
         {TIER_MODEL_MAPPING_FIELDS.map(({ provider, tier, placeholder }) => {
           const id = `tier-model-${provider}-${tier}`;
           return (
@@ -1154,10 +1136,10 @@ function TierModelMappingsAdvancedSection({
           );
         })}
       </FormRows>
-      <Button type="button" size="sm" className="mt-3" onClick={save} disabled={saving}>
+      <Button type="button" size="sm" className="self-start" onClick={save} disabled={saving}>
         {t("advanced.tierModelMappings.save")}
       </Button>
-    </FormRow>
+    </Section>
   );
 }
 
@@ -1411,9 +1393,10 @@ function ImpersonationAdvancedSection({
   );
 }
 
-/** Features still being tried out, each off until a guardian switches it on.
- *  `experimentalConcierge` shows the Concierge chat under Chats. */
-function ExperimentalFeaturesSection({
+/** Switches for what Rome does in chats. Concierge is still being tried out,
+ *  so it carries an Experimental badge; `experimentalConcierge` shows its chat
+ *  under Chats. */
+function FeaturesSection({
   settings,
   onSave,
   saving,
@@ -1433,20 +1416,20 @@ function ExperimentalFeaturesSection({
   return (
     <Section>
       <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>{t("advanced.experimental.title")}</SectionTitle>
-          <SectionDescription>{t("advanced.experimental.description")}</SectionDescription>
-        </SectionHeading>
+        <SectionTitle>{t("advanced.features.title")}</SectionTitle>
       </SectionHeader>
       <FormRows>
         <SettingsToggleRow
           title={t("advanced.experimental.concierge.title")}
+          badge={t("advanced.experimental.badge")}
           description={t("advanced.experimental.concierge.description")}
           label={t("advanced.experimental.concierge.toggleLabel")}
           checked={concierge}
           onChange={toggleConcierge}
           disabled={saving}
         />
+        <SpokenRecapsRows />
+        <PresentationModeRow />
       </FormRows>
     </Section>
   );
@@ -1472,7 +1455,6 @@ function AiToolUsageAdvancedSection({
   return (
     <SettingsToggleRow
       title={t("advanced.aiToolUsage.title")}
-      description={t("advanced.aiToolUsage.description")}
       label={t("advanced.aiToolUsage.toggleLabel")}
       checked={enabled}
       onChange={toggle}
@@ -1566,17 +1548,32 @@ function AdvancedEasterEggOverlay({ onClose }: { onClose: () => void }) {
 // ── Section: Access Control ───────────────────────────
 // Who can sign in from the public host (allowed Rome Cloud emails).
 
-function AccessControlSection() {
+function AccessControlSection({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
   const { t } = useTranslation("settings");
   return (
     <Section>
       <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>{t("publicAccess.title")}</SectionTitle>
-          <SectionDescription>{t("publicAccess.description")}</SectionDescription>
-        </SectionHeading>
+        <SectionTitle>{t("publicAccess.title")}</SectionTitle>
       </SectionHeader>
       <AllowedCloudEmailsSection />
+      <FormRows>
+        <SettingsToggleRow
+          title={t("advanced.feedback.agentReports.title")}
+          description={t("advanced.feedback.agentReports.description")}
+          label={t("advanced.feedback.agentReports.toggleLabel")}
+          checked={settings["feedback.agentReportsEnabled"] ?? true}
+          onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
+          disabled={saving}
+        />
+      </FormRows>
     </Section>
   );
 }
@@ -1722,13 +1719,7 @@ function AllowedCloudEmailsSection() {
             {t("publicAccess.dashboardEmails.add")}
           </Button>
         </div>
-        {draftError ? (
-          <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>
-        ) : (
-          <p className="mt-2 text-aux text-muted-foreground">
-            {t("publicAccess.dashboardEmails.help")}
-          </p>
-        )}
+        {draftError && <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>}
 
         {emails.length > 0 ? (
           <ul className="mt-4 space-y-2">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Plus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ComposioServiceBadge } from "@/components/brand-icons/composio-glyphs";
@@ -167,20 +168,51 @@ export function useComposioConnect(onFlash: (message: string) => void) {
   return { connect, busySlug };
 }
 
+/** A Composio service in the Connections grids. `row` sits in Connected and
+ *  shows its status; `tile` sits in Add, names the service, and starts its
+ *  connect. The scope is what a search matches and what the
+ *  tile's title shows on hover. */
 export function ComposioServiceRowButton({
   row,
   connected,
   disabled,
   busy,
   onClick,
+  variant = "row",
 }: {
   row: ComposioServiceRow;
   connected: boolean;
   disabled: boolean;
   busy: boolean;
   onClick: () => void;
+  variant?: "row" | "tile";
 }) {
   const { t } = useTranslation("settings");
+  if (variant === "tile") {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="default"
+        align="between"
+        disabled={disabled || busy}
+        onClick={onClick}
+        title={row.scope || undefined}
+        className="h-auto w-full bg-surface py-2 text-left hover:bg-accent"
+        aria-label={`Connect ${row.name}`}
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <ComposioServiceBadge glyph={row.glyph} />
+          <span className="truncate text-ui text-foreground">{row.name}</span>
+        </span>
+        {busy ? (
+          <Spinner size="sm" label={t("common.connecting")} />
+        ) : (
+          <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        )}
+      </Button>
+    );
+  }
   return (
     <Button
       type="button"
@@ -189,25 +221,18 @@ export function ComposioServiceRowButton({
       align="between"
       disabled={disabled || busy}
       onClick={onClick}
-      className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
+      className="h-auto w-full bg-surface py-2 text-left hover:bg-accent"
       aria-label={`${connected ? "Open" : "Connect"} ${row.name}`}
     >
       <span className="flex min-w-0 items-center gap-3">
         <ComposioServiceBadge glyph={row.glyph} />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-ui text-foreground">{row.name}</span>
-          {!connected && row.scope ? (
-            <span className="truncate text-aux text-muted-foreground">{row.scope}</span>
-          ) : null}
-        </span>
+        <span className="truncate text-ui text-foreground">{row.name}</span>
       </span>
       {connected ? (
         <StatusIndicator status={rowStatus(row)} />
       ) : busy ? (
         <Spinner size="sm" label={t("common.connecting")} />
-      ) : (
-        <span className="shrink-0 text-ui text-primary">{t("connections.connect")}</span>
-      )}
+      ) : null}
     </Button>
   );
 }

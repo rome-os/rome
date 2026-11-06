@@ -57,29 +57,10 @@
       "placeholder": "搜索连接",
       "clear": "清除搜索",
       "noMatch": {
-        "connected": "没有与“{{query}}”匹配的已连接服务。",
         "all": "没有与“{{query}}”匹配的服务。"
       }
     },
-    "tabs": {
-      "label": "连接",
-      "connected": "已连接",
-      "all": "全部",
-      "needsAttention": "需要关注",
-      "empty": {
-        "connected": "还没有任何连接。"
-      },
-      "show": {
-        "all": "在全部中查看 {{count}} 个"
-      }
-    },
-    "groups": {
-      "messaging": "消息渠道",
-      "accounts": "账号和工具",
-      "other": "其他"
-    },
     "composioServices": {
-      "group": "通过 Composio 连接",
       "viaLong": "Rome 通过你的 Composio 账号连接这个服务。",
       "signInBanner": "登录 Composio 后才能连接这些服务。",
       "signIn": "登录",
@@ -303,11 +284,14 @@
           }
         }
       }
+    },
+    "sections": {
+      "connected": "已连接 · {{count}}",
+      "add": "添加连接"
     }
   },
   "appKeys": {
     "title": "应用密钥",
-    "back": "连接",
     "openLabel": "打开应用密钥",
     "keyCount_one": "{{count}} 个密钥",
     "keyCount_other": "{{count}} 个密钥",
@@ -323,11 +307,6 @@
     "remove": "移除",
     "removeTitle": "移除 {{name}}？",
     "removeBody": "应用将无法再读取该值。此操作无法撤销。",
-    "table": {
-      "key": "密钥",
-      "value": "值",
-      "actions": "操作"
-    },
     "valueHidden": "值已隐藏",
     "form": {
       "titleAdd": "新密钥",
@@ -360,14 +339,17 @@
         "longValue": "值超过 32,768 个字符",
         "name": "密钥名称无效"
       },
-      "batchFailed": "已保存 {{saved}} 个，{{count}} 个失败。表单中仅保留失败的条目，请重试保存。"
+      "batchFailed": "已保存 {{saved}} 个，{{count}} 个失败。表单中仅保留失败的条目，请重试保存。",
+      "back": "返回应用密钥"
     },
     "saved": "已保存。应用现在可以读取 {{name}}。",
     "savedOverridden": "已保存，但存在同名的服务器设置并优先生效——你输入的值不会被使用。",
     "removed": "已移除 {{name}}。",
     "batchSaved_one": "已为所有应用保存 {{count}} 个密钥。",
     "batchSaved_other": "已为所有应用保存 {{count}} 个密钥。",
-    "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。"
+    "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。",
+    "summary": "应用可以读取的密钥，比如数据库密码或 API Key。",
+    "manage": "管理"
   },
   "trust": {
     "title": "关系层级规则",
@@ -550,17 +532,15 @@
     "startingPackPurchase": "正在购买 favor 套餐"
   },
   "publicAccess": {
-    "title": "访问控制",
-    "description": "在此处的所有设置下，仪表盘都仍需登录。",
+    "title": "访问与隐私",
     "dashboardEmails": {
       "title": "允许的邮箱",
-      "description": "授予的是完整仪表盘权限，而不只是单个应用。",
+      "description": "这些账号可以使用完整仪表盘。",
       "accountCount_one": "{{count}} 个账号",
       "accountCount_other": "{{count}} 个账号",
       "inputLabel": "添加邮箱地址",
       "placeholder": "name@example.com",
       "add": "添加",
-      "help": "按回车添加。粘贴列表时会按逗号、空格或换行自动拆分。",
       "empty": "还没有账号。添加账号之前，共享仪表盘访问保持关闭。",
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
@@ -696,18 +676,19 @@
     "reviewed": "已审阅"
   },
   "advanced": {
-    "title": "高级设置",
     "presentationMode": {
       "title": "演示模式",
-      "description": "隐藏固定代理的名称、头像和输入框标签。仅对当前浏览器生效。",
+      "description": "在聊天中隐藏代理的名称和头像。仅对当前浏览器生效。",
       "toggleLabel": "在聊天中隐藏代理身份"
     },
+    "features": {
+      "title": "功能"
+    },
     "experimental": {
-      "title": "实验性功能",
-      "description": "仍在试用的功能。每项默认关闭，之后可能调整或移除。",
+      "badge": "实验",
       "concierge": {
         "title": "Concierge",
-        "description": "在对话列表里增加一个对话：代理像发消息一样用短消息和你聊天，较长的工作交给可以打开查看的任务对话。",
+        "description": "一个对话：代理用短消息和你聊天，较长的工作交给任务对话。",
         "toggleLabel": "在对话中显示 Concierge"
       }
     },
@@ -739,7 +720,6 @@
     },
     "aiToolUsage": {
       "title": "AI 工具用量",
-      "description": "用量窗口会显示在 AI 工具标签页。",
       "toggleLabel": "显示 Claude 和 ChatGPT 用量"
     },
     "relayHealth": {
@@ -770,7 +750,7 @@
       "copied": "已复制"
     },
     "diagnosis": {
-      "title": "系统诊断",
+      "title": "诊断",
       "loading": "正在运行诊断…",
       "loadFailed": "加载诊断信息失败。",
       "refresh": "刷新",
@@ -815,13 +795,18 @@
       "short": "不足",
       "low": "不足",
       "memoryShortHint": "内存不足。排队中的任务会等到内存释放后再开始，正在运行的任务可能变慢。",
-      "diskLowHint": "磁盘即将用满。请在写入开始失败前清理空间。"
+      "diskLowHint": "磁盘即将用满。请在写入开始失败前清理空间。",
+      "summary": {
+        "ok": "所有检查都正常",
+        "degraded": "部分检查需要处理"
+      },
+      "details": "详情",
+      "close": "关闭"
     },
     "uptimePrefix": "已运行 {{uptime}}",
     "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",
     "computerUse": {
       "title": "计算机操作",
-      "description": "通过 OpenCLI 连接的浏览器。上次在线时间记录最近一次确认连接的时间。",
       "refresh": "刷新",
       "loadFailed": "无法刷新浏览器连接",
       "loading": "正在检查浏览器连接…",
@@ -841,43 +826,44 @@
       },
       "lastSeen": "上次在线",
       "notReported": "未提供",
-      "installExtension": "安装 OpenCLI 扩展"
+      "installExtension": "安装 OpenCLI 扩展",
+      "summary_one": "已连接 {{count}} 个浏览器",
+      "summary_other": "已连接 {{count}} 个浏览器",
+      "details": "详情",
+      "close": "关闭"
     },
     "feedback": {
-      "title": "反馈",
       "agentReports": {
         "title": "智能体平台问题报告",
-        "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
+        "description": "允许智能体把 Rome 平台问题报告给 Rome 团队，并附带实例诊断信息。",
         "toggleLabel": "允许智能体发送报告"
       }
     },
     "spokenRecaps": {
       "title": "语音回顾",
-      "description": "在较长的对话回合后生成一段简短总结，可选生成音频，方便不看屏幕时收听。回顾会显示在对话中。",
+      "description": "在较长的对话回合后生成简短总结。每次会多调用一次模型。",
       "enabled": {
         "title": "生成回顾",
         "description": "每次回顾会多调用一次模型。默认关闭。关闭后不再生成新的总结和音频，已有的回顾会保留。"
       },
       "threshold": {
         "title": "长度阈值",
-        "description": "按回复长度和工具调用量判断，与回顾本身的长度无关。",
         "short": "较短的回合",
         "medium": "较长的回合",
         "long": "仅很长的回合"
       },
       "createAudio": {
         "title": "生成音频",
-        "description": "将回顾文字发送到 Microsoft Edge 文字转语音服务，生成可播放的录音。"
+        "description": "用 Microsoft Edge 文字转语音朗读回顾。"
       },
       "audioSpeed": {
         "title": "音频语速",
-        "description": "仅对新生成的录音生效。",
         "slower": "较慢（−15%）",
         "normal": "正常",
         "faster": "较快（+15%）",
         "fastest": "最快（+30%）"
       },
-      "loadFailed": "无法加载或保存回顾设置，请重试。",
+      "loadFailed": "回顾设置未能加载或保存。",
       "loading": "正在加载回顾设置…",
       "saving": "正在保存…",
       "retry": "重试"
@@ -897,7 +883,7 @@
     "upgradeAvailable": "新版本 {{version}} 可用。",
     "upgradeButton": "升级到 {{version}}",
     "notManaged": "此实例未由 Rome Cloud 托管，无法从仪表盘发起升级。",
-    "upgradeUnsupported": "此构建没有发行版本号，不支持升级。开发与测试构建通过重建实例来更新。",
+    "upgradeUnsupported": "开发构建没有发行版本号，无法在这里升级。",
     "unresolvable": "无法确定最新版本 — 发行注册表不可达，请稍后再试。",
     "checkFailed": "检查更新失败：{{message}}",
     "checkFailedFallback": "检查更新失败。",

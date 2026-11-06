@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import i18n from "@/i18n";
@@ -49,9 +49,21 @@ const status: ComputerUseStatus = {
   ],
 };
 
+async function openDetails() {
+  fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+}
+
 describe("ComputerUseSection", () => {
+  it("summarizes the daemon and connected browsers in one row", async () => {
+    mount(status);
+    expect(await screen.findByText("1 browser connected")).toBeTruthy();
+    expect(screen.getByText("Running")).toBeTruthy();
+    expect(screen.queryByText("Rome browser")).toBeNull();
+  });
+
   it("shows live and disconnected browsers with the exact last seen time available", async () => {
     mount(status);
+    await openDetails();
     expect(await screen.findByText("Rome browser")).toBeTruthy();
     expect(screen.getByText("Mac Chrome")).toBeTruthy();
     expect(screen.getByText("Connected")).toBeTruthy();
@@ -65,6 +77,8 @@ describe("ComputerUseSection", () => {
       daemon: { status: "unavailable", version: null },
       connections: status.connections.map((c) => ({ ...c, status: "unknown" })),
     });
+    expect(await screen.findByText(/OpenCLI is unreachable/)).toBeTruthy();
+    await openDetails();
     expect(await screen.findByText("Mac Chrome")).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
     expect(screen.getAllByText("Unknown")).toHaveLength(2);
@@ -73,6 +87,7 @@ describe("ComputerUseSection", () => {
 
   it("distinguishes an empty connection list from a failed request", async () => {
     mount({ ...status, connections: [] });
+    await openDetails();
     expect(await screen.findByText(/No browser connections have been observed/)).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "Install OpenCLI extension" }).getAttribute("href"),
@@ -81,6 +96,7 @@ describe("ComputerUseSection", () => {
     rs.restoreAllMocks();
     mount(status, 503);
     expect(await screen.findByRole("alert")).toBeTruthy();
+    await openDetails();
     expect(screen.queryByText(/No browser connections have been observed/)).toBeNull();
   });
 });

@@ -367,46 +367,9 @@ function labelAccounts(cards: ConnectionCard[]): void {
   }
 }
 
-/** The two views of the Connections page. */
-export type ConnectionTab = "all" | "connected";
-
-/** The groups the Connections page sorts cards into. Channels the guardian
- *  talks to Rome through are Messaging; accounts Rome acts in (Rome OAuth and
- *  the Composio broker) are Accounts. */
-export type ConnectionGroup = "messaging" | "accounts";
-
 /** A card is connected while any of its accounts gives Rome access, working or
  *  broken. A broken one stays connected so it is fixed where it is listed,
  *  instead of reading as something new to add. */
 export function isConnectedCard(card: ConnectionCard): boolean {
   return card.slots.some((slot) => slot.state !== null);
-}
-
-export function connectionGroup(card: ConnectionCard): ConnectionGroup {
-  return card.kind === "channel" ? "messaging" : "accounts";
-}
-
-/** Splits the cards into the groups of one tab, in group order. Attention
- *  leads each group, then connected cards, then unconnected cards, otherwise
- *  keeping the list order. An empty group is left out unless `keep` names it,
- *  for a caller that adds rows of its own to that group. */
-export function groupConnectionCards(
-  cards: ConnectionCard[],
-  needsAttention: (card: ConnectionCard) => boolean,
-  keep: Partial<Record<ConnectionGroup, boolean>> = {},
-): { group: ConnectionGroup; cards: ConnectionCard[] }[] {
-  const order: ConnectionGroup[] = ["messaging", "accounts"];
-  return order
-    .map((group) => {
-      const inGroup = cards.filter((card) => connectionGroup(card) === group);
-      return {
-        group,
-        cards: [
-          ...inGroup.filter(needsAttention),
-          ...inGroup.filter((card) => !needsAttention(card) && isConnectedCard(card)),
-          ...inGroup.filter((card) => !needsAttention(card) && !isConnectedCard(card)),
-        ],
-      };
-    })
-    .filter((entry) => entry.cards.length > 0 || keep[entry.group] === true);
 }
