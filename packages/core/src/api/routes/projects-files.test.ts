@@ -1559,6 +1559,28 @@ describe("Projects files API", () => {
       await expect(webchatRepo.listProjectPaths()).resolves.toEqual(["default", "demo-other"]);
     });
 
+    it("retires the Concierge chats in a deleted folder before deleting them", async () => {
+      mkdirSync(join(projectsRoot, "demo"), { recursive: true });
+      await webchatRepo.createProject("demo", "demo");
+      await webchatRepo.createSession("topic", "Trips", undefined, "demo", null, "demo");
+      const retired: string[][] = [];
+      const app = buildApp({
+        settingsRepo,
+        webchatRepo,
+        concierge: {
+          retireDeletedChats: async (ids) => {
+            // Asked while the chats still exist, so their owners can be read.
+            expect(await webchatRepo.getSession("topic")).not.toBeNull();
+            retired.push([...ids]);
+          },
+        },
+      });
+      const res = await app.request("/projects/file?path=projects/demo", { method: "DELETE" });
+      expect(res.status).toBe(200);
+      expect(retired).toEqual([["topic"]]);
+      await expect(webchatRepo.getSession("topic")).resolves.toBeNull();
+    });
+
     it("deletes chats under the deleted project folder", async () => {
       mkdirSync(join(projectsRoot, "demo", "nested"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo-other"), { recursive: true });

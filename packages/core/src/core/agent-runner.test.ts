@@ -602,6 +602,79 @@ describe("AgentRunner", () => {
     }
   });
 
+  it("stamps a fork of a visitor's task chat private to them when it is made", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "task-chat",
+        "Task",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "visitor:a" },
+      );
+      await repo.setSessionTrigger("task-chat", { triggerKind: "concierge", triggerName: "Task" });
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Noted", agent: "main" } as const;
+          yield {
+            type: "turn_end",
+            turnId: "fork-turn",
+            status: "completed",
+            durationMs: 5,
+            agent: "main",
+          } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+      await collectMessages(
+        runner.runForked({
+          agentName: "main",
+          sourceSessionId: "source-session",
+          channelThreadKey: "webchat:task-chat",
+          prompt: "a note on this answer",
+          threadContext: { channel: "webchat", threadId: "task-chat", romeSessionId: "task-chat" },
+          label: "feedback",
+        }),
+      );
+      // Never promoted, it is private from the start, so deleting the task
+      // chat does not open it.
+      expect(await repo.getSession("fork-session")).toMatchObject({
+        type: "fork",
+        ownerKey: "visitor:a",
+        triggerKind: "concierge_fork",
+        triggerName: "feedback",
+      });
+    } finally {
+      testDb.close();
+    }
+  });
+
   describe("a resumed session whose caller names no conversation", () => {
     function resumedSession(recorded?: RecordedConversation) {
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };

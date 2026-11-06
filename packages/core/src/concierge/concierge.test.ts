@@ -1953,6 +1953,35 @@ describe("Concierge chat", () => {
     expect(stored.get("conciergeRetiredChats")).toEqual({ "topic-a": owner, "topic-b": owner });
   });
 
+  it("keeps the owner of each Concierge chat deleted with a project folder", async () => {
+    const owner = "visitor:acct-ann";
+    const main = mainChatIdOf(owner);
+    const stored = new Map<string, unknown>();
+    const rows = new Map<string, Record<string, unknown>>([
+      [
+        main,
+        { id: main, agentName: CONCIERGE_AGENT_ID, ownerKey: owner, largeModelSelection: "x" },
+      ],
+      ["topic", { id: "topic", agentName: CONCIERGE_AGENT_ID, ownerKey: owner }],
+      ["plain", { id: "plain", agentName: null, ownerKey: owner }],
+    ]);
+    const service = new ConciergeService({
+      settingsRepo: {
+        get: async (key: string) => stored.get(key) ?? null,
+        set: async (key: string, value: unknown) => void stored.set(key, value),
+      },
+      webchatRepo: { getSession: async (id: string) => rows.get(id) ?? null },
+      tasks: { repo: { moveToMainChat: async () => 0 } },
+      aiToolState: { get: () => codexOnly },
+    } as unknown as ConciergeDeps);
+    await service.retireDeletedChats([main, "topic", "plain"]);
+    expect(stored.get("conciergeRetiredChats")).toEqual({ [main]: owner, topic: owner });
+    for (const id of [main, "topic", "plain"]) rows.delete(id);
+    // A wake-up that names a deleted chat goes to its owner's chat, not the guardian's.
+    expect(await service.ownerOfChat("topic")).toBe(owner);
+    expect(await service.ownerOfChat(main)).toBe(owner);
+  });
+
   it("leaves an existing chat and its model alone", async () => {
     const { service, createSession, update } = serviceWith(codexOnly, true, "claude-sonnet");
     expect(await service.ensureChatId()).toBe("concierge");

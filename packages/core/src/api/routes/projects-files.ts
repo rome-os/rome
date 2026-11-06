@@ -40,6 +40,7 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 
 type ProjectsRouteDeps = {
   agentSessionManager?: Pick<ApiDeps["agentSessionManager"], "peek">;
+  concierge?: Pick<NonNullable<ApiDeps["concierge"]>, "retireDeletedChats">;
   // Optional only because `ApiDeps.settingsRepo` is still optional and the
   // production callsite passes the full ApiDeps; when absent, dashboard
   // dates fall back to UTC.
@@ -220,6 +221,9 @@ async function finalizeProjectFolderDelete(
 ): Promise<void> {
   const sessions = await deps.webchatRepo.listSessionRefsByProjectPathPrefix(projectPath);
   await closeLiveProjectSessions(deps.agentSessionManager, sessions);
+  // Concierge chats in the folder are retired as a deletion of each would,
+  // so their follows, tasks and wake-ups stay with their owners.
+  await deps.concierge?.retireDeletedChats(sessions.map((session) => session.id));
   await deps.webchatRepo.deleteSessionsByProjectPathPrefix(projectPath);
   await deps.webchatRepo.deleteArchivedProjectsByPathPrefix(projectPath);
 }

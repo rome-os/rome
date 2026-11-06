@@ -3965,7 +3965,7 @@ describe("Webchat API", () => {
       getRegistryLoadFailures: () => [],
     };
     const { runtime } = createWebchatRuntime(deps);
-    const chatId = await runtime.startChat({});
+    const chatId = await runtime.startChat({}, "guardian");
     const result = await runtime.post(
       chatId,
       {

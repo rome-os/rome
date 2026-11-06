@@ -365,6 +365,25 @@ export class ConciergeService {
   }
 
   /**
+   * Chats are being deleted together, as with a project folder. Each topic
+   * chat among them is retired as one deleted alone is, and each main chat's
+   * owner is kept, so what still names any of them (a defer's wake-up)
+   * reaches that owner's main chat, never another's.
+   */
+  async retireDeletedChats(chatIds: readonly string[]): Promise<void> {
+    for (const chatId of chatIds) {
+      const chat = await this.deps.webchatRepo.getSession(chatId);
+      if (!chat || !isConciergeChat(chat)) continue;
+      const owner = ownerOf(chat);
+      if (this.isMainChat(chat)) {
+        if (owner !== GUARDIAN_OWNER) await this.rememberRetired(chatId, owner);
+        continue;
+      }
+      await this.retireChat(chatId, "deleted");
+    }
+  }
+
+  /**
    * A Concierge chat is being archived or deleted. Its follows, its tasks and
    * the events owed to it move to its owner's main chat, and the
    * Concierge says so there. A main chat is never retired: this throws for one.
