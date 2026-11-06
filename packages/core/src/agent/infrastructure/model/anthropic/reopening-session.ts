@@ -9,20 +9,13 @@ import type {
   ModelUserInput,
 } from "../../../domain/model-port.js";
 import { createLogger } from "../../../../logger.js";
+import { AsyncMessageQueue } from "./async-message-queue.js";
 
 const log = createLogger("anthropic-reopening-session");
 
 /** One Claude CLI process. `ended` once an interrupt or its stream has taken it down. */
 export interface ClaudeQuerySession extends ModelSession {
   readonly ended: boolean;
-}
-
-function signal(): { fired: Promise<void>; fire(): void } {
-  let fire!: () => void;
-  const fired = new Promise<void>((resolve) => {
-    fire = resolve;
-  });
-  return { fired, fire };
 }
 
 export function createReopeningSession(args: {
@@ -38,8 +31,7 @@ export function createReopeningSession(args: {
   let closed = false;
   let abandoned = false;
   let reopening: Promise<void> | undefined;
-  let drained = signal();
-  let replaced = signal();
+  const outbox = new AsyncMessageQueue<ModelSessionEvent>();
 
   /** The terminal of a turn whose query ended without giving one. */
   const lostTurnTerminal = (failure: unknown): ModelSessionEvent => {
@@ -54,28 +46,30 @@ export function createReopeningSession(args: {
     };
   };
 
+  /** Read a query to its end, whether or not anyone is reading the session. */
+  const pump = async (current: ClaudeQuerySession): Promise<void> => {
+    let failure: unknown;
+    try {
+      for await (const event of current.events) {
+        if (event.type === "result" || event.type === "error") turnOpen = false;
+        outbox.push(event);
+      }
+    } catch (err) {
+      failure = err;
+      log.warn("claude query stream failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (turnOpen) {
+      turnOpen = false;
+      outbox.push(lostTurnTerminal(failure));
+    }
+  };
+  let pumped = pump(query);
+
   const events: AsyncIterable<ModelSessionEvent> = (async function* () {
     try {
-      while (!closed) {
-        let failure: unknown;
-        try {
-          for await (const event of query.events) {
-            if (event.type === "result" || event.type === "error") turnOpen = false;
-            yield event;
-          }
-        } catch (err) {
-          failure = err;
-          log.warn("claude query stream failed", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        if (turnOpen) {
-          turnOpen = false;
-          yield lostTurnTerminal(failure);
-        }
-        drained.fire();
-        await replaced.fired;
-      }
+      yield* outbox.iter();
     } finally {
       abandoned = true;
     }
@@ -85,18 +79,14 @@ export function createReopeningSession(args: {
     reopening ??= (async () => {
       const ended = query;
       await ended.close();
-      await drained.fired;
-      const next = await open({
+      await pumped;
+      query = await open({
         ...params,
         thread: ended.modelThreadId
           ? { kind: "resume", modelThreadId: ended.modelThreadId }
           : params.thread,
       });
-      query = next;
-      drained = signal();
-      const { fire } = replaced;
-      replaced = signal();
-      fire();
+      pumped = pump(query);
     })().finally(() => {
       reopening = undefined;
     });
@@ -149,7 +139,7 @@ export function createReopeningSession(args: {
       closed = true;
       await settled();
       await query.close();
-      replaced.fire();
+      void pumped.finally(() => outbox.end());
     },
   };
 }

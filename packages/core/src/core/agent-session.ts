@@ -2358,7 +2358,6 @@ class AgentSessionImpl implements AgentSession {
           // The branch action becomes available when turn_end is published.
           // Persist the provider-native anchor first so an immediate click can
           // never fall back to (or race with) a later model-thread head.
-          this.lastPosition = undefined;
           if (outbound.type === "result") {
             const interrupted =
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
@@ -3369,6 +3368,8 @@ class AgentSessionImpl implements AgentSession {
       this.failTurn(sink, "AgentSession closed");
       return;
     }
+    // Only this turn's own position is a place to branch at, and it may leave none.
+    this.lastPosition = undefined;
     // Turns are FIFO-serialized by turnMutex. Resolve exactly once at this
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
@@ -3628,6 +3629,8 @@ class AgentSessionImpl implements AgentSession {
               reasoningEffort: mwInput.reasoningEffort,
               injectedToolResult: input.injectedToolResult,
             });
+            // Taking the input may have replaced a Claude query, and its payer.
+            sink.funding = this.modelSession.funding;
             this.inputs.ready(turnId);
             if (this.deps.turnLinks && unseenLineIds.length > 0) {
               try {

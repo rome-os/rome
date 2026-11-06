@@ -24,6 +24,9 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 
+/** Lets the run finish sending, so what follows happens during the turn. */
+const turnUnderway = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 const SOURCE_CHECKPOINT = {
   providerId: "openai",
   providerThreadId: "source-thread",
@@ -52,6 +55,10 @@ describe("AgentSession turn usage", () => {
   let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
   let funding: UsageFunding;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
+  // Whether middleware ends the turn without reaching the model.
+  let shortCircuit: boolean;
+  // What the session does as it takes an input.
+  let onSend: (() => void) | undefined;
   // Whether the model resolver sees Rome credits paying.
   let resolverUsesRomeCredits: boolean;
   let state: AIToolStateValue;
@@ -79,6 +86,8 @@ describe("AgentSession turn usage", () => {
     recordMetrics.mockClear();
     funding = "byok";
     beforeModelDispatch = undefined;
+    shortCircuit = false;
+    onSend = undefined;
     resolverUsesRomeCredits = false;
     providerCalls = 0;
     const provider: ModelProvider = {
@@ -101,6 +110,13 @@ describe("AgentSession turn usage", () => {
           params,
         );
         Object.defineProperty(session, "funding", { get: () => funding });
+        const send = session.sendUserInput.bind(session);
+        // Like a real provider, it resolves once it accepts the input, not when
+        // the turn ends.
+        session.sendUserInput = async (input) => {
+          onSend?.();
+          void send(input);
+        };
         return session;
       },
     };
@@ -115,7 +131,7 @@ describe("AgentSession turn usage", () => {
       loadFromCatalog: async () => [],
       run: async (_ctx, terminal) => {
         await beforeModelDispatch?.();
-        await terminal();
+        if (!shortCircuit) await terminal();
       },
       size: () => 1,
     };
@@ -245,6 +261,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const first = session.sendTurn({ prompt: "ChatGPT-funded" });
     await firstStartedPromise;
+    await turnUnderway();
     funding = "rome_credits";
     resolverUsesRomeCredits = true;
     releaseFirst();
@@ -266,11 +283,51 @@ describe("AgentSession turn usage", () => {
 
     const second = session.sendTurn({ prompt: "Credit-funded" });
     await secondStartedPromise;
+    await turnUnderway();
     funding = "subscription";
     releaseSecond();
     await drain(second.events);
 
     expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
+  });
+
+  it("records the payer of the query that took the input", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    funding = "subscription";
+    onSend = () => {
+      funding = "byok";
+    };
+    const session = await manager.acquire(key);
+    await drain(session.sendTurn({ prompt: "after a reopen" }).events);
+
+    expect(recorded.map((facts) => facts.funding)).toEqual(["byok"]);
+  });
+
+  it("leaves no position to branch at after a turn that never reached the model", async () => {
+    nextRun = async function* () {
+      yield {
+        type: "result",
+        content: "done",
+        position: { provider: "openai", modelThreadId: "source-thread", checkpointId: "turn-1" },
+      };
+    };
+    const session = await manager.acquire(key);
+    await drain(session.sendTurn({ prompt: "first" }).events);
+    shortCircuit = true;
+    await drain(session.sendTurn({ prompt: "parked on a card" }).events);
+
+    const events: unknown[] = [];
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      events.push(event);
+    }
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Cannot fork before a turn has left a checkpoint",
+      }),
+    );
   });
 
   it("dispatches a turn whose funding label resolves without a payer change", async () => {

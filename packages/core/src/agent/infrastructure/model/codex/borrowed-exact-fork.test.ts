@@ -14,6 +14,8 @@ type OpenOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   tools?: Partial<FacadeParams>;
 };
 
+type McpServers = ModelSessionConfig["externalMcpServers"];
+
 function openParams(overrides: OpenOverrides = {}): ModelSessionParams {
   const { config, tools, ...rest } = overrides;
   return {
@@ -37,9 +39,10 @@ function openParams(overrides: OpenOverrides = {}): ModelSessionParams {
   };
 }
 
-function evaluate(openOverrides: OpenOverrides = {}) {
+function evaluate(openOverrides: OpenOverrides = {}, sourceExternalMcpServers?: McpServers) {
   return evaluateBorrowedExactFork({
     openParams: openParams(openOverrides),
+    sourceExternalMcpServers,
     sourceBuiltinTools: [],
     sourceDynamicTools: createRomeDynamicTools(openParams().tools).definitions,
     sourceModelName: "gpt-5.6-terra",
@@ -79,6 +82,14 @@ describe("evaluateBorrowedExactFork", () => {
     const result = evaluate(overrides as OpenOverrides);
     expect(result.eligible).toBe(false);
     expect(result[mismatch]).toBe(false);
+  });
+});
+
+describe("evaluateBorrowedExactFork with external MCP servers", () => {
+  it("rejects a branch that leaves out the source's servers", () => {
+    const servers: McpServers = { docs: { command: "docs-mcp", args: [] } };
+    expect(evaluate({}, servers)).toMatchObject({ eligible: false, sameTools: false });
+    expect(evaluate({ config: { externalMcpServers: servers } }, servers).eligible).toBe(true);
   });
 });
 

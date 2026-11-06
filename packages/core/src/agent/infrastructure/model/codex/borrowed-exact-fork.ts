@@ -46,6 +46,7 @@ export function evaluateBorrowedExactFork(args: {
   openParams: ModelSessionParams;
   sourceBuiltinTools?: readonly string[];
   sourceDynamicTools: readonly DynamicToolSpec[];
+  sourceExternalMcpServers?: ModelSessionParams["config"]["externalMcpServers"];
   sourceModelName: string;
   sourceSystemPrompt: string;
   sourceWorkingDir?: string;
@@ -58,6 +59,10 @@ export function evaluateBorrowedExactFork(args: {
     (args.sourceWorkingDir ?? process.cwd());
   const sameTools =
     isDeepStrictEqual(args.openParams.config.builtinTools ?? [], args.sourceBuiltinTools ?? []) &&
+    isDeepStrictEqual(
+      args.openParams.config.externalMcpServers ?? {},
+      args.sourceExternalMcpServers ?? {},
+    ) &&
     isDeepStrictEqual(
       createRomeDynamicTools(args.openParams.tools).definitions,
       args.sourceDynamicTools,

@@ -4,6 +4,7 @@ import type {
   ModelSessionParams,
   ThreadStart,
 } from "../../../domain/model-port.js";
+import type { UsageFunding } from "../../../../usage/events.js";
 import { noRomeTools } from "../../../../test/tool-calls.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
 
@@ -15,7 +16,7 @@ interface FakeQuery extends ClaudeQuerySession {
   readonly interrupts: number;
 }
 
-function fakeQuery(modelThreadId?: string): FakeQuery {
+function fakeQuery(modelThreadId?: string, funding?: UsageFunding): FakeQuery {
   const queue: Array<ModelSessionEvent | Error | null> = [];
   let wake: (() => void) | undefined;
   let ended = false;
@@ -29,6 +30,7 @@ function fakeQuery(modelThreadId?: string): FakeQuery {
     providerId: "anthropic",
     model: "claude-test",
     modelThreadId,
+    funding,
     sent,
     get interrupts() {
       return interrupts;
@@ -85,6 +87,7 @@ function setup(first: FakeQuery, thread: ThreadStart = { kind: "new" }) {
   const open = rs.fn(async (_params: ModelSessionParams) => {
     const next = fakeQuery(
       _params.thread.kind === "resume" ? _params.thread.modelThreadId : undefined,
+      "byok",
     );
     reopened.push(next);
     return next;
@@ -208,6 +211,43 @@ describe("createReopeningSession", () => {
     await session.close();
     await parked;
     await expect(session.sendUserInput({ text: "late" })).rejects.toThrow("closed");
+  });
+
+  it("reopens on the next input with no one reading the events", async () => {
+    const first = fakeQuery("thread-1");
+    const { session, reopened, events } = setup(first);
+
+    await session.sendUserInput({ text: "first" });
+    await session.interrupt();
+    first.emit({ type: "result", content: "partial", reasoningEffort: "high" });
+    first.finish();
+    await expect(events.next()).resolves.toMatchObject({ value: { content: "partial" } });
+
+    await session.sendUserInput({ text: "second" });
+    expect(reopened[0]?.sent).toEqual(["second"]);
+    await session.close();
+  });
+
+  it("closes with no one reading the events", async () => {
+    const first = fakeQuery("thread-1");
+    const { session } = setup(first);
+    await session.sendUserInput({ text: "first" });
+    await session.interrupt();
+    first.finish();
+
+    await session.close();
+    await expect(session.sendUserInput({ text: "late" })).rejects.toThrow("closed");
+  });
+
+  it("reports the payer of the query that took the input", async () => {
+    const first = fakeQuery("thread-1", "subscription");
+    const { session } = setup(first);
+    expect(session.funding).toBe("subscription");
+    first.finish();
+
+    await session.sendUserInput({ text: "next" });
+    expect(session.funding).toBe("byok");
+    await session.close();
   });
 
   it("does not interrupt a query that has already ended", async () => {

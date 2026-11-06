@@ -1412,6 +1412,7 @@ export class CodexAppServerProvider implements ModelProvider {
           openParams,
           sourceBuiltinTools: params.config.builtinTools,
           sourceDynamicTools: romeTools.definitions,
+          sourceExternalMcpServers: params.config.externalMcpServers,
           sourceModelName: modelName,
           sourceSystemPrompt: params.config.systemPrompt,
           sourceWorkingDir: params.config.workingDir,
