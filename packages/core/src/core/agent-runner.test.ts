@@ -603,6 +603,48 @@ describe("AgentRunner", () => {
     }
   });
 
+  it("records an agent an action starts from a private chat as that chat's owner's, and none once the chat is gone", async () => {
+    const repo = new ChatsWebChatRepository(testDb.db);
+    await repo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.setSessionTrigger("visitor-task", { triggerKind: "concierge", triggerName: "T" });
+    const runner = createRunner(
+      new MockModelProvider([
+        [{ type: "result", content: "Found it" }],
+        [{ type: "result", content: "Found it" }],
+      ]),
+    );
+    const runFrom = (executionId: string, chatId: string) =>
+      actionExecutionContext.run(
+        {
+          executionId,
+          rootExecutionId: executionId,
+          initiator: "agent:main",
+          actionName: "some-app:research",
+          channelContext: { channel: "webchat", threadId: chatId },
+        },
+        () => collectMessages(runner.run({ agentName: "test-main", prompt: "Look it up" })),
+      );
+    await runFrom("exec-private", "visitor-task");
+    expect(await repo.getSession("action:exec-private:core:test-main")).toMatchObject({
+      ownerKey: "visitor:a",
+      triggerKind: "concierge_fork",
+    });
+    // Called from a chat that is gone: nothing is saved for the run.
+    await runFrom("exec-orphan", "deleted-chat");
+    expect(await repo.getSession("action:exec-orphan:core:test-main")).toBeNull();
+  });
+
   it("does not run a fork of a chat that is gone, and publishes no stream for it", async () => {
     const testDb = createTestDb();
     try {

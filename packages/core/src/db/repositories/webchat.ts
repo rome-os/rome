@@ -264,6 +264,13 @@ export interface EnsureRomeSessionInput {
   trigger?: RomeAgentTraceTriggerMetadata;
   /** Lineage for 'fork' sessions: the rome session the fork branched from. */
   parentSessionId?: string | null;
+  /**
+   * The dashboard chat a session serves a turn of without being its child,
+   * as an agent an action starts from that chat. The session takes that
+   * chat's owner and privacy as a child does, and is not made when the chat
+   * is gone.
+   */
+  servesSessionId?: string | null;
   /** The turn on the parent session that triggered the fork. */
   parentTurnId?: string | null;
 }
@@ -1000,10 +1007,11 @@ export class WebChatRepository {
 
   /**
    * Saves a session row unless it exists. A child session (a fork, a
-   * subagent: anything naming `parentSessionId`) is saved in one transaction
-   * with the read of its parent, and takes the parent's owner, and its
-   * privacy when the parent is private. A parent that no longer exists makes
-   * this throw and saves nothing, so no child is ever made without them.
+   * subagent: anything naming `parentSessionId`), and a session made to serve
+   * a turn of a chat (`servesSessionId`), is saved in one transaction with
+   * the read of that chat, and takes its owner, and its privacy when it is
+   * private. A chat that no longer exists makes this throw and saves nothing,
+   * so no such session is ever made without them.
    */
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
@@ -1042,7 +1050,7 @@ export class WebChatRepository {
       activityAt: now,
       lastSeenActivityAt: chat ? now : null,
     });
-    const parentId = input.parentSessionId;
+    const parentId = input.parentSessionId ?? input.servesSessionId;
     if (!parentId) {
       await this.db.insert(romeSessions).values(row(null)).onConflictDoNothing({
         target: romeSessions.id,
