@@ -18,6 +18,22 @@ A Rome session is the durable product boundary around one continuous body of age
 - **[Forked turn](#forked-turns)** — a fork branches from a session's context but can never mutate it.
 - **Provider execution state** — the provider-side thread is an implementation resource the session resumes. The session is the product boundary.
 
+## Continuity key
+
+A continuity key is the value that whatever opens a session, and comes back to it later, uses to find its current session again: a dashboard chat, a chat on one of Rome's accounts, or an app. It names a run of sessions across resets. The code that opens the session mints it, and Sessions stores and compares it as an opaque string.
+
+**Contracts:**
+
+- At most one session per continuity key and agent is active. A reset completes that session and starts the next one under the same continuity key, so the next message continues where the chat left off.
+- Sessions never reads what a continuity key means. Only the code that minted it may parse it.
+- A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
+- Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
+
+**Not to be confused with:**
+
+- **Session id** — the id names one session. The continuity key names the run of sessions a chat has had, and finds the current one.
+- **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat.
+
 ## Model pin
 
 A session remembers the concrete model that produced its history — the **session model pin** — and requests exactly that model on every later turn and resume ([ADR](../adrs/pinned-session-model-fails-closed.md)). Except for [Concierge provider failover](../adrs/concierge-provider-failover.md), a pinned session does not move to another model on its own. Its prompt cache survives an entitlement or setting change mid-thread.
