@@ -2548,6 +2548,7 @@ describe("Webchat API", () => {
     deps.concierge = {
       switchIfExhausted: async () => null,
       conciergeChat: async () => null,
+      turnFailedBeforeStart: () => undefined,
     } as never;
     const generateTitle = rs.fn(async () => "Calendar");
     deps.conversationTitleGenerator = { generate: generateTitle };
