@@ -8,16 +8,20 @@ UPDATE `concierge_tasks` SET `owner_key` = coalesce(
   'guardian'
 )
 WHERE `chat_id` IS NOT NULL;--> statement-breakpoint
--- A child session (a fork, a subagent) made before children were marked at
--- creation: one of a Concierge chat or a Concierge task chat is marked private
--- to that chat's owner, as a new one is.
+-- A child session (a fork, a branch promoted to a chat, a subagent) made
+-- before children were marked at creation: one of a Concierge chat or a
+-- Concierge task chat is marked private to that chat's owner, as a new one is.
 UPDATE `rome_sessions` SET
   `trigger_kind` = 'concierge_fork',
   `owner_key` = (
     SELECT coalesce(p.`owner_key`, 'guardian') FROM `rome_sessions` p
     WHERE p.`id` = `rome_sessions`.`parent_session_id`
   )
-WHERE `type` IN ('fork', 'subagent')
+WHERE (
+    `type` IN ('fork', 'subagent')
+    -- A branch promoted to an ordinary chat keeps its parent and its fork mark.
+    OR (`type` = 'channel' AND `trigger_kind` = 'fork')
+  )
   AND coalesce(`agent_name`, '') NOT IN ('core:concierge', 'concierge')
   AND EXISTS (
     SELECT 1 FROM `rome_sessions` p

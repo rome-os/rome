@@ -83,11 +83,21 @@ describe("the Concierge owners migration", () => {
     expect(owner("t-guardian-chat")).toBe("guardian");
   });
 
-  it("marks each fork and subagent of a Concierge or task chat private to that chat's owner, and no other", () => {
+  it("marks each fork, promoted branch and subagent of a Concierge or task chat private to that chat's owner, and no other", () => {
     const sqlite = databaseBeforeMigration();
     insertChat(sqlite, { id: "task", triggerKind: "concierge", ownerKey: "visitor:a" });
     insertChat(sqlite, { id: "branch", triggerKind: "fork", ownerKey: "guardian", parent: "task" });
     insertChat(sqlite, { id: "helper", ownerKey: "visitor:a", parent: "task", type: "subagent" });
+    // A branch of the task chat already promoted to an ordinary chat.
+    insertChat(sqlite, {
+      id: "promoted",
+      triggerKind: "fork",
+      ownerKey: "visitor:a",
+      parent: "task",
+      type: "channel",
+    });
+    // An ordinary chat with a parent but no fork mark is not a branch.
+    insertChat(sqlite, { id: "linked", ownerKey: "guardian", parent: "task", type: "channel" });
     insertChat(sqlite, { id: "topic", agentName: "core:concierge", ownerKey: "visitor:b" });
     insertChat(sqlite, { id: "topic-fork", triggerKind: "fork", parent: "topic" });
     insertChat(sqlite, { id: "plain", ownerKey: "guardian" });
@@ -106,6 +116,8 @@ describe("the Concierge owners migration", () => {
         .get(id);
     expect(row("branch")).toEqual({ kind: "concierge_fork", owner: "visitor:a" });
     expect(row("helper")).toEqual({ kind: "concierge_fork", owner: "visitor:a" });
+    expect(row("promoted")).toEqual({ kind: "concierge_fork", owner: "visitor:a" });
+    expect(row("linked")).toEqual({ kind: null, owner: "guardian" });
     expect(row("topic-fork")).toEqual({ kind: "concierge_fork", owner: "visitor:b" });
     // The private chats themselves and every ordinary line are untouched.
     expect(row("task")).toEqual({ kind: "concierge", owner: "visitor:a" });

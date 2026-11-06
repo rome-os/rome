@@ -1091,7 +1091,7 @@ describe("Concierge task anchors", () => {
 
   it("forwards a task chat without a task row without creating one", async () => {
     const s = setup();
-    const chatId = await s.chats.startChat({});
+    const chatId = await s.chats.startChat({}, "guardian");
     await s.deps.webchatRepo.setSessionTrigger(chatId, {
       triggerKind: TASK_CHAT_TRIGGER_KIND,
       triggerName: null,
