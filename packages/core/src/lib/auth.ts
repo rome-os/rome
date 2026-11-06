@@ -97,14 +97,14 @@ export function createVisitorSession(
 }
 
 // The native visitor sign-in returns the same visitor session the web flow
-// sets as a cookie. Rome Cloud's id_token carries no favor viewer token, so a
-// native visitor session has none.
+// sets as a cookie.
 export function createVisitorSessionEnvelope(
   accountId: string,
   email: string,
+  favorViewerToken?: string,
   avatarUrl?: string | null,
 ): SessionEnvelope {
-  return sessionEnvelope(createVisitorSession(accountId, email, undefined, avatarUrl));
+  return sessionEnvelope(createVisitorSession(accountId, email, favorViewerToken, avatarUrl));
 }
 
 /**
