@@ -670,6 +670,47 @@ describe("Chat agent identity", () => {
     expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
   });
 
+  it("shows a spinner and Loading… instead of New Chat while an existing session loads", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      loading: true,
+      sessionName: null,
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByRole("status", { name: "sidebar.loading" })).toBeTruthy();
+    expect(screen.getByText("sidebar.loading")).toBeTruthy();
+    expect(screen.queryByText("sidebar.newChat")).toBeNull();
+  });
+
+  it("shows no loading title for a draft chat without a session", () => {
+    renderChat(<Chat />);
+    expect(screen.queryByRole("status", { name: "sidebar.loading" })).toBeNull();
+    expect(screen.queryByText("sidebar.loading")).toBeNull();
+  });
+
+  it("shows the session name once loaded, and New Chat for a loaded unnamed session", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      loading: false,
+      sessionName: "A conversation",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const { unmount } = renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByText("A conversation")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "sidebar.loading" })).toBeNull();
+    unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      loading: false,
+      sessionName: "  ",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByText("sidebar.newChat")).toBeTruthy();
+  });
+
   it("does not invent a model for a session without a pin", () => {
     renderChat(<Chat sessionId="session-1" />);
     expect(screen.queryByLabelText("navbar.sessionModel")).toBeNull();

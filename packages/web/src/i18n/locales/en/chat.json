@@ -110,6 +110,7 @@
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
     "newChat": "New Chat",
+    "loading": "Loading…",
     "noSessions": "No sessions yet",
     "openSidebar": "Open sidebar"
   },

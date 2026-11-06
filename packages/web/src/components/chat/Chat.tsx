@@ -41,6 +41,7 @@ import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipbo
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
@@ -438,6 +439,7 @@ export function Chat({
   // composer renders the agent as a non-removable chip and the navbar shows the
   // name as the title; the mobile header bar (FreeGrid) reuses the same hook.
   const {
+    loading: sessionLoading,
     sessionName,
     model,
     largeModelSelection: storedModelSelection,
@@ -2016,9 +2018,13 @@ export function Chat({
               model={model}
               reasoningEffort={reasoningEffort}
             />
-            <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-            </span>
+            {sessionLoading ? (
+              <SessionLoadingTitle />
+            ) : (
+              <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
+                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+              </span>
+            )}
             {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
             {/* The agent's app beside a titled chat. The Concierge's is always
                 Rome, so it shows none. */}

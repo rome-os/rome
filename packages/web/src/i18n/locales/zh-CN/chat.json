@@ -110,6 +110,7 @@
   "documentTitle": "{{guardian}} 与 {{agent}} | Rome",
   "sidebar": {
     "newChat": "新对话",
+    "loading": "加载中…",
     "noSessions": "暂无会话",
     "openSidebar": "打开侧边栏"
   },
