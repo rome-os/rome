@@ -41,7 +41,8 @@ export class VisitorAllowListSync {
   private latest: VisitorAllowList | null = null;
   // The revision Rome Cloud last accepted.
   private settled = -1;
-  private running: Promise<void> | null = null;
+  private draining = false;
+  private running: Promise<void> = Promise.resolve();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private failures = 0;
   private readonly log: Pick<Logger, "debug" | "info" | "warn">;
@@ -68,7 +69,7 @@ export class VisitorAllowListSync {
 
   /** Resolves when no send is in flight. A scheduled retry does not count. */
   async idle(): Promise<void> {
-    while (this.running) await this.running;
+    while (this.draining) await this.running;
   }
 
   stop(): void {
@@ -76,27 +77,34 @@ export class VisitorAllowListSync {
   }
 
   private kick(): void {
-    if (this.running) return;
-    this.running = this.drain().finally(() => {
-      this.running = null;
-    });
+    if (this.draining) return;
+    this.draining = true;
+    this.running = this.drain();
   }
 
+  // The flag clears in the same synchronous step as the last look at `latest`,
+  // so a push either lands before that look or finds the sync idle and starts
+  // a new drain. A drain that finishes without awaiting has already cleared the
+  // flag by the time `kick` stores its promise.
   private async drain(): Promise<void> {
-    for (;;) {
-      const list = this.latest;
-      if (!list || list.revision === this.settled) return;
-      const outcome = await this.send(list);
-      // A save during the send queued a newer list: send that one instead.
-      if (this.latest !== list) continue;
-      if (outcome === "retry") {
-        this.scheduleRetry();
+    try {
+      for (;;) {
+        const list = this.latest;
+        if (!list || list.revision === this.settled) return;
+        const outcome = await this.send(list);
+        // A save during the send queued a newer list: send that one instead.
+        if (this.latest !== list) continue;
+        if (outcome === "retry") {
+          this.scheduleRetry();
+          return;
+        }
+        // Only an accepted list settles. A skipped or refused one is sent again
+        // on the next push: a save, a boot, or the instance linking.
+        if (outcome === "ok") this.settled = list.revision;
         return;
       }
-      // Only an accepted list settles. A skipped or refused one is sent again
-      // on the next push: a save, a boot, or the instance linking.
-      if (outcome === "ok") this.settled = list.revision;
-      return;
+    } finally {
+      this.draining = false;
     }
   }
 

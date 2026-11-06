@@ -148,6 +148,40 @@ describe("VisitorAllowListSync", () => {
     ]);
   });
 
+  it("sends a list pushed just as the previous send finishes", async () => {
+    // The push lands 0 to 9 microtasks after the send is accepted, which covers
+    // the moment the previous send settles and the sync releases its running flag.
+    for (let hops = 0; hops < 10; hops++) {
+      const cloud = fakeCloud();
+      let sync: VisitorAllowListSync | null = null;
+      const pushLater = async () => {
+        for (let i = 0; i < hops; i++) await Promise.resolve();
+        sync?.push({ emails: ["b@example.com"], revision: 2 });
+      };
+      const record = (message: string, data?: unknown) => {
+        if (
+          message === "visitor allow-list synced" &&
+          (data as { revision: number }).revision === 1
+        )
+          void pushLater();
+      };
+      sync = new VisitorAllowListSync({
+        getToken: () => "inst-token",
+        getOrigin: () => ORIGIN,
+        fetchImpl: cloud.fetchImpl,
+        logger: { debug: record, info: record, warn: record },
+      });
+
+      sync.push({ emails: ["a@example.com"], revision: 1 });
+      await settle(sync);
+
+      expect({ hops, sent: cloud.sent.map((s) => s.body.revision) }).toEqual({
+        hops,
+        sent: [1, 2],
+      });
+    }
+  });
+
   it("retries an unreachable or failing Rome Cloud in the background", async () => {
     const cloud = fakeCloud(["throw", 503]);
     const sync = new VisitorAllowListSync({
