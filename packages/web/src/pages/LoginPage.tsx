@@ -298,7 +298,7 @@ export default function LoginPage() {
                 </div>
               </div>
               <a
-                href="/api/oauth/google/start"
+                href="/api/oauth/google/start?intent=sign-in"
                 className="mt-4 flex w-full items-center justify-center rounded-8 border border-border-strong bg-surface px-4 py-2 text-ui text-foreground shadow-1 hover:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 {t("login.google")}

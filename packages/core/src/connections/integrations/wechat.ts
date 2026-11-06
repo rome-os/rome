@@ -4,7 +4,7 @@
 // coordinates (baseUrl, accountId, optional userId) minted by the QR pairing
 // flow. The transport core — long-poll, the inbound `ChannelMessage`,
 // attachment download/decrypt, media send — is `WechatAdapter`
-// (packages/core/src/channels/wechat.ts), wrapped here so the runtime's
+// (packages/core/src/connections/kinds/wechat/wechat.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping drive it. The transport
 // already speaks the channel's record, so inbound and send pass through
 // without a projection.
@@ -30,7 +30,7 @@ import {
   type WechatAdapterConfig,
   WechatAuthService,
   type WechatSettings,
-} from "../../channels/wechat.js";
+} from "../kinds/wechat/wechat.js";
 import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";

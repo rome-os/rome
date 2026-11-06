@@ -22,12 +22,12 @@ const inputSchema = z.object({
     .describe("Tool slug to fetch the schema for, e.g. 'GMAIL_SEND_EMAIL' (from connector_search)"),
 });
 
-export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps): Action {
+export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
     schema: inputSchema,
     execute: async ({ toolkit, slug }) => {
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {
           status: "error",

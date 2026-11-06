@@ -5,10 +5,8 @@ import {
   comparePeople,
   countPeople,
   isAssignableBondLevel,
-  latestDynamic,
   parseAccountCursor,
   parseAccountState,
-  parseStreamCursor,
   parseMergeRequest,
   parsePersonFilterLevel,
   parseSendMessageRequest,
@@ -17,7 +15,6 @@ import {
   personMatchesQuery,
   sendRefusalMessage,
   sliceAccountDirectory,
-  sliceAccountStream,
   timelinePageLimit,
   type CreatePersonRequest,
   type DirectoryAccount,
@@ -29,7 +26,6 @@ import {
   type PersonResource,
   type SendRefusal,
   type SentMessage,
-  type StreamAccount,
   type TimelinePage,
 } from "@rome/api-types/people";
 import {
@@ -48,7 +44,6 @@ import {
   ownerOf,
   dismissalOf,
   dismissedAccounts,
-  personTimeline,
   persons,
   recordDelivered,
   sentinelSenders,
@@ -80,7 +75,6 @@ function sendState({ channel, channelUserId }: AccountRef): AccountSendState {
 type PersonFixture = (typeof persons)[number];
 
 function personResource(person: PersonFixture): PersonResource {
-  const entries = personTimeline(person.id) ?? [];
   return {
     id: person.id,
     displayName: person.displayName,
@@ -90,16 +84,9 @@ function personResource(person: PersonFixture): PersonResource {
       channelUserId: a.channelUserId,
       displayName: nameForAccount(a.channel, a.channelUserId),
       send: sendState(a),
-      // The account's own head, not the person's: the person's newest entry
-      // names a channel and not an address, so it cannot say which of two
-      // accounts on one channel was the recent one.
       latestAt: accountTimeline(a)[0]?.timestamp ?? null,
       ...(a.delegate ? { delegate: true as const } : {}),
     })),
-    // Timeline entries, not records: the contract pins a person's count to the
-    // history GET /api/people/:id/messages pages.
-    messageCount: entries.length,
-    latest: latestDynamic(entries),
     // Read off the memory tree (./memory-files.ts) rather than a list here, so
     // the dossier only offers the link for a profile the Memory page can open.
     // Not everyone has one, because nothing writes a profile when a person is
@@ -126,15 +113,8 @@ function directoryRow(ref: AccountRef): DirectoryAccount {
   };
 }
 
-/** The same account on the recents surface, or null when nothing has happened
- *  on it — the stream carries no such account. */
-function streamRow(ref: AccountRef): StreamAccount | null {
-  const latest = latestDynamic(accountTimeline(ref));
-  return latest == null ? null : { ...directoryRow(ref), latest };
-}
-
-/** Every account the three sources name, once each — what both account reads
- *  are cut out of. */
+/** Every account the three sources name, once each — what the account read is
+ *  cut out of. */
 function observedAccounts(): AccountRef[] {
   const seen = new Map<string, AccountRef>();
   const add = (channel: string, channelUserId: string) => {
@@ -263,7 +243,7 @@ export const peopleHandlers = [
   // senders endpoint answered over one channel at a time.
   //
   // The contacts list: every account, by name, carrying nothing about what
-  // anyone said. `/api/accounts/stream` below is the other half.
+  // anyone said.
   http.get("/api/accounts", ({ request }) => {
     const params = new URL(request.url).searchParams;
     const state = readState(params);
@@ -284,30 +264,6 @@ export const peopleHandlers = [
         cursor,
         limit: params.get("limit") ? Number(params.get("limit")) : null,
       }),
-    );
-  }),
-
-  // The recents surface: the accounts something has happened on, newest first.
-  http.get("/api/accounts/stream", ({ request }) => {
-    const params = new URL(request.url).searchParams;
-    const state = readState(params);
-    if ("error" in state) return state.error;
-    const rawCursor = params.get("cursor");
-    const cursor = parseStreamCursor(rawCursor);
-    if (rawCursor != null && rawCursor !== "" && cursor === null) {
-      return HttpResponse.json({ error: "cursor is not a stream cursor" }, { status: 400 });
-    }
-
-    return HttpResponse.json(
-      sliceAccountStream(
-        observedAccounts().flatMap((ref) => streamRow(ref) ?? []),
-        {
-          query: params.get("q"),
-          state: state.state,
-          cursor,
-          limit: params.get("limit") ? Number(params.get("limit")) : null,
-        },
-      ),
     );
   }),
 
@@ -373,10 +329,20 @@ export const peopleHandlers = [
     const person = findVisiblePerson(String(params.id));
     if (!person) return notFound("person");
     const search = new URL(request.url).searchParams;
+    // One account, as the route requires: a person has no history joined
+    // across their accounts.
     const channel = search.get("channel");
-    const all = (personTimeline(person.id) ?? []).filter(
-      (entry) => !channel || entry.source === channel,
+    const channelUserId = search.get("channelUserId");
+    const held = person.channelMappings.find(
+      (a) => a.channel === channel && a.channelUserId === channelUserId,
     );
+    if (!held) {
+      return HttpResponse.json(
+        { error: "That account is not linked to this person" },
+        { status: 400 },
+      );
+    }
+    const all = accountTimeline(held);
     const rawCursor = search.get("cursor");
     const cursor = parseMessageCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {

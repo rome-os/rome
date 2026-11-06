@@ -216,3 +216,40 @@ describe("GET /oauth/shopify/start", () => {
     });
   });
 });
+
+describe("GET /oauth/github/start", () => {
+  const savedEnv = { ...process.env };
+  let db: DrizzleDb;
+  let close: () => void;
+
+  beforeEach(() => {
+    process.env.PANTHEON_BASE_ORIGIN = ROME_CLOUD;
+    process.env.PANTHEON_INSTANCE_ORIGIN = INSTANCE;
+    delete process.env.ROME_LOOPBACK_CALLBACK_ORIGIN;
+    ({ db, close } = createTestDb());
+  });
+
+  afterEach(() => {
+    process.env = { ...savedEnv };
+    rs.restoreAllMocks();
+    close();
+  });
+
+  async function intentOf(query: string): Promise<string | null | undefined> {
+    const app = new Hono().route("/", oauthRoutes({ db } as unknown as ApiDeps));
+    const res = await app.request(`/oauth/github/start${query}`, {
+      headers: { cookie: `${COOKIE_NAME}=${createGuardianSession("guardian-1").token}` },
+    });
+    expect(res.status).toBe(303);
+    const [attempt] = await db.select().from(oauthPendingAttempts);
+    return attempt?.intent;
+  }
+
+  it("records a signed-in guardian's start as a connect", async () => {
+    expect(await intentOf("")).toBe("connect");
+  });
+
+  it("records a start from the login page as a sign-in, even with a session", async () => {
+    expect(await intentOf("?intent=sign-in")).toBe("sign-in");
+  });
+});

@@ -2,13 +2,15 @@
 import { useEffect } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 import { FreeGrid } from "./FreeGrid";
-import { setActiveSession } from "./use-free-cells";
+import { selectTool, setActiveSession } from "./use-free-cells";
+
+let viewportWidth = 1200;
 
 const mounted = rs.hoisted(() => rs.fn());
 const catalog = rs.hoisted(() => ({
@@ -30,7 +32,17 @@ const identity = rs.hoisted(() => ({
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: () => identity.current,
 }));
-rs.mock("@/components/chat/Chat", () => ({ Chat: () => null }));
+// The host's `onSessionLayout`, which the real Chat calls when a session's first
+// messages page arrives; tests call it to play that arrival.
+const chatHost = rs.hoisted(() => ({
+  onSessionLayout: undefined as ((id: string, layout: unknown[] | null) => void) | undefined,
+}));
+rs.mock("@/components/chat/Chat", () => ({
+  Chat: (props: { onSessionLayout?: (id: string, layout: unknown[] | null) => void }) => {
+    chatHost.onSessionLayout = props.onSessionLayout;
+    return null;
+  },
+}));
 rs.mock("./AppWidget", () => ({
   AppWidget: ({ placementId }: { placementId: string }) => {
     useEffect(() => {
@@ -86,6 +98,7 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 beforeEach(() => {
+  viewportWidth = 1200;
   mounted.mockClear();
   catalog.apps = [];
   rs.stubGlobal(
@@ -101,7 +114,7 @@ beforeEach(() => {
       observe(target: Element) {
         if (target.getAttribute("data-testid") === "tool-workspace") {
           this.callback(
-            [{ target, contentRect: { width: 1200 } } as ResizeObserverEntry],
+            [{ target, contentRect: { width: viewportWidth } } as ResizeObserverEntry],
             this as unknown as ResizeObserver,
           );
         }
@@ -110,6 +123,7 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+  chatHost.onSessionLayout = undefined;
   localStorage.clear();
   setActiveSession("reset");
   setActiveSession(null);
@@ -203,6 +217,7 @@ describe("FreeGrid mobile header", () => {
                         completedAt: null,
                         archivedAt: null,
                         notSynced: false,
+                        conciergeChat: { id: "concierge", name: "Concierge", main: true },
                       },
                     ],
                   }
@@ -275,5 +290,171 @@ describe("FreeGrid mobile header", () => {
     const { container } = renderAt("/chat/concierge");
     await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
+  });
+});
+
+describe("FreeGrid workspace re-entry", () => {
+  const layout = [{ id: "notes", type: "app", targetId: "notes", order: 0 }];
+
+  function Navigation() {
+    const navigate = useNavigate();
+    return (
+      <>
+        <button type="button" onClick={() => navigate("/apps")}>
+          Visit apps
+        </button>
+        <button type="button" onClick={() => navigate("/projects")}>
+          Visit projects
+        </button>
+        <button type="button" onClick={() => navigate("/chat/a")}>
+          Return to chat
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            navigate("/chat/a", { state: { widgets: [{ type: "app", appId: "calendar" }] } })
+          }
+        >
+          Return with widgets
+        </button>
+      </>
+    );
+  }
+
+  async function reenter(page = "apps", width = 390, handoff = false) {
+    viewportWidth = width;
+    rs.stubGlobal("innerWidth", width);
+    localStorage.setItem("rome:free-layout:a", JSON.stringify(layout));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MemoryRouter initialEntries={["/chat/a"]}>
+        <QueryClientProvider client={queryClient}>
+          <SlotProvider>
+            <SlotOutlet name="mobileHeader" />
+            <Navigation />
+            <Routes>
+              <Route path="/chat/*" element={<FreeGrid />} />
+              <Route path="/apps" element={<p>Apps page</p>} />
+              <Route path="/projects" element={<p>Projects page</p>} />
+            </Routes>
+          </SlotProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await act(async () => {});
+    // The first messages page carries the saved layout.
+    act(() => chatHost.onSessionLayout?.("a", layout));
+    const toggle = screen.queryByRole("button", { name: "Show apps" });
+    if (toggle) fireEvent.click(toggle);
+    expect(screen.getByTestId("workspace-chat").style.display).toBe(width < 721 ? "none" : "");
+    const saved = localStorage.getItem("rome:tool-view:a");
+    act(() => setActiveSession("a"));
+    fireEvent(document, new Event("visibilitychange"));
+    fireEvent(window, new Event("focus"));
+    expect(screen.getAllByRole("button", { name: "Hide apps" })[0]).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `Visit ${page}` }));
+    expect(screen.queryByTestId("workspace-chat")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: handoff ? "Return with widgets" : "Return to chat" }),
+    );
+    // The remounted chat reports its first page again, as the re-entry load did.
+    const respond = () => chatHost.onSessionLayout?.("a", layout);
+    return { saved, respond };
+  }
+
+  it.each([
+    "apps",
+    "projects",
+  ])("returns to chat after visiting /%s without persisting collapse", async (page) => {
+    const { saved, respond } = await reenter(page);
+    expect(screen.getByTestId("workspace-chat").style.display).toBe("");
+    expect(localStorage.getItem("rome:tool-view:a")).toBe(saved);
+    await act(async () => {
+      respond();
+    });
+    expect(screen.getByTestId("workspace-chat").style.display).toBe("");
+    expect(localStorage.getItem("rome:tool-view:a")).toBe(saved);
+  });
+
+  it.each([
+    "toggle",
+    "link",
+  ])("keeps an explicit %s open during the re-entry load", async (action) => {
+    const { respond } = await reenter();
+    expect(screen.getByTestId("workspace-chat").style.display).toBe("");
+    if (action === "toggle") fireEvent.click(screen.getByRole("button", { name: "Show apps" }));
+    else act(() => selectTool("notes"));
+    await act(async () => {
+      respond();
+    });
+    expect(screen.getByTestId("workspace-chat").style.display).toBe("none");
+    expect(screen.getByRole("tab", { name: "notes" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps a narrow widget handoff chat-first after re-entry", async () => {
+    const { respond } = await reenter("apps", 390, true);
+    expect(screen.getByTestId("workspace-chat").style.display).toBe("");
+    await act(async () => {
+      respond();
+    });
+    await waitFor(() => expect(localStorage.getItem("rome:free-layout:a")).toContain("calendar"));
+    expect(screen.getByTestId("workspace-chat").style.display).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Show apps" }));
+    expect(screen.getByRole("tab", { name: "calendar" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+  });
+
+  it.each([721, 1280])("keeps the saved pane open on same-chat remount at %s px", async (width) => {
+    const { saved, respond } = await reenter("apps", width);
+    expect(screen.getAllByRole("button", { name: "Hide apps" })[0]).toBeTruthy();
+    await act(async () => {
+      respond();
+    });
+    expect(screen.getAllByRole("button", { name: "Hide apps" })[0]).toBeTruthy();
+    expect(localStorage.getItem("rome:tool-view:a")).toBe(saved);
+  });
+});
+
+describe("FreeGrid layout from the first messages page", () => {
+  const cached = [{ id: "notes", type: "app", targetId: "notes", order: 0 }];
+  const fromServer = [{ id: "files", type: "projects", order: 0 }];
+
+  function renderSession(id: string, state?: unknown) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <MemoryRouter initialEntries={[{ pathname: `/chat/${id}`, state }]}>
+        <QueryClientProvider client={queryClient}>
+          <SlotProvider>
+            <Routes>
+              <Route path="/chat/*" element={<FreeGrid />} />
+            </Routes>
+          </SlotProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the cached layout on the first render and never fetches /layout", () => {
+    localStorage.setItem("rome:free-layout:cached-chat", JSON.stringify(cached));
+    renderSession("cached-chat");
+    expect(screen.getByRole("tab", { name: "notes" })).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/layout"), expect.anything());
+  });
+
+  it("applies the layout the first page carries", () => {
+    renderSession("server-chat");
+    expect(screen.queryByRole("tab")).toBeNull();
+    act(() => chatHost.onSessionLayout?.("server-chat", fromServer));
+    expect(screen.getByRole("tab", { name: "Projects" })).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem("rome:free-layout:server-chat")!)).toEqual(fromServer);
+  });
+
+  it("places a widget handoff on top of the layout once the first page applied it", () => {
+    renderSession("handoff-chat", { widgets: [{ type: "app", appId: "calendar" }] });
+    expect(screen.queryByRole("tab", { name: "calendar" })).toBeNull();
+    act(() => chatHost.onSessionLayout?.("handoff-chat", fromServer));
+    expect(screen.getByRole("tab", { name: "Projects" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "calendar" })).toBeTruthy();
   });
 });

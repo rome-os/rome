@@ -1,0 +1,626 @@
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import type {
+  Account,
+  Channel,
+  ChannelMessage,
+  ChatId,
+  InboundEvent,
+  OutgoingMessage,
+} from "@rome-os/app-runtime";
+import { ChatBuffers } from "../participation/conversation-buffer.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import { chats } from "../db/schema.js";
+import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { startChannelChat } from "./channel-chat.js";
+import { ChatAddresses } from "./chat-addresses.js";
+import {
+  addressOf,
+  ChatAdapters,
+  chatAt,
+  channelAdapter,
+  ChannelWithoutAccount,
+  type Inbound,
+  isDirectMessage,
+  messageKeyAt,
+  messageHolder,
+  kindNamedBy,
+  platformIdOfMessage,
+  sentMessageKey,
+} from "./chat-adapter.js";
+import { chatKey } from "./chat-ids.js";
+
+const ROME: Account = { platform: "telegram", id: "rome_bot" };
+
+/** A Telegram channel that hands each event to its subscriber and keeps what
+ *  it was asked to send. */
+function fakeChannel() {
+  let handler: ((event: InboundEvent) => Promise<void>) | null = null;
+  const sent: Array<{ to: ChatId; message: OutgoingMessage }> = [];
+  const channel = {
+    name: "telegram",
+    send: {
+      send: async (to: ChatId, message: OutgoingMessage) => {
+        sent.push({ to, message });
+        return { messageId: `p${sent.length}`, chatId: to };
+      },
+    },
+    inbound: {
+      subscribe(next: (event: InboundEvent) => Promise<void>) {
+        handler = next;
+        return () => {
+          handler = null;
+        };
+      },
+      media: null,
+    },
+  } as unknown as Channel;
+  const hear = (
+    message: Partial<Omit<ChannelMessage, "chatId">> & { chatId: string; messageId: string },
+  ) => {
+    if (!handler) throw new Error("nothing is listening");
+    return handler({
+      kind: "message",
+      ref: { connectionId: "conn-1", chatId: message.chatId as ChatId },
+      message: {
+        channel: "telegram",
+        direction: "inbound",
+        senderId: "alice",
+        senderDisplayName: "Alice",
+        text: "hi",
+        attachments: [],
+        timestamp: new Date("2026-10-29T01:00:00Z"),
+        ...message,
+        chatId: message.chatId as ChatId,
+      },
+    });
+  };
+  return { channel, sent, hear, listening: () => handler !== null };
+}
+
+describe("chat adapter keys", () => {
+  it("key a direct message by both its ends, and reach it at the other end", () => {
+    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
+    expect(isDirectMessage(dm)).toBe(true);
+    expect(addressOf(dm)).toBe("alice");
+    expect(addressOf(dm, "topic-1" as ChatId)).toBe("topic-1");
+
+    const group = chatAt("telegram", "-1001234567890123");
+    expect(isDirectMessage(group)).toBe(false);
+    expect(addressOf(group)).toBe("-1001234567890123");
+  });
+
+  it("key a basic group's messages by the account that heard them, and back", () => {
+    const basic = chatAt("telegram", "-42");
+    expect(messageKeyAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
+    expect(platformIdOfMessage(basic, "rome_bot", "rome_bot:7")).toBe("7");
+    expect(sentMessageKey(basic, "rome_bot", "8")).toBe("rome_bot:8");
+  });
+
+  it("name the account holding each message only where each account holds its own copy", () => {
+    const holder = messageHolder("telegram", "-42");
+    expect(holder?.(messageKeyAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
+    expect(holder?.("7")).toBeNull();
+    expect(messageHolder("telegram", "-1001234567890123")).toBeNull();
+    expect(messageHolder("telegram", "dm:rome_bot:alice")).toBeNull();
+    expect(messageHolder("discord", "-42")).toBeNull();
+  });
+
+  it("quote no message in a basic group that only another of Rome's accounts holds", () => {
+    const basic = chatAt("telegram", "-42");
+    expect(platformIdOfMessage(basic, "rome_bot", "other_bot:7")).toBeNull();
+    expect(platformIdOfMessage(basic, "rome_bot", "7")).toBeNull();
+    const group = chatAt("telegram", "-1001234567890123");
+    expect(platformIdOfMessage(group, "rome_bot", "7")).toBe("7");
+  });
+
+  it("key a message the platform gave no id by one of Rome's, which names no platform message", () => {
+    const group = chatAt("telegram", "-1001234567890123");
+    const key = sentMessageKey(group, "rome_bot", undefined);
+    expect(key).toMatch(/^rome:/);
+    expect(platformIdOfMessage(group, "rome_bot", key)).toBeNull();
+  });
+});
+
+describe("channelAdapter", () => {
+  let testDb: TestDb;
+  let addresses: ChatAddresses;
+  const deps = () => ({
+    accountOf: () => ROME,
+    platformOfChannel: () => "telegram",
+    addresses,
+  });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    addresses = new ChatAddresses(testDb.db);
+  });
+  afterEach(() => testDb.close());
+
+  it("hand a group message to Chats by the adapter's keys, with the event while it is delivered", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    let event: InboundEvent | undefined;
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        event = adapter.heard(message.chat.externalId, message.key);
+        return 1;
+      },
+      (error) => {
+        throw error;
+      },
+    );
+
+    await hear({ chatId: "-42", messageId: "7", replyTo: { messageId: "6" } });
+    await adapter.settled();
+
+    expect(delivered).toEqual([
+      expect.objectContaining({
+        chat: chatKey("telegram", "-42" as ChatId),
+        chatKind: "group",
+        thread: null,
+        key: "rome_bot:7",
+        replyTo: "rome_bot:6",
+        sender: { accountId: "alice", name: "Alice" },
+        text: "hi",
+        via: expect.objectContaining({ connectionId: "conn-1", address: "-42", account: ROME }),
+      }),
+    ]);
+    expect(event?.message.messageId).toBe("7");
+    expect(adapter.heard("-42", "rome_bot:7")).toBeUndefined();
+  });
+
+  it("hand a chat's messages over one at a time, its threads' too, holding none at the port", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let otherChatDone!: () => void;
+    const otherChat = new Promise<void>((resolve) => {
+      otherChatDone = resolve;
+    });
+    adapter.start(
+      async (message) => {
+        order.push(`start ${message.key}`);
+        if (message.key === "1") await held;
+        order.push(`end ${message.key}`);
+        if (message.key === "4") otherChatDone();
+        return 1;
+      },
+      () => {},
+    );
+    // The port buffers each platform address and holds its next event until
+    // the handler returns, as connection ports do.
+    const port = new ChatBuffers<{ chatId: string; messageId: string; parentChatId?: ChatId }>(
+      (message) =>
+        hear({
+          ...message,
+          ...(message.parentChatId ? { thread: { kind: "topic" as const } } : {}),
+        }),
+      { log: { warn: () => {}, error: () => {} }, describe: () => ({}) },
+    );
+    const thread = (chatId: string, messageId: string) =>
+      port.push(chatId, { chatId, parentChatId: "-1001234567890123" as ChatId, messageId });
+
+    // 1 and 2 in one thread, 3 in a sibling thread, 4 in another chat. The
+    // adapter takes each from the port at once, so while 1 is being
+    // delivered nothing waits at the port, 2 and 3 wait their turn in the
+    // chat, and 4 goes ahead.
+    thread("topic-1", "1");
+    thread("topic-1", "2");
+    thread("topic-2", "3");
+    port.push("-1009999999999999", { chatId: "-1009999999999999", messageId: "4" });
+    await otherChat;
+    // Whatever the port could hand over by now, it has.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(port.size).toBe(0);
+    expect(order).toEqual(["start 1", "start 4", "end 4"]);
+
+    release();
+    await adapter.settled();
+    const rest = order.slice(3);
+    expect(rest[0]).toBe("end 1");
+    // One at a time, each thread's in the order heard.
+    expect([rest.slice(1, 3), rest.slice(3, 5)].sort()).toEqual([
+      ["start 2", "end 2"],
+      ["start 3", "end 3"],
+    ]);
+  });
+
+  it("hold at most a port's worth of a chat's messages while one is delivered, dropping the oldest", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    adapter.start(
+      async (message) => {
+        delivered.push(message.key);
+        if (message.key === "1") await held;
+        return 1;
+      },
+      () => {},
+    );
+
+    for (let id = 1; id <= 151; id += 1) {
+      await hear({ chatId: "-1001234567890123", messageId: String(id) });
+    }
+    release();
+    await adapter.settled();
+
+    expect(delivered).toHaveLength(101);
+    expect(delivered.slice(0, 3)).toEqual(["1", "52", "53"]);
+    expect(delivered.at(-1)).toBe("151");
+  });
+
+  it("hold no event for a message whose address could not be kept", async () => {
+    const { channel, hear } = fakeChannel();
+    const failing = {
+      ...deps(),
+      addresses: {
+        ...addresses,
+        bind: () => {
+          throw new Error("store down");
+        },
+        addressOf: () => null,
+        keyAt: () => null,
+        rekey: () => {},
+        bindThread: () => {},
+        threadChatAt: () => null,
+      },
+    };
+    const adapter = channelAdapter(channel, failing);
+    const faults: Error[] = [];
+    adapter.start(
+      async () => 1,
+      (error) => faults.push(error),
+    );
+
+    await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+    expect(faults.map((error) => error.message)).toEqual(["store down"]);
+    expect(adapter.heard("dm:rome_bot:alice", "3")).toBeUndefined();
+  });
+
+  it("hand nothing for a message with no text and no attachments", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return null;
+      },
+      () => {},
+    );
+
+    await hear({ chatId: "-42", messageId: "7", text: "  " });
+    await adapter.settled();
+    expect(delivered).toEqual([]);
+  });
+
+  it("key a thread's message by its parent chat, and reach the thread at its own address", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+
+    await hear({
+      chatId: "topic-1",
+      parentChatId: "-1001234567890123" as ChatId,
+      messageId: "9",
+      thread: { kind: "topic", name: "Plans" },
+    });
+    await adapter.settled();
+
+    expect(delivered[0]).toMatchObject({
+      chat: { externalId: "-1001234567890123" },
+      thread: { id: "topic-1", name: "Plans" },
+      chatName: null,
+    });
+    expect(adapter.threadAt("topic-1")).toEqual(chatKey("telegram", "-1001234567890123" as ChatId));
+    expect(adapter.threadAt("topic-2")).toBeNull();
+  });
+
+  it("hear a direct message in the chat the account already reaches at its address", async () => {
+    // Rome opened this direct message by sending to its address, before it
+    // knew the other end.
+    addresses.bind(ROME, "dm:rome_bot:oc_p2p", "oc_p2p");
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "oc_p2p", senderId: "ou_person", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["dm:rome_bot:oc_p2p"]);
+  });
+
+  it("move a group Rome took for a direct message to its key once a group message is heard there", async () => {
+    // A send opened the group as private, so Rome keyed it as a direct
+    // message with the one person who wrote there.
+    addresses.bind(ROME, "dm:rome_bot:alice", "grp_1");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: "dm:rome_bot:alice", kind: "dm", startedAt: new Date() })
+      .run();
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "grp_1", senderId: "bob", messageId: "4", thread: { kind: "group" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["grp_1"]);
+    expect(testDb.db.select({ key: chats.key, kind: chats.kind }).from(chats).all()).toEqual([
+      { key: "grp_1", kind: "group" },
+    ]);
+  });
+
+  it("move a group Rome took for a direct message once a message is heard in one of its threads", async () => {
+    addresses.bind(ROME, "dm:rome_bot:alice", "grp_2");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: "dm:rome_bot:alice", kind: "dm", startedAt: new Date() })
+      .run();
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({
+      chatId: "topic-9",
+      parentChatId: "grp_2" as ChatId,
+      senderId: "bob",
+      messageId: "5",
+      thread: { kind: "topic", name: "Plans" },
+    });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["grp_2"]);
+    expect(testDb.db.select({ key: chats.key, kind: chats.kind }).from(chats).all()).toEqual([
+      { key: "grp_2", kind: "group" },
+    ]);
+  });
+
+  it("send to a direct message where it was heard, quoting the platform's id", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+    const dm = delivered[0]!;
+    expect(dm.chatKind).toBe("dm");
+
+    const landed = await adapter.send(dm.chat.externalId, null, {
+      text: "hello",
+      replyTo: dm.key,
+    });
+
+    expect(sent).toEqual([{ to: "alice", message: { text: "hello", replyToMessageId: "3" } }]);
+    expect(landed).toEqual({ key: "p1", threadId: null });
+  });
+
+  it("keep a Telegram private chat a direct message when its message names a group", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    // A Telegram account's live message names no kind and reads as a group;
+    // the other party's positive id says it is a direct message.
+    await hear({ chatId: "42", senderId: "42", messageId: "5", thread: { kind: "group" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => [message.chat.externalId, message.chatKind])).toEqual([
+      ["dm:rome_bot:42", "dm"],
+    ]);
+  });
+
+  it("refuse to answer a message the account holds no platform id for, and send nothing", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+
+    await expect(
+      adapter.send(delivered[0]!.chat.externalId, null, { text: "hello", replyTo: "rome:local-1" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    expect(sent).toEqual([]);
+  });
+
+  it("answer the thread a sent message landed in when the platform placed it elsewhere", async () => {
+    const { channel } = fakeChannel();
+    (channel.send as { send: unknown }).send = async () => ({
+      messageId: "m9",
+      chatId: "thread-7",
+    });
+    const adapter = channelAdapter(channel, deps());
+
+    const landed = await adapter.send("-1001234567890123", null, { text: "on it" });
+
+    expect(landed).toEqual({ key: "m9", threadId: "thread-7" });
+    // A send to the thread finds its chat before anything is heard there.
+    expect(adapter.threadAt("thread-7")?.externalId).toBe("-1001234567890123");
+  });
+
+  it("stop delivering once stopped, and refuse a second start while receiving", async () => {
+    const { channel, listening } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    adapter.start(
+      async () => null,
+      () => {},
+    );
+    expect(() =>
+      adapter.start(
+        async () => null,
+        () => {},
+      ),
+    ).toThrow("already receiving");
+
+    await adapter.stop();
+    expect(listening()).toBe(false);
+  });
+
+  it("drop what reaches a channel that knows no account, and refuse its sends", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, { ...deps(), accountOf: () => null });
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return null;
+      },
+      () => {},
+    );
+
+    await hear({ chatId: "-42", messageId: "7" });
+    // An event that names its account is dropped too: the record decides.
+    await hear({ chatId: "-42", messageId: "8", account: ROME });
+    await adapter.settled();
+
+    expect(delivered).toEqual([]);
+    await expect(adapter.send("-42", null, { text: "hi" })).rejects.toThrow(ChannelWithoutAccount);
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("ChatAdapters", () => {
+  let testDb: TestDb;
+  let addresses: ChatAddresses;
+  let adapters: ChatAdapters;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    addresses = new ChatAddresses(testDb.db);
+    adapters = new ChatAdapters({
+      accountOf: (channel) => (channel === "telegram" ? ROME : null),
+      platformOfChannel: () => "telegram",
+      addresses,
+      keyOf: () => chatKey("telegram", "-42" as ChatId),
+      channelsOn: () => ["telegram", "telegram-user"],
+    });
+  });
+  afterEach(() => testDb.close());
+
+  it("build one adapter per channel, and a new one for a channel minted again", () => {
+    const first = fakeChannel().channel;
+    expect(adapters.of(first)).toBe(adapters.of(first));
+    expect(adapters.of(fakeChannel().channel)).not.toBe(adapters.of(first));
+  });
+
+  it("name the account a channel is, and the channel an account is", () => {
+    expect(adapters.accountOn("telegram")).toEqual(ROME);
+    // A channel that knows no account is not active, and no name stands in.
+    expect(() => adapters.accountOn("telegram-user")).toThrow(ChannelWithoutAccount);
+    expect(adapters.knownAccountOn("telegram-user")).toBeNull();
+    expect(adapters.channelOf(ROME)).toBe("telegram");
+    expect(adapters.channelOf({ platform: "telegram", id: "nobody" })).toBeNull();
+  });
+
+  it("find a direct message at the address it was reached at, and reach it there", () => {
+    const dm = adapters.directMessageReached("telegram", "alice", "dm-address-1");
+
+    expect(adapters.chatAt("telegram", "dm-address-1", "dm")).toEqual(dm);
+    expect(adapters.chatAt("telegram", "-42", "group")).toEqual(
+      chatKey("telegram", "-42" as ChatId),
+    );
+    expect(adapters.chatAt("telegram", "bob", "dm")).toEqual(
+      chatAt("telegram", "bob", { romeEnd: "rome_bot" }),
+    );
+  });
+
+  it("move a direct message reached at its address to its other end's key once that is known", () => {
+    // Rome sent to the address before it knew who was there.
+    const early = adapters.chatAt("telegram", "dm-address-2", "dm");
+    addresses.bind(ROME, early.externalId, "dm-address-2");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: early.externalId, kind: "dm", startedAt: new Date() })
+      .run();
+
+    const dm = adapters.directMessageReached("telegram", "carol", "dm-address-2");
+
+    expect(dm).toEqual(chatAt("telegram", "dm-address-2", { romeEnd: "rome_bot", other: "carol" }));
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([
+      { key: dm.externalId },
+    ]);
+    expect(adapters.chatAt("telegram", "dm-address-2", "dm")).toEqual(dm);
+  });
+
+  it("keep a direct message Rome opened at its address there, so the other end's first message moves it", () => {
+    const early = startChannelChat(
+      { chats: new ChatRepository(testDb.db), adapters },
+      { channel: "telegram", threadId: "dm-address-3", threadType: "private" },
+    ).key;
+
+    expect(addresses.keyAt(ROME, "dm-address-3")).toBe(early.externalId);
+    const dm = adapters.directMessageReached("telegram", "dave", "dm-address-3");
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([
+      { key: dm.externalId },
+    ]);
+  });
+});
+
+describe("kindNamedBy", () => {
+  it("read a group from the address where the platform's ids say so, and nowhere else", () => {
+    expect(kindNamedBy("telegram", "-100")).toBe("group");
+    expect(kindNamedBy("telegram", "4242")).toBe("dm");
+    expect(kindNamedBy("telegram", "@public_channel")).toBeNull();
+    expect(kindNamedBy("whatsapp", "120363@g.us")).toBe("group");
+    expect(kindNamedBy("whatsapp", "4479@s.whatsapp.net")).toBe("dm");
+    expect(kindNamedBy("discord", "1234567890")).toBeNull();
+    expect(kindNamedBy("feishu", "ou_abc")).toBe("dm");
+    expect(kindNamedBy("lark", "ou_abc")).toBe("dm");
+    expect(kindNamedBy("lark", "oc_abc")).toBeNull();
+  });
+});

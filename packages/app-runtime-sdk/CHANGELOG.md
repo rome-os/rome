@@ -1,5 +1,55 @@
 # @rome-os/app-runtime
 
+## [0.11.1](https://github.com/rome-os/rome/compare/app-runtime-v0.11.0...app-runtime-v0.11.1) (2026-11-05)
+
+
+### Features
+
+* stop streaming replies to external platforms ([#1729](https://github.com/rome-os/rome/issues/1729)) ([ddc8d64](https://github.com/rome-os/rome/commit/ddc8d645de1315569671922f9162e17da717ff9b))
+
+## [0.11.0](https://github.com/rome-os/rome/compare/app-runtime-v0.10.0...app-runtime-v0.11.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** Sent.message is optional.
+* **app-runtime:** remove recordOutboundMessage; apps send through the host's chats ([#1677](https://github.com/rome-os/rome/issues/1677))
+
+### Features
+
+* **app-runtime:** leave Sent.message out when Rome cannot read the send back ([#1690](https://github.com/rome-os/rome/issues/1690)) ([6576d1e](https://github.com/rome-os/rome/commit/6576d1e2f8af2efc991f3f26c21077c7b89ef6e3))
+* **app-runtime:** name a send refusal SendRefused ([0ca19c0](https://github.com/rome-os/rome/commit/0ca19c04a190eeb8c2ce1c4aca08945383881805))
+* **app-runtime:** refuse a reply where the platform cannot quote, and quote natively on Discord ([#1680](https://github.com/rome-os/rome/issues/1680)) ([167a416](https://github.com/rome-os/rome/commit/167a41608332b76bd4319f7c01671bdfb29af712))
+* **app-runtime:** remove recordOutboundMessage; apps send through the host's chats ([#1677](https://github.com/rome-os/rome/issues/1677)) ([15fe07d](https://github.com/rome-os/rome/commit/15fe07d1c5d7423b5058eb74afd42eddeaf7916f))
+* **connections:** send an approval card as its plain text where it cannot be drawn ([#1682](https://github.com/rome-os/rome/issues/1682)) ([523d9b0](https://github.com/rome-os/rome/commit/523d9b0fbeb8fb909b7520919ed8b9af66a67217))
+
+
+### Bug Fixes
+
+* **app-runtime:** refuse a send whose attachment the platform cannot carry, as attachment_unsupported, before anything goes out ([0ca19c0](https://github.com/rome-os/rome/commit/0ca19c04a190eeb8c2ce1c4aca08945383881805))
+* **app-runtime:** send `text` in place of the text parts on every platform when it says anything ([0ca19c0](https://github.com/rome-os/rome/commit/0ca19c04a190eeb8c2ce1c4aca08945383881805))
+* **web:** distinguish automated chat messages ([#1620](https://github.com/rome-os/rome/issues/1620)) ([cd6d139](https://github.com/rome-os/rome/commit/cd6d139335cbcddb1ec8a96f7d8f62e227243b83))
+
+## [0.10.0](https://github.com/rome-os/rome/compare/app-runtime-v0.9.6...app-runtime-v0.10.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove chat handoff and its handback approval ([#1645](https://github.com/rome-os/rome/issues/1645))
+
+### Features
+
+* let apps read and write the chats their sessions stand in through Chats ([#1632](https://github.com/rome-os/rome/issues/1632)) ([844e8a8](https://github.com/rome-os/rome/commit/844e8a814a74c172437c88d17af141330dc7f59a))
+* refuse a send a channel cannot deliver in full ([#1622](https://github.com/rome-os/rome/issues/1622)) ([24088ae](https://github.com/rome-os/rome/commit/24088ae2e65f1f0c1378a1bbc0a972361d500a7b))
+* remove chat handoff and its handback approval ([#1645](https://github.com/rome-os/rome/issues/1645)) ([001214b](https://github.com/rome-os/rome/commit/001214b9ccbbfa5e6e2dcc0f933d2246d610ca25))
+
+## [0.9.6](https://github.com/rome-os/rome/compare/app-runtime-v0.9.5...app-runtime-v0.9.6) (2026-11-02)
+
+
+### Features
+
+* **app-runtime:** add the chats subpath for sending by Chats refs ([#1605](https://github.com/rome-os/rome/issues/1605)) ([c36a3a7](https://github.com/rome-os/rome/commit/c36a3a704976b495e89cfe6f459e6295f7119d8f))
+
 ## [0.9.5](https://github.com/rome-os/rome/compare/app-runtime-v0.9.4...app-runtime-v0.9.5) (2026-10-29)
 
 

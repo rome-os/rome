@@ -22,15 +22,30 @@ case "$GITHUB_EVENT_NAME" in
     tag="$(git for-each-ref --format='%(refname:strip=2) %(contents:subject)' refs/tags/ |
       awk -v marker="$marker" '$2 == marker { print $1 }')"
     if [[ -n "$tag" ]]; then
-      if [[ "$(git rev-parse "${tag}^{commit}")" != "$target_sha" ]]; then
-        echo "::error::The scheduled release tag points at a different commit."
+      target_sha="$(git rev-parse "${tag}^{commit}")"
+      if ! git merge-base --is-ancestor "$target_sha" "$GITHUB_SHA"; then
+        echo "::error::The scheduled release tag points at a commit outside this branch."
         exit 1
       fi
     else
-      ci="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=${target_sha}&per_page=1" \
-        --jq '.workflow_runs[0] | "\(.status):\(.conclusion)"')"
-      if [[ "$ci" != completed:success ]]; then
-        echo "::error::CI for ${target_sha} is ${ci}. No release tag was created."
+      # Runs are listed newest first. A commit merged after this run started can
+      # already be green, so only commits in this run's history qualify.
+      green_shas="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+        --jq '.workflow_runs[].head_sha')"
+      target_sha=""
+      for sha in $green_shas; do
+        if git merge-base --is-ancestor "$sha" "$GITHUB_SHA" 2>/dev/null; then
+          target_sha="$sha"
+          break
+        fi
+      done
+      if [[ -z "$target_sha" ]]; then
+        echo "::error::No commit in the history of ${GITHUB_SHA} has passed CI. No release tag was created."
+        exit 1
+      fi
+      # A person who starts a run expects the commit they started it on.
+      if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$target_sha" != "$GITHUB_SHA" ]]; then
+        echo "::error::CI for ${GITHUB_SHA} has not passed. No release tag was created."
         exit 1
       fi
 
@@ -38,6 +53,10 @@ case "$GITHUB_EVENT_NAME" in
         awk '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/ && !found { print; found = 1 }')"
       if [[ -z "$latest_tag" ]]; then
         echo "::error::No stable vMAJOR.MINOR.PATCH tag exists."
+        exit 1
+      fi
+      if [[ "$target_sha" != "$GITHUB_SHA" ]] && git merge-base --is-ancestor "$target_sha" "$latest_tag"; then
+        echo "::error::The newest green commit ${target_sha} is already in ${latest_tag}. No release tag was created."
         exit 1
       fi
       IFS='.' read -r major minor patch <<<"${latest_tag#v}"
@@ -61,4 +80,7 @@ esac
   echo "sha=${target_sha}"
 } >>"$GITHUB_OUTPUT"
 
+if [[ "$target_sha" != "$GITHUB_SHA" ]]; then
+  echo "::warning::${tag} releases ${target_sha}, not the newest main commit ${GITHUB_SHA}, whose CI has not passed."
+fi
 echo "Release ${tag} from ${target_sha}"

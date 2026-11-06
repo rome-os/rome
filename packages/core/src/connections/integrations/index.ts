@@ -1,13 +1,12 @@
 // Built-in connection integrations. `registerBuiltinConnections` is the boot-time entry point.
 
-import { feishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
-import type { EmailAdapter } from "../../channels/email.js";
+import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
-import type { WechatUserRuntime } from "../../channels/wechat-user.js";
-import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
+import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
+import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
+import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../../lib/oauth-providers.js";
 import {
@@ -124,7 +123,6 @@ export function registerBuiltinConnections(
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
-      replyStreamingStyle: feishuStreamingStyle(deps.settingsRepo),
     }),
   );
   registry.register(
@@ -168,7 +166,11 @@ export function registerBuiltinConnections(
     registry.register(
       makeOAuthProviderDescriptor(provider, {
         beginRedirect: (opts) =>
-          createRomeCloudOAuthStartRedirect(deps.db, provider, { ...opts, reconnect: true }),
+          createRomeCloudOAuthStartRedirect(deps.db, provider, {
+            ...opts,
+            reconnect: true,
+            intent: "connect",
+          }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
           const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);

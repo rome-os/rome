@@ -103,6 +103,11 @@ export interface SetupGrant {
    *  same terminal write (e.g. Discord's verified author id). Omit for connection kinds
    *  with no guardian-link step. */
   guardianChannelUserId?: string;
+  /** True when `guardianChannelUserId` is one more of the guardian's accounts
+   *  rather than a newer id for one they hold, so the mapping only ever adds a
+   *  link. A signed-in account is one: the guardian may hold several on a
+   *  platform, and re-pointing their only link there would take one away. */
+  addsGuardianAccount?: boolean;
   /** The success view the standard "done" renderer presents. */
   summary?: SetupView;
 }
@@ -128,6 +133,11 @@ export interface SetupDoneView {
   /** The connection the grant wrote, so a setup for a new account can
    *  name the account it made. */
   connectionId?: string;
+  /** The connection the setup ended, when it fixed a connection and the
+   *  grant reached another account. A connection's account never changes,
+   *  so Rome ended that connection and `connectionId` is a new one to the
+   *  account that answered. */
+  ended?: string;
 }
 
 /** The guardian-facing verbs handed to a setup coroutine. Deliberately
@@ -162,9 +172,10 @@ export interface SetupContext {
   step<T>(label: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** The setup's cancellation signal — aborts when the guardian cancels. */
   readonly signal: AbortSignal;
-  /** The setup renews a connection that already names its account, so only
-   *  that same account can grant. A flow that always creates a new account
-   *  has nothing to offer here. */
+  /** The setup renews a connection that already names its account. Another
+   *  account would end that connection and start a new one, so a flow that
+   *  always creates a new account offers only the existing one's credentials
+   *  here. */
   readonly renewing?: boolean;
 }
 
@@ -174,3 +185,10 @@ export interface SetupContext {
  * next to the grant it grants.
  */
 export type SetupFn = (interact: SetupInteraction, ctx: SetupContext) => Promise<SetupGrant>;
+
+/** What a setup's terminal write made: the connection it wrote, and the one it
+ *  ended when a fix reached another account. */
+export interface SetupCommitted {
+  connectionId: string;
+  ended?: string;
+}

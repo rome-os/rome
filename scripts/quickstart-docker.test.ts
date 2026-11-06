@@ -10,12 +10,13 @@ const execFileAsync = promisify(execFile);
 const script = fileURLToPath(new URL("./quickstart-docker.sh", import.meta.url));
 
 // A stub `docker` on PATH satisfies every subcommand the script issues (info,
-// ps, rm, logs, inspect) and records the `docker run` argv, so the full flow —
+// ps, rm, logs, inspect) and records the `docker run` argv (the last run in the
+// args file, every run in its `.all` sibling, signer first), so the full flow —
 // preflight, arg assembly, readiness wait — executes without a daemon. `logs`
 // prints the readiness line immediately, so the wait loop never sleeps.
 const DOCKER_STUB = `#!/usr/bin/env bash
 case "$1" in
-  run) shift; printf '%s\\n' "$@" > "$DOCKER_STUB_ARGS_FILE"; echo cid ;;
+  run) shift; printf '%s\\n' "$@" > "$DOCKER_STUB_ARGS_FILE"; { printf '%s\\n' "$@"; echo ---; } >> "$DOCKER_STUB_ARGS_FILE.all"; echo cid ;;
   logs) echo "Rome started" ;;
   inspect) echo true ;;
   *) exit 0 ;;
@@ -102,6 +103,64 @@ describe("quickstart-docker.sh container env", () => {
     const envFile = await writeEnvFile("PANTHEON_BASE_ORIGIN=https://from-file.example\n");
     const args = await runQuickstart({ PANTHEON_BASE_ORIGIN: "" }, ["--env-file", envFile]);
     expect(args).toContain("PANTHEON_BASE_ORIGIN=");
+  });
+
+  async function runsOf(): Promise<string[][]> {
+    const all = await readFile(`${argsFile}.all`, "utf8");
+    return all
+      .split("---\n")
+      .filter(Boolean)
+      .map((run) => run.split("\n").filter(Boolean));
+  }
+
+  it("starts the signer before Rome, with the resolved origin as its audience", async () => {
+    await runQuickstart({ PANTHEON_BASE_ORIGIN: "https://from-shell.example" });
+    const [signer, rome] = await runsOf();
+    expect(signer.slice(0, 4)).toEqual(["-d", "--name", "rome-signer", "--restart"]);
+    for (const flag of ["--read-only", "--cap-drop", "ALL", "--network", "none"]) {
+      expect(signer).toContain(flag);
+    }
+    expect(signer).toContain("10001:10001");
+    expect(signer).toContain("no-new-privileges:true");
+    expect(signer).toContain("SIGNER_AUDIENCE=https://from-shell.example");
+    expect(signer).toContain("SIGNER_KEY_DIR=/keys");
+    expect(signer).toContain("SIGNER_SOCKET=/run/rome-signer/signer.sock");
+    expect(signer).toContain("rome-signer-key:/keys");
+    expect(signer).toContain("rome-signer-sock:/run/rome-signer");
+    expect(signer.slice(-4)).toEqual([
+      "--entrypoint",
+      "node",
+      "yunfanye/rome:latest",
+      "/opt/rome/packages/signer/dist/main.js",
+    ]);
+    expect(rome).toContain("rome-signer-sock:/run/rome-signer:ro");
+    expect(rome).toContain("ROME_SIGNER_SOCKET=/run/rome-signer/signer.sock");
+    expect(rome).not.toContain("rome-signer-key:/keys");
+  });
+
+  it("uses the default origin, and an env file's origin, as the audience", async () => {
+    await runQuickstart();
+    expect((await runsOf())[0]).toContain("SIGNER_AUDIENCE=https://romeos.cc");
+    await rm(`${argsFile}.all`);
+    const envFile = await writeEnvFile("PANTHEON_BASE_ORIGIN=https://from-file.example\n");
+    await runQuickstart({}, ["--env-file", envFile]);
+    expect((await runsOf())[0]).toContain("SIGNER_AUDIENCE=https://from-file.example");
+  });
+
+  it("names the signer and its volumes after --name", async () => {
+    await runQuickstart({}, ["--name", "work"]);
+    const [signer, rome] = await runsOf();
+    expect(signer).toContain("work-signer");
+    expect(signer).toContain("work-signer-key:/keys");
+    expect(signer).toContain("work-signer-sock:/run/rome-signer");
+    expect(rome).toContain("work-signer-sock:/run/rome-signer:ro");
+  });
+
+  it("starts no signer when Rome Cloud is off", async () => {
+    await runQuickstart({ PANTHEON_BASE_ORIGIN: "" });
+    const runs = await runsOf();
+    expect(runs).toHaveLength(1);
+    expect(runs[0].join(" ")).not.toContain("ROME_SIGNER_SOCKET");
   });
 
   it("derives the callback origin from --port", async () => {

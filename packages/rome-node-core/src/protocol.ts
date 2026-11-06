@@ -4,6 +4,7 @@ export const CLOSE = {
   revoked: 4001,
   superseded: 4002,
   outputLimit: 4003,
+  expired: 4004,
   invalid: 1008,
   tooLarge: 1009,
 } as const;

@@ -25,7 +25,6 @@ export const STATIC_PUBLIC_PATHS = [
   "/api/onboard/create-account",
   "/api/instance/enroll/",
   "/api/health",
-  "/api/tailnet",
   "/api/terminal/",
   "/api/ai-tools/",
   "/callback",

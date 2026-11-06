@@ -14,26 +14,15 @@ import type {
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type { DeliveryTransport } from "../channels/delivery/types.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
 // A Connection's conversational surface, as its builder implements it
-// (`Talker`). Only the channel ports (channels/connection-ports.ts) reach it,
+// (`Talker`). Only the channel ports (chats/connected-accounts/connection-ports.ts) reach it,
 // through `Connection.withTalker`: apps reach channels through the channels
 // service (actions) or a hook's `channels`. A talker delivers each message as
 // the channel's own record: a `ChannelMessage` naming the channel it backs,
 // with direction `inbound`.
-
-/**
- * The platform's own history of a Connection's conversations: at most `limit`
- * of them at or after `since`, oldest first, each saying which channel carried
- * it and which way it went. It backs `messages.query` for a channel with no
- * store of its own (channels/connection-ports.ts).
- */
-export interface TalkHistory {
-  query(input: { chatId?: ChatId; since?: Date; limit?: number }): Promise<ChannelMessage[]>;
-}
 
 /** The conversations a Connection can see, for conversation settings. */
 export interface TalkDirectory {
@@ -46,15 +35,12 @@ export interface TalkDirectory {
 }
 
 export interface TalkFeatureMap {
-  history: TalkHistory;
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
-  /** Writing a reply as it is generated: creating and editing messages. */
-  replyDelivery: DeliveryTransport;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;
@@ -380,10 +366,6 @@ export interface ConnectionDescriptor {
        *  the talker does: webchat's talker is wired to `deliver`, but its turns
        *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
-      /** True when the Talk reads the platform's own history, so the channel it
-       *  backs answers `messages.query` through it. Absent means it does not:
-       *  the channel's messages come from a store, or from nowhere. */
-      history?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */

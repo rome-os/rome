@@ -71,7 +71,7 @@ export function createRomeCloudListingClient(
     let response: Response;
     try {
       response = await fetchImpl(detailUrl, {
-        headers: withRomeCloudReadAuth(detailUrl, { accept: "application/json" }),
+        headers: await withRomeCloudReadAuth(detailUrl, { accept: "application/json" }),
         signal: controller.signal,
       });
     } catch (err) {

@@ -455,20 +455,38 @@ interface HostTransfer {
   peer: string;
   endpoint?: TransferEndpoint;
   canceled: boolean;
+  /** The highest offset the caller acknowledged, for a pull. */
+  acked: number;
+  /** The pushed bytes, kept for the audit log when the push is small enough. */
+  chunks?: Buffer[];
+}
+
+/** What a host transfer did, for the audit log. `code` is set when it failed. */
+export interface TransferResult {
+  code?: string;
+  direction?: "push" | "pull";
+  path?: string;
+  bytes?: number;
+  sha256?: string;
+  ackedBytes?: number;
+  /** The file a push replaced, or null when there was none. */
+  replaced?: { size: number; mtimeMs: number } | null;
+  /** The pushed content, when the push is at most `keepBytes`. */
+  file?: Buffer;
 }
 
 /** Device side of transfers. Isolates concurrent transfers by transfer ID and sender. */
 export class TransferHost {
   private transfers = new Map<string, HostTransfer>();
 
-  constructor(private options: TransferOptions & { limit?: number } = {}) {}
+  constructor(private options: TransferOptions & { limit?: number; keepBytes?: number } = {}) {}
 
   /**
    * Handles transfer.open and runs the transfer to completion. `send` must drop frames once the
    * connection that carried the request is replaced. A repeated ID is ignored.
    */
-  async open(id: string, peer: string, args: unknown, send: TransferSend): Promise<void> {
-    if (this.transfers.has(id)) return;
+  async open(id: string, peer: string, args: unknown, send: TransferSend): Promise<TransferResult> {
+    if (this.transfers.has(id)) return { code: "duplicate_transfer" };
     const request = parseOpen(args);
     if (!request) {
       send(
@@ -477,23 +495,36 @@ export class TransferHost {
           "transfer.open requires direction push or pull, a path, and a size for push.",
         ),
       );
-      return;
+      return { code: "invalid_args" };
     }
     if (this.transfers.size >= (this.options.limit ?? MAX_HOST_TRANSFERS)) {
       send(actionError("busy", "The computer is already running its maximum number of transfers."));
-      return;
+      return { code: "busy" };
     }
-    const entry: HostTransfer = { peer, canceled: false };
+    const { direction, path } = request;
+    const keep = direction === "push" && (request.size ?? 0) <= (this.options.keepBytes ?? 0);
+    const entry: HostTransfer = { peer, canceled: false, acked: 0, chunks: keep ? [] : undefined };
+    const result: TransferResult = { direction, path };
     this.transfers.set(id, entry);
     try {
-      if (request.direction === "push") {
-        const destination = await openDestination(request.path);
-        if (entry.canceled) return void (await destination.cancel());
+      if (direction === "push") {
+        const existing = await stat(path).catch(() => null);
+        result.replaced = existing?.isFile()
+          ? { size: existing.size, mtimeMs: existing.mtimeMs }
+          : null;
+        const destination = await openDestination(path);
+        if (entry.canceled) {
+          await destination.cancel();
+          return { ...result, code: "canceled" };
+        }
         entry.endpoint = destination.start(send, { ...this.options, size: request.size });
         send({ type: "response", ok: true, result: {} } satisfies ActionResponse);
       } else {
-        const source = await openSource(request.path);
-        if (entry.canceled) return void (await source.close());
+        const source = await openSource(path);
+        if (entry.canceled) {
+          await source.close();
+          return { ...result, code: "canceled" };
+        }
         send({
           type: "response",
           ok: true,
@@ -501,14 +532,26 @@ export class TransferHost {
         } satisfies ActionResponse);
         entry.endpoint = source.start(send, this.options);
       }
-      await entry.endpoint.result.catch(() => {});
+      const summary = await entry.endpoint.result;
+      return {
+        ...result,
+        bytes: summary.size,
+        sha256: summary.sha256,
+        ...(direction === "pull" ? { ackedBytes: entry.acked } : {}),
+        ...(entry.chunks ? { file: Buffer.concat(entry.chunks) } : {}),
+      };
     } catch (error) {
-      if (!entry.canceled)
-        send(
-          error instanceof TransferError
-            ? actionError(error.code, error.message)
-            : actionError("io_error", "The transfer failed."),
-        );
+      const failure =
+        error instanceof TransferError
+          ? error
+          : new TransferError("io_error", "The transfer failed.");
+      // An endpoint's failure already reached the peer as an abort.
+      if (!entry.canceled && !entry.endpoint) send(actionError(failure.code, failure.message));
+      return {
+        ...result,
+        code: failure.code,
+        ...(direction === "pull" ? { ackedBytes: entry.acked } : {}),
+      };
     } finally {
       this.transfers.delete(id);
     }
@@ -518,6 +561,8 @@ export class TransferHost {
   receive(id: string, peer: string, message: TransferMessage, body: Uint8Array) {
     const entry = this.transfers.get(id);
     if (!entry || entry.peer !== peer) return;
+    if (message.kind === "data") entry.chunks?.push(Buffer.from(body));
+    else if (message.kind === "ack") entry.acked = Math.max(entry.acked, message.offset);
     if (entry.endpoint) entry.endpoint.receive(message, body);
     else if (message.kind === "abort") entry.canceled = true;
   }

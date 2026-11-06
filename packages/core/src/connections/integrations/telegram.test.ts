@@ -9,7 +9,7 @@
 //      end-to-end over the real ConnectionRegistry.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { sendThrough } from "../../channels/connection-ports.js";
+import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
@@ -211,37 +211,6 @@ describe("telegram descriptor shape", () => {
     } satisfies ChannelMessage;
     void talker.inboundMedia?.materialize(message);
     return stopped as Promise<void>;
-  });
-
-  it("offers reply delivery over the one bot it sends with", async () => {
-    const factory = new FaultBotFactory(true);
-    const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(validCred(), {
-      connectionId: "telegram-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    });
-    factory.sendMessage = () => ({
-      ok: true,
-      result: { message_id: 7, date: 0, chat: { id: 55, type: "private", first_name: "c" } },
-    });
-
-    expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 4096, edit: true });
-    await expect(talker.replyDelivery?.create("55", "hello", "3")).resolves.toEqual({
-      messageId: "7",
-      chatId: "55",
-    });
-    expect(factory.sent).toEqual([
-      {
-        method: "sendMessage",
-        payload: expect.objectContaining({
-          chat_id: "55",
-          text: "hello",
-          reply_parameters: { message_id: 3, allow_sending_without_reply: true },
-        }),
-      },
-    ]);
-    expect(factory.tokens).toEqual(["bot-token"]);
   });
 
   it("reports needs-auth for talk before the bot grant is granted", async () => {

@@ -17,12 +17,11 @@ import {
   type TestConnections,
   recordedConnectionKindOf,
 } from "../helpers.js";
-import type { Channels } from "../../channels/channel.js";
-import { channelList } from "../../channels/channel-list.js";
+import type { Channels } from "../../chats/connected-accounts/connected-account.js";
+import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
-import { SessionsRepository } from "../../db/repositories/sessions.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
@@ -33,9 +32,12 @@ import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
 import { ApprovalHandler } from "../../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../../actions/backend-turn.js";
+import { chatsWiring } from "../../chats-wiring.js";
+import { openChannelChat } from "../../connections/open-chat.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
-import { SessionManager } from "../../core/session-manager.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
@@ -92,7 +94,7 @@ export interface TestRomeOptions {
 }
 
 export interface TestRomeRepos {
-  sessions: SessionsRepository;
+  sessions: SessionRepository;
   approvals: ApprovalsRepository;
   executionJournal: ExecutionJournalRepository;
   actionExecutions: ActionExecutionsRepository;
@@ -208,9 +210,10 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new SessionsRepository(db),
+    sessions: new DrizzleSessionRepository(db, artifactIdentity),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
@@ -233,7 +236,6 @@ async function buildHarness(
       "utf-8",
     );
   }
-  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const agentLoader = new AgentLoader(artifactIdentity);
   await agentLoader.loadAll(agentsDir);
 
@@ -275,13 +277,11 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
-      sessionManager,
-      sessionsRepo: repos.sessions,
+      sessionRepository: repos.sessions,
       promptBuilder,
       actionRegistry,
       modelResolver,
@@ -309,9 +309,38 @@ async function buildHarness(
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 
+  // Chats as production wires it, so a continuation's reply is said through
+  // its session's speaker. Each test channel is its own platform, and Rome's
+  // account on it is named like it.
+  const chatsWired = chatsWiring(db, {
+    accountOf: (channel) => ({ platform: channel, id: channel }),
+    platformOfChannel: (channel) => channel,
+    channelsOn: (platform) => [platform],
+  });
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo: new ChatsWebChatRepository(db, {
+              chats: chatsWired.chats,
+              lines: chatsWired.messages,
+              links: chatsWired.links,
+            }),
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,

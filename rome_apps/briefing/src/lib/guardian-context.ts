@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import type { RomeAppContext } from "@rome-os/app-runtime";
+import { createAppLogger, type RomeAppContext } from "@rome-os/app-runtime";
+import type { ChatReads } from "@rome-os/app-runtime/chats";
 import { unwrap } from "./action-result.js";
 
 // Personal context for the brief's "Try with Rome" section: what the guardian
@@ -7,6 +7,8 @@ import { unwrap } from "./action-result.js";
 // guardian's own chat words are read: a dashboard chat a visitor owns or wrote
 // in is left out whole (the same rule Dream's chat-activity uses), as are
 // archived chats and the agent's replies.
+
+const log = createAppLogger("briefing_guardian_context");
 
 const WINDOW_HOURS = 48;
 const MAX_MESSAGES = 60;
@@ -31,31 +33,60 @@ export async function gatherGuardianContext(
   tz: string,
   now = Date.now(),
 ): Promise<GuardianContext> {
-  return { chats: readRecentChats(appContext, tz, now), profile: await readProfile(appContext) };
+  return {
+    chats: await readRecentChats(appContext, tz, now),
+    profile: await readProfile(appContext),
+  };
 }
 
-function readRecentChats(appContext: RomeAppContext, tz: string, now: number): string | null {
+/** The chat reads Rome hands this app. Briefing reads chats only through
+ *  them, so a host that offers none is an error. */
+function chatReadsOf(appContext: RomeAppContext): ChatReads {
+  const chats = appContext.repositories?.chats;
+  if (!chats?.recentChats || !chats.transcript || !chats.traces) {
+    throw new Error("Briefing reads chats through Chats, and this host offers no chat reads");
+  }
+  return chats as ChatReads;
+}
+
+/** The guardian's requests in their own unarchived dashboard chats since
+ *  `since`, newest first, read through Chats. */
+async function guardianRequests(reads: ChatReads, since: Date): Promise<MessageRow[]> {
+  const recent = (await reads.recentChats({ since, where: "dashboard" })).filter(
+    (chat) => chat.ownerKey === "guardian" && !chat.archived,
+  );
+  const rows: MessageRow[] = [];
+  for (const { sessionId, name } of recent) {
+    const asked = (await reads.transcript(sessionId)).filter((line) => line.role === "user");
+    if (asked.some((line) => line.senderId?.startsWith("visitor:"))) continue;
+    for (const line of asked) {
+      if (line.createdAt < since) continue;
+      rows.push({
+        chat: name,
+        content: line.content,
+        created_at: Math.floor(line.createdAt.getTime() / 1000),
+      });
+    }
+  }
+  rows.sort((a, b) => b.created_at - a.created_at);
+  return rows.slice(0, MAX_MESSAGES);
+}
+
+async function readRecentChats(
+  appContext: RomeAppContext,
+  tz: string,
+  now: number,
+): Promise<string | null> {
   const cutoff = Math.floor((now - WINDOW_HOURS * 60 * 60 * 1000) / 1000);
+  // The chats are optional context, so a failed read leaves them out of the
+  // brief rather than failing it.
   let rows: MessageRow[];
   try {
-    rows = appContext.db.connection.all(sql`
-      SELECT s.name AS chat, m.content, m.created_at
-      FROM rome_agent_messages m
-      JOIN rome_sessions s ON s.id = m.session_id
-      WHERE (s.type IN ('webchat', 'webchat_handoff')
-          OR (s.type = 'channel' AND s.source_channel = 'webchat' AND s.source_thread_id = s.id))
-        AND coalesce(s.owner_key, 'guardian') = 'guardian'
-        AND s.id NOT IN (
-          SELECT session_id FROM rome_agent_messages
-          WHERE role = 'user' AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
-        )
-        AND s.archived_at IS NULL
-        AND m.role = 'user'
-        AND m.created_at >= ${cutoff}
-      ORDER BY m.created_at DESC
-      LIMIT ${MAX_MESSAGES}
-    `) as MessageRow[];
-  } catch {
+    rows = await guardianRequests(chatReadsOf(appContext), new Date(cutoff * 1000));
+  } catch (err) {
+    log.warn("left the guardian's chats out of the brief", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 

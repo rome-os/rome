@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
+import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
-import { SessionManager } from "./session-manager.js";
+import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
 import {
@@ -14,14 +15,26 @@ import {
 } from "../test/helpers.js";
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
-import { SessionsRepository } from "../db/repositories/sessions.js";
-import { sessions } from "../db/schema.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { RecordedConversation } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
+import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
+
+const recordMetrics = rs.hoisted(() => rs.fn());
+rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
+
+import type { ModelSessionEvent, RomeTools } from "../agent/index.js";
+import {
+  executeActionTool,
+  executeSubagentTool,
+  listActionNames,
+  noRomeTools,
+  parseToolText,
+  toolNames,
+} from "../test/tool-calls.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -51,10 +64,9 @@ import { createSessionFromRun, createNullModelSession } from "./agent-runner.js"
 import type {
   ModelProvider,
   ModelSession,
-  ModelSessionForkParams,
-  ModelSessionForkOpenParams,
   ModelSessionParams,
   ProviderId,
+  ThreadStart,
 } from "./agent-runner.js";
 import { createModelResolver, type ModelResolver } from "./model-resolver.js";
 import {
@@ -77,6 +89,8 @@ import type {
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { testChannelSurface } from "../test/channel-surface.js";
+import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -113,12 +127,17 @@ async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<Age
   return messages;
 }
 
+const MOCK_ACCOUNTING = {
+  provider: "mock",
+  model: "mock-model",
+  usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+} as const;
+
 describe("AgentRunner", () => {
   let testDb: TestDb;
   let agentLoader: AgentLoader;
   let artifactIdentity: ArtifactIdentityContext;
-  let sessionManager: SessionManager;
-  let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let promptBuilder: PromptBuilder;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
@@ -129,13 +148,12 @@ describe("AgentRunner", () => {
     // short-circuit never fires unless a test opts in.
 
     testDb = createTestDb();
-    sessionsRepo = new SessionsRepository(testDb.db);
 
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     promptBuilder = new PromptBuilder();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
@@ -146,39 +164,28 @@ describe("AgentRunner", () => {
     testDb.close();
   });
 
-  it("mock sessions reject fork with a clear unsupported error", async () => {
-    const session = createSessionFromRun("mock", async function* () {}, {
-      model: "mock-model",
-      systemPrompt: "system",
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      sessionId: "mock-session",
-      isNewSession: true,
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
-    });
-
-    await expect(session.fork({ sessionId: "fork-session" })).rejects.toThrow(
-      "ModelSession fork is not supported by this provider",
-    );
-    await session.close();
+  it("mock sessions reject a branch with a clear unsupported error", () => {
+    expect(() =>
+      createSessionFromRun("mock", async function* () {}, {
+        config: { model: "mock-model", systemPrompt: "system", builtinTools: [] },
+        tools: noRomeTools(),
+        thread: {
+          kind: "branch",
+          at: { provider: "mock", modelThreadId: "thread", checkpointId: "turn" },
+          lifetime: "ephemeral",
+        },
+      }),
+    ).toThrow("Branching a thread is not supported by this provider");
   });
 
   it("code-backed null session parks until close and never resumes a provider", async () => {
     const session = createNullModelSession({
-      model: "code-backed",
-      systemPrompt: "unused",
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      sessionId: "null-session",
-      isNewSession: false, // the reuse case that broke a real provider resume
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
+      config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
+      tools: noRomeTools(),
+      thread: { kind: "new" },
     });
     expect(session.providerId).toBe("mock");
-    expect(session.providerThreadId).toBeUndefined();
+    expect(session.modelThreadId).toBeUndefined();
 
     // The events stream parks (no provider query, nothing to resume/error) until
     // close() ends it — proven by racing the iterator against a timer.
@@ -196,26 +203,20 @@ describe("AgentRunner", () => {
   it("code-backed null session terminates gracefully if sendUserInput is ever reached", async () => {
     // A correctly-configured code-backed agent short-circuits via middleware, so
     // sendUserInput is never called. If it is (no middleware matched), the turn
-    // must terminate rather than hang: a fallback text + result land on events.
+    // must terminate rather than hang: a fallback text + error land on events.
     const session = createNullModelSession({
-      model: "code-backed",
-      systemPrompt: "unused",
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      sessionId: "null-session-2",
-      isNewSession: true,
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
+      config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
+      tools: noRomeTools(),
+      thread: { kind: "new" },
     });
-    const drained: AgentEvent[] = [];
+    const drained: ModelSessionEvent[] = [];
     const collector = (async () => {
       for await (const msg of session.events) drained.push(msg);
     })();
     await session.sendUserInput({ text: "anything" });
     await session.close();
     await collector;
-    expect(drained.map((m) => m.type)).toEqual(["text", "result"]);
+    expect(drained.map((m) => m.type)).toEqual(["text", "error"]);
   });
 
   it("reuses a code-backed session across acquires without resolving a provider", async () => {
@@ -260,15 +261,12 @@ describe("AgentRunner", () => {
     const legacyBindings = createEmptyLegacyArtifactBindings();
     const namespacedLoader = new AgentLoader({ legacyBindings });
     await namespacedLoader.loadAll(FIXTURES_DIR);
-    const namespacedSessionManager = new SessionManager(new SessionsRepository(testDb.db), {
-      legacyBindings,
-    });
     const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
     const modelResolver = createTestModelResolver({ providers: [provider] });
     const manager = createAgentSessionManager({
       ...managerDeps(modelResolver),
       agentLoader: namespacedLoader,
-      sessionManager: namespacedSessionManager,
+      sessionRepository: new DrizzleSessionRepository(testDb.db, { legacyBindings }),
     });
 
     const session = await manager.acquire({
@@ -284,7 +282,7 @@ describe("AgentRunner", () => {
   });
 
   it("fills a re-entry's conversation id from its channel address", async () => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-1", "Webchat chat");
     const stop = new Error("stop after acquire");
     const acquireBySessionId = rs.fn(async () => {
@@ -317,7 +315,7 @@ describe("AgentRunner", () => {
     ["saves", true, ["trace"]],
     ["leaves", undefined, []],
   ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
-    const webchatRepo = new WebChatRepository(testDb.db);
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
@@ -345,6 +343,138 @@ describe("AgentRunner", () => {
 
     const messages = await webchatRepo.getMessages("chat-trace");
     expect(messages.map((message) => message.role)).toEqual(roles);
+    await manager.shutdown();
+  });
+
+  it.each([
+    ["writes", undefined, true],
+    ["leaves out", false, false],
+  ])("%s a turn's answer in its transcript as the caller asks, and keeps its trace", async (_label, persistAnswer, answered) => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-answer", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-answer",
+        prompt: "continue",
+        threadContext: {
+          channel: "webchat",
+          threadId: "chat-answer",
+          romeSessionId: "chat-answer",
+        },
+        persistTrace: true,
+        persistAnswer,
+      }),
+    );
+
+    const roles = (await webchatRepo.getMessages("chat-answer")).map((message) => message.role);
+    expect(roles).toContain("trace");
+    expect(roles.includes("assistant")).toBe(answered);
+    await manager.shutdown();
+  });
+
+  it("records fresh runs that name one session into it, each in its own agent session", async () => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.ensureRomeSession({
+      id: "shared-record",
+      type: "action",
+      name: "Shared record",
+      agentName: "test-main",
+    });
+    const opened: ModelSessionParams["thread"][] = [];
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: async (params) => {
+        opened.push(params.thread);
+        return createSessionFromRun(
+          "anthropic",
+          async function* () {
+            yield { type: "result", content: "decided" };
+          },
+          params,
+        );
+      },
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+    for (const prompt of ["batch one", "batch two"]) {
+      await collectMessages(
+        runner.run({ agentName: "test-main", prompt, romeSessionId: "shared-record" }),
+      );
+    }
+    // No history carried: each run opened a session of its own, new to the provider.
+    expect(opened).toHaveLength(2);
+    expect(opened).toEqual([{ kind: "new" }, { kind: "new" }]);
+    // Both runs are in the one session: a trace and an answer each.
+    const roles = (await webchatRepo.getMessages("shared-record")).map((m) => m.role);
+    expect(roles.filter((role) => role === "trace")).toHaveLength(2);
+    expect(roles.filter((role) => role === "assistant")).toHaveLength(2);
+    await manager.shutdown();
+  });
+
+  it.each([
+    ["keeps", "Following · important (1)"],
+    ["keeps no", undefined],
+  ])("%s a system turn's input in its trace as the caller asks, never as a chat line", async (_label, inputLabel) => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.ensureRomeSession({
+      id: "system-input",
+      type: "action",
+      name: "System input",
+      agentName: "test-main",
+    });
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "" };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+    const prompt = '<external_events untrusted="true" delivery="important">…</external_events>';
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        prompt,
+        romeSessionId: "system-input",
+        persistTranscript: false,
+        ...(inputLabel ? { inputLabel } : {}),
+      }),
+    );
+    const blocks = testDb.db
+      .select({ content: romeAgentTraceBlocks.content })
+      .from(romeAgentTraceBlocks)
+      .where(eq(romeAgentTraceBlocks.sessionId, "system-input"))
+      .all()
+      .map((row) => JSON.parse(row.content) as { type: string; label?: string; content?: string });
+    const inputs = blocks.filter((block) => block.type === "system_input");
+    expect(inputs).toEqual(
+      inputLabel ? [{ type: "system_input", label: inputLabel, content: prompt }] : [],
+    );
+    // It is the turn's input in the trace, not a line of the conversation.
+    const roles = (await webchatRepo.getMessages("system-input")).map((m) => m.role);
+    expect(roles.filter((role) => role === "user" || role === "assistant")).toEqual([]);
     await manager.shutdown();
   });
 
@@ -388,7 +518,7 @@ describe("AgentRunner", () => {
   it("records a forked run as a fork rome session with parent lineage", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("parent-chat", "Fixing the build");
 
       const source = {
@@ -455,8 +585,6 @@ describe("AgentRunner", () => {
         parentTurnId: "parent-turn-1",
         triggerKind: "fork",
         triggerName: "recap",
-        sourceChannel: "webchat",
-        sourceThreadId: "parent-chat",
         // Follow-up turns of the side chat rebuild their context from this row.
         deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
       });
@@ -521,7 +649,7 @@ describe("AgentRunner", () => {
     it("leaves a recorded channel conversation to the inbox", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "channel:telegram:t1",
           type: "channel",
@@ -550,7 +678,7 @@ describe("AgentRunner", () => {
     it("writes the prompt into a recorded subagent conversation it alone records", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -579,7 +707,7 @@ describe("AgentRunner", () => {
     it("leaves a turn under a webchat thread to that chat", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -618,7 +746,7 @@ describe("AgentRunner", () => {
     it("leaves a turn under a messaging thread to that thread", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -655,7 +783,7 @@ describe("AgentRunner", () => {
     it("writes a recorded subagent transcript when the caller keeps its own", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "child-chat",
           type: "subagent",
@@ -692,7 +820,7 @@ describe("AgentRunner", () => {
     it("leaves a saved side chat to the webchat route on a backend turn", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
           id: "side-chat",
           type: "fork",
@@ -735,7 +863,7 @@ describe("AgentRunner", () => {
     it("leaves a recorded webchat conversation to the webchat route", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
         const { manager, turns } = resumedSession({
           id: "user-chat",
@@ -758,7 +886,7 @@ describe("AgentRunner", () => {
     it("does not recreate a recorded conversation that was deleted", async () => {
       const testDb = createTestDb();
       try {
-        const repo = new WebChatRepository(testDb.db);
+        const repo = new ChatsWebChatRepository(testDb.db);
         // The lookup at open found no conversation, so none is recorded.
         const { manager, turns } = resumedSession();
         const runner = new AgentRunner(manager, agentLoader, repo);
@@ -779,7 +907,7 @@ describe("AgentRunner", () => {
   it("links a fork to the conversation its source serves when no thread names one", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("stored-chat", "Stored chat");
 
       const source = {
@@ -901,35 +1029,27 @@ describe("AgentRunner", () => {
     expect(turnStreams.listBySession("fork-session")).toEqual([]);
   });
 
-  /** Provider whose live sessions support fork(); each fork opens the
-   *  session produced by `makeForkSession` (which receives the open params
-   *  so tests can inspect the fork's tool surface). */
+  type BranchStart = Extract<ThreadStart, { kind: "branch" }>;
+
+  /** Provider that opens a `branch` thread start on the session produced by
+   *  `makeForkSession`, which receives the open params so tests can inspect
+   *  the fork's tool surface. */
   function withForkSupport(
     provider: MockModelProvider,
-    makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
+    makeForkSession: (openParams: ModelSessionParams) => ModelSession,
     options: {
-      providerThreadId?: string;
-      onFork?: (params: ModelSessionForkParams) => void;
+      modelThreadId?: string;
+      onBranch?: (branch: BranchStart) => void;
     } = {},
   ): MockModelProvider {
     const baseOpen = provider.openSession.bind(provider);
     provider.openSession = async (params: ModelSessionParams) => {
+      if (params.thread.kind === "branch") {
+        options.onBranch?.(params.thread);
+        return makeForkSession(params);
+      }
       const session = await baseOpen(params);
-      return {
-        ...session,
-        providerThreadId: options.providerThreadId,
-        fork: async (forkParams: ModelSessionForkParams) => {
-          options.onFork?.(forkParams);
-          return {
-            providerId: "mock" as const,
-            sessionId: forkParams.sessionId,
-            sourceSessionId: params.sessionId,
-            sourceProviderThreadId: options.providerThreadId,
-            mode: "ephemeral" as const,
-            open: async (openParams: ModelSessionForkOpenParams) => makeForkSession(openParams),
-          };
-        },
-      };
+      return { ...session, modelThreadId: options.modelThreadId ?? "mock-source-thread" };
     };
     return provider;
   }
@@ -938,11 +1058,8 @@ describe("AgentRunner", () => {
     return {
       providerId: "mock",
       model: "mock-model",
-      events: (async function* (): AsyncIterable<AgentEvent> {})(),
+      events: (async function* (): AsyncIterable<ModelSessionEvent> {})(),
       async sendUserInput() {},
-      async fork() {
-        throw new Error("nested fork unsupported");
-      },
       async interrupt() {},
       async close() {},
       ...overrides,
@@ -951,13 +1068,13 @@ describe("AgentRunner", () => {
 
   /** Run one normal turn to make the source session live, then fork it. */
   async function runForkAgainstLiveSession(
-    makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
+    makeForkSession: (openParams: ModelSessionParams) => ModelSession,
     opts: {
       provider?: MockModelProvider;
       agentName?: string;
       fork?: Partial<Omit<ForkRunParams, "agentName" | "sourceSessionId" | "channelThreadKey">>;
-      sourceProviderThreadId?: string;
-      onFork?: (params: ModelSessionForkParams) => void;
+      sourceModelThreadId?: string;
+      onBranch?: (branch: BranchStart) => void;
       appCatalog?: Pick<AppCatalog, "get">;
     } = {},
   ): Promise<AgentEvent[]> {
@@ -965,7 +1082,7 @@ describe("AgentRunner", () => {
     const provider = withForkSupport(
       opts.provider ?? new MockModelProvider([[{ type: "result", content: "Done" }]]),
       makeForkSession,
-      { providerThreadId: opts.sourceProviderThreadId, onFork: opts.onFork },
+      { modelThreadId: opts.sourceModelThreadId, onBranch: opts.onBranch },
     );
     const runner = createRunner(provider, undefined, {
       keepAliveAcrossTurns: true,
@@ -986,6 +1103,11 @@ describe("AgentRunner", () => {
         sourceSessionId: start.sessionId,
         channelThreadKey: "webchat:fork-1",
         prompt: "fork it",
+        sourceCheckpoint: {
+          providerId: "mock",
+          providerThreadId: opts.sourceModelThreadId ?? "mock-source-thread",
+          checkpointId: "source-turn",
+        },
         ...opts.fork,
       }),
     );
@@ -997,7 +1119,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_input_delta",
                 toolUseId: "tu-explore-1",
@@ -1010,16 +1132,16 @@ describe("AgentRunner", () => {
                 tool: "lookup",
                 content: "{",
               };
-              yield { type: "result", content: "Fork complete" };
+              yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
             })(),
           }),
         {
-          sourceProviderThreadId: "provider-thread",
+          sourceModelThreadId: "model-thread",
           fork: {
             mode: "exact",
             sourceCheckpoint: {
               providerId: "mock",
-              providerThreadId: "provider-thread",
+              providerThreadId: "model-thread",
               checkpointId: "provider-turn-t2",
             },
           },
@@ -1032,24 +1154,24 @@ describe("AgentRunner", () => {
     });
 
     it("validates and forwards the selected provider checkpoint", async () => {
-      let providerFork: ModelSessionForkParams | undefined;
+      let branch: BranchStart | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork complete" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
             })(),
           }),
         {
-          sourceProviderThreadId: "provider-thread",
-          onFork: (params) => {
-            providerFork = params;
+          sourceModelThreadId: "model-thread",
+          onBranch: (start) => {
+            branch = start;
           },
           fork: {
             mode: "exact",
             sourceCheckpoint: {
               providerId: "mock",
-              providerThreadId: "provider-thread",
+              providerThreadId: "model-thread",
               checkpointId: "provider-turn-t2",
             },
           },
@@ -1057,21 +1179,22 @@ describe("AgentRunner", () => {
       );
 
       expect(messages.map((message) => message.type)).toEqual(["turn_start", "result", "turn_end"]);
-      expect(providerFork).toMatchObject({
-        configurationMode: "exact",
-        sourceCheckpoint: "provider-turn-t2",
+      expect(branch).toEqual({
+        kind: "branch",
+        at: { provider: "mock", modelThreadId: "model-thread", checkpointId: "provider-turn-t2" },
+        lifetime: "ephemeral",
       });
     });
 
-    it("rejects a checkpoint from a different provider thread", async () => {
-      const onFork = rs.fn();
+    it("rejects a checkpoint from a different model thread", async () => {
+      const onBranch = rs.fn();
       const messages = await runForkAgainstLiveSession(() => forkSessionStub({}), {
-        sourceProviderThreadId: "live-provider-thread",
-        onFork,
+        sourceModelThreadId: "live-model-thread",
+        onBranch,
         fork: {
           sourceCheckpoint: {
             providerId: "mock",
-            providerThreadId: "different-provider-thread",
+            providerThreadId: "different-model-thread",
             checkpointId: "provider-turn-t2",
           },
         },
@@ -1080,9 +1203,9 @@ describe("AgentRunner", () => {
       expect(messages.map((message) => message.type)).toEqual(["turn_start", "error", "turn_end"]);
       expect(messages[1]).toMatchObject({
         type: "error",
-        error: "Fork checkpoint belongs to a different provider thread",
+        error: "Fork checkpoint belongs to a different model thread",
       });
-      expect(onFork).not.toHaveBeenCalled();
+      expect(onBranch).not.toHaveBeenCalled();
     });
 
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
@@ -1091,8 +1214,8 @@ describe("AgentRunner", () => {
         new MockModelProvider([[{ type: "result", content: "Source ready" }]]),
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork complete" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
             })(),
           }),
       );
@@ -1178,13 +1301,13 @@ describe("AgentRunner", () => {
     });
 
     it("opens a fork with an explicitly requested model tier", async () => {
-      const openParams: ModelSessionForkOpenParams[] = [];
+      const openParams: ModelSessionParams[] = [];
       await runForkAgainstLiveSession(
         (params) => {
           openParams.push(params);
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork summary" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
             })(),
           });
         },
@@ -1192,52 +1315,52 @@ describe("AgentRunner", () => {
       );
 
       expect(openParams).toHaveLength(1);
-      expect(openParams[0].model).toBe("claude-haiku-5-5");
+      expect(openParams[0].config.model).toBe("claude-haiku-5-5");
       // Forks never write pins: the source session keeps the pin of
       // its own live model even after a tier-overridden forked turn ran.
-      const row = await new SessionsRepository(testDb.db).findByChannelThreadKey("webchat:fork-1");
+      const row = await sessionRepository.current("webchat:fork-1", "test-main");
       expect(row).toMatchObject({ model: "claude-opus-5-5[1m]" });
     });
 
-    it("leaves a resumable thread behind for a fork that ran on its own provider thread", async () => {
-      let forkMode: string | undefined;
+    it("leaves a resumable thread behind for a fork that ran on its own model thread", async () => {
+      let forkLifetime: string | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
-            appliedReasoningEffort: "max",
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            modelThreadId: "fork-model-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", content: "Fork answer", reasoningEffort: "max" };
             })(),
           }),
         {
-          sourceProviderThreadId: "source-provider-thread",
-          onFork: (params) => {
-            forkMode = params.mode;
+          sourceModelThreadId: "source-model-thread",
+          onBranch: (start) => {
+            forkLifetime = start.lifetime;
           },
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
 
       // A fork that wants to be continuable must ask for a thread of its own.
-      expect(forkMode).toBe("thread");
+      expect(forkLifetime).toBe("kept");
       const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
-      const repo = new SessionsRepository(testDb.db);
       await expect(
-        repo.findByChannelThreadKey(`webchat:${start.sessionId}`),
+        sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
       ).resolves.toMatchObject({
         id: start.sessionId,
         provider: "mock",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "mock-model",
-        // The branch header shows the effort its provider reported, not the model alone.
+        // The branch header shows the effort its provider ran at, not the model alone.
         reasoningEffort: "max",
         status: "active",
       });
       // A fork never rewrites its parent: the source keeps its own pin.
-      await expect(repo.findByChannelThreadKey("webchat:fork-1")).resolves.toMatchObject({
-        model: "claude-opus-5-5[1m]",
-      });
+      await expect(sessionRepository.current("webchat:fork-1", "test-main")).resolves.toMatchObject(
+        {
+          model: "claude-opus-5-5[1m]",
+        },
+      );
     });
 
     it("withholds defer from a continuable fork's own turn", async () => {
@@ -1245,27 +1368,27 @@ describe("AgentRunner", () => {
       // wake-up scheduled here would resume the fork session and deliver into
       // the parent transcript. A one-shot fork keeps defer: it cannot be
       // resumed at all, so nothing can answer into the wrong place.
-      const openParams: ModelSessionForkOpenParams[] = [];
+      const openParams: ModelSessionParams[] = [];
       const runFork = (fork: Partial<ForkRunParams>) =>
         runForkAgainstLiveSession(
           (params) => {
             openParams.push(params);
             return forkSessionStub({
-              providerThreadId: "fork-provider-thread",
-              events: (async function* (): AsyncIterable<AgentEvent> {
-                yield { type: "result", content: "Fork answer" };
+              modelThreadId: "fork-model-thread",
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
               })(),
             });
           },
-          { sourceProviderThreadId: "source-provider-thread", fork: { mode: "exact", ...fork } },
+          { sourceModelThreadId: "source-model-thread", fork: { mode: "exact", ...fork } },
         );
 
       await runFork({ persistThreadKey: (id: string) => `webchat:${id}` });
       await runFork({});
 
       expect(openParams).toHaveLength(2);
-      expect(openParams[0].executeDefer).toBeUndefined();
-      expect(openParams[1].executeDefer).toBeDefined();
+      expect(toolNames(openParams[0].tools, "ask_user")).not.toContain("defer");
+      expect(toolNames(openParams[1].tools, "ask_user")).toContain("defer");
     });
 
     it("stays one-shot when the fork borrowed the source's thread", async () => {
@@ -1275,46 +1398,45 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "shared-source-thread",
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            modelThreadId: "shared-source-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         {
-          sourceProviderThreadId: "shared-source-thread",
+          sourceModelThreadId: "shared-source-thread",
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
 
       const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
-      // findByChannelThreadKey returns null for a miss (SessionManager's
-      // findReusableSession, which wraps it, returns undefined — don't mix up).
+      // `current` answers null for a miss.
       await expect(
-        new SessionsRepository(testDb.db).findByChannelThreadKey(`webchat:${start.sessionId}`),
+        sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
       ).resolves.toBeNull();
     });
 
-    it("stays one-shot and ephemeral with no thread key, no provider thread, or a failed fork", async () => {
-      let defaultMode: string | undefined;
+    it("stays one-shot and ephemeral with no thread key, no model thread, or a failed fork", async () => {
+      let defaultLifetime: string | undefined;
       const noKey = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            modelThreadId: "fork-model-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         {
-          onFork: (params) => {
-            defaultMode = params.mode;
+          onBranch: (start) => {
+            defaultLifetime = start.lifetime;
           },
         },
       );
       const noThread = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         { fork: { persistThreadKey: (id: string) => `webchat:${id}` } },
@@ -1322,30 +1444,31 @@ describe("AgentRunner", () => {
       const failed = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            modelThreadId: "fork-model-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield { type: "error", error: "the branch blew up" };
             })(),
           }),
         {
-          sourceProviderThreadId: "source-provider-thread",
+          sourceModelThreadId: "source-model-thread",
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
 
       // Every other fork in Rome (recap, feedback) keeps today's cheap path.
-      expect(defaultMode).toBe("ephemeral");
-      const repo = new SessionsRepository(testDb.db);
+      expect(defaultLifetime).toBe("ephemeral");
       for (const messages of [noKey, noThread, failed]) {
         const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
-        await expect(repo.findByChannelThreadKey(`webchat:${start.sessionId}`)).resolves.toBeNull();
+        await expect(
+          sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
+        ).resolves.toBeNull();
       }
     });
 
     it("synthesizes error + turn_end when the fork stream ends without a terminal", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
             yield { type: "text", content: "partial fork output" };
           })(),
         }),
@@ -1394,8 +1517,8 @@ describe("AgentRunner", () => {
     it("a close-time fork error does not escape after turn_end", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
-            yield { type: "result", content: "Fork summary" };
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
+            yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
           })(),
           async close() {
             throw new Error("close exploded");
@@ -1410,9 +1533,10 @@ describe("AgentRunner", () => {
     it("brackets a user-stopped forked turn with status=interrupted", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
             yield {
               type: "result",
+              reasoningEffort: "high",
               content: "",
               accounting: {
                 provider: "mock",
@@ -1437,9 +1561,9 @@ describe("AgentRunner", () => {
     it("brackets a successful forked turn with status=completed", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
             yield { type: "text", content: "fork output" };
-            yield { type: "result", content: "Fork summary" };
+            yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
           })(),
         }),
       );
@@ -1472,35 +1596,27 @@ describe("AgentRunner", () => {
 
     it("default forks open an isolated tool surface with execution disabled", async () => {
       registerDemoAction();
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
       const messages = await runForkAgainstLiveSession((openParams) => {
         forkOpen = openParams;
         return forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
-            yield { type: "result", content: "Fork summary" };
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
+            yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
           })(),
         });
       });
 
       expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
       expect(forkOpen).toBeDefined();
-      expect(forkOpen!.getActionCatalog()).toEqual([]);
-      expect(forkOpen!.getSkillCatalog()).toEqual([]);
-      expect(forkOpen!.subagentTools).toEqual([]);
-      expect(forkOpen!.builtinTools).toEqual([]);
-      expect(forkOpen!.reasoningEffort).toBe("high");
-      expect(forkOpen!.supportsInteractiveSurface).toBe(false);
-      expect(forkOpen!.handback).toBeUndefined();
-      await expect(forkOpen!.executeAction("demo_action", {})).rejects.toThrow(
-        "Actions are disabled in forked turns",
-      );
+      // An empty tool surface: nothing to list in any group, and no builtins.
+      for (const group of ["actions", "subagents", "skills", "ask_user"] as const) {
+        expect(toolNames(forkOpen!.tools, group)).toEqual([]);
+      }
+      expect(forkOpen!.config.builtinTools).toEqual([]);
+      expect(forkOpen!.config.reasoningEffort).toBe("high");
       await expect(
-        forkOpen!.executeSubagent(
-          EXPLORE_TOOL,
-          { prompt: "x" },
-          { toolUseId: "isolated-subagent" },
-        ),
-      ).rejects.toThrow("Subagents are disabled in forked turns");
+        executeActionTool(forkOpen!.tools, "demo_action", {}, { toolUseId: "isolated-action" }),
+      ).rejects.toThrow("Unknown tool: execute_action");
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
@@ -1517,15 +1633,18 @@ describe("AgentRunner", () => {
           },
         };
       });
-      let forkOpen: ModelSessionForkOpenParams | undefined;
 
       try {
         await runForkAgainstLiveSession(
-          (openParams) => {
-            forkOpen = openParams;
+          () => {
             return forkSessionStub({
-              events: (async function* (): AsyncIterable<AgentEvent> {
-                yield { type: "result", content: "Fork summary" };
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield {
+                  type: "result",
+                  reasoningEffort: "high",
+                  content: "Fork summary",
+                  accounting: MOCK_ACCOUNTING,
+                };
               })(),
             });
           },
@@ -1546,7 +1665,10 @@ describe("AgentRunner", () => {
           },
         );
 
-        expect(forkOpen?.appStoreListingId).toBe("@publisher/test-app");
+        expect(recordMetrics).toHaveBeenCalledWith(MOCK_ACCOUNTING, {
+          agentName: "core:test-main",
+          appStoreListingId: "@publisher/test-app",
+        });
       } finally {
         recordSpy.mockRestore();
       }
@@ -1556,13 +1678,13 @@ describe("AgentRunner", () => {
       registerDemoAction();
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       provider.builtinTools = new Set(["Read", "Edit", "Bash"]);
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
       await runForkAgainstLiveSession(
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork summary" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
             })(),
           });
         },
@@ -1571,31 +1693,37 @@ describe("AgentRunner", () => {
 
       const sourceOpen = provider.sessions[0];
       expect(forkOpen).toBeDefined();
-      expect(forkOpen!.systemPrompt).toBe(sourceOpen.systemPrompt);
-      // Same getter references, not equal copies: both sessions must
-      // serialize the same catalog snapshot for the tool block to match.
-      expect(forkOpen!.getActionCatalog).toBe(sourceOpen.getActionCatalog);
-      expect(forkOpen!.getSkillCatalog).toBe(sourceOpen.getSkillCatalog);
-      expect(forkOpen!.getActionCatalog().map((a) => a.name)).toEqual(["demo_action"]);
-      expect(forkOpen!.subagentTools).toBe(sourceOpen.subagentTools);
-      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain(EXPLORE_TOOL);
+      expect(forkOpen!.config.systemPrompt).toBe(sourceOpen.config.systemPrompt);
+      // The same catalog as the source: both sessions serialize the same tool
+      // block.
+      expect(await listActionNames(forkOpen!.tools)).toEqual(["demo_action"]);
+      expect(toolNames(forkOpen!.tools, "subagents")).toEqual(
+        toolNames(sourceOpen.tools, "subagents"),
+      );
+      expect(toolNames(forkOpen!.tools, "subagents")).toContain(EXPLORE_TOOL);
       // test-main declares Read + Edit; Bash stays provider-only in both.
-      expect(forkOpen!.builtinTools).toBe(sourceOpen.builtinTools);
-      expect(forkOpen!.builtinTools).toEqual(["Read", "Edit"]);
+      expect(forkOpen!.config.builtinTools).toBe(sourceOpen.config.builtinTools);
+      expect(forkOpen!.config.builtinTools).toEqual(["Read", "Edit"]);
       // The advertised surface stays identical (prefix identity with the
-      // source); only the interactive *runtime* is marked detached, since no
-      // webchat drain reads a fork stream.
-      expect(forkOpen!.supportsInteractiveSurface).toBe(true);
-      expect(forkOpen!.interactiveSurfaceDetached).toBe(true);
-      expect(forkOpen!.maxTurns).toBe(sourceOpen.maxTurns);
-      expect(forkOpen!.workingDir).toBe(sourceOpen.workingDir);
-      expect(forkOpen!.externalMcpServers).toBe(sourceOpen.externalMcpServers);
-      expect(forkOpen!.reasoningEffort).toBe(sourceOpen.reasoningEffort);
+      // source); only the interactive *runtime* is detached, since no webchat
+      // drain reads a fork stream: ask_question relays prose there instead of
+      // parking the turn on a card.
+      expect(toolNames(forkOpen!.tools, "ask_user")).toEqual(
+        toolNames(sourceOpen.tools, "ask_user"),
+      );
+      const askQuestion = (tools: RomeTools) =>
+        tools.listTools("ask_user").find((tool) => tool.name === "ask_question");
+      expect(askQuestion(sourceOpen.tools)?.endsTurn).toBe(true);
+      expect(askQuestion(forkOpen!.tools)?.endsTurn).toBe(false);
+      expect(forkOpen!.config.maxTurns).toBe(sourceOpen.config.maxTurns);
+      expect(forkOpen!.config.workingDir).toBe(sourceOpen.config.workingDir);
+      expect(forkOpen!.config.externalMcpServers).toBe(sourceOpen.config.externalMcpServers);
+      expect(forkOpen!.config.reasoningEffort).toBe(sourceOpen.config.reasoningEffort);
       // Model follows the source's live model when no tier override is given.
-      expect(forkOpen!.model).toBe(sourceOpen.model);
-      // Callbacks must be fresh fork-bound closures, never the source's.
-      expect(forkOpen!.executeAction).not.toBe(sourceOpen.executeAction);
-      expect(forkOpen!.executeSubagent).not.toBe(sourceOpen.executeSubagent);
+      expect(forkOpen!.config.model).toBe(sourceOpen.config.model);
+      // The fork's tools run through fresh fork-bound callbacks, never the
+      // source's.
+      expect(forkOpen!.tools).not.toBe(sourceOpen.tools);
     });
 
     it("exact forks execute actions attributed to the fork session, not the source", async () => {
@@ -1612,9 +1740,9 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              await openParams.executeAction("demo_action", {});
-              yield { type: "result", content: "acted" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              await executeActionTool(openParams.tools, "demo_action", {});
+              yield { type: "result", reasoningEffort: "high", content: "acted" };
             })(),
           }),
         {
@@ -1649,14 +1777,15 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-1",
                 tool: EXPLORE_TOOL,
                 input: { prompt: "dig" },
               };
-              const completion = (await openParams.executeSubagent(
+              const completion = (await executeSubagentTool(
+                openParams.tools,
                 EXPLORE_TOOL,
                 { prompt: "dig" },
                 { toolUseId: "fork-subagent-1" },
@@ -1667,7 +1796,7 @@ describe("AgentRunner", () => {
                 tool: EXPLORE_TOOL,
                 output: completion,
               };
-              yield { type: "result", content: completion.output };
+              yield { type: "result", reasoningEffort: "high", content: completion.output };
             })(),
           }),
         { provider, fork: { mode: "exact" } },
@@ -1699,15 +1828,16 @@ describe("AgentRunner", () => {
 
     it("exact forks preserve provider-native structured results without a side-channel event", async () => {
       const payload = { decision: "REPLY", reason: "all good" };
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
 
       const messages = await runForkAgainstLiveSession(
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "result",
+                reasoningEffort: "high",
                 content: JSON.stringify(payload),
                 structuredOutput: payload,
               };
@@ -1717,10 +1847,9 @@ describe("AgentRunner", () => {
         { agentName: "test-structured", fork: { mode: "exact" } },
       );
 
-      expect(forkOpen!.outputSchema).toEqual(
+      expect(forkOpen!.config.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
-      expect(forkOpen!.handback).toBeUndefined();
       expect(messages.some((message) => message.type === "structured_output")).toBe(false);
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: JSON.stringify(payload),
@@ -1731,8 +1860,8 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "forgot to submit" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "forgot to submit" };
             })(),
           }),
         { agentName: "test-structured", fork: { mode: "exact" } },
@@ -1751,7 +1880,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_result",
                 toolUseId: "tu-fork-park",
@@ -1760,6 +1889,7 @@ describe("AgentRunner", () => {
               };
               yield {
                 type: "result",
+                reasoningEffort: "high",
                 content: JSON.stringify({ decision: "REPLY", reason: "after approval" }),
                 structuredOutput: { decision: "REPLY", reason: "after approval" },
               };
@@ -1797,9 +1927,9 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              actionResult = await openParams.executeAction("demo_action", {});
-              yield { type: "result", content: "done" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              actionResult = await executeActionTool(openParams.tools, "demo_action", {});
+              yield { type: "result", reasoningEffort: "high", content: "done" };
             })(),
           }),
         { fork: { mode: "exact" } },
@@ -1832,7 +1962,7 @@ describe("AgentRunner", () => {
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
       ): AsyncIterable<AgentEvent> {
-        actionResult = await params.executeAction("demo_action", {});
+        actionResult = await executeActionTool(params.tools, "demo_action", {});
         yield { type: "result", content: "done" };
       };
       const provider: ModelProvider = {
@@ -1858,70 +1988,6 @@ describe("AgentRunner", () => {
       await session.close("shutdown");
     });
 
-    it("exact forks of a handback session reject submit_output instead of claiming guardian review", async () => {
-      let forkOpen: ModelSessionForkOpenParams | undefined;
-      let submitResponse: unknown;
-      const provider = withForkSupport(
-        new MockModelProvider([[{ type: "result", content: "Done" }]]),
-        (openParams) => {
-          forkOpen = openParams;
-          return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              submitResponse = await openParams.executeSubmitOutput!({ answer: "candidate" });
-              yield { type: "result", content: "tried to submit" };
-            })(),
-          });
-        },
-      );
-      const modelResolver = createTestModelResolver({ providers: [provider] });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
-        keepAliveAcrossTurns: true,
-      });
-      const runner = new AgentRunner(manager, agentLoader);
-      // A conversational-handback source (interactive-summon child session):
-      // No config outputSchema; the session-scoped contract wires handback tools.
-      const source = await manager.acquire(
-        { agentName: "test-main", channelThreadKey: "webchat:handback-fork" },
-        {
-          handback: {
-            schema: {
-              type: "object",
-              properties: { answer: { type: "string" } },
-              required: ["answer"],
-            },
-          },
-        },
-      );
-
-      const messages = await collectMessages(
-        runner.runForked({
-          agentName: "test-main",
-          sourceSessionId: source.sessionId,
-          channelThreadKey: "webchat:handback-fork",
-          prompt: "fork it",
-          mode: "exact",
-        }),
-      );
-
-      // The fork still advertises the source's handback contract
-      // (catalog identity with the source)...
-      expect(forkOpen!.handback).toBeDefined();
-      expect(forkOpen!.outputSchema).toBeUndefined();
-      expect(forkOpen!.executeSubmitOutput).toBeDefined();
-      // ...but a handback submission is a UI act: no webchat drain persists a
-      // submission_card off a fork stream, so accepting it would claim a
-      // guardian review that can never happen.
-      expect(submitResponse).toMatchObject({
-        ok: false,
-        error: expect.stringContaining("no guardian approval surface"),
-      });
-      expect(messages.some((m) => m.type === "structured_output")).toBe(false);
-      // Handbacks stay exempt from the fail-closed terminal rule (live
-      // parity): the fork's result passes through.
-      expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
-      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
-    });
-
     it("exact fork subagents run in fresh fork-owned child sessions", async () => {
       const provider = withForkSupport(
         new MockModelProvider([
@@ -1930,14 +1996,15 @@ describe("AgentRunner", () => {
         ]),
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-2",
                 tool: EXPLORE_TOOL,
                 input: { prompt: "fork dig" },
               };
-              const completion = (await openParams.executeSubagent(
+              const completion = (await executeSubagentTool(
+                openParams.tools,
                 EXPLORE_TOOL,
                 { prompt: "fork dig" },
                 { toolUseId: "fork-subagent-2" },
@@ -1948,7 +2015,7 @@ describe("AgentRunner", () => {
                 tool: EXPLORE_TOOL,
                 output: completion,
               };
-              yield { type: "result", content: completion.output };
+              yield { type: "result", reasoningEffort: "high", content: completion.output };
             })(),
           }),
       );
@@ -1969,14 +2036,18 @@ describe("AgentRunner", () => {
           channelThreadKey: "webchat:fork-iso",
           prompt: "fork it",
           mode: "exact",
+          sourceCheckpoint: {
+            providerId: "mock",
+            providerThreadId: "mock-source-thread",
+            checkpointId: "source-turn",
+          },
         }),
       );
 
       // The fork's subagent is always a fresh session owned by the fork.
-      const childOpens = provider.sessions.filter((s) => s.agentName === "core:test-explore");
+      const childOpens = provider.sessions.slice(1);
       expect(childOpens).toHaveLength(1);
-      expect(childOpens[0].sessionId).not.toBe(start.sessionId);
-      expect(childOpens[0].isNewSession).toBe(true);
+      expect(childOpens[0].thread).toEqual({ kind: "new" });
       const terminal = messages.find((m) => m.type === "result");
       expect(terminal).toMatchObject({ content: "fork child answer" });
     });
@@ -2005,6 +2076,10 @@ describe("AgentRunner", () => {
       onFinished() {
         return () => {};
       },
+      dispatchFailedBeforeStart() {},
+      onFailedBeforeStart() {
+        return () => {};
+      },
     };
   }
 
@@ -2021,20 +2096,19 @@ describe("AgentRunner", () => {
     return {
       agentLoader,
       appCatalog,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       promptBuilder,
       actionRegistry,
       modelResolver,
       actionEngine,
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
-        webchatRepo: new WebChatRepository(testDb.db),
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
         activeRegistry: activeSubagentRegistry,
         turnStreams,
       }),
@@ -2048,6 +2122,7 @@ describe("AgentRunner", () => {
       keepAliveAcrossTurns?: boolean;
       appCatalog?: Pick<AppCatalog, "get">;
       resetPolicy?: ProviderSessionResetPolicy;
+      turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2060,6 +2135,7 @@ describe("AgentRunner", () => {
         ...(options.resetPolicy
           ? { resolveProviderSessionReset: async () => options.resetPolicy! }
           : {}),
+        ...(options.turnLinks ? { turnLinks: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
@@ -2068,16 +2144,19 @@ describe("AgentRunner", () => {
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
     let closed = false;
-    const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
-    const finish = (): IteratorResult<AgentEvent> => ({ value: undefined as never, done: true });
+    const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
+    const finish = (): IteratorResult<ModelSessionEvent> => ({
+      value: undefined as never,
+      done: true,
+    });
 
     return {
       providerId: "mock",
-      model: params.model,
+      model: params.config.model,
       events: {
         [Symbol.asyncIterator]() {
           return {
-            async next(): Promise<IteratorResult<AgentEvent>> {
+            async next(): Promise<IteratorResult<ModelSessionEvent>> {
               if (closed) return finish();
               return await new Promise((resolve) => {
                 resolvers.push(resolve);
@@ -2087,9 +2166,6 @@ describe("AgentRunner", () => {
         },
       },
       async sendUserInput(): Promise<void> {},
-      async fork() {
-        throw new Error("ModelSession fork is not supported by this provider");
-      },
       async interrupt(): Promise<void> {},
       async close(): Promise<void> {
         if (closed) return;
@@ -2407,7 +2483,7 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider through the conversational input lane", async () => {
+    it("takes the next input on the same model session after an interrupt", async () => {
       const opens: ModelSessionParams[] = [];
       const prompts: string[] = [];
       const cancels = rs.fn();
@@ -2425,13 +2501,11 @@ describe("AgentRunner", () => {
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
-          const first = opens.length === 1;
-          let disposed = false;
           const model = createSessionFromRun(
             "anthropic",
             async function* ({ prompt }) {
               prompts.push(prompt);
-              if (first) {
+              if (prompts.length === 1) {
                 yield {
                   type: "tool_use",
                   id: "edit-1",
@@ -2439,8 +2513,15 @@ describe("AgentRunner", () => {
                   input: { file_path: "test.txt" },
                 };
                 await firstGate;
-                yield { type: "result", content: "Work before cancellation" };
-                await model.close();
+                yield {
+                  type: "result",
+                  content: "Work before cancellation",
+                  position: {
+                    provider: "anthropic",
+                    modelThreadId: "persisted-claude-thread",
+                    checkpointId: "assistant-current",
+                  },
+                };
               } else {
                 await secondGate;
                 yield { type: "result", content: "Next turn" };
@@ -2450,13 +2531,9 @@ describe("AgentRunner", () => {
           );
           return {
             ...model,
-            providerThreadId: "persisted-claude-thread",
-            get isClosed() {
-              return disposed;
-            },
+            modelThreadId: "persisted-claude-thread",
             async interrupt() {
               cancels();
-              disposed = true;
               releaseFirst();
             },
           };
@@ -2503,16 +2580,12 @@ describe("AgentRunner", () => {
       expect(await secondMessages).toContainEqual(
         expect.objectContaining({ type: "result", content: "Next turn" }),
       );
-      expect(opens).toHaveLength(2);
-      expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "persisted-claude-thread",
-      });
+      expect(opens).toHaveLength(1);
       expect(session.status).toBe("idle");
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider before forking its current checkpoint", async () => {
+    it("branches an interrupted source at its current checkpoint", async () => {
       const opens: ModelSessionParams[] = [];
       let releaseInterrupted!: () => void;
       const interruptedGate = new Promise<void>((resolve) => {
@@ -2522,63 +2595,43 @@ describe("AgentRunner", () => {
       const interruptedBegun = new Promise<void>((resolve) => {
         beginInterrupted = resolve;
       });
-      let providerFork: ModelSessionForkParams | undefined;
       const provider: ModelProvider = {
         id: "anthropic",
         displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
-          const first = opens.length === 1;
-          let disposed = false;
+          if (params.thread.kind === "branch") {
+            return forkSessionStub({
+              providerId: "anthropic",
+              model: "claude-fork",
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
+              })(),
+            });
+          }
           const model = createSessionFromRun(
             "anthropic",
             async function* () {
-              if (!first) return;
               beginInterrupted();
               await interruptedGate;
-              yield { type: "result", content: "Work before cancellation" };
-              await model.close();
+              yield {
+                type: "result",
+                content: "Work before cancellation",
+                position: {
+                  provider: "anthropic",
+                  modelThreadId: "persisted-claude-thread",
+                  checkpointId: "assistant-current",
+                },
+              };
             },
             params,
           );
           return {
             ...model,
-            providerThreadId: "persisted-claude-thread",
-            get isClosed() {
-              return disposed;
-            },
-            get lastCompletedTurnCheckpoint() {
-              return first ? "assistant-current" : undefined;
-            },
+            modelThreadId: "persisted-claude-thread",
             async interrupt() {
-              if (!first || disposed) return;
-              disposed = true;
               releaseInterrupted();
-            },
-            async fork(forkParams) {
-              if (disposed) throw new Error("Cannot fork a closed ModelSession");
-              providerFork = forkParams;
-              return {
-                providerId: "anthropic" as const,
-                sessionId: forkParams.sessionId,
-                sourceSessionId: params.sessionId,
-                sourceProviderThreadId: "persisted-claude-thread",
-                mode: forkParams.mode ?? "ephemeral",
-                providerThreadId: forkParams.sessionId,
-                open: async () =>
-                  forkSessionStub({
-                    providerId: "anthropic",
-                    model: "claude-fork",
-                    events: (async function* (): AsyncIterable<AgentEvent> {
-                      yield { type: "result", content: "Fork complete" };
-                    })(),
-                  }),
-              };
-            },
-            async close() {
-              disposed = true;
-              await model.close();
             },
           };
         },
@@ -2622,13 +2675,14 @@ describe("AgentRunner", () => {
       ]);
       expect(forkMessages[1]).toMatchObject({ type: "result", content: "Fork complete" });
       expect(opens).toHaveLength(2);
-      expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "persisted-claude-thread",
-      });
-      expect(providerFork).toMatchObject({
-        configurationMode: "exact",
-        sourceCheckpoint: "assistant-current",
+      expect(opens[1]?.thread).toEqual({
+        kind: "branch",
+        at: {
+          provider: "anthropic",
+          modelThreadId: "persisted-claude-thread",
+          checkpointId: "assistant-current",
+        },
+        lifetime: "ephemeral",
       });
       await manager.shutdown();
     });
@@ -2642,6 +2696,7 @@ describe("AgentRunner", () => {
         turnContext: context.active(),
       }));
       const session: AgentSession = {
+        selectModel: () => {},
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
         sessionId: "sess-1",
         status: "idle",
@@ -2706,20 +2761,17 @@ describe("AgentRunner", () => {
         type: "session_init";
         sessionId: string;
       };
-      const stored = await new SessionsRepository(testDb.db).findByChannelThreadKey(
-        "telegram:thread-new",
-      );
+      const stored = await sessionRepository.current("telegram:thread-new", "core:test-main");
       expect(stored?.id).toBe(sessionInit.sessionId);
       expect(stored?.agentName).toBe("core:test-main");
+      // New session ids are UUIDv7, which sort by when they were minted.
+      expect(uuidVersion(sessionInit.sessionId)).toBe(7);
     });
 
     it("reuses an active session for the same key", async () => {
-      const repo = new SessionsRepository(testDb.db);
-      const existingId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "telegram:thread-reuse",
-        status: "active",
-      });
+      const seeded = Session.create("test-main", { continuityKey: "telegram:thread-reuse" });
+      await sessionRepository.add(seeded);
+      const existingId = seeded.id;
 
       const provider = new MockModelProvider([
         [
@@ -2745,12 +2797,12 @@ describe("AgentRunner", () => {
     });
 
     it("rotates an expired external-IM provider generation before running the turn", async () => {
-      const repo = new SessionsRepository(testDb.db);
-      const existingId = await repo.create({
-        id: "expired-generation",
-        agentName: "core:test-main",
-        channelThreadKey: "telegram:thread-reset",
+      const seeded = Session.create("core:test-main", {
+        deprecatedId: "expired-generation",
+        continuityKey: "telegram:thread-reset",
       });
+      await sessionRepository.add(seeded);
+      const existingId = seeded.id;
       await testDb.db
         .update(sessions)
         .set({ lastActiveAt: new Date("2026-07-01T00:00:00Z") })
@@ -2784,9 +2836,12 @@ describe("AgentRunner", () => {
       expect(sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined).not.toBe(
         existingId,
       );
-      expect((await repo.findById(existingId))?.status).toBe("completed");
+      expect(uuidVersion(sessionInit?.type === "session_init" ? sessionInit.sessionId : "")).toBe(
+        7,
+      );
+      expect((await sessionRepository.session(existingId))?.status).toBe("completed");
       expect(
-        await repo.findByChannelThreadKey("telegram:thread-reset", "core:test-main"),
+        await sessionRepository.current("telegram:thread-reset", "core:test-main"),
       ).toMatchObject({
         id: sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined,
         status: "active",
@@ -2830,11 +2885,7 @@ describe("AgentRunner", () => {
       };
 
       expect(secondSession.sessionId).toBe(firstSession.sessionId);
-      expect(provider.calls[1]).toMatchObject({
-        prompt: "Follow up",
-        sessionId: firstSession.sessionId,
-        isNewSession: false,
-      });
+      expect(provider.calls[1]).toMatchObject({ prompt: "Follow up" });
     });
 
     it("reopens the exact requested session instead of reusing a different cached session", async () => {
@@ -2847,12 +2898,16 @@ describe("AgentRunner", () => {
       });
       const key = { agentName: "test-main", channelThreadKey: "telegram:t-1" };
       const cached = await manager.acquire(key);
-      const repo = new SessionsRepository(testDb.db);
-      await repo.create({
+      // A second active row for the same key and agent, as rows written before
+      // the one-active-session rule could be. The repository refuses to add one.
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
         id: "sess-old",
         agentName: "test-main",
         channelThreadKey: "telegram:t-1",
         status: "active",
+        createdAt: now,
+        lastActiveAt: now,
       });
 
       expect(cached.sessionId).not.toBe("sess-old");
@@ -2863,15 +2918,9 @@ describe("AgentRunner", () => {
       expect(resumed.sessionId).toBe("sess-old");
       expect(resumed).not.toBe(cached);
       expect(provider.sessions).toHaveLength(2);
-      expect(provider.sessions[1]).toMatchObject({
-        sessionId: "sess-old",
-        // The row has no stored provider identity, so its native thread is not
-        // resumed into whichever provider happens to resolve now. The id is not
-        // new either: a first turn cut off by a restart leaves a transcript
-        // under it with no provider recorded (#1045).
-        isNewSession: false,
-      });
-      expect(provider.sessions[1].providerThreadId).toBeUndefined();
+      // The row has no stored provider identity, so its native thread is not
+      // resumed into whichever provider happens to resolve now (#1045).
+      expect(provider.sessions[1].thread).toEqual({ kind: "new" });
 
       await manager.shutdown();
     });
@@ -2930,12 +2979,24 @@ describe("AgentRunner", () => {
     });
 
     it("persists the provider checkpoint for a completed Rome turn", async () => {
-      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
-      const openSession = provider.openSession.bind(provider);
+      const provider = new MockModelProvider();
       provider.openSession = rs.fn(async (params) => ({
-        ...(await openSession(params)),
-        providerThreadId: "provider-thread",
-        lastCompletedTurnCheckpoint: "provider-turn-2",
+        ...createSessionFromRun(
+          "mock",
+          async function* () {
+            yield {
+              type: "result",
+              content: "Done",
+              position: {
+                provider: "mock",
+                modelThreadId: "model-thread",
+                checkpointId: "provider-turn-2",
+              },
+            };
+          },
+          params,
+        ),
+        modelThreadId: "model-thread",
       }));
       const runner = createRunner(provider);
 
@@ -2946,11 +3007,13 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toMatchObject({
+      expect(
+        await sessionRepository.deprecatedCheckpoint(start.sessionId, start.turnId),
+      ).toMatchObject({
         sessionId: start.sessionId,
         turnId: start.turnId,
         provider: "mock",
-        providerThreadId: "provider-thread",
+        modelThreadId: "model-thread",
         checkpointId: "provider-turn-2",
       });
     });
@@ -2970,7 +3033,7 @@ describe("AgentRunner", () => {
                 content: "partial output",
                 accounting: {
                   provider: "anthropic",
-                  model: params.model,
+                  model: params.config.model,
                   usage: {
                     cacheReadTokens: 0,
                     cacheWriteTokens: 0,
@@ -2979,15 +3042,16 @@ describe("AgentRunner", () => {
                   },
                   stopReason: "interrupted",
                 },
+                position: {
+                  provider: "anthropic",
+                  modelThreadId: "claude-thread",
+                  checkpointId: "streamed-but-not-resumable-assistant-uuid",
+                },
               };
             },
             params,
           );
-          return {
-            ...session,
-            providerThreadId: "claude-thread",
-            lastCompletedTurnCheckpoint: "streamed-but-not-resumable-assistant-uuid",
-          };
+          return { ...session, modelThreadId: "claude-thread" };
         },
       };
       const runner = createRunner(provider);
@@ -2999,7 +3063,9 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(
+        await sessionRepository.deprecatedCheckpoint(start.sessionId, start.turnId),
+      ).toBeNull();
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
     });
 
@@ -3022,7 +3088,7 @@ describe("AgentRunner", () => {
                 content: "partial answer",
                 accounting: {
                   provider: "openai",
-                  model: params.model,
+                  model: params.config.model,
                   usage: {
                     cacheReadTokens: 0,
                     cacheWriteTokens: 0,
@@ -3032,15 +3098,16 @@ describe("AgentRunner", () => {
                   stop: { reason: "interrupted", raw: "interrupted" },
                   stopReason: "end_turn",
                 },
+                position: {
+                  provider: "openai",
+                  modelThreadId: "codex-thread",
+                  checkpointId: "codex-turn-1",
+                },
               };
             },
             params,
           );
-          return {
-            ...session,
-            providerThreadId: "codex-thread",
-            lastCompletedTurnCheckpoint: "codex-turn-1",
-          };
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const runner = createRunner(provider, lifecycle);
@@ -3053,7 +3120,9 @@ describe("AgentRunner", () => {
       if (!start || start.type !== "turn_start") return;
 
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
-      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(
+        await sessionRepository.deprecatedCheckpoint(start.sessionId, start.turnId),
+      ).toBeNull();
       expect(lifecycle.finished[0]).toMatchObject({
         status: "interrupted",
         output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },
@@ -3071,7 +3140,7 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      const row = await new SessionsRepository(testDb.db).findById(start.sessionId);
+      const row = await sessionRepository.session(start.sessionId);
       expect(row).toMatchObject({
         provider: "mock",
         // The concrete model that actually ran, not the tier name.
@@ -3093,28 +3162,39 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:effort-record",
       });
-      const repo = new SessionsRepository(testDb.db);
 
       // No per-turn effort falls back to the agent's configured effort.
       await collectMessages(session.sendTurn({ prompt: "One" }).events);
-      expect((await repo.findById(session.sessionId))?.reasoningEffort).toBe("high");
+      expect((await sessionRepository.session(session.sessionId))?.reasoningEffort).toBe("high");
 
       await collectMessages(session.sendTurn({ prompt: "Two", reasoningEffort: "xhigh" }).events);
-      expect((await repo.findById(session.sessionId))?.reasoningEffort).toBe("xhigh");
+      expect((await sessionRepository.session(session.sessionId))?.reasoningEffort).toBe("xhigh");
 
       await collectMessages(session.sendTurn({ prompt: "Three", reasoningEffort: "low" }).events);
-      expect(
-        await sessionManager.findReusableSession("webchat:effort-record", "test-main"),
-      ).toMatchObject({ model: "claude-opus-5-5[1m]", reasoningEffort: "low" });
+      expect(await sessionRepository.current("webchat:effort-record", "test-main")).toMatchObject({
+        model: "claude-opus-5-5[1m]",
+        reasoningEffort: "low",
+      });
       await manager.shutdown();
     });
 
-    it("records the effort the provider reports it applied, in the provider's terms", async () => {
+    it("records the effort the turn ran at, and keeps the provider's facts off what it publishes", async () => {
       // Claude runs a warm session at its open-time effort and calls it `max`.
-      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
-      const open = provider.openSession.bind(provider);
+      const provider = new MockModelProvider();
       provider.openSession = async (params) =>
-        Object.defineProperty(await open(params), "appliedReasoningEffort", { value: "max" });
+        createSessionFromRun(
+          "mock",
+          async function* () {
+            yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
+            yield {
+              type: "result",
+              content: "Done",
+              reasoningEffort: "max",
+              position: { provider: "mock", modelThreadId: "t", checkpointId: "c" },
+            };
+          },
+          params,
+        );
       const manager = createAgentSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
@@ -3124,10 +3204,16 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:effort-fixed",
       });
 
-      await collectMessages(session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events);
+      const messages = await collectMessages(
+        session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events,
+      );
 
-      const row = await new SessionsRepository(testDb.db).findById(session.sessionId);
+      const row = await sessionRepository.session(session.sessionId);
       expect(row?.reasoningEffort).toBe("max");
+      const result = messages.find((m) => m.type === "result");
+      expect(messages.map((m) => m.type)).not.toContain("model_turn_started");
+      expect(result).not.toHaveProperty("reasoningEffort");
+      expect(result).not.toHaveProperty("position");
       await manager.shutdown();
     });
 
@@ -3145,7 +3231,7 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      const row = await new SessionsRepository(testDb.db).findById(start.sessionId);
+      const row = await sessionRepository.session(start.sessionId);
       expect(row).toMatchObject({ provider: null, model: null, reasoningEffort: null });
     });
 
@@ -3450,7 +3536,7 @@ describe("AgentRunner", () => {
           tool: "demo_action",
           input: {},
         };
-        await params.executeAction("demo_action", {});
+        await executeActionTool(params.tools, "demo_action", {});
         yield {
           type: "tool_result",
           toolUseId: `tu-${params.prompt}`,
@@ -3565,7 +3651,8 @@ describe("AgentRunner", () => {
             tool: EXPLORE_TOOL,
             input: { prompt: `Inspect ${nestedCalls.length}` },
           };
-          const output = await params.executeSubagent(
+          const output = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: `Inspect ${nestedCalls.length}` },
             { toolUseId: id },
@@ -3645,6 +3732,50 @@ describe("AgentRunner", () => {
       expect(rootFinished[1].metrics).toEqual({ toolCallCount: 1, skillWritten: false });
       expect(childFinished[0].metrics).toEqual({ toolCallCount: 1, skillWritten: true });
       expect(childFinished[1].metrics).toEqual({ toolCallCount: 1, skillWritten: true });
+    });
+
+    it.each([
+      ["anthropic", "Repeated 529 Overloaded errors", undefined, 529, "overloaded"],
+      [
+        "openai",
+        "exceeded retry limit, last status: 429 Too Many Requests",
+        "transient",
+        429,
+        undefined,
+      ],
+    ] as const)("carries %s failure details without replacing the output error", async (id, message, code, httpStatus, providerError) => {
+      const lifecycle = createLifecycleRecorder();
+      const provider: ModelProvider = {
+        id,
+        displayName: id,
+        builtinTools: new Set(),
+        openSession: makeOpenSessionFromRun(id, async function* () {
+          yield { type: "error", error: message, code, httpStatus, providerError };
+        }),
+      };
+      await collectMessages(
+        createRunner(provider, lifecycle).run({ agentName: "test-main", prompt: "Continue" }),
+      );
+      expect(lifecycle.finished[0].output).toMatchObject({
+        error: message,
+        failure: {
+          message,
+          provider: id,
+          ...(code ? { code } : {}),
+          httpStatus,
+          ...(providerError ? { providerError } : {}),
+        },
+      });
+    });
+
+    it("omits failure information on a successful turn", async () => {
+      const lifecycle = createLifecycleRecorder();
+      await collectMessages(
+        createRunner(new MockModelProvider([[{ type: "result", content: "done" }]]), lifecycle).run(
+          { agentName: "test-main", prompt: "Continue" },
+        ),
+      );
+      expect(lifecycle.finished[0].output).not.toHaveProperty("failure");
     });
 
     it("classifies provider-interrupted terminal results separately from completions", async () => {
@@ -3785,7 +3916,7 @@ describe("AgentRunner", () => {
           tool: "demo_action",
           input: { name: "standup" },
         };
-        await params.executeAction("demo_action", { name: "standup" });
+        await executeActionTool(params.tools, "demo_action", { name: "standup" });
         yield {
           type: "tool_result",
           toolUseId: "tu-shared-1",
@@ -3837,10 +3968,6 @@ describe("AgentRunner", () => {
       const call = provider.calls[0];
       expect(call.systemPrompt).toContain("You are a test main agent.");
       expect(call.systemPrompt).toContain("Extra context");
-      expect(provider.sessions[0]).toMatchObject({
-        agentName: "core:test-main",
-      });
-      expect(provider.sessions[0].appStoreListingId).toBeUndefined();
     });
 
     it("attributes app-store agents by listing id and omits local app attribution", async () => {
@@ -3859,7 +3986,8 @@ describe("AgentRunner", () => {
       });
 
       try {
-        const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
+        const built = { type: "result", content: "Built", accounting: MOCK_ACCOUNTING } as const;
+        const provider = new MockModelProvider([[built]]);
         const appCatalog = {
           get: rs.fn((appId: string) =>
             appId === "test-app"
@@ -3888,12 +4016,12 @@ describe("AgentRunner", () => {
           "You are a test main agent. Handle messages and delegate as needed.\n\n" +
             "App-supplied session context.",
         );
-        expect(provider.sessions[0]).toMatchObject({
+        expect(recordMetrics).toHaveBeenLastCalledWith(MOCK_ACCOUNTING, {
           agentName: "core:test-main",
           appStoreListingId: "@publisher/test-app",
         });
 
-        const localProvider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
+        const localProvider = new MockModelProvider([[built]]);
         const localAppCatalog = {
           get: rs.fn(() => ({
             source: {
@@ -3914,7 +4042,10 @@ describe("AgentRunner", () => {
           }),
         );
 
-        expect(localProvider.sessions[0].appStoreListingId).toBeUndefined();
+        expect(recordMetrics).toHaveBeenLastCalledWith(MOCK_ACCOUNTING, {
+          agentName: "core:test-main",
+          appStoreListingId: undefined,
+        });
       } finally {
         recordSpy.mockRestore();
       }
@@ -4045,14 +4176,14 @@ describe("AgentRunner", () => {
     });
 
     it("does not inject into a resumed session (the block is already in its history)", async () => {
-      // A row whose provider thread the provider resumes already holds the block.
-      const repo = new SessionsRepository(testDb.db);
-      const id = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:tc-resumed",
-        status: "active",
+      // A row whose model thread the provider resumes already holds the block.
+      const seeded = Session.create("test-main", { continuityKey: "webchat:tc-resumed" });
+      seeded.recordTurn({
+        provider: "mock",
+        modelThreadId: "mock-thread-1",
+        model: "mock-model",
       });
-      await repo.setProviderInfo(id, "mock", "mock-thread-1", "mock-model");
+      await sessionRepository.add(seeded);
       const runner = createRunner(alwaysResultProvider());
 
       const messages = await collectMessages(
@@ -4068,15 +4199,11 @@ describe("AgentRunner", () => {
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
     });
 
-    it("injects into a session whose row never recorded a provider thread", async () => {
+    it("injects into a session whose row never recorded a model thread", async () => {
       // The provider resumes only a recorded thread, so this one starts new
       // and has not seen the block.
-      const repo = new SessionsRepository(testDb.db);
-      await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:tc-unthreaded",
-        status: "active",
-      });
+      const seeded = Session.create("test-main", { continuityKey: "webchat:tc-unthreaded" });
+      await sessionRepository.add(seeded);
       const runner = createRunner(alwaysResultProvider());
 
       const messages = await collectMessages(
@@ -4140,7 +4267,7 @@ describe("AgentRunner", () => {
     });
 
     it("skips stored-message context for a channel whose surface needs none", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "quiet-context",
@@ -4187,35 +4314,54 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("injects pending channel notifications and exact reply context once before the current message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+    it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
-        threadId: "channel-context",
+        threadId: "linked-context",
         agentName: "main",
       });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "user",
-        content: textContent("original message"),
-        platformMessageId: "original-message",
-        senderName: "Alice",
-        createdAt: new Date("2026-08-03T08:00:00.000Z"),
-      });
+      // A legacy row the turn links stand in for: it must not be read.
       await webchatRepo.addConversationMessage({
         sessionId: conversation.id,
         role: "notification",
-        content: textContent("ambient update"),
-        platformMessageId: "ambient-message",
-        senderName: "Bob",
-        createdAt: new Date("2026-08-03T08:01:00.000Z"),
+        content: JSON.stringify([{ type: "text", content: "legacy update" }]),
+        platformMessageId: "legacy-message",
+        senderName: "Carol",
       });
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const unseen: UnseenLine[] = [
+        {
+          id: 7,
+          senderName: "Bob",
+          text: "ambient update",
+          at,
+          fromRome: false,
+          quoted: null,
+          quotesOutside: false,
+        },
+        {
+          id: 8,
+          senderName: "Dana",
+          text: "second update",
+          at,
+          fromRome: false,
+          quoted: null,
+          quotesOutside: false,
+        },
+      ];
+      const seen: { ids: readonly number[]; sessionId: string; turnId: string }[] = [];
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: (sessionId) => (sessionId === conversation.id ? unseen : []),
+        seen: (ids, sessionId, turnId) => {
+          seen.push({ ids, sessionId, turnId });
+        },
+      };
 
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-conversation-context",
+        displayName: "mock-linked-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4223,188 +4369,151 @@ describe("AgentRunner", () => {
         }),
       };
       await collectMessages(
-        createRunner(provider).run({
+        createRunner(provider, undefined, { turnLinks }).run({
           agentName: "test-main",
           prompt: "current message",
-          channelThreadKey: "discord:channel-context",
+          channelThreadKey: "discord:linked-context",
           romeSessionId: conversation.id,
-          platformMessageId: "current-message",
-          replyTo: {
-            messageId: "original-message",
-            content: "stale provider snapshot",
-            senderName: "Wrong sender",
-          },
           threadContext: {
             channel: "discord",
-            threadId: "channel-context",
+            threadId: "linked-context",
             channelUserId: "guardian",
             threadType: "group",
           },
         }),
       );
 
-      expect(providerPrompts).toHaveLength(1);
       const prompt = providerPrompts[0] ?? "";
-      expect(prompt).toContain("<conversation_context>");
       expect(prompt).toContain("Bob: ambient update");
-      expect(prompt).toContain("<reply_context>");
-      expect(prompt).toContain("Alice: original message");
-      expect(prompt).not.toContain("stale provider snapshot");
-      expect(prompt).toContain("<current_message>\ncurrent message\n</current_message>");
-      expect(prompt.indexOf("<conversation_context>")).toBeLessThan(
-        prompt.indexOf("<reply_context>"),
-      );
-      expect(prompt.indexOf("<reply_context>")).toBeLessThan(prompt.indexOf("<current_message>"));
-
-      await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
+      expect(prompt).toContain("Dana: second update");
+      expect(prompt).not.toContain("legacy update");
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.ids).toEqual([7, 8]);
+      expect(seen[0]?.sessionId).toBe(conversation.id);
     });
 
-    it("injects a child thread's parent starter before Rome's first reply and the current message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const parent = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "parent-channel-thread-starter",
-        agentName: "main",
-      });
-      const child = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "child-thread-starter-context",
-        parentThreadId: "parent-channel-thread-starter",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      await webchatRepo.addConversationMessage({
-        sessionId: parent.id,
-        role: "user",
-        content: textContent("Should we ship on Friday?"),
-        platformMessageId: "thread-starter-message",
-        senderName: "Alice",
-      });
-      await webchatRepo.recordOutboundConversationMessage({
-        sessionId: child.id,
-        content: textContent("We should check the release checklist first."),
-        platformMessageId: "rome-first-thread-reply",
-        senderId: "rome",
-        senderName: "Rome",
-        replyToPlatformMessageId: "thread-starter-message",
-        knownToProvider: false,
-      });
-
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-child-thread-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "What deadline did you mean?",
-          channelThreadKey: "discord:child-thread-starter-context",
-          romeSessionId: child.id,
-          platformMessageId: "child-current-message",
-          threadContext: {
-            channel: "discord",
-            threadId: "child-thread-starter-context",
-            parentThreadId: "parent-channel-thread-starter",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
-
-      expect(providerPrompts).toHaveLength(1);
-      const prompt = providerPrompts[0] ?? "";
-      expect(prompt).toContain("Alice: Should we ship on Friday?");
-      expect(prompt).toContain("Rome: We should check the release checklist first.");
-      expect(prompt).toContain(
-        "<current_message>\nWhat deadline did you mean?\n</current_message>",
-      );
-      expect(prompt.indexOf("Alice: Should we ship on Friday?")).toBeLessThan(
-        prompt.indexOf("Rome: We should check the release checklist first."),
-      );
-      expect(prompt.indexOf("Rome: We should check the release checklist first.")).toBeLessThan(
-        prompt.indexOf("<current_message>"),
-      );
-      await expect(webchatRepo.loadConversationContext(child.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
-    });
-
-    it("injects only the latest 20 pending notifications and marks the omitted snapshot consumed", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "bounded-channel-context",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      for (let index = 0; index < 21; index += 1) {
-        await webchatRepo.addConversationMessage({
-          sessionId: conversation.id,
-          role: "notification",
-          content: textContent(`ambient ${index + 1}`),
-          platformMessageId: `ambient-${index + 1}`,
-          senderName: "Participant",
-          createdAt: new Date(Date.UTC(2026, 7, 3, 8, index)),
+    async function linkedPrompt(
+      unseen: UnseenLine[],
+      threadContext: { threadId: string; parentThreadId?: string },
+    ): Promise<string> {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      if (threadContext.parentThreadId) {
+        await webchatRepo.ensureChannelChat({
+          channel: "discord",
+          threadId: threadContext.parentThreadId,
+          agentName: "main",
         });
       }
-
-      const providerPrompts: string[] = [];
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "discord",
+        threadId: threadContext.threadId,
+        ...(threadContext.parentThreadId ? { parentThreadId: threadContext.parentThreadId } : {}),
+        agentName: "main",
+      });
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: () => unseen,
+        seen: () => undefined,
+      };
+      const prompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-bounded-conversation-context",
+        displayName: "mock-linked-starter",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
+          prompts.push(input.prompt);
           yield { type: "result", content: "ok" };
         }),
       };
       await collectMessages(
-        createRunner(provider).run({
+        createRunner(provider, undefined, { turnLinks }).run({
           agentName: "test-main",
           prompt: "current message",
-          channelThreadKey: "discord:bounded-channel-context",
+          channelThreadKey: `discord:${threadContext.threadId}`,
           romeSessionId: conversation.id,
-          platformMessageId: "current-message",
           threadContext: {
             channel: "discord",
-            threadId: "bounded-channel-context",
+            ...threadContext,
             channelUserId: "guardian",
             threadType: "group",
           },
         }),
       );
+      return prompts[0] ?? "";
+    }
 
-      const prompt = providerPrompts[0] ?? "";
+    it("leaves the line an ordinary reply quotes out of the catch-up", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const target = { id: 1, senderName: "Bob", text: "the question", at };
+      const prompt = await linkedPrompt(
+        [
+          { ...target, fromRome: false, quoted: null, quotesOutside: false },
+          {
+            id: 2,
+            senderName: "Rome",
+            text: "the answer",
+            at,
+            fromRome: true,
+            quoted: target,
+            quotesOutside: false,
+          },
+        ],
+        { threadId: "open-chat" },
+      );
+      expect(prompt.split("Bob: the question")).toHaveLength(2);
+    });
+
+    it("carries the line that started a thread before Rome's first line in it", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const starter = { id: 1, senderName: "Bob", text: "start here", at };
+      const prompt = await linkedPrompt(
+        [
+          {
+            id: 2,
+            senderName: "Rome",
+            text: "on it",
+            at,
+            fromRome: true,
+            quoted: starter,
+            quotesOutside: true,
+          },
+        ],
+        { threadId: "thread-1", parentThreadId: "parent-chat" },
+      );
+      expect(prompt).toContain("Bob: start here");
+      expect(prompt.indexOf("Bob: start here")).toBeLessThan(prompt.indexOf("Rome: on it"));
+    });
+
+    it("carries only the newest 20 unseen lines, and counts the rest", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const unseen: UnseenLine[] = Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        senderName: "Participant",
+        text: `ambient ${index + 1}`,
+        at,
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      }));
+
+      const prompt = await linkedPrompt(unseen, { threadId: "bounded-chat" });
+
       expect(prompt).toContain("[1 earlier messages omitted]");
       expect(prompt).not.toContain("Participant: ambient 1\n");
       expect(prompt).toContain("Participant: ambient 2");
       expect(prompt).toContain("Participant: ambient 21");
-      await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
     });
 
-    it("uses provider-supplied reply content for the current turn without persisting a synthetic message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
+    it("quotes the platform's copy of the message replied to when Rome holds none", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "wechat",
         threadId: "wechat-runtime-reply",
         agentName: "main",
       });
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: () => [],
+        seen: () => undefined,
+      };
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
@@ -4417,7 +4526,7 @@ describe("AgentRunner", () => {
       };
 
       await collectMessages(
-        createRunner(provider).run({
+        createRunner(provider, undefined, { turnLinks }).run({
           agentName: "test-main",
           prompt: "What does the first word mean?",
           channelThreadKey: "wechat:wechat-runtime-reply",
@@ -4440,13 +4549,6 @@ describe("AgentRunner", () => {
       expect(providerPrompts[0]).toContain(
         "<reply_context>\nRome: Jack Ma profile\n</reply_context>",
       );
-      await expect(
-        webchatRepo.loadConversationContext(conversation.id, "wechat-server-42"),
-      ).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
     });
   });
 
@@ -4459,7 +4561,7 @@ describe("AgentRunner", () => {
           prompt: "Use configured effort",
         }),
       );
-      expect(configuredProvider.sessions[0].reasoningEffort).toBe("low");
+      expect(configuredProvider.sessions[0].config.reasoningEffort).toBe("low");
 
       const defaultProvider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       await collectMessages(
@@ -4468,7 +4570,7 @@ describe("AgentRunner", () => {
           prompt: "Use default effort",
         }),
       );
-      expect(defaultProvider.sessions[0].reasoningEffort).toBe("high");
+      expect(defaultProvider.sessions[0].config.reasoningEffort).toBe("high");
     });
 
     it("maps tier names correctly (large, medium, small)", async () => {
@@ -4539,7 +4641,7 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-6-luna");
+      expect(openAiSessions[0].config.model).toBe("gpt-6-luna");
       await manager.shutdown();
 
       const codexLoggedOut = {
@@ -4616,7 +4718,7 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-5.6-terra");
+      expect(openAiSessions[0].config.model).toBe("gpt-5.6-terra");
     });
 
     it("restores the selected model from the session pin on explicit cold resume", async () => {
@@ -4634,8 +4736,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          modelSession.providerThreadId = "codex-thread-1";
-          return modelSession;
+          return { ...modelSession, modelThreadId: "codex-thread-1" };
         },
       };
       const modelResolver = createTestModelResolver({ providers: [openai] });
@@ -4660,13 +4761,12 @@ describe("AgentRunner", () => {
 
       expect(openAiSessions).toHaveLength(2);
       expect(openAiSessions[0]).toMatchObject({
-        model: "gpt-5.6-terra",
-        isNewSession: true,
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "new" },
       });
       expect(openAiSessions[1]).toMatchObject({
-        model: "gpt-5.6-terra",
-        isNewSession: false,
-        providerThreadId: "codex-thread-1",
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "resume", modelThreadId: "codex-thread-1" },
       });
       expect(resumedMessages.find((message) => message.type === "session_init")).toMatchObject({
         sessionId: firstSession.sessionId,
@@ -4698,8 +4798,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          session.providerThreadId = "codex-thread";
-          return session;
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const claude: ModelProvider = {
@@ -4716,8 +4815,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          session.providerThreadId = "claude-thread";
-          return session;
+          return { ...session, modelThreadId: "claude-thread" };
         },
       };
       const modelResolver = createModelResolver({
@@ -4745,8 +4843,7 @@ describe("AgentRunner", () => {
       });
       expect(codexTurns).toBe(1);
       expect(claudeTurns).toBe(1);
-      expect(claudeOpens[0]).toMatchObject({ isNewSession: false });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
+      expect(claudeOpens[0].thread).toEqual({ kind: "new" });
       await manager.shutdown();
     });
 
@@ -4779,8 +4876,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          session.providerThreadId = "codex-thread";
-          return session;
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const modelResolver = createModelResolver({
@@ -4811,8 +4907,7 @@ describe("AgentRunner", () => {
       });
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
@@ -4840,12 +4935,11 @@ describe("AgentRunner", () => {
                 yield { type: "error", error: "Model API failure" };
                 return;
               }
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
-          session.providerThreadId = "codex-thread";
-          return session;
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const modelResolver = createModelResolver({
@@ -4864,10 +4958,9 @@ describe("AgentRunner", () => {
       state.codex.solAccess = false;
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
-      expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
+      expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
@@ -4899,7 +4992,7 @@ describe("AgentRunner", () => {
           createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           ),
@@ -4915,17 +5008,16 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:model-pin-swap",
       });
-      const repo = new SessionsRepository(testDb.db);
 
       // First turn fails on Codex → no pin recorded.
       await collectMessages(session.sendTurn({ prompt: "Sol" }).events);
-      expect((await repo.findById(session.sessionId))!.model).toBeNull();
+      expect((await sessionRepository.session(session.sessionId))!.model).toBeNull();
 
       // Codex quota exhausts; the unpinned session re-resolves to Claude and
       // the first successful turn pins the model that actually ran.
       state.codex.quotaExhausted = true;
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
-      expect(await repo.findById(session.sessionId)).toMatchObject({
+      expect(await sessionRepository.session(session.sessionId)).toMatchObject({
         provider: "anthropic",
         model: "claude-opus-5-5[1m]",
       });
@@ -4942,7 +5034,7 @@ describe("AgentRunner", () => {
     function recordingProvider(
       id: ProviderId,
       displayName: string,
-      providerThreadId: string,
+      modelThreadId: string,
       opens: ModelSessionParams[],
     ): ModelProvider {
       return {
@@ -4954,12 +5046,11 @@ describe("AgentRunner", () => {
           const session = createSessionFromRun(
             id,
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
-          session.providerThreadId = providerThreadId;
-          return session;
+          return { ...session, modelThreadId: modelThreadId };
         },
       };
     }
@@ -4989,9 +5080,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect((await new SessionsRepository(testDb.db).findById(session.sessionId))!.model).toBe(
-        "gpt-5.6-terra",
-      );
+      expect((await sessionRepository.session(session.sessionId))!.model).toBe("gpt-5.6-terra");
 
       // Sol access arrives mid-session. Tier resolution would now map large →
       // Sol, but the pinned session must keep running Terra on the same
@@ -5022,7 +5111,7 @@ describe("AgentRunner", () => {
           return createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
@@ -5045,7 +5134,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens[0].model).toBe(FABLE_MODEL);
+      expect(opens[0].config.model).toBe(FABLE_MODEL);
 
       // A mapping is a Rome-side preference, not an entitlement: it governs
       // new resolutions only. The pinned session stays on the mapped model.
@@ -5075,7 +5164,7 @@ describe("AgentRunner", () => {
           return createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
@@ -5094,7 +5183,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol"]);
+      expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol"]);
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
@@ -5131,14 +5220,11 @@ describe("AgentRunner", () => {
         providers: [codexProvider(opens)],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const repo = new SessionsRepository(testDb.db);
-      const legacyId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "telegram:legacy-row",
-        status: "active",
-      });
+      const seeded = Session.create("test-main", { continuityKey: "telegram:legacy-row" });
       // A pre-cutover row: provider + thread persisted, model NULL.
-      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
+      await sessionRepository.add(seeded);
+      const legacyId = seeded.id;
 
       const manager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
@@ -5147,14 +5233,13 @@ describe("AgentRunner", () => {
       );
 
       // Tier resolution as before the pin (large → Sol with access), carrying
-      // the stored provider thread; the successful turn then records the pin.
+      // the stored model thread; the successful turn then records the pin.
       expect(opens).toHaveLength(1);
       expect(opens[0]).toMatchObject({
-        model: "gpt-6.1-sol",
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        config: { model: "gpt-6.1-sol" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
-      expect(await repo.findById(legacyId)).toMatchObject({
+      expect(await sessionRepository.session(legacyId)).toMatchObject({
         provider: "openai",
         model: "gpt-6.1-sol",
       });
@@ -5171,14 +5256,15 @@ describe("AgentRunner", () => {
         providers: [codexProvider(opens)],
         aiToolState: { get: () => state, refresh: async () => state },
       });
-      const repo = new SessionsRepository(testDb.db);
       // The main agent's session on this thread is pinned to Sol.
-      const mainId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:shared-thread",
-        status: "active",
+      const seeded = Session.create("test-main", { continuityKey: "webchat:shared-thread" });
+      seeded.recordTurn({
+        provider: "openai",
+        modelThreadId: "codex-thread",
+        model: "gpt-5.6-sol",
       });
-      await repo.setProviderInfo(mainId, "openai", "codex-thread", "gpt-5.6-sol");
+      await sessionRepository.add(seeded);
+      const mainId = seeded.id;
 
       // A subagent reuses the parent's channelThreadKey; session lookup is
       // agent-scoped, so its fresh session resolves from its own tier (small
@@ -5192,8 +5278,10 @@ describe("AgentRunner", () => {
 
       expect(session.sessionId).not.toBe(mainId);
       expect(opens).toHaveLength(1);
-      expect(opens[0]).toMatchObject({ model: "gpt-5.6-terra", isNewSession: true });
-      expect(opens[0].providerThreadId).toBeUndefined();
+      expect(opens[0]).toMatchObject({
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "new" },
+      });
       await manager.shutdown();
     });
 
@@ -5214,7 +5302,7 @@ describe("AgentRunner", () => {
       });
       await collectMessages(first.sendTurn({ prompt: "Start" }).events);
       await firstManager.shutdown();
-      expect(opens.map((params) => params.model)).toEqual(["gpt-5.6-terra"]);
+      expect(opens.map((params) => params.config.model)).toEqual(["gpt-5.6-terra"]);
 
       // Entitlements improved while the session was cold. Tier resolution
       // would now pick Sol; the pin keeps the resume on Terra.
@@ -5227,9 +5315,8 @@ describe("AgentRunner", () => {
 
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        model: "gpt-5.6-terra",
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await resumedManager.shutdown();
     });
@@ -5246,14 +5333,15 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
       });
 
-      const repo = new SessionsRepository(testDb.db);
       // A session already pinned to Codex Terra.
-      const pinnedId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:override-pin",
-        status: "active",
+      const seeded = Session.create("test-main", { continuityKey: "webchat:override-pin" });
+      seeded.recordTurn({
+        provider: "openai",
+        modelThreadId: "codex-thread",
+        model: "gpt-5.6-terra",
       });
-      await repo.setProviderInfo(pinnedId, "openai", "codex-thread", "gpt-5.6-terra");
+      await sessionRepository.add(seeded);
+      const pinnedId = seeded.id;
 
       // The guardian picks Claude Opus in the selector. Precedence is explicit
       // selection → pin → tier, so the selection wins over the pinned Terra and
@@ -5272,7 +5360,7 @@ describe("AgentRunner", () => {
       expect(claudeOpens).toHaveLength(1);
       expect(codexOpens).toHaveLength(0);
       // The successful turn re-pins the session to the model that actually ran.
-      expect(await repo.findById(pinnedId)).toMatchObject({
+      expect(await sessionRepository.session(pinnedId)).toMatchObject({
         provider: "anthropic",
         model: "claude-opus-4-8[1m]",
       });
@@ -5290,14 +5378,15 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
       });
 
-      const repo = new SessionsRepository(testDb.db);
       // A session pinned to Sol, whose access is now lost: the pin strands it.
-      const strandedId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:rescue",
-        status: "active",
+      const seeded = Session.create("test-main", { continuityKey: "webchat:rescue" });
+      seeded.recordTurn({
+        provider: "openai",
+        modelThreadId: "codex-thread",
+        model: "gpt-5.6-sol",
       });
-      await repo.setProviderInfo(strandedId, "openai", "codex-thread", "gpt-5.6-sol");
+      await sessionRepository.add(seeded);
+      const strandedId = seeded.id;
 
       // Resuming on the pin alone fails closed — the pinned model cannot run and
       // there is no silent substitution, so acquiring the session throws the
@@ -5326,8 +5415,8 @@ describe("AgentRunner", () => {
       expect(rescued.find((message) => message.type === "result")).toMatchObject({
         content: "gpt-5.6-terra",
       });
-      expect(codexOpens.map((params) => params.model)).toEqual(["gpt-5.6-terra"]);
-      expect(await repo.findById(strandedId)).toMatchObject({
+      expect(codexOpens.map((params) => params.config.model)).toEqual(["gpt-5.6-terra"]);
+      expect(await sessionRepository.session(strandedId)).toMatchObject({
         provider: "openai",
         model: "gpt-5.6-terra",
       });
@@ -5346,24 +5435,21 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
       });
 
-      const repo = new SessionsRepository(testDb.db);
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
-      // while the stored provider thread is Codex. With the resume guard removed,
+      // while the stored model thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-mismatch",
         "Legacy chat",
         undefined,
         undefined,
         "claude-opus",
       );
-      const legacyId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:legacy-mismatch",
-        status: "active",
-      });
-      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+      const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-mismatch" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
+      await sessionRepository.add(seeded);
+      const legacyId = seeded.id;
 
       const manager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
@@ -5380,17 +5466,16 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // The resume opens Claude Opus on a fresh model thread (provider changed
       // from Codex), never the stored-provider tier resolution.
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
       });
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
-        model: "claude-opus-4-8[1m]",
-        isNewSession: false,
+        config: { model: "claude-opus-4-8[1m]" },
+        thread: { kind: "new" },
       });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
       await manager.shutdown();
     });
@@ -5407,24 +5492,21 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
       });
 
-      const repo = new SessionsRepository(testDb.db);
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
-      // while the stored provider thread is Codex. With the resume guard removed,
+      // while the stored model thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-no-context",
         "Legacy chat",
         undefined,
         undefined,
         "claude-opus",
       );
-      const legacyId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:legacy-no-context",
-        status: "active",
-      });
-      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+      const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-no-context" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
+      await sessionRepository.add(seeded);
+      const legacyId = seeded.id;
 
       const manager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
@@ -5436,17 +5518,16 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // The resume opens Claude Opus on a fresh model thread (provider changed
       // from Codex), never the stored-provider tier resolution.
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
       });
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
-        model: "claude-opus-4-8[1m]",
-        isNewSession: false,
+        config: { model: "claude-opus-4-8[1m]" },
+        thread: { kind: "new" },
       });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
       await manager.shutdown();
     });
@@ -5463,23 +5544,22 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
       });
 
-      const repo = new SessionsRepository(testDb.db);
       // The parent chat stores a Claude selection. Its subagent's legacy row
       // (model NULL) ran on Codex, and the subagent opens with the parent's
       // thread context, so the chat's selection must not reach it.
-      await new WebChatRepository(testDb.db).createSession(
+      await new ChatsWebChatRepository(testDb.db).createSession(
         "legacy-parent",
         "Legacy chat",
         undefined,
         undefined,
         "claude-opus",
       );
-      const legacyId = await repo.create({
-        agentName: "test-main",
-        channelThreadKey: "webchat:legacy-parent:subagent:child-1",
-        status: "active",
+      const seeded = Session.create("test-main", {
+        continuityKey: "webchat:legacy-parent:subagent:child-1",
       });
-      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
+      await sessionRepository.add(seeded);
+      const legacyId = seeded.id;
 
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         isSubagent: true,
@@ -5528,7 +5608,7 @@ describe("AgentRunner", () => {
         params: import("./agent-runner.js").ModelRunParams,
       ): AsyncIterable<AgentEvent> {
         yield { type: "tool_use", id: "tu-send-1", tool: "send_message", input: { text: "hello" } };
-        await params.executeAction("send_message", { text: "hello" });
+        await executeActionTool(params.tools, "send_message", { text: "hello" });
         yield { type: "result", content: "Done" };
       };
       const provider: ModelProvider = {
@@ -5595,10 +5675,12 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Use tools" }));
 
       expect(provider.calls).toHaveLength(1);
-      const toolNames = provider.calls[0].actionCatalog.map((t) => t.name);
+      const listed = (await parseToolText(
+        await provider.calls[0].tools.callTool("actions", "list_actions", {}),
+      )) as Array<Record<string, unknown>>;
       // demo_action is in test-main's tools list and registered in registry
-      expect(toolNames).toContain("demo_action");
-      expect(provider.calls[0].actionCatalog[0]).toMatchObject({
+      expect(listed.map((action) => action.name)).toContain("demo_action");
+      expect(listed[0]).toMatchObject({
         description: "Schedule an event",
         sideEffects: "write",
         requiresApproval: false,
@@ -5660,48 +5742,63 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
-      let sessionParams: ModelSessionParams | undefined;
-      let keyDuringTurn: string | undefined;
+      const proposals: Record<string, string> = {};
+      const routineDraft = (actionName: string) => ({
+        sentence: "Every morning, run it",
+        name: "Morning run",
+        watchLabel: "Run now",
+        thenSummary: `Run ${actionName}`,
+        kind: "manual",
+        actionName,
+        args: {},
+        activate: true,
+      });
       const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
-        keyDuringTurn = sessionParams?.routineActivation?.routineKeyFor("tu-1");
-        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-          "demo_action",
-          "send_message",
-        ]);
-        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-          /Unknown action: internal_action/,
-        );
+        expect(await listActionNames(params.tools)).toEqual(["demo_action", "send_message"]);
+        await expect(
+          executeActionTool(params.tools, "internal_action", {}, { toolUseId: "tu-0" }),
+        ).rejects.toThrow(/Unknown action: internal_action/);
         executionWasRejected = true;
+        // propose_routine's auto-enable gate mirrors the same allow-list: a
+        // routine on an action the agent may not call stays a draft, one on
+        // an unregistered action is refused, and one on a permitted action
+        // gets past the target check under this turn's key.
+        for (const actionName of ["internal_action", "no_such_action", "demo_action"]) {
+          const result = await params.tools.callTool(
+            "ask_user",
+            "propose_routine",
+            routineDraft(actionName),
+            { toolUseId: "tu-1" },
+          );
+          proposals[actionName] = result.content.map((item) => item.text).join("\n");
+        }
         yield { type: "result", content: "Done" };
       });
       const provider: ModelProvider = {
         id: "mock",
         displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: async (params) => {
-          sessionParams = params;
-          return openFromRun(params);
-        },
+        openSession: openFromRun,
       };
       const runner = createRunner(provider);
 
       const messages = await collectMessages(
-        runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }),
+        runner.run({
+          agentName: "test-all-actions",
+          prompt: "Use all tools",
+          channelThreadKey: "webchat:routine-gate",
+        }),
       );
 
       expect(executionWasRejected).toBe(true);
-      // The activation key is scoped by the same turn id the stream reports,
-      // which is how the webchat drain derives the card's key.
-      const turnStart = messages.find((m) => m.type === "turn_start") as
-        | { turnId: string }
-        | undefined;
-      expect(turnStart).toBeDefined();
-      expect(keyDuringTurn).toBe(`chat-routine:${turnStart?.turnId}:tu-1`);
-      // propose_routine's auto-enable gate mirrors the same allow-list.
-      const gate = sessionParams?.routineActivation;
-      expect(gate?.canCallAction("demo_action")).toBe("permitted");
-      expect(gate?.canCallAction("internal_action")).toBe("denied");
-      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(proposals.internal_action).toContain(
+        '"internal_action" is not an action you are permitted to call',
+      );
+      expect(proposals.no_such_action).toContain('"no_such_action" is not a registered action');
+      // demo_action is permitted and the call carried its id, so the gate only
+      // stops at create_routine, which this agent may not call.
+      expect(proposals.demo_action).toContain("not permitted to create routines directly");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {
@@ -5746,8 +5843,7 @@ describe("AgentRunner", () => {
 
       expect(captured).toHaveLength(1);
       const sessionParams = captured[0];
-      expect(sessionParams.getActionCatalog).toBeDefined();
-      expect(sessionParams.getActionCatalog!().map((a) => a.name)).toEqual(["demo_action"]);
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action"]);
 
       // Simulate `app_management` install finishing and the lifecycle manager
       // resync registering a new app action mid-session.
@@ -5772,16 +5868,12 @@ describe("AgentRunner", () => {
       // The live getter now reports both actions to anything that reads it
       // (the facade tools' list_actions / search_actions / read_action).
       // Order is registry-insertion-order; sort for stable comparison.
-      expect(
-        sessionParams.getActionCatalog!()
-          .map((a) => a.name)
-          .sort(),
-      ).toEqual(["demo_action", "repro_hello"]);
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action", "repro_hello"]);
 
       // executeAction looks up against the same live, allow-list-filtered set
       // — so the agent can call the freshly-installed action from inside the
       // same conversation without rebinding the MCP token.
-      const result = await sessionParams.executeAction("repro_hello", { name: "world" });
+      const result = await executeActionTool(sessionParams.tools, "repro_hello", { name: "world" });
       expect(result).toEqual({ ok: true });
       expect(newActionExecutes).toEqual([{ name: "world" }]);
     });
@@ -5840,10 +5932,10 @@ describe("AgentRunner", () => {
         execute: async () => ({ status: "ok", data: { ok: true } }),
       });
 
-      expect(sessionParams.getActionCatalog!().map((a) => a.name)).toEqual(["demo_action"]);
-      await expect(sessionParams.executeAction("send_message", { text: "x" })).rejects.toThrow(
-        /Unknown action: send_message/,
-      );
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action"]);
+      await expect(
+        executeActionTool(sessionParams.tools, "send_message", { text: "x" }),
+      ).rejects.toThrow(/Unknown action: send_message/);
     });
 
     it("executeAction resolves a legacy name before checking the allow-list", async () => {
@@ -5903,9 +5995,9 @@ describe("AgentRunner", () => {
         createRunner(provider).run({ agentName: "test-main", prompt: "Review" }),
       );
 
-      expect(captured[0].getActionCatalog!().map((action) => action.name)).toEqual([actionId]);
+      expect(await listActionNames(captured[0].tools)).toEqual([actionId]);
       await expect(
-        captured[0].executeAction("demo_action", { path: "src/index.ts" }),
+        executeActionTool(captured[0].tools, "demo_action", { path: "src/index.ts" }),
       ).resolves.toEqual({ reviewed: true });
       expect(executed).toEqual([{ path: "src/index.ts" }]);
     });
@@ -5951,11 +6043,12 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Delegate" }));
 
       expect(provider.calls).toHaveLength(1);
-      const toolNames = provider.calls[0].subagentTools.map((t) => t.name);
       // test-main has allowedSubagents: ["test-explore"]
-      expect(toolNames).toContain(EXPLORE_TOOL);
+      expect(toolNames(provider.calls[0].tools, "subagents")).toContain(EXPLORE_TOOL);
 
-      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === EXPLORE_TOOL);
+      const subagentTool = provider.calls[0].tools
+        .listTools("subagents")
+        .find((t) => t.name === EXPLORE_TOOL);
       expect(subagentTool).toBeDefined();
       expect(subagentTool!.description).toContain("test-explore");
       expect(subagentTool!.inputSchema).toHaveProperty("properties");
@@ -5991,7 +6084,8 @@ describe("AgentRunner", () => {
           tool: EXPLORE_TOOL,
           input: { prompt: "Inspect" },
         };
-        const output = await params.executeSubagent(
+        const output = await executeSubagentTool(
+          params.tools,
           EXPLORE_TOOL,
           { prompt: "Inspect" },
           { toolUseId: "tu-explore-1" },
@@ -6036,14 +6130,16 @@ describe("AgentRunner", () => {
             tool: EXPLORE_TOOL,
             input: { prompt: "Inspect" },
           };
-          const output = await params.executeSubagent(
+          const output = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: "Inspect" },
             { toolUseId: "tu-explore-1" },
           );
           delegatedOutput = output;
           yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
-          const earlyOutput = await params.executeSubagent(
+          const earlyOutput = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: "Inspect before provider event" },
             { toolUseId: "tu-explore-2" },
@@ -6158,7 +6254,9 @@ describe("AgentRunner", () => {
           message.type === "subagent_start" && message.toolUseId === "tu-explore-1",
       );
       expect(firstChild).toBeDefined();
-      const storedChild = await new WebChatRepository(testDb.db).getSession(firstChild!.sessionId);
+      const storedChild = await new ChatsWebChatRepository(testDb.db).getSession(
+        firstChild!.sessionId,
+      );
       expect(storedChild).toMatchObject({
         type: "subagent",
         parentSessionId: "action:exec-1:core:test-main",
@@ -6207,13 +6305,10 @@ describe("AgentRunner", () => {
       const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
-      expect(provider.sessions[0].outputSchema).toEqual(
+      expect(provider.sessions[0].config.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
-      expect(calls[0].outputSchema).toEqual(provider.sessions[0].outputSchema);
-      expect(provider.sessions[0].handback).toBeUndefined();
-      expect(provider.sessions[0].executeSubmitOutput).toBeUndefined();
-      expect(provider.sessions[0].systemPrompt).not.toContain("submit_output");
+      expect(calls[0].outputSchema).toEqual(provider.sessions[0].config.outputSchema);
       expect(events.filter((event) => event.type === "result")).toEqual([
         expect.objectContaining({
           type: "result",
@@ -6306,8 +6401,7 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "hi" }));
 
       expect(provider.sessions).toHaveLength(1);
-      expect(provider.sessions[0].outputSchema).toBeUndefined();
-      expect(provider.sessions[0].handback).toBeUndefined();
+      expect(provider.sessions[0].config.outputSchema).toBeUndefined();
     });
   });
 });

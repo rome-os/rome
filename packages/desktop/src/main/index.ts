@@ -33,6 +33,8 @@ import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
 import { adoptLoginShellPath } from "./cloud/login-path";
 import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
+import { openAudit, registerAuditHandlers } from "./audit";
+import { createAuditWindow } from "./window";
 
 const log = createLogger("main");
 
@@ -86,6 +88,12 @@ async function bootstrap() {
     });
     runtime = controller.runtime;
     const keepAwake = new KeepAwake(powerSaveBlocker);
+    // Opened before the device connects, and never fatal: an unavailable log makes this
+    // computer refuse remote requests and shows why in Rome → Audit Log…
+    const audit = await openAudit();
+    if (audit.state.state === "unavailable")
+      log.warn(`Audit log unavailable: ${audit.state.message}`);
+    registerAuditHandlers(audit);
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
     const deviceHost = !devDashboardUrl
@@ -98,6 +106,7 @@ async function bootstrap() {
             await controller.signOut();
           },
           prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
+          audit,
           onStatus: (status) => {
             keepAwake.sync(status);
             // Only the app's own pages and the open Rome hear it, as with device:get.
@@ -138,6 +147,7 @@ async function bootstrap() {
 
     registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
+      openAuditWindow: () => createAuditWindow(),
       cloudAccount,
       device,
     });
@@ -202,6 +212,7 @@ async function bootstrap() {
         }
       },
       () => createSettingsWindow(),
+      () => createAuditWindow(),
       // The check only broadcasts a status, which nothing renders unless the
       // settings window happens to be open — so from a menu the common
       // "already up to date" answer arrived as silence.
@@ -252,6 +263,9 @@ async function bootstrap() {
       openSettings: () => {
         createSettingsWindow();
       },
+      openAuditLog: () => {
+        createAuditWindow();
+      },
       runtime,
       floatingPill,
     });
@@ -262,6 +276,7 @@ async function bootstrap() {
       onShutdown: async () => {
         runtime.dispose?.();
         await device.stop();
+        audit.close();
       },
     });
 

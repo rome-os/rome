@@ -1,11 +1,13 @@
-import { SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
+import { type AppDbContext, SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
 
 import {
   ComposioClient,
+  ComposioProjectUnconfirmedError,
   isComposioAuthenticationError,
   isComposioNotFoundError,
 } from "./api/composio-client.js";
 import { readSessionApiKey } from "./api/composio-login.js";
+import { pinnedProjectFor } from "./api/composio-project.js";
 import { buildTopic } from "./api/topic.js";
 
 /**
@@ -244,14 +246,30 @@ export function githubViaRomeHint(): string {
 /**
  * Build a ComposioClient from the live CLI session key
  * (`~/.composio/user_data.json`) — the single source of truth for the Composio
- * credential. Returns null when the CLI isn't logged in so callers can surface a
+ * credential, addressing this Rome's pinned project (`composio-project.ts`).
+ * Throws `ComposioProjectUnconfirmedError` while a user key's project cannot
+ * be confirmed. Returns null when the CLI isn't logged in so callers can surface a
  * "log in to Composio first" message instead of throwing on a missing
  * credential.
  */
-export async function loadConnectorClient(): Promise<ComposioClient | null> {
+export async function loadConnectorClient(db: AppDbContext): Promise<ComposioClient | null> {
   const apiKey = await readSessionApiKey();
   if (!apiKey) return null;
-  return new ComposioClient({ apiKey });
+  const project = await pinnedProjectFor(db, apiKey);
+  // An unpinned user key would act in whatever project Composio picks by
+  // default: another mailbox, another account. Refuse until the pin is known.
+  if (apiKey.startsWith("uak_") && !project) throw new ComposioProjectUnconfirmedError();
+  return new ComposioClient({ apiKey, project });
+}
+
+/**
+ * A client for the saved credential alone, addressing no project. Only for
+ * account-wide checks, such as whether the sign-in still works, which must
+ * answer before this Rome's project is confirmed. Null when not logged in.
+ */
+export async function loadCredentialClient(): Promise<ComposioClient | null> {
+  const apiKey = await readSessionApiKey();
+  return apiKey ? new ComposioClient({ apiKey }) : null;
 }
 
 /**

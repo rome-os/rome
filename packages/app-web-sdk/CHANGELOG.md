@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.7...app-web-sdk-v0.4.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove chat handoff and its handback approval ([#1645](https://github.com/rome-os/rome/issues/1645))
+
+### Features
+
+* remove chat handoff and its handback approval ([#1645](https://github.com/rome-os/rome/issues/1645)) ([001214b](https://github.com/rome-os/rome/commit/001214b9ccbbfa5e6e2dcc0f933d2246d610ca25))
+
 ## [0.3.7](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.6...app-web-sdk-v0.3.7) (2026-10-11)
 
 

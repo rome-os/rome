@@ -28,11 +28,11 @@ import {
 } from "@/components/ui/select";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { cn } from "@/lib/utils";
-import { DirectoryRow, StrangerRow } from "./rows";
+import { DirectoryRow } from "./rows";
 import { levelLabelKey } from "./rows";
 import { TransferConfirm } from "./transfer";
 import { usePeopleWrites } from "./use-writes";
-import type { LinkTarget, PeopleRow, PeopleView } from "./people-model";
+import type { LinkTarget, PeopleRow } from "./people-model";
 
 // Placing an account that nobody has decided about, and taking one back.
 //
@@ -259,18 +259,6 @@ function LinkForm({
 }
 
 /**
- * The row an entry's gestures sit on, which is the view's own answer.
- *
- * The stream's row is dense: a placement decision runs on the evidence — which
- * channel, which number, what they last said — so all of it is on the row. The
- * directory carries none of that, so its row is the contacts line every other
- * row in that view is, and the gestures sit behind a `⋯` menu at the end of it.
- */
-function entryRow(variant: PeopleView) {
-  return variant === "directory" ? DirectoryRow : StrangerRow;
-}
-
-/**
  * One unplaced account, with the gestures that place it.
  *
  * Nothing is handed back to a parent to refresh: every verb here settles by
@@ -280,13 +268,10 @@ function entryRow(variant: PeopleView) {
 export function StrangerEntry({
   row,
   people,
-  variant,
 }: {
   row: PeopleRow;
   /** The people a link can land on — the listing's own rows. */
   people: LinkTarget[];
-  /** Which view this row is in — see {@link entryRow}. */
-  variant: PeopleView;
 }) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
@@ -370,38 +355,9 @@ export function StrangerEntry({
     }
   }
 
-  const Row = entryRow(variant);
-  // The verbs wear the shape their view has room for. The stream is the triage
-  // surface, a handful of senders waiting on a decision, so its dense row
-  // carries the three as buttons. The directory's Stranger group is everyone
-  // Rome has not placed — a synced address book can put hundreds of rows in it
-  // — and three buttons per contact would out-shout the roster the view exists
-  // to read, so there they fold into one quiet row menu.
-  const triageButtons = (
-    <span className="flex items-center gap-1">
-      <Button type="button" size="sm" onClick={() => openAction("create")} disabled={acting}>
-        {t("actions.create")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => openAction("link")}
-        disabled={acting}
-      >
-        {t("actions.link")}
-      </Button>
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        onClick={() => setConfirmingDismiss(true)}
-        disabled={acting}
-      >
-        <BusyLabel idle={t("actions.dismiss")} busy={t("actions.dismissing")} isBusy={acting} />
-      </Button>
-    </span>
-  );
+  // The Stranger group is everyone Rome has not placed — a synced address book
+  // can put hundreds of rows in it — so the three verbs fold into one quiet
+  // row menu rather than three buttons per contact.
   const rowMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -436,7 +392,7 @@ export function StrangerEntry({
   );
   return (
     <div>
-      <Row row={row} actions={!action && (variant === "directory" ? rowMenu : triageButtons)} />
+      <DirectoryRow row={row} actions={!action && rowMenu} />
 
       {/* With no form open the failure belongs to the dismissal, whose button
           sits on the row above. */}
@@ -499,11 +455,11 @@ export function StrangerEntry({
 /**
  * An account the guardian dismissed, with the gesture that undoes it.
  *
- * The same row the Stranger view uses in whichever view it is in, because the
- * decision runs on the same evidence. No confirmation — a restore only puts the
+ * The same row the Stranger group uses, because the decision runs on the same
+ * evidence. No confirmation — a restore only puts the
  * account back where a decision is still owed.
  */
-export function DismissedEntry({ row, variant }: { row: PeopleRow; variant: PeopleView }) {
+export function DismissedEntry({ row }: { row: PeopleRow }) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
   const [acting, setActing] = useState(false);
@@ -522,10 +478,9 @@ export function DismissedEntry({ row, variant }: { row: PeopleRow; variant: Peop
     }
   }
 
-  const Row = entryRow(variant);
   return (
     <div>
-      <Row
+      <DirectoryRow
         row={row}
         actions={
           <Button

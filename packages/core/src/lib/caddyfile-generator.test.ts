@@ -1,18 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { generateCaddyfile, resolveWebRoot } from "./caddyfile-generator.js";
-import type { PublicAccessConfig } from "./public-access-config.js";
-
-const openConfig: PublicAccessConfig = {
-  enableAccessControl: false,
-  allowedApps: [],
-  cloudEmailAccess: {},
-};
-
-const publicConfig: PublicAccessConfig = {
-  enableAccessControl: true,
-  allowedApps: ["morning-brief"],
-  cloudEmailAccess: {},
-};
+import { normalizePublicAccessConfig } from "./public-access-config.js";
 
 const RUNTIME_CONFIG_HANDLE = "handle /runtime-config.js {";
 
@@ -30,23 +18,10 @@ afterEach(() => {
 
 // The C1 delivery contract: Caddy serves the SPA shell from disk, so
 // the boot-written runtime-config.js must be reachable as a real file — with
-// no-cache, since its content changes across container boots — in EVERY
-// generated Caddyfile variant.
+// no-cache, since its content changes across container boots.
 describe("generateCaddyfile runtime-config.js delivery", () => {
-  it("keeps a scoped public app id in one encoded path segment", () => {
-    const caddyfile = generateCaddyfile({
-      enableAccessControl: true,
-      allowedApps: ["@foo/bar"],
-      cloudEmailAccess: {},
-    });
-    expect(caddyfile).toContain("handle /apps/%40foo%2Fbar {");
-    expect(caddyfile).toContain("handle /api/apps/%40foo%2Fbar/* {");
-    expect(caddyfile).toContain("handle /api/app-api/%40foo%2Fbar/* {");
-    expect(caddyfile).toContain("handle /app-assets/%40foo%2Fbar/* {");
-  });
-
-  it("serves /runtime-config.js as a file with no-cache in open mode", () => {
-    const caddyfile = generateCaddyfile(openConfig);
+  it("serves /runtime-config.js as a file with no-cache", () => {
+    const caddyfile = generateCaddyfile();
     expect(caddyfile).toContain(RUNTIME_CONFIG_HANDLE);
     const handleBody = caddyfile.split(RUNTIME_CONFIG_HANDLE)[1].split("}")[0];
     expect(handleBody).toContain('header Cache-Control "no-cache"');
@@ -54,21 +29,9 @@ describe("generateCaddyfile runtime-config.js delivery", () => {
     expect(handleBody).not.toContain("max-age");
   });
 
-  it("serves /runtime-config.js from the web root before the gateway rewrite in public-access mode", () => {
-    const caddyfile = generateCaddyfile(publicConfig);
-    const handleAt = caddyfile.indexOf(RUNTIME_CONFIG_HANDLE);
-    const gatewayRewriteAt = caddyfile.indexOf("rewrite * /gateway.html");
-    expect(handleAt).toBeGreaterThan(-1);
-    expect(gatewayRewriteAt).toBeGreaterThan(-1);
-    // Caddy evaluates handle blocks in config order; if the fallback gateway
-    // rewrite came first, the shell's <script src="/runtime-config.js"> would
-    // receive gateway HTML instead of JS on the public edge.
-    expect(handleAt).toBeLessThan(gatewayRewriteAt);
-  });
-
   it("serves the shell and runtime config from the same resolved web root", () => {
     process.env.INTERNAL_API_WEB_ROOT = "/custom/web/dist";
-    const caddyfile = generateCaddyfile(openConfig);
+    const caddyfile = generateCaddyfile();
     // The boot script writes runtime-config.js into resolveWebRoot(); the
     // Caddyfile must serve from the identical root or the browser gets the
     // build's empty stub instead of the boot-written config.
@@ -78,8 +41,8 @@ describe("generateCaddyfile runtime-config.js delivery", () => {
 });
 
 describe("generateCaddyfile app document routes", () => {
-  it("proxies /apps and /full/apps documents to Hono in open mode, after the asset handlers", () => {
-    const caddyfile = generateCaddyfile(openConfig);
+  it("proxies /apps and /full/apps documents to Hono, after the asset handlers", () => {
+    const caddyfile = generateCaddyfile();
     expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/*");
     const appDocsAt = caddyfile.indexOf("handle @appDocs {");
     const missingAssetsAt = caddyfile.indexOf("handle @missingSpaAssets {");
@@ -91,72 +54,72 @@ describe("generateCaddyfile app document routes", () => {
     expect(body).toContain("encode zstd gzip");
     expect(body).not.toContain("forward_auth");
   });
-
-  it("proxies allowlisted app documents to Hono in public-access mode", () => {
-    const caddyfile = generateCaddyfile(publicConfig);
-    const block = caddyfile.split("handle /full/apps/morning-brief/* {")[1].split("}")[0];
-    expect(block).toContain("reverse_proxy 127.0.0.1:");
-    expect(block).toContain("encode zstd gzip");
-    expect(block).not.toContain("rewrite * /index.html");
-    // Cloud-email apps share the same shell delivery.
-    const cloudEmail = generateCaddyfile({
-      enableAccessControl: true,
-      allowedApps: [],
-      cloudEmailAccess: { "night-brief": ["a@b.co"] },
-    });
-    const emailBlock = cloudEmail.split("handle /apps/night-brief {")[1].split("}")[0];
-    expect(emailBlock).toContain("reverse_proxy 127.0.0.1:");
-  });
 });
 
 describe("generateCaddyfile social card images", () => {
-  it("proxies /app-og through the dynamic matcher in open mode", () => {
-    const caddyfile = generateCaddyfile(openConfig);
+  it("proxies /app-og through the dynamic matcher", () => {
+    const caddyfile = generateCaddyfile();
     expect(caddyfile).toContain(
       "@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/*",
-    );
-  });
-
-  it("exposes cards only for allowlisted and cloud-email apps in public-access mode", () => {
-    const caddyfile = generateCaddyfile({
-      enableAccessControl: true,
-      allowedApps: ["morning-brief", "@foo/bar"],
-      cloudEmailAccess: { "night-brief": ["a@b.co"] },
-    });
-    expect(caddyfile).not.toContain("handle /app-og/* {");
-    for (const seg of ["morning-brief", "%40foo%2Fbar", "night-brief"]) {
-      const block = caddyfile.split(`handle /app-og/${seg}.png {`)[1]?.split("}")[0] ?? "";
-      expect(block).toContain("reverse_proxy 127.0.0.1:");
-      expect(block).not.toContain("forward_auth");
-    }
-    expect(caddyfile.indexOf("handle /app-og/morning-brief.png {")).toBeLessThan(
-      caddyfile.indexOf("rewrite * /gateway.html"),
     );
   });
 });
 
 describe("generateCaddyfile home-screen manifests and icons", () => {
-  it("proxies them through the dynamic matcher in open mode", () => {
-    const caddyfile = generateCaddyfile(openConfig);
+  it("proxies them through the dynamic matcher", () => {
+    const caddyfile = generateCaddyfile();
     const dynamic =
       caddyfile.split("\n").find((line) => line.trim().startsWith("@dynamic path")) ?? "";
     expect(dynamic).toContain(" /app-manifest/* /app-icon/*");
   });
+});
 
-  it("exposes them only for allowlisted and cloud-email apps in public-access mode", () => {
-    const caddyfile = generateCaddyfile({
-      enableAccessControl: true,
-      allowedApps: ["morning-brief", "@foo/bar"],
+describe("canonical path guard", () => {
+  it("runs before every proxied handler", () => {
+    const caddyfile = generateCaddyfile();
+    const guardAt = caddyfile.indexOf("handle @nonCanonicalPath {");
+    const firstProxyAt = caddyfile.indexOf("reverse_proxy");
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(firstProxyAt);
+  });
+
+  it("leaves an encoded slash allowed for scoped app ids", () => {
+    const caddyfile = generateCaddyfile();
+    const expression =
+      caddyfile.split("\n").find((line) => line.trim().startsWith("expression")) ?? "";
+    expect(expression).toContain("%2[eE]");
+    expect(expression).not.toMatch(/%2\[[^\]]*[fF]/);
+  });
+});
+
+// A policy persisted by an earlier release can still carry the retired
+// `enableAccessControl` flag. It is dropped on read and never changes the proxy:
+// the dashboard and login stay reachable, and per-app sharing is decided per
+// request by the `/api/auth/verify` probe behind `forward_auth`.
+describe("generateCaddyfile with a persisted legacy enableAccessControl flag", () => {
+  const persisted = {
+    enableAccessControl: true,
+    allowedApps: ["morning-brief"],
+    cloudEmailAccess: { "night-brief": ["a@b.co"] },
+  };
+
+  it("normalizes without the flag and keeps the app policy", () => {
+    const config = normalizePublicAccessConfig(persisted);
+    expect(config).toEqual({
+      allowedApps: ["morning-brief"],
       cloudEmailAccess: { "night-brief": ["a@b.co"] },
     });
-    expect(caddyfile).not.toContain("handle /app-manifest/* {");
-    expect(caddyfile).not.toContain("handle /app-icon/* {");
-    for (const seg of ["morning-brief", "%40foo%2Fbar", "night-brief"]) {
-      for (const path of [`/app-manifest/${seg}.webmanifest`, `/app-icon/${seg}.png`]) {
-        const block = caddyfile.split(`handle ${path} {`)[1]?.split("}")[0] ?? "";
-        expect(block).toContain("reverse_proxy 127.0.0.1:");
-        expect(block).not.toContain("forward_auth");
-      }
-    }
+    expect("enableAccessControl" in config).toBe(false);
+  });
+
+  it("still produces the normal dashboard-reachable Caddyfile", () => {
+    const caddyfile = generateCaddyfile();
+    expect(caddyfile).toContain("forward_auth 127.0.0.1:4141 {");
+    expect(caddyfile).toContain("uri /api/auth/verify");
+    // Login and the rest of /api/* go through the gate, not a canned 403.
+    expect(caddyfile).toContain("@dynamic path /api /api/*");
+    expect(caddyfile).not.toContain("not_public");
+    expect(caddyfile).not.toContain("gateway");
+    expect(caddyfile).toContain("try_files {path} /index.html");
   });
 });

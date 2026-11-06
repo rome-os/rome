@@ -16,7 +16,7 @@ Fake a dependency only if it crosses the process boundary:
 | Subprocess fork | avoided via `ActionEngine` `processRole: "worker"` (the harness does this) |
 | Outbound HTTP | `createFetchRecorder()` (inject `recorder.fetch` via a module's `fetch?: typeof fetch` option) |
 
-Everything else — repositories, ActionEngine, SessionManager, PromptBuilder, AgentRunner, ChannelManager — runs the production class over in-memory SQLite with real migrations. Don't hand-roll `{ … } as unknown as SomeRepository` stubs and don't `rs.mock` internal modules; if you feel the need to, the harness is probably missing something — raise it on #763 instead.
+Everything else — repositories, ActionEngine, SessionRepository, PromptBuilder, AgentRunner, ChannelManager — runs the production class over in-memory SQLite with real migrations. Don't hand-roll `{ … } as unknown as SomeRepository` stubs and don't `rs.mock` internal modules; if you feel the need to, the harness is probably missing something — raise it on #763 instead.
 
 Assert **outcomes**, not stub call shapes: read the DB row, the outbound channel message, or the prompt the model received — not `expect(mock.run).toHaveBeenCalledWith(…)`.
 
@@ -36,7 +36,7 @@ rome.model
   .whenPromptIncludes("send hi")
   .reply(invokeAction("send_message", { to: "u1", body: "hi" }), result("Sent."));
 
-// Drive a real turn: real AgentLoader/PromptBuilder/SessionManager/ActionEngine
+// Drive a real turn: real AgentLoader/PromptBuilder/SessionRepository/ActionEngine
 const messages = await rome.runAgent({ prompt: "send hi", channelThreadKey: "telegram:t1" });
 
 // Assert real outcomes
@@ -50,7 +50,7 @@ Approval flows: record through `rome.actionEngine.run(...)` (the gate persists j
 
 Channels: `rome.channels` is the production channel list over fake Connections, so a test hears and answers through the channel's `inbound` and `send` ports. `rome.channel("telegram").receive({ text: "hello" })` delivers an incoming `ChannelMessage` where the platform would, and `nextReply()` awaits what Rome sent back. (The inbox pipeline — the system-app message hook — is not booted by the harness yet; subscribe your handler under test to `channel.inbound`.)
 
-Adapter units (testing the adapter itself, below the harness): inject through the adapter's factory seam — `new TelegramAdapter({ botToken }, fake.createBot)` with `const fake = new FakeTelegramApi()`. The fake is a *server*, not an SDK replica: `createBot` returns a real grammy `Bot` whose API transformer answers outbound calls with canned wire JSON, so middleware filters, init, and the long-poll lifecycle run grammy's production code instead of a hand-rolled imitation that drifts. Await `fake.untilPolling()` after `adapter.start()`, drive incoming traffic with `fake.emitUpdate(update)` (a Telegram `Update`, through real `bot.handleUpdate`), and assert the outbound contract on `fake.sent` (`{ method, payload }` pairs captured pre-serialization — an `InputFile` is still an instance, since multipart encoding happens in grammy's HTTP caller below the seam; methods the fake doesn't model throw instead of fake-succeeding); no `createTestRome()` and no DB needed. See `src/channels/telegram.test.ts` for the reference conversion.
+Adapter units (testing the adapter itself, below the harness): inject through the adapter's factory seam — `new TelegramAdapter({ botToken }, fake.createBot)` with `const fake = new FakeTelegramApi()`. The fake is a *server*, not an SDK replica: `createBot` returns a real grammy `Bot` whose API transformer answers outbound calls with canned wire JSON, so middleware filters, init, and the long-poll lifecycle run grammy's production code instead of a hand-rolled imitation that drifts. Await `fake.untilPolling()` after `adapter.start()`, drive incoming traffic with `fake.emitUpdate(update)` (a Telegram `Update`, through real `bot.handleUpdate`), and assert the outbound contract on `fake.sent` (`{ method, payload }` pairs captured pre-serialization — an `InputFile` is still an instance, since multipart encoding happens in grammy's HTTP caller below the seam; methods the fake doesn't model throw instead of fake-succeeding); no `createTestRome()` and no DB needed. See `src/connections/kinds/telegram/telegram.test.ts` for the reference conversion.
 
 ## Notes
 

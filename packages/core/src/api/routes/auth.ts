@@ -1,26 +1,17 @@
-import { randomUUID } from "node:crypto";
 import type { DashboardIdentity } from "@rome/api-types";
 import { Hono, type Context } from "hono";
+import { getPath } from "hono/utils/url";
 import { deleteCookie, getCookie } from "hono/cookie";
-import { and, eq, like, lt } from "drizzle-orm";
-import { guardianAuth, settings } from "../../db/schema.js";
+import { eq } from "drizzle-orm";
+import { guardianAuth } from "../../db/schema.js";
 import {
   COOKIE_NAME,
-  SESSION_HANDOFF_TTL_MS,
   VISITOR_COOKIE_NAME,
-  createSessionHandoffToken,
   issueGuardianSession,
   shouldSecureCookie,
   verifyPassword,
   verifySession,
-  verifySessionHandoffToken,
 } from "../../lib/auth.js";
-import { getExternalRequestOrigin } from "../../lib/request-origin.js";
-import {
-  createSessionHandoffKey,
-  SESSION_HANDOFF_KEY_PREFIX,
-  type SessionHandoffRecord,
-} from "../../lib/session-handoff.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../lib/guardian-auth-state.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
@@ -45,8 +36,6 @@ const PUBLIC_API_PATHS = [
   "/api/health/*",
   "/api/uptime",
   "/api/uptime/*",
-  "/api/tailnet",
-  "/api/tailnet/*",
   // The unauthenticated SPA bootstrap probe.
   "/api/bootstrap",
   "/api/onboard/*",
@@ -64,6 +53,37 @@ const PUBLIC_API_PATHS = [
   // token in the path is the credential; management stays under /api/chat/*.
   "/api/share/*",
 ];
+
+// Any absolute origin works: only the path is read back.
+const ROUTING_ORIGIN = "http://verify.invalid";
+
+/**
+ * Turn the raw `X-Forwarded-Uri` into the path the router will serve,
+ * keeping the query string. Every access decision below reads this result.
+ *
+ * The proxied request reaches Hono through WHATWG URL parsing, which
+ * resolves dot segments (including percent-encoded ones) and backslashes,
+ * and then through Hono's `getPath`, which percent-decodes. A decision made
+ * on the raw string can therefore approve a path that the router serves as
+ * a different one. Returns `null`, so the caller rejects the request, when
+ * parsing would change the path, the path starts with `//`, or the URI
+ * carries a fragment.
+ */
+export function resolveRoutedUri(forwardedUri: string): string | null {
+  if (forwardedUri.includes("#")) return null;
+  const queryAt = forwardedUri.indexOf("?");
+  const rawPath = queryAt === -1 ? forwardedUri : forwardedUri.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : forwardedUri.slice(queryAt);
+  if (!rawPath.startsWith("/") || rawPath.startsWith("//")) return null;
+  let url: URL;
+  try {
+    url = new URL(`${ROUTING_ORIGIN}${rawPath}`);
+  } catch {
+    return null;
+  }
+  if (url.pathname !== rawPath) return null;
+  return `${getPath(new Request(url))}${query}`;
+}
 
 /**
  * Decide whether the original request (carried in `X-Forwarded-Uri`) is
@@ -249,27 +269,6 @@ function isRateLimited(ip: string): boolean {
   return entry.count > MAX_ATTEMPTS;
 }
 
-function normalizeTargetHost(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim().toLowerCase();
-  if (!trimmed) return null;
-
-  try {
-    return new URL(`https://${trimmed}`).hostname;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeNextPath(raw: unknown): string {
-  if (typeof raw !== "string") return "/onboard";
-  return raw.startsWith("/") ? raw : "/onboard";
-}
-
-function createTailnetRedirectUrl(targetHost: string, nextPath: string): URL {
-  return new URL(nextPath, `https://${targetHost}`);
-}
-
 export function authRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
@@ -386,7 +385,11 @@ export function authRoutes(deps: ApiDeps): Hono {
   // fall through to the cookie check — effectively "am I logged in" with a
   // userId-in-header response.
   app.get("/auth/verify", async (c) => {
-    const forwardedUri = c.req.header("X-Forwarded-Uri") ?? "";
+    const rawForwardedUri = c.req.header("X-Forwarded-Uri") ?? "";
+    const forwardedUri = rawForwardedUri ? resolveRoutedUri(rawForwardedUri) : "";
+    if (forwardedUri === null) {
+      return c.json({ error: "Bad Request" }, 400);
+    }
     let guardianSession: { userId: string } | null | undefined;
     const getGuardianSession = () => {
       if (guardianSession === undefined) {
@@ -497,99 +500,6 @@ export function authRoutes(deps: ApiDeps): Hono {
 
     applyGuardianHeaders(c, session);
     return c.body(null, 204);
-  });
-
-  app.post("/auth/handoff-token", async (c) => {
-    const sessionToken = getCookie(c, COOKIE_NAME);
-    if (!sessionToken) {
-      return c.json({ error: "Not authenticated" }, 401);
-    }
-
-    const session = verifySession(sessionToken);
-    if (!session) {
-      return c.json({ error: "Invalid session" }, 401);
-    }
-
-    const body = await c.req.json<{ targetHost?: unknown; next?: unknown }>().catch(() => null);
-    if (!body) {
-      return c.json({ error: "Invalid request body" }, 400);
-    }
-
-    const targetHost = normalizeTargetHost(body.targetHost);
-    if (!targetHost) {
-      return c.json({ error: "A valid targetHost is required" }, 400);
-    }
-
-    const nextPath = normalizeNextPath(body.next);
-    const nonce = randomUUID();
-    const now = new Date();
-
-    await deps.db
-      .delete(settings)
-      .where(
-        and(
-          like(settings.key, `${SESSION_HANDOFF_KEY_PREFIX}%`),
-          lt(settings.updatedAt, new Date(Date.now() - SESSION_HANDOFF_TTL_MS)),
-        ),
-      );
-
-    await deps.db.insert(settings).values({
-      key: createSessionHandoffKey(nonce),
-      value: { userId: session.userId, targetHost },
-      updatedAt: now,
-    });
-
-    return c.json({
-      token: createSessionHandoffToken({
-        userId: session.userId,
-        targetHost,
-        nonce,
-      }),
-      targetHost,
-      next: nextPath,
-    });
-  });
-
-  app.post("/auth/handoff", async (c) => {
-    const externalOrigin = getExternalRequestOrigin(c.req.raw);
-    const form = await c.req.formData();
-    const handoffToken = form.get("token");
-    if (typeof handoffToken !== "string" || !handoffToken) {
-      return c.redirect("/login", 303);
-    }
-
-    const claims = verifySessionHandoffToken(handoffToken);
-    if (!claims || claims.targetHost !== externalOrigin.hostname) {
-      return c.redirect("/login", 303);
-    }
-
-    const handoffKey = createSessionHandoffKey(claims.nonce);
-    const [row] = await deps.db
-      .select()
-      .from(settings)
-      .where(eq(settings.key, handoffKey))
-      .limit(1);
-
-    if (!row) {
-      return c.redirect("/login", 303);
-    }
-
-    const nextPath = normalizeNextPath(form.get("next"));
-    const record = row.value as SessionHandoffRecord | undefined;
-    const isExpired = row.updatedAt.getTime() < Date.now() - SESSION_HANDOFF_TTL_MS;
-    const matchesRecord =
-      record?.userId === claims.userId && record?.targetHost === claims.targetHost;
-
-    await deps.db.delete(settings).where(eq(settings.key, handoffKey));
-
-    if (isExpired || !matchesRecord) {
-      return c.redirect("/login", 303);
-    }
-
-    issueGuardianSession(c, claims.userId);
-    deps.loginUsage.recordLogin("handoff");
-
-    return c.redirect(createTailnetRedirectUrl(claims.targetHost, nextPath).toString(), 303);
   });
 
   return app;

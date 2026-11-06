@@ -29,10 +29,10 @@ import {
   runOpencli,
   type LinkedInWhoami,
   type RunOpencli,
-} from "../../channels/linkedin-cli.js";
-import { LinkedInInboxPoller } from "../../channels/linkedin.js";
-import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
-import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+} from "../kinds/linkedin/linkedin-cli.js";
+import { LinkedInInboxPoller } from "../kinds/linkedin/linkedin.js";
+import { linkedInMemberIdFromProfileUrl } from "../kinds/linkedin/linkedin-sync.js";
+import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -45,6 +45,7 @@ import type {
   Talker,
 } from "../types.js";
 import { createLogger } from "../../logger.js";
+import { refuseAttachments, refuseReplies, textToSend } from "../outbound/send-refusals.js";
 
 const log = createLogger("linkedin-reply");
 
@@ -225,9 +226,13 @@ export function makeLinkedInSetup(deps: {
     return {
       credential: browserSessionCredential(),
       profile,
-      ...(identity.publicId
-        ? { guardianChannelUserId: `https://www.linkedin.com/in/${identity.publicId}/` }
-        : {}),
+      // The guardian's own account, under the id `accountIdOf` records on the
+      // channel, so the two name one account.
+      ...(identity.plainId
+        ? { guardianChannelUserId: identity.plainId }
+        : identity.publicId
+          ? { guardianChannelUserId: `https://www.linkedin.com/in/${identity.publicId}/` }
+          : {}),
       summary: {
         title: "LinkedIn connected",
         body: [
@@ -309,15 +314,10 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               poller.stop();
             },
             async send(chatId: ChatId, msg) {
-              if (
-                !msg.text?.trim() ||
-                msg.attachments?.length ||
-                msg.replyToMessageId ||
-                msg.kind === "email" ||
-                msg.parts?.length
-              ) {
-                throw new Error("LinkedIn replies support plain text only");
-              }
+              if (msg.kind === "email") throw new Error("LinkedIn replies support plain text only");
+              refuseAttachments("linkedin", msg);
+              refuseReplies("linkedin", msg);
+              const text = textToSend("linkedin", msg);
               const target = await deps.syncSink.findReplyTarget?.({ threadId: chatId });
               if (!target)
                 throw new Error("No verified LinkedIn direct conversation for this reply");
@@ -341,7 +341,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                       "--expected-self",
                       target.selfParticipantId,
                       "--message",
-                      msg.text,
+                      text,
                       "--send",
                     ],
                     { timeoutMs: 180_000 },
@@ -353,6 +353,13 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                   throw new CredentialRejected({ grant: "session", cause: error });
                 }
                 throw error;
+              }
+              if (message.textMatches === false) {
+                // Sent, so never resent. The mirror below holds the text LinkedIn stored.
+                log.warn("LinkedIn stored the reply with different text or line breaks", {
+                  threadId: chatId,
+                  messageId: message.messageId,
+                });
               }
               try {
                 await deps.syncSink.upsertMessages([message]);

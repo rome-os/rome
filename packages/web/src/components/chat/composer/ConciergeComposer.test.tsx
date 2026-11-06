@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
+import { createRef } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import type { ChatComposerSnapshot } from "../ChatComposer";
+import type { ChatComposerHandle, ChatComposerSnapshot } from "../ChatComposer";
 import { ConciergeComposer, type ConciergeComposerProps } from "./ConciergeComposer";
 import { ReplyDraftHarness } from "../reply/reply-draft-harness";
 import type { ReplyTarget } from "../reply/reply-draft";
@@ -18,17 +19,63 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderComposer(props: Partial<ConciergeComposerProps> = {}, reply?: ReplyTarget) {
-  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
-    String(input) === "/api/settings"
-      ? Response.json({ enableModelSelector: true, webchatReasoningEffort: "low" })
-      : Response.json({}, { status: 404 })) as typeof fetch);
+function renderComposer(
+  props: Partial<ConciergeComposerProps> = {},
+  reply?: ReplyTarget,
+  selector = true,
+  ref?: React.Ref<ChatComposerHandle>,
+) {
+  rs.spyOn(globalThis, "fetch").mockImplementation(
+    (async (input: RequestInfo | URL) =>
+      ({
+        "/api/skills": () =>
+          Response.json({
+            skills: [
+              {
+                name: "@ray/scoped-app:identity_probe",
+                localName: "identity_probe",
+                description: "Scoped identity probe",
+                tools: [],
+                ownerType: "app",
+                ownerId: "@ray/scoped-app",
+                ownerLabel: "Scoped App",
+                ownerDescription: "Scoped app test fixture",
+                iconUrl: null,
+              },
+            ],
+          }),
+        "/api/settings": () =>
+          Response.json({
+            enableModelSelector: selector,
+            webchatReasoningEffort: "low",
+          }),
+        "/api/chat/locations": () =>
+          Response.json({
+            projects: {
+              rootPath: "/home/alex/.rome/default/projects",
+              defaultPath: "/home/alex/.rome/default/projects",
+              projects: [{ name: "app", path: "/home/alex/.rome/default/projects/app" }],
+            },
+            devices: [{ id: "0f3c", name: "workstation", platform: "macos" }],
+          }),
+        "/api/devices/0f3c/files": () =>
+          Response.json({
+            path: "/home/alex",
+            parent: "/home",
+            entries: [],
+            truncated: false,
+          }),
+      })[new URL(String(input), "http://rome.test").pathname]?.() ??
+      Response.json({}, { status: 404 })) as typeof fetch,
+  );
   const onSend = rs.fn(async (_snapshot: ChatComposerSnapshot) => {});
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   render(
     <QueryClientProvider client={client}>
       <ReplyDraftHarness initial={reply}>
-        <ConciergeComposer onSend={onSend} {...props} />
+        <ConciergeComposer ref={ref} onSend={onSend} {...props} />
       </ReplyDraftHarness>
     </QueryClientProvider>,
   );
@@ -36,6 +83,110 @@ function renderComposer(props: Partial<ConciergeComposerProps> = {}, reply?: Rep
 }
 
 describe("ConciergeComposer", () => {
+  it("picks a scoped skill, sends a chip-only turn, and clears the chip", async () => {
+    const { onSend } = renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(box, { target: { value: "/@ray/scoped-app:identity_probe" } });
+    expect(await screen.findByText("Scoped App")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByText("/identity_probe"));
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+    expect(box.value).toBe("");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "",
+      skillName: "@ray/scoped-app:identity_probe",
+    });
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
+  it("navigates the slash menu with arrows, accepts with Enter, and removes the chip with its button", async () => {
+    const { onSend } = renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await userEvent.type(box, "/");
+    await screen.findByText("/identity_probe");
+    await userEvent.keyboard("{ArrowDown}{ArrowUp}{ArrowRight}{ArrowLeft}{ArrowRight}{Enter}");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Remove skill" }));
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
+  it("dismisses the slash menu with Escape and ignores file paths", async () => {
+    renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await userEvent.type(box, "/");
+    await screen.findByText("/identity_probe");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByText("/identity_probe")).toBeNull();
+    fireEvent.input(box, { target: { value: "/etc/hosts" } });
+    expect(screen.queryByText("/identity_probe")).toBeNull();
+  });
+
+  it("preserves task text after the cursor when accepting a slash skill", async () => {
+    const { onSend } = renderComposer();
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(box, { target: { value: "/identity_probe inspect this" } });
+    box.setSelectionRange(15, 15);
+    fireEvent.select(box);
+    await screen.findByText("/identity_probe");
+    fireEvent.mouseDown(screen.getByText("/identity_probe"));
+    expect(box.value).toBe("inspect this");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "inspect this",
+      skillName: "@ray/scoped-app:identity_probe",
+    });
+  });
+
+  it("supports programmatic selection and restores a selected skill after a failed send", async () => {
+    const ref = createRef<ChatComposerHandle>();
+    const onSend = rs.fn().mockRejectedValueOnce(new Error("failed")).mockResolvedValue(undefined);
+    renderComposer({ onSend }, undefined, true, ref);
+    act(() => ref.current?.setSkillSelection({ name: "@ray/scoped-app:identity_probe" }));
+    await screen.findByRole("button", { name: "Remove skill" });
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("button", { name: "Remove skill" });
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[0][0]).toEqual(onSend.mock.calls[1][0]);
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+  ])("hides Stop when streaming=%s and a handler is present=%s", (isStreaming, hasHandler) => {
+    renderComposer({ isStreaming, onStop: hasHandler ? rs.fn() : undefined });
+    expect(screen.queryByRole("button", { name: "Stop generating" })).toBeNull();
+  });
+
+  it("stops without sending, and keeps the draft and Send available while running", async () => {
+    const onStop = rs.fn();
+    const { onSend } = renderComposer({ isStreaming: true, onStop });
+    const box = screen.getByPlaceholderText("Message") as HTMLTextAreaElement;
+    const stop = screen.getByRole("button", { name: "Stop generating" });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+
+    await userEvent.type(box, "next question");
+    await userEvent.click(stop);
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(box.value).toBe("next question");
+    await userEvent.type(box, "{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "next question" });
+  });
+
+  it("lets the keyboard stop a turn with an empty draft", async () => {
+    const onStop = rs.fn();
+    const { onSend } = renderComposer({ isStreaming: true, onStop });
+    screen.getByRole("button", { name: "Stop generating" }).focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("is one text line between + and Send, and sends on Enter", async () => {
     const { onSend } = renderComposer();
     const box = screen.getByPlaceholderText("Message");
@@ -52,9 +203,9 @@ describe("ConciergeComposer", () => {
     expect((box as HTMLTextAreaElement).value).toBe("");
   });
 
-  it("opens a menu with file upload and a model submenu from +", async () => {
+  it.each([true, false])("opens the model submenu with selector=%s", async (selector) => {
     const onChange = rs.fn();
-    renderComposer({ modelSelection: { value: "claude-sonnet", onChange } });
+    renderComposer({ modelSelection: { value: "claude-sonnet", onChange } }, undefined, selector);
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     screen.getByRole("button", { name: "Add files or change the model" }).focus();
     await userEvent.keyboard("{Enter}");
@@ -101,7 +252,10 @@ describe("ConciergeComposer reply", () => {
     await userEvent.type(screen.getByPlaceholderText("Message"), "why there?{Enter}");
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "why there?", replyTo: reply });
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "why there?",
+      replyTo: reply,
+    });
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 
@@ -132,5 +286,95 @@ describe("ConciergeComposer reply", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Cancel reply" }));
 
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  describe("choosing a folder", () => {
+    const openPicker = async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Add files or change the model" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /Choose folder/ }));
+      return screen.findByRole("combobox");
+    };
+    const pickDeviceFolder = async () => {
+      await openPicker();
+      await userEvent.click(await screen.findByRole("option", { name: /workstation/ }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use this folder" }));
+    };
+    const deviceLine = '- Folder: "/home/alex" on Rome node device "workstation" (id 0f3c)';
+    // The placeholder changes once a file is attached, so find it by role.
+    const box = () => screen.getByRole("textbox") as HTMLTextAreaElement;
+
+    it("opens the selector from the + menu with focus in its search field, and keeps it open", async () => {
+      renderComposer();
+      const search = await openPicker();
+      await waitFor(() => expect(document.activeElement).toBe(search));
+      expect(await screen.findByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+      expect(screen.getByRole("option", { name: /workstation/ })).toBeTruthy();
+      // No new-project row in this selector.
+      expect(screen.queryByText("Create project")).toBeNull();
+      expect(screen.queryByRole("menuitem")).toBeNull();
+    });
+
+    it("sends a device folder as a line of text and clears the chip", async () => {
+      const { onSend } = renderComposer();
+      await pickDeviceFolder();
+      expect(await screen.findByRole("button", { name: "Remove folder" })).toBeTruthy();
+
+      await userEvent.type(box(), "run the tests{Enter}");
+
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].text).toBe(`run the tests\n\n${deviceLine}`);
+      expect(screen.queryByRole("button", { name: "Remove folder" })).toBeNull();
+    });
+
+    it("sends a Rome project by its path, and nothing once the chip is removed", async () => {
+      const { onSend } = renderComposer();
+      await openPicker();
+      await userEvent.click(await screen.findByRole("option", { name: /Rome Cloud/ }));
+      await userEvent.click(await screen.findByRole("option", { name: /app/ }));
+      await userEvent.type(box(), "hi{Enter}");
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].text).toBe(
+        'hi\n\n- Folder: "/home/alex/.rome/default/projects/app" (Rome project "app")',
+      );
+
+      await pickDeviceFolder();
+      await userEvent.click(await screen.findByRole("button", { name: "Remove folder" }));
+      await userEvent.type(box(), "again{Enter}");
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+      expect(onSend.mock.calls[1][0].text).toBe("again");
+    });
+
+    it("sends a folder alone, and puts the folder back when the send fails", async () => {
+      const { onSend } = renderComposer();
+      onSend.mockRejectedValueOnce(new Error("offline"));
+      await pickDeviceFolder();
+
+      await userEvent.click(screen.getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].text).toBe(deviceLine);
+      expect(await screen.findByRole("button", { name: "Remove folder" })).toBeTruthy();
+
+      await userEvent.type(box(), "retry{Enter}");
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+      expect(onSend.mock.calls[1][0].text).toBe(`retry\n\n${deviceLine}`);
+    });
+
+    it("keeps the text, the attachments and the folder when a send with files fails", async () => {
+      const { onSend } = renderComposer();
+      onSend.mockRejectedValueOnce(new Error("offline"));
+      await pickDeviceFolder();
+      const file = new File(["x"], "notes.txt", { type: "text/plain" });
+      await userEvent.upload(
+        document.querySelector('input[type="file"]') as HTMLInputElement,
+        file,
+      );
+      await userEvent.type(box(), "see notes{Enter}");
+
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+      expect(onSend.mock.calls[0][0].uploads).toHaveLength(1);
+      expect(box().value).toBe("see notes");
+      expect(await screen.findByRole("button", { name: "Remove folder" })).toBeTruthy();
+      expect(screen.getByText("notes.txt")).toBeTruthy();
+    });
   });
 });

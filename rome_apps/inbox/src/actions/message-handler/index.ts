@@ -14,7 +14,6 @@ import type {
   PersonMappingRepository,
   PersonRecord,
   PolicyEngine,
-  ReplyDeliveryReport,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -63,7 +62,7 @@ export interface SentinelDecision {
 }
 
 type CollectedAgentResult =
-  | { success: true; content: string; turnId?: string; replyDelivery?: ReplyDeliveryReport }
+  | { success: true; content: string; turnId?: string }
   | { success: false; error: string };
 
 // ---------------------------------------------------------------------------
@@ -288,12 +287,10 @@ async function collectAgentResult(
   let response = "";
   let lastError = "";
   let turnId: string | undefined;
-  let replyDelivery: ReplyDeliveryReport | undefined;
   for await (const msg of runner.run(params)) {
     if (msg.type === "turn_start") {
       turnId = msg.turnId;
     }
-    if (msg.type === "turn_end" && msg.replyDelivery) replyDelivery = msg.replyDelivery;
     if (msg.type === "result") response = msg.content;
     if (msg.type === "error") lastError = msg.error;
     emitAgentMessage?.({ ...msg, agent: agentName });
@@ -302,7 +299,7 @@ async function collectAgentResult(
     log.warn("agent returned error instead of result", { agentName, error: lastError });
     return { success: false, error: lastError };
   }
-  return { success: true, content: response, turnId, ...(replyDelivery ? { replyDelivery } : {}) };
+  return { success: true, content: response, turnId };
 }
 
 function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
@@ -387,10 +384,6 @@ async function handleTrustedMessage(
       romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
-      // The guardian can see the reply as it is written in a direct
-      // conversation. Everyone else's reply passes Envoy whole first. The host
-      // streams only when reply streaming is on and the channel can.
-      ...(bondLevel === "guardian" && args.threadType === "private" ? { streamReply: true } : {}),
       threadContext: {
         connectionId,
         channel,
@@ -432,20 +425,7 @@ async function handleTrustedMessage(
   // Skip envoy for guardian — send directly
   if (bondLevel === "guardian") {
     log.info("skipping envoy (guardian)", { channel, channelUserId });
-    // The host streamed the reply. Only a stream that sent nothing at all may
-    // be sent again: any other outcome may already show on the platform.
-    const streamed = mainResult.replyDelivery;
-    if (streamed && streamed.status !== "failed") {
-      await deps.approvalsRepo.create({
-        type: "outgoing_message",
-        requestedBy: targetAgent,
-        description: `Skipped envoy (guardian), streamed: ${streamed.status}`,
-        payload: { response, channel, threadId, messageId, channelUserId, streamed },
-        status: "auto_approved",
-      });
-      return { status: "ok", data: { action: "streamed", response, streamed } };
-    }
-    await deps.appContext.runAction("send_message", {
+    await sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -471,7 +451,7 @@ async function handleTrustedMessage(
   log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
 
   if (envoyResult.action === "approve") {
-    await deps.appContext.runAction("send_message", {
+    await sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -582,7 +562,7 @@ async function handleUntrustedMessage(
   });
 
   if (decision.action === "replied" && decision.response) {
-    await deps.appContext.runAction("send_message", {
+    await sendAnswer(deps, {
       channel,
       threadId,
       text: decision.response,
@@ -854,4 +834,26 @@ export function createMessageHandlerAction(
 
 export function createAction(config: ActionConfig, deps: MessageHandlerRuntimeDeps): Action {
   return createMessageHandlerAction(config, deps);
+}
+
+/** Send an answer that quotes the message it answers. Where the platform
+ *  cannot quote, the send is refused, and the answer goes again without the
+ *  quote: the quote is the inbox's own choice, not the agent's words. */
+export async function sendAnswer(
+  deps: Pick<MessageHandlerRuntimeDeps, "appContext">,
+  input: Record<string, unknown> & { replyToMessageId?: string },
+): Promise<void> {
+  try {
+    await deps.appContext.runAction("send_message", input);
+  } catch (err) {
+    // Matched by its fields, not its class, as `isSendRefused` matches, so a
+    // copy of the SDK other than the host's still recognizes it.
+    const unquotable =
+      err instanceof Error &&
+      err.name === "ActionInvocationError" &&
+      (err as { refusal?: unknown }).refusal === "reply_unaddressable";
+    if (!unquotable || input.replyToMessageId === undefined) throw err;
+    const { replyToMessageId: _quote, ...unquoted } = input;
+    await deps.appContext.runAction("send_message", unquoted);
+  }
 }

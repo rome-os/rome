@@ -11,23 +11,24 @@
     "@composio/client": "0.1.0-alpha.73",
     "@octokit/rest": "^22.0.1",
     "@octokit/webhooks-methods": "^6.0.0",
-    "@rome-os/app-runtime": "^0.7.0",
-    "@rome-os/app-web-sdk": "^0.3.0",
-    "@rome-os/ui": "^0.3.0",
-    "drizzle-orm": "^0.45.1",
-    "lucide-react": "^0.468.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "@rome-os/app-runtime": "^0.9.0",
+    "drizzle-orm": "^0.45.1"
   },
   "devDependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@rome-os/app-web-sdk": "^0.3.0",
+    "@rome-os/ui": "^0.3.0",
     "@types/jsdom": "^28.0.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/turndown": "^5.0.6",
     "dotenv": "^17.3.1",
     "jsdom": "^29.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "turndown": "^7.2.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "yaml": "^2.8.2"
   }
 }

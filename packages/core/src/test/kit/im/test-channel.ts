@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
-import type { DeliveryTransport } from "../../../channels/delivery/types.js";
 import { DISCORD_USER, DiscordPeer } from "./discord.js";
 import type { Peer } from "./peer.js";
 import { TELEGRAM_CHAT, TelegramPeer } from "./telegram.js";
@@ -23,9 +22,6 @@ export interface TestChannel {
   send(message: OutgoingMessage): Promise<MessageReceipt>;
   /** The user writes `text`; resolves with the message the adapter delivers. */
   receive(text: string): Promise<ChannelMessage>;
-  /** Writes into the same conversation through the adapter's reply delivery
-   *  transport, where it has one. */
-  readonly delivery?: DeliveryTransport;
   /** Undoes the setup, latest step first, even where a step fails. */
   stop(): Promise<void>;
 }
@@ -118,7 +114,6 @@ const telegram = () =>
       platform: "telegram",
       peer,
       conversation,
-      delivery: adapter.replyDelivery(),
       send: (message) => adapter.send(conversation, message),
       receive: (text) => heard.receive(() => peer.emitMessage(text)),
     };

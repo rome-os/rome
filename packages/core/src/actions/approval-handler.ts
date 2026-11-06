@@ -38,9 +38,6 @@ function formatResultForAgent(result: ActionResult): string {
   if (result.status === "pending_interaction") {
     return `The action you requested was approved and now awaits the guardian in the "${result.interaction.appId}" interaction surface. The outcome will arrive as a new turn.`;
   }
-  if (result.status === "handoff") {
-    return `The action you requested was approved and control has been handed off to the "${result.handoff.appId}" app. The outcome will arrive as a new turn.`;
-  }
   if (result.status === "place_widget") {
     return `The action you requested was approved and executed; the "${result.placement.appId}" widget has been placed on the guardian's workspace.`;
   }
@@ -206,6 +203,11 @@ export class ApprovalHandler {
           payload.channelContext?.channel ?? "",
           payload.channelContext?.threadId ?? "",
         );
+        const channel = payload.channelContext?.channel;
+        const threadId = payload.channelContext?.threadId;
+        const messaging = Boolean(channel && threadId && channel !== "webchat");
+        let reply = "";
+        let turnId: string | undefined;
         for await (const message of this.agentRunner.run({
           agentName,
           prompt: resultText,
@@ -216,8 +218,32 @@ export class ApprovalHandler {
           workingDir,
           threadContext: payload.channelContext,
           initiatedBy: "system",
+          // The reply is recorded as it is said below, never twice, and a
+          // reply that could not be said is not on record as said.
+          ...(messaging ? { persistAnswer: false } : {}),
         })) {
+          if (message.type === "turn_start") turnId = message.turnId;
+          if (message.type === "result") reply = message.content;
           if (emit) emit({ ...message, agent: agentName });
+        }
+        // Webchat's reply rides the session stream through `emit`. A messaging
+        // channel has no such stream, so its reply goes out on the channel.
+        if (messaging && channel && threadId) {
+          // The action already ran. A reply that cannot be sent must not mark
+          // the approval's execution as failed.
+          try {
+            await this.backendTurnRunner.deliverMessagingReply(
+              { agentName, channel, threadId },
+              reply,
+              turnId,
+            );
+          } catch (err) {
+            log.error("approval continuation reply not delivered", {
+              approvalId,
+              channel,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
 

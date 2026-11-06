@@ -14,7 +14,9 @@ export function scriptOf(row: NodeActionRow): { shell: string; script: string } 
   if (!row.command || !Array.isArray(row.args)) return null;
   const shell = (row.command.split(/[\\/]/).pop() ?? "").toLowerCase().replace(/\.exe$/, "");
   if (["bash", "sh", "zsh", "dash"].includes(shell)) {
-    const flag = row.args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
+    // A flag group such as `-c` or `-lc`. Two checks instead of `/^-[a-z]*c[a-z]*$/`, whose
+    // backtracking grows polynomially on long flag-like arguments.
+    const flag = row.args.findIndex((arg) => /^-[a-z]*$/.test(arg) && arg.includes("c"));
     if (flag >= 0 && row.args[flag + 1] !== undefined)
       return { shell, script: row.args[flag + 1]! };
   }

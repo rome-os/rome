@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../lib/auth.js";
 import { getGuardianAuthState } from "../../lib/guardian-auth-state.js";
@@ -16,10 +16,21 @@ import {
   redeemRomeCloudOAuthHandoff,
 } from "../../lib/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
+import type { OAuthAttemptIntent } from "../../db/schema.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The Shopify card, where a signed-out browser finishes a Shopify-initiated install. */
 const SHOPIFY_SETTINGS_PATH = "/settings/connections/shopify";
+
+/** An attempt the login page starts (`?intent=sign-in`) signs in to Rome,
+ *  even when the browser holds a session by the time the guardian clicks.
+ *  Any other attempt started by a recognized guardian connects a provider,
+ *  and one started by anyone else signs in. Recognized the way the guardian is
+ *  everywhere, trusted loopback included. */
+async function attemptIntentOf(c: Context, db: ApiDeps["db"]): Promise<OAuthAttemptIntent> {
+  if (c.req.query("intent") === "sign-in") return "sign-in";
+  return (await resolveGuardianSession(c, db)) ? "connect" : "sign-in";
+}
 
 export function oauthRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -77,6 +88,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       const redirectUrl = await createRomeCloudOAuthStartRedirect(deps.db, provider, {
         reconnect,
         ...(shop ? { shop } : {}),
+        intent: await attemptIntentOf(c, deps.db),
       });
       return c.redirect(redirectUrl, 303);
     } catch (error) {
@@ -96,7 +108,10 @@ export function oauthRoutes(deps: ApiDeps): Hono {
 
     try {
       const reconnect = c.req.query("reconnect") === "1";
-      const redirectUrl = await createRomeCloudOAuthStartRedirect(deps.db, provider, { reconnect });
+      const redirectUrl = await createRomeCloudOAuthStartRedirect(deps.db, provider, {
+        reconnect,
+        intent: await attemptIntentOf(c, deps.db),
+      });
       c.header("Cache-Control", "no-store");
       return c.json({ redirectUrl });
     } catch (error) {
@@ -151,34 +166,51 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       // Default to an empty profile when the provider returned no identity, so the
       // grant still records a grant outcome — scopes and Slack's teamId come
       // from the token bundle even when the identity fields are sparse.
+      // A redeem either connects a provider or signs in to Rome. Signing in
+      // never disturbs a connection, so one that reaches another account
+      // grants nothing. The attempt says which it was started for, so a
+      // session that changed during the round trip cannot turn a sign-in into
+      // a connect. An attempt started before Rome recorded that falls back to
+      // the session now.
+      const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
+      const connecting = redeemed.intent
+        ? redeemed.intent === "connect"
+        : existingSession !== null || (await attemptIntentOf(c, deps.db)) === "connect";
+      // Set when the redeem reached another account and ended the connection.
+      let ended = false;
       const imported = await importProviderBundle(
         deps.connectionRegistry,
         redeemed.provider,
         redeemed.tokens,
         redeemed.profile ?? {},
+        {
+          signIn: !connecting,
+          onEnded: () => {
+            ended = true;
+          },
+        },
       );
       if (!imported) {
         throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
       }
 
-      // An already-signed-in guardian redeeming here is connecting a provider
-      // (a sign-in redeem has no session yet), so land them on that connection's
-      // own page — the surface that shows the grant it just granted.
-      const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
-      const nextPath = existingSession
+      // A connecting guardian lands on that connection's own page, the
+      // surface that shows the grant it just granted.
+      const nextPath = connecting
         ? `/settings/connections/${encodeURIComponent(redeemed.provider)}`
         : guardian.onboardingComplete
           ? "/"
           : "/onboard";
 
       issueGuardianSession(c, guardian.userId);
-      if (!existingSession) deps.loginUsage.recordLogin("oauth");
+      if (!connecting) deps.loginUsage.recordLogin("oauth");
 
       c.header("Cache-Control", "no-store");
       return c.json({
         ok: true,
         provider: redeemed.provider,
         nextPath,
+        ...(ended ? { ended: true } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "OAuth handoff redemption failed.";

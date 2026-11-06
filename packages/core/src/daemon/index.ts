@@ -74,7 +74,6 @@ interface CapabilityManifest {
   name: string;
   version: string;
   hostname: string;
-  tailscale_ip: string | null;
   capabilities: {
     agent: AgentCapabilityInfo;
     cdp_servers: CdpServerInfo[];
@@ -534,7 +533,6 @@ export class HealthCheckDaemon {
       name: "rome-daemon",
       version: process.env.npm_package_version ?? "0.1.0",
       hostname: hostname(),
-      tailscale_ip: advertisedIp,
       capabilities: {
         agent: {
           status: status.status === "ok" ? "running" : "degraded",
@@ -595,21 +593,6 @@ export class HealthCheckDaemon {
   }
 
   private async resolveAdvertisedIp(requestHost: string): Promise<string | null> {
-    try {
-      const { stdout } = await this.execFile("tailscale", ["status", "--json"]);
-      const parsed = JSON.parse(stdout) as {
-        Self?: {
-          TailscaleIPs?: string[];
-        };
-      };
-      const ip = parsed.Self?.TailscaleIPs?.[0];
-      if (typeof ip === "string" && ip.length > 0) {
-        return ip;
-      }
-    } catch {
-      // Fall back to the address the caller used when it looks routable.
-    }
-
     if (!this.isLocalHost(requestHost)) {
       return requestHost;
     }
@@ -619,40 +602,6 @@ export class HealthCheckDaemon {
 
   private isLocalHost(host: string): boolean {
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
-  }
-
-  private async execFile(
-    command: string,
-    args: string[],
-  ): Promise<{ stdout: string; stderr: string }> {
-    return await new Promise((resolve, reject) => {
-      const child = spawn(command, args, {
-        cwd: this.config.appDir,
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      child.stdout?.on("data", (chunk: Buffer | string) => {
-        stdout += chunk.toString();
-      });
-      child.stderr?.on("data", (chunk: Buffer | string) => {
-        stderr += chunk.toString();
-      });
-
-      child.once("error", reject);
-      child.once("exit", (code, signal) => {
-        if (code === 0) {
-          resolve({ stdout, stderr });
-          return;
-        }
-        reject(
-          new Error(`${command} exited with code=${code ?? "null"} signal=${signal ?? "null"}`),
-        );
-      });
-    });
   }
 
   private async enqueueAction(actionRequest: DaemonActionRequest): Promise<DaemonActionResult> {

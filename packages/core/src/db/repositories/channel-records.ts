@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { Account } from "@rome-os/app-runtime";
-import { and, asc, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
-import type { AccountLinkOf } from "../../channels/account-links.js";
-import { platformOf } from "../../channels/platform.js";
+import {
+  and,
+  asc,
+  eq,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+  type SQL,
+  type SQLWrapper,
+} from "drizzle-orm";
+import type { AccountLinkOf } from "../../chats/connected-accounts/account-links.js";
+import { platformOf } from "../../connections/platform.js";
 import type { GrantAccount } from "../../connections/grant.js";
 import { channels, connectionGrants } from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
@@ -25,6 +36,21 @@ export interface ChannelRecord {
 }
 
 type Exec = DrizzleDb | DrizzleTx;
+
+/**
+ * The id of the channel that records the account `accountId` on `platform`,
+ * as a correlated SQL subquery over the caller's columns; null when no
+ * channel records it. A released channel that kept its account still
+ * answers, and `uq_channels_platform_account` makes the answer unique.
+ */
+export function channelOfAccountSql(
+  platform: SQLWrapper,
+  accountId: SQLWrapper,
+): SQL<string | null> {
+  return sql<
+    string | null
+  >`(select ${channels.id} from ${channels} where ${channels.platform} = ${platform} and ${channels.platformAccountId} = ${accountId})`;
+}
 
 /** Let go of the account `accountId` on `platform` from every channel but
  *  `keep`, so channel `keep` can record it. It runs only once the registry has

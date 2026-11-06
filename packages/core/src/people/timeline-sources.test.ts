@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import type { Account, AccountId, Accounts } from "../channels/accounts.js";
-import type { Channels } from "../channels/channel.js";
+import type { Account, AccountId, Accounts } from "../chats/accounts/accounts.js";
+import type { Channels } from "../chats/connected-accounts/connected-account.js";
 import { timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
@@ -67,6 +67,26 @@ describe("timelineAccounts", () => {
       { channel: "whatsapp", storedUnder: ["whatsapp"], addresses: [ada, adaLid] },
     ]);
     expect(whatsapp.listings).toBe(1);
+  });
+
+  it("keeps every link's own address on the account it folds onto", async () => {
+    // LinkedIn's book lists only the member id, and resolves the profile URL
+    // to it. A person holding both links is one account, and either link is
+    // found on it by its own address.
+    const memberId = "ACoAAAda";
+    const profileUrl = "https://www.linkedin.com/in/ada/";
+    const linkedin = new FakeAccounts([account(memberId)], { [profileUrl]: memberId });
+
+    const [accounts] = await timelineAccounts({ channels: channelList({ linkedin }) }, [
+      [
+        { platform: "linkedin", id: memberId },
+        { platform: "linkedin", id: profileUrl },
+      ],
+    ]);
+
+    expect(accounts).toEqual([
+      { channel: "linkedin", storedUnder: ["linkedin"], addresses: [memberId, profileUrl] },
+    ]);
   });
 
   it("reads one account per channel, each folded by that channel's own book", async () => {

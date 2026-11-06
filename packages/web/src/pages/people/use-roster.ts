@@ -4,14 +4,13 @@ import { useTranslation } from "react-i18next";
 import type {
   AccountDirectory,
   AccountState,
-  AccountStream,
   PeopleList,
   PersonResource,
   TimelinePage,
 } from "@rome/api-types/people";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
-import { peopleRows, type PeopleRow, type PeopleView } from "./people-model";
+import { peopleRows, type PeopleRow } from "./people-model";
 
 // The People page's reads, and nothing else — the writes are `./writes.ts`,
 // and `./use-writes.ts` is what settles these queries after one lands.
@@ -21,17 +20,11 @@ import { peopleRows, type PeopleRow, type PeopleView } from "./people-model";
 // page's own paged reads. Two hooks with one name would be read as one.
 //
 // Two reads compose the roster: `GET /api/people` for the people the guardian
-// has placed, and one of the two account reads for the accounts beside them.
-// They are separate queries rather than one, because they page differently:
-// curated people are entered one at a time by hand and the listing is bounded,
-// while a synced address book is thousands of rows and pages by cursor.
-//
-// Which account read is the view's own question. The directory is a contacts
-// list and reads `GET /api/accounts`: every account, by name, carrying nothing
-// about what anyone said. The stream is the recents surface and reads `GET
-// /api/accounts/stream`: what happened last, with the line to preview. Neither
-// view pays for the other's fields, and a cursor from one never resumes the
-// other — they are different orders.
+// has placed, and `GET /api/accounts` for the accounts beside them — every
+// account, by name, carrying nothing about what anyone said. They are separate
+// queries rather than one, because they page differently: curated people are
+// entered one at a time by hand and the listing is bounded, while a synced
+// address book is thousands of rows and pages by cursor.
 //
 // Every number a chip or a heading shows comes back with these reads and
 // describes the whole roster the query admits. A tally over the rows that
@@ -71,9 +64,6 @@ function useDebounced<T>(value: T, delayMs: number): T {
 
 export interface PeopleRosterParams {
   search: string;
-  /** Which account read the view is about — the contacts list, or the recents
-   *  surface. */
-  view: PeopleView;
   /**
    * Which state of account the view is about, when one narrows it.
    *
@@ -135,11 +125,8 @@ export function usePeopleRoster(params: PeopleRosterParams) {
   // and names a position rather than a row, so a page boundary survives an
   // account being linked or dismissed between two requests.
   //
-  // The view is part of the key, not just of the URL: the two reads are two
-  // orders with two cursors, and a page of one is not a page of the other.
-  const path = params.view === "directory" ? "/api/accounts" : "/api/accounts/stream";
-  const accounts = useInfiniteQuery<AccountDirectory | AccountStream>({
-    queryKey: [ACCOUNTS_KEY, params.view, search, accountState],
+  const accounts = useInfiniteQuery<AccountDirectory>({
+    queryKey: [ACCOUNTS_KEY, "roster", search, accountState],
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
     refetchInterval: ROSTER_POLL_MS,
@@ -150,7 +137,7 @@ export function usePeopleRoster(params: PeopleRosterParams) {
       if (accountState) query.set("state", accountState);
       if (pageParam) query.set("cursor", String(pageParam));
       const suffix = query.toString();
-      return fetchJson<AccountDirectory | AccountStream>(`${path}${suffix ? `?${suffix}` : ""}`, {
+      return fetchJson<AccountDirectory>(`/api/accounts${suffix ? `?${suffix}` : ""}`, {
         signal,
         fallback,
       });
@@ -261,39 +248,36 @@ export function usePerson(id: string | undefined) {
 }
 
 /**
- * One person's history across every account they hold, newest first.
+ * One of a person's accounts, its history newest first. Null `account` reads
+ * nothing: a person with no account has no history to show.
  *
- * One request rather than one per channel: which stores a history is merged
- * from is the server's business, and a client that merged per-channel reads
- * would have to re-derive the ordering the cursor is written against — and
- * would disagree with it at every page boundary.
- *
- * No interval. The dossier's writes converge on their own: `./use-writes.ts`
- * invalidates this key the moment one lands, so a merge or a link shows its new
- * history without waiting for a tick. The composer is the one write still to
- * come, and it settles the same way. What is left for a poll to catch is a
- * message arriving while the page sits open, which the client's
- * `refetchOnWindowFocus` already catches at the moment the reader looks back at
- * it — and a refetch here re-reads every page the reader has opened, so an
- * interval charges the deepest reader the most for the least.
+ * Keyed under the person as well as the account, so a write that settles the
+ * person's page (`./use-writes.ts`) settles every account view of it.
  */
-export function usePersonTimeline(id: string | undefined) {
+export function useAccountTimeline(
+  personId: string | undefined,
+  account: { channel: string; channelUserId: string } | null,
+) {
   const { t } = useTranslation("people");
   const query = useInfiniteQuery<TimelinePage>({
-    queryKey: [TIMELINE_KEY, id],
-    enabled: id != null,
+    queryKey: [TIMELINE_KEY, personId, account?.channel, account?.channelUserId],
+    enabled: personId != null && account != null,
     refetchInterval: TIMELINE_POLL_MS,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
     queryFn: ({ signal, pageParam }) => {
       // The cursor names an exact entry (time, direction, source, ref), so it
       // carries separators of its own and has to be escaped rather than pasted
-      // into the query string.
-      const search = pageParam ? `?cursor=${encodeURIComponent(String(pageParam))}` : "";
-      return fetchJson<TimelinePage>(`/api/people/${encodeURIComponent(id!)}/messages${search}`, {
-        signal,
-        fallback: t("errors.loadFailedFallback"),
+      // into the query string, as an address can.
+      const search = new URLSearchParams({
+        channel: account!.channel,
+        channelUserId: account!.channelUserId,
       });
+      if (pageParam) search.set("cursor", String(pageParam));
+      return fetchJson<TimelinePage>(
+        `/api/people/${encodeURIComponent(personId!)}/messages?${search}`,
+        { signal, fallback: t("errors.loadFailedFallback") },
+      );
     },
   });
   return { ...query, entries: query.data?.pages.flatMap((page) => page.entries) ?? [] };

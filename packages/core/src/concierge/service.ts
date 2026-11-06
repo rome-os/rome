@@ -1,21 +1,39 @@
-// Concierge: one fixed texting-style conversation that hands work to task
-// chats. Design: rome-os/rome#1344.
+// Concierge: texting-style chats that hand work to task chats. One Concierge
+// talks in a main chat and in any topic chats its owner starts, all sharing one
+// memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
+// docs/adrs/one-concierge-with-several-chats.md). Design: rome-os/rome#1344.
 
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import type { Account, BackendTurnParams } from "@rome-os/app-runtime";
+import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
+import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
-import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../chats/send.js";
-import type { AIToolStateValue } from "../core/ai-tool-state.js";
+import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
+import { claudeUsesApiKey, type AIToolStateValue } from "../core/ai-tool-state.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SessionManager } from "../core/session-manager.js";
-import type { ModelSelectionId } from "../core/model-selector.js";
+import type { SkillCatalog } from "../core/skill-catalog.js";
+import {
+  resolveWebchatLargeModelSelection,
+  WEBCHAT_LARGE_MODEL_SELECTIONS,
+  type ModelSelectionId,
+} from "../core/model-selector.js";
+import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
+import type { AgentSessionManager } from "../core/agent-session.js";
+import type { SessionRepository } from "../agent/index.js";
+import {
+  quotaSwitchTarget,
+  sameProviderTarget,
+  soleExhaustedProvider,
+} from "../core/quota-switch.js";
+import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
+import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
+
+import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
 
 const log = createLogger("concierge");
 
@@ -34,6 +52,33 @@ export function isConciergeAgent(agentName: string | null | undefined): boolean 
   return agentName === CONCIERGE_AGENT_ID || agentName === "concierge";
 }
 
+/** Whether a dashboard chat is a Concierge chat: the main chat, or a topic chat. */
+export function isConciergeChat(
+  chat: { id: string; agentName?: string | null } | null | undefined,
+): boolean {
+  return !!chat && (chat.id === CONCIERGE_CHAT_ID || isConciergeAgent(chat.agentName));
+}
+
+/** How a Concierge chat was retired. */
+export type RetiredHow = "archived" | "deleted";
+
+function attr(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+/**
+ * The line that opens every Concierge turn's input: which Concierge chat the
+ * turn runs in. It rides each turn rather than the session's setup, so a
+ * rename reaches a running session (rome-os/rome#1739).
+ */
+export function conciergeChatLine(chat: ConciergeChatRef): string {
+  return `<concierge_chat id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"/>`;
+}
+
 /**
  * The dashboard's chat operations a task chat needs beyond saying something
  * in it: starting the chat, and its turns' state. They belong to the
@@ -42,6 +87,11 @@ export function isConciergeAgent(agentName: string | null | undefined): boolean 
 export interface TaskChats {
   /** Start a chat for the guardian and answer its id. */
   startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  /**
+   * Opens the runtime session of a chat that has had no turn yet, as its
+   * first message would, and answers its id.
+   */
+  openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): string[];
@@ -52,11 +102,12 @@ export interface TaskChats {
  *  Concierge, so it is attached once that layer is up. */
 export interface ConciergeDashboard {
   chats: TaskChats;
-  /** Chats' ordinary send (chats/send.ts), with the dashboard able to take it. */
+  /** The ordinary send into a chat (connections/send.ts), with the dashboard able to take it. */
   send(place: Place, body: Body, as: Account): Promise<SendResult>;
 }
 
 export interface ConciergeDeps {
+  skillCatalog: Pick<SkillCatalog, "get">;
   settingsRepo: Pick<SettingsRepository, "get">;
   webchatRepo: Pick<
     WebChatRepository,
@@ -64,6 +115,7 @@ export interface ConciergeDeps {
     | "getSession"
     | "listSessions"
     | "updateSessionName"
+    | "updateSessionLargeModelSelection"
     | "getTurnChatMessages"
     | "getReplyTarget"
     | "addBackendMessage"
@@ -74,17 +126,25 @@ export interface ConciergeDeps {
   tasks: ConciergeTasks;
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
-  sessionManager: Pick<SessionManager, "findReusableSession">;
+  sessionRepository: Pick<SessionRepository, "current">;
   aiToolState: { get(): AIToolStateValue };
+  agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
-  runBackendTurn: (params: BackendTurnParams, options?: { quiet?: boolean }) => Promise<void>;
+  /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
+  runBackendTurn: (
+    params: BackendTurnParams,
+    options?: { quiet?: boolean; inputLabel?: string },
+  ) => Promise<"completed" | "failed" | void>;
 }
 
 export class ConciergeService {
+  private readonly leftModels = new Map<string, number>();
   private creating: Promise<string> | null = null;
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
+  private attachedFollowing: ConciergeFollowing | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
 
@@ -110,18 +170,29 @@ export class ConciergeService {
     }
   }
 
-  /** The Concierge chat's id, or null when it does not exist yet. */
+  /** The main Concierge chat's id, or null when it does not exist yet. */
   async findChatId(): Promise<string | null> {
     return (await this.deps.webchatRepo.getSession(CONCIERGE_CHAT_ID)) ? CONCIERGE_CHAT_ID : null;
   }
 
   /**
-   * The Concierge chat's id. Creates the chat on first use; concurrent calls
-   * share one creation. Its model is picked once, here; the guardian changes
-   * it later with the chat's model picker.
+   * The main Concierge chat's id. Creates the chat on first use; concurrent calls
+   * share one creation. The initial model is picked here; later selections
+   * and quota failover are stored on the chat. A chat created before any
+   * provider was signed in has no model, so it gets one the first time a
+   * provider is available.
    */
   async ensureChatId(): Promise<string> {
-    if (await this.findChatId()) return CONCIERGE_CHAT_ID;
+    const existing = await this.deps.webchatRepo.getSession(CONCIERGE_CHAT_ID);
+    if (existing) {
+      if (!existing.largeModelSelection) {
+        const picked = this.pickModel();
+        if (picked) {
+          await this.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT_ID, picked);
+        }
+      }
+      return CONCIERGE_CHAT_ID;
+    }
     this.creating ??= this.createChat().finally(() => {
       this.creating = null;
     });
@@ -142,6 +213,85 @@ export class ConciergeService {
     return CONCIERGE_CHAT_ID;
   }
 
+  /** A Concierge chat that is not archived, as a list shows it, or null. */
+  async conciergeChat(chatId: string): Promise<ConciergeChatRef | null> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat || !isConciergeChat(chat) || chat.archivedAt) return null;
+    return { id: chat.id, name: chat.name, main: chat.id === CONCIERGE_CHAT_ID };
+  }
+
+  /**
+   * Where something that reports to Concierge chat `chatId` goes: that chat
+   * while it is a live Concierge chat, else the main chat. Null names the main
+   * chat. Answers null only while the main chat does not exist.
+   */
+  async deliveryChat(chatId: string | null | undefined): Promise<string | null> {
+    if (chatId && (await this.conciergeChat(chatId))) return chatId;
+    return this.findChatId();
+  }
+
+  /** The owner's Concierge chats: the main chat first, then the topic chats, oldest first. */
+  async listChats(): Promise<ConciergeChatRef[]> {
+    const main = await this.conciergeChat(await this.ensureChatId());
+    const topics = (await this.deps.webchatRepo.listSessions("active", "guardian"))
+      .filter((chat) => isConciergeChat(chat) && chat.id !== CONCIERGE_CHAT_ID)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((chat) => ({ id: chat.id, name: chat.name, main: false }));
+    return [...(main ? [main] : []), ...topics];
+  }
+
+  /**
+   * Starts a topic chat on the model the main chat uses, and answers it. With
+   * no name it is untitled (an empty name), and its first message names it.
+   */
+  async startTopicChat(name?: string): Promise<ConciergeChatRef> {
+    const trimmed = name?.trim() ?? "";
+    if (name !== undefined && !trimmed) throw new Error("A topic chat needs a name");
+    const main = await this.deps.webchatRepo.getSession(await this.ensureChatId());
+    const id = uuidv7();
+    await this.deps.webchatRepo.createSession(
+      id,
+      trimmed,
+      undefined,
+      undefined,
+      main?.largeModelSelection ?? this.pickModel(),
+      undefined,
+      CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    log.info("concierge topic chat started", { chatId: id });
+    return { id, name: trimmed, main: false };
+  }
+
+  /**
+   * A Concierge chat is being archived or deleted. Its follows, its unfinished
+   * tasks and the events owed to it move to the main chat, and the Concierge
+   * says so there. The main chat is never retired: this throws for it.
+   */
+  async retireChat(chatId: string, how: RetiredHow): Promise<void> {
+    if (chatId === CONCIERGE_CHAT_ID)
+      throw new Error("The main Concierge chat cannot be archived or deleted");
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!isConciergeChat(chat)) return;
+    const follows = (await this.attachedFollowing?.moveToMainChat(chatId)) ?? 0;
+    const tasks = await this.deps.tasks.repo.moveToMainChat(chatId);
+    log.info("concierge chat retired", { chatId, how, follows, tasks });
+    if (follows === 0 && tasks === 0) return;
+    const main = await this.findChatId();
+    if (!main) return;
+    void this.runSystemTurn(
+      main,
+      `<concierge_chat_retired name="${attr(chat?.name ?? "")}" how="${how}" follows="${follows}" tasks="${tasks}"/>`,
+      { quiet: true, inputLabel: "Concierge chat retired" },
+    ).catch((error: unknown) =>
+      log.warn("retired chat notice failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+
   // The YAML tier prefers Codex whenever it is signed in, so the choice is
   // stored on the chat: Sonnet answers fastest and calls tools most reliably,
   // and Codex's small model is next. An Anthropic-compatible provider serves
@@ -158,38 +308,166 @@ export class ConciergeService {
     return null;
   }
 
-  /** The runtime session id of the Concierge chat, or null before its first turn. */
+  /** Checks raw subscription availability before a turn in any Concierge chat. */
+  async switchIfExhausted(chatId: string) {
+    return this.move(chatId);
+  }
+
+  async switchForFailure(
+    chatId: string,
+    failure: AgentTurnFailure,
+    reason: FailoverReason,
+    crossOnly = false,
+  ) {
+    return this.move(chatId, failure, reason, crossOnly);
+  }
+
+  private async move(
+    chatId: string,
+    failure?: AgentTurnFailure,
+    reason?: FailoverReason,
+    crossOnly = false,
+  ) {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat || !isConciergeChat(chat)) return null;
+    const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
+    const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection);
+    const runtime = selected
+      ? null
+      : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+    const state = this.deps.aiToolState.get();
+    // An Auto chat whose first turn failed has no recorded provider yet.
+    const from =
+      selected?.providerId ??
+      runtime?.provider ??
+      failure?.provider ??
+      soleExhaustedProvider(state);
+    if (from !== "openai" && from !== "anthropic") return null;
+    if (failure && failure.provider !== from) return null;
+    const source = from === "openai" ? state.codex : state.claude;
+    if (from === "anthropic" ? claudeUsesApiKey(source) : source.accountType === "api_key")
+      return null;
+    reason ??= source.quotaExhausted
+      ? "quota"
+      : // Rome credits pay for Codex while its login is out, so that alone is no failure.
+        (from === "anthropic" && source.loggedIn === false) || source.needsReauth
+        ? "login"
+        : undefined;
+    if (!reason) return null;
+    const fromModel = selected?.model ?? runtime?.model ?? "";
+    const same =
+      !crossOnly &&
+      (reason === "model_limit" || (reason === "quota" && ambiguousQuota(failure?.message ?? "")))
+        ? sameProviderTarget(state, from, fromModel)
+        : null;
+    const cross = quotaSwitchTarget(state, from, true);
+    const candidates = reason === "model_limit" ? [same, cross] : [cross, same];
+    // A model each Concierge chat left, so one chat's move never blocks another's.
+    const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;
+    const target = candidates.find(
+      (candidate) =>
+        candidate &&
+        (this.leftModels.get(
+          modelKey(WEBCHAT_LARGE_MODEL_SELECTIONS[candidate.selectionId].model),
+        ) ?? 0) <= Date.now(),
+    );
+    if (!target) return null;
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
+    this.deps.agentSessionManager.peek(key)?.selectModel(target.selectionId);
+    this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
+    await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
+      {
+        type: "quota_switch",
+        from,
+        to: target.provider,
+        reason,
+        fromModel,
+        model: WEBCHAT_LARGE_MODEL_SELECTIONS[target.selectionId].model,
+      },
+    ]);
+    return { from, to: target.provider, selectionId: target.selectionId, reason };
+  }
+
+  /** The runtime session id of a Concierge chat, or null before its first turn. */
   async runtimeSessionId(chatId: string): Promise<string | null> {
-    const row = await this.deps.sessionManager.findReusableSession(
+    const stored = await this.deps.sessionRepository.current(
       webchatSessionKey(chatId),
       CONCIERGE_AGENT_ID,
     );
-    return row?.id ?? null;
+    return stored?.id ?? null;
   }
 
-  /** Runs `prompt` as a system turn in the Concierge chat. A no-op before its first turn. */
+  /**
+   * Where a Concierge turn runs, decided when it is sent: the chat it names
+   * while that is a live Concierge chat, else the main chat. A chat that never
+   * had a turn gets its runtime first, after the same quota check a send makes.
+   * The turn's input opens with the line naming the chat. Every backend turn
+   * passes here (alerts, digests, task events, recoveries and the wake-ups of
+   * `defer`), so a turn never lands in a chat the guardian closed.
+   */
+  async resolveTurn(params: BackendTurnParams): Promise<BackendTurnParams> {
+    if (params.channel !== "webchat" || !isConciergeAgent(params.agentName)) return params;
+    // Before the main chat exists, the turn stays where it was sent.
+    const chatId = (await this.deliveryChat(params.threadId)) ?? params.threadId;
+    const moved = chatId !== params.threadId;
+    const sessionId =
+      (!moved && params.sessionId) || (await this.runtimeOf(chatId)) || params.sessionId;
+    const chat = await this.conciergeChat(chatId);
+    const prompt =
+      chat && !params.prompt.startsWith("<concierge_chat ")
+        ? `${conciergeChatLine(chat)}\n\n${params.prompt}`
+        : params.prompt;
+    return { ...params, threadId: chatId, sessionId, prompt };
+  }
+
+  /**
+   * A Concierge chat's runtime session, opened when it has none yet, as its
+   * first message would open it: on a provider the quota check left it, read
+   * again after that check.
+   */
+  private async runtimeOf(chatId: string): Promise<string | null> {
+    const existing = await this.runtimeSessionId(chatId);
+    if (existing || !this.attached) return existing;
+    await this.switchIfExhausted(chatId);
+    return this.attached.chats.openSession(chatId);
+  }
+
+  /**
+   * Runs `prompt` as a system turn in a Concierge chat, or in the main chat
+   * when that chat is archived or gone. Answers whether a turn ran to its end:
+   * false when no runtime could be found or opened, and when the turn errored
+   * or was stopped.
+   */
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean } = {},
-  ): Promise<void> {
-    const sessionId = await this.runtimeSessionId(chatId);
-    if (!sessionId) return;
-    await this.deps.runBackendTurn(
-      {
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId,
-        channel: "webchat",
-        threadId: chatId,
-        prompt,
-      },
-      options,
-    );
+    options: { quiet?: boolean; inputLabel?: string } = {},
+  ): Promise<boolean> {
+    const params = await this.resolveTurn({
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: "",
+      channel: "webchat",
+      threadId: chatId,
+      prompt,
+    });
+    if (!params.sessionId) return false;
+    const outcome = await this.deps.runBackendTurn(params, options);
+    return outcome === "completed";
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
   attachTaskEvents(events: TaskEventCoalescer | null): void {
     this.taskEvents = events;
+  }
+
+  /** What the Concierge follows, once {@link startConciergeFollowing} has started it. */
+  attachFollowing(following: ConciergeFollowing | null): void {
+    this.attachedFollowing = following;
+  }
+
+  get following(): ConciergeFollowing {
+    if (!this.attachedFollowing) throw new Error("Following is not running");
+    return this.attachedFollowing;
   }
 
   /** The id of the todo row that links a chat, or null. Read before the chat is deleted. */
@@ -200,5 +478,15 @@ export class ConciergeService {
   /** A task chat was deleted. Its row stays, unlinked; the Concierge hears of it quietly. */
   chatDeleted(taskId: string): void {
     this.taskEvents?.mark({ taskId, kind: "chat_deleted", urgent: false });
+  }
+
+  /** Where a turn that failed before it started is told, once {@link startConciergeEvents} runs. */
+  attachFailedBeforeStart(handler: ((event: AgentTurnFailedBeforeStart) => void) | null): void {
+    this.failedBeforeStart = handler;
+  }
+
+  /** A dashboard turn failed before any agent session opened, so nothing else tells of it. */
+  turnFailedBeforeStart(event: AgentTurnFailedBeforeStart): void {
+    this.failedBeforeStart?.(event);
   }
 }

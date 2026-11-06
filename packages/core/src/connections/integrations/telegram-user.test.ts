@@ -23,7 +23,7 @@ import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
-import * as telegramUserModule from "../../channels/telegram-user.js" with {
+import * as telegramUserModule from "../kinds/telegram-user/telegram-user.js" with {
   rstest: "importActual",
 };
 
@@ -36,9 +36,6 @@ const fakeState: {
   probeError: unknown;
   /** Count of probe() ticks, so a test can assert the timer stopped. */
   probeCalls: number;
-  historyCalls: Array<{ threadId: string | null; windowHours: number }>;
-  /** What the fake fetchHistory answers. */
-  historyLines: ChannelMessage[];
   /** The handler the integration registered through onInbound. */
   inbound: ((msg: ChannelMessage) => Promise<void>) | null;
   /** What the fake saveIncomingAttachments was asked to materialize. */
@@ -53,14 +50,12 @@ const fakeState: {
   sent: [],
   probeError: null,
   probeCalls: 0,
-  historyCalls: [],
-  historyLines: [],
   inbound: null,
   materialized: [],
   probeGate: null,
 };
 
-rs.mock("../../channels/telegram-user.js", () => {
+rs.mock("../kinds/telegram-user/telegram-user.js", () => {
   // Keep the real classifier + error class; only replace the adapter transport.
   return {
     ...telegramUserModule,
@@ -91,15 +86,13 @@ rs.mock("../../channels/telegram-user.js", () => {
         fakeState.materialized.push(msg);
         return msg.attachments;
       }
-      async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-        fakeState.historyCalls.push({ threadId, windowHours });
-        return fakeState.historyLines;
-      }
     },
   };
 });
 
-const { TelegramUserSessionNotAuthorizedError } = await import("../../channels/telegram-user.js");
+const { TelegramUserSessionNotAuthorizedError } = await import(
+  "../kinds/telegram-user/telegram-user.js"
+);
 const {
   makeTelegramUserDescriptor,
   telegramUserMaterialFromSettings,
@@ -162,8 +155,6 @@ beforeEach(() => {
   fakeState.sent = [];
   fakeState.probeError = null;
   fakeState.probeCalls = 0;
-  fakeState.historyCalls = [];
-  fakeState.historyLines = [];
   fakeState.inbound = null;
   fakeState.materialized = [];
   fakeState.probeGate = null;
@@ -224,46 +215,6 @@ describe("telegram_user descriptor shape", () => {
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
     expect(fakeState.stopped).toBe(true);
-  });
-
-  // The flag is what gives the channel a \`messages\` port; the feature is what
-  // answers it. A Talk offering one without the other is unreachable or broken.
-  it("declares the history its Talk offers", () => {
-    expect(makeTelegramUserDescriptor().capabilities.talker?.history).toBe(true);
-  });
-
-  it("exposes provider-neutral history", async () => {
-    const h = buildTalker();
-    h.start();
-    await expect(
-      h.talker.history?.query({
-        chatId: "dialog-1" as ChatId,
-        limit: 20,
-      }),
-    ).resolves.toEqual([]);
-    expect(fakeState.historyCalls).toEqual([{ threadId: "dialog-1", windowHours: 24 }]);
-  });
-
-  it("marks the lines GramJS flags `out` as outbound and slices to the limit", async () => {
-    const line = (messageId: string, out: boolean): ChannelMessage => ({
-      channel: "telegram_user",
-      direction: "inbound",
-      messageId,
-      chatId: "dialog-1" as ChatId,
-      senderId: out ? "u-1" : "999",
-      senderDisplayName: out ? "Me" : "999",
-      text: `line ${messageId}`,
-      attachments: [],
-      timestamp: new Date(1_700_000_000_000),
-      thread: { kind: "group" },
-      raw: { out },
-    });
-    fakeState.historyLines = [line("1", false), line("2", true), line("3", false)];
-    const h = buildTalker();
-    h.start();
-    const lines = await h.talker.history?.query({ limit: 2 });
-    expect(lines).toStrictEqual([line("1", false), { ...line("2", true), direction: "outbound" }]);
-    expect(fakeState.historyCalls).toEqual([{ threadId: null, windowHours: 24 }]);
   });
 });
 

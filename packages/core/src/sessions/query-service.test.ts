@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SessionQueryService } from "./query-service.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { speakerFixture } from "../test/speakers.js";
 
 describe("SessionQueryService", () => {
   let testDb: TestDb;
@@ -21,7 +23,20 @@ describe("SessionQueryService", () => {
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
     testDb = createTestDb();
-    webchat = new WebChatRepository(testDb.db);
+    // Each channel records its account, `<channel>-bot` on a platform of its name.
+    for (const channel of [...Object.keys(links), "email"]) {
+      testDb.db
+        .insert(channels)
+        .values({
+          id: channel,
+          connectionKind: channel,
+          platform: channel,
+          platformAccountId: `${channel}-bot`,
+          createdAt: new Date(0),
+        })
+        .run();
+    }
+    webchat = new ChatsWebChatRepository(testDb.db);
     const codeReviewAgent = {
       metadata: { ownerType: "app" as const, ownerId: "code-review" },
     };
@@ -65,6 +80,29 @@ describe("SessionQueryService", () => {
     rs.useRealTimers();
     testDb.close();
   });
+
+  /** Rome's speaker on `channel` in the chat at `address`, as the channel's first message placed it. */
+  function channelSpeaker(input: {
+    channel: string;
+    address: string;
+    kind: "private" | "group";
+    agentName: string;
+  }): { id: string } {
+    const fixture = speakerFixture(testDb.db);
+    const chat = fixture.chat(
+      input.channel,
+      input.address,
+      input.kind === "private" ? "dm" : "group",
+      input.address,
+    );
+    const id = fixture.speaker({
+      id: `${input.channel}:${input.address}`,
+      chat,
+      accountId: `${input.channel}-bot`,
+      agentName: input.agentName,
+    });
+    return { id };
+  }
 
   async function seedRun(input: {
     messageId: string;
@@ -557,10 +595,10 @@ describe("SessionQueryService", () => {
       "code-review-agent",
     ],
   ] as const)("labels a channel conversation by the agent that answers it: %s", async (_label, channel, threadType, stored, pinnedMain, expected) => {
-    const { id } = await webchat.ensureChannelChat({
+    const { id } = channelSpeaker({
       channel,
-      threadId: "thread-1",
-      threadType,
+      address: "thread-1",
+      kind: threadType,
       agentName: stored,
     });
     if (pinnedMain) {
@@ -614,16 +652,16 @@ describe("SessionQueryService", () => {
   });
 
   it("finds a channel conversation by the name of the agent that answers it", async () => {
-    const follows = await webchat.ensureChannelChat({
+    const follows = channelSpeaker({
       channel: "telegram",
-      threadId: "thread-1",
-      threadType: "group",
+      address: "thread-1",
+      kind: "group",
       agentName: "main",
     });
-    const keeps = await webchat.ensureChannelChat({
+    const keeps = channelSpeaker({
       channel: "telegram",
-      threadId: "thread-2",
-      threadType: "group",
+      address: "thread-2",
+      kind: "group",
       agentName: "code-review-agent",
     });
     for (const [index, sessionId] of [follows.id, keeps.id].entries()) {

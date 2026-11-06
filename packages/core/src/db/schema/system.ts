@@ -37,7 +37,7 @@ export const sessions = sqliteTable(
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
     provider: text("provider"),
-    providerThreadId: text("provider_thread_id"),
+    modelThreadId: text("provider_thread_id"),
     /** The concrete model that produced the session's last successful turn,
      *  written by the same after-turn provider-info write. Null for legacy
      *  rows and sessions that never completed a turn. Nothing reads it yet. */
@@ -64,7 +64,7 @@ export const sessions = sqliteTable(
 // The checkpoint id is intentionally opaque to core persistence: Codex stores
 // its app-server turn id, while Claude stores the final top-level assistant
 // message UUID. Fork callers use it to branch at the selected turn instead of
-// implicitly branching from the provider thread's current head.
+// implicitly branching from the model thread's current head.
 export const sessionTurnCheckpoints = sqliteTable(
   "session_turn_checkpoints",
   {
@@ -73,7 +73,7 @@ export const sessionTurnCheckpoints = sqliteTable(
       .references(() => sessions.id, { onDelete: "cascade" }),
     turnId: text("turn_id").notNull(),
     provider: text("provider").notNull(),
-    providerThreadId: text("provider_thread_id").notNull(),
+    modelThreadId: text("provider_thread_id").notNull(),
     checkpointId: text("checkpoint_id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
@@ -89,7 +89,6 @@ export const persons = sqliteTable("persons", {
     enum: ["guardian", "inner-circle", "acquaintance", "other"],
   }).notNull(),
   profilePath: text("profile_path"),
-  approved: integer("approved", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
@@ -154,9 +153,9 @@ export const accountProfiles = sqliteTable(
     handle: text("handle"),
     avatarUrl: text("avatar_url"),
     // Where the row was learned. A platform's address book outranks the name a
-    // sender put on a message, so a message never overwrites a row the address
-    // book wrote.
-    source: text("source", { enum: ["address_book", "message"] }).notNull(),
+    // sender put on a message and the name a grant reported for Rome's own
+    // account, so neither overwrites a row the address book wrote.
+    source: text("source", { enum: ["address_book", "message", "connection"] }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
@@ -430,6 +429,10 @@ export const visitorProfiles = sqliteTable("visitor_profiles", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/** What an OAuth attempt was started for: connecting a provider, or signing
+ *  in to Rome. */
+export type OAuthAttemptIntent = "connect" | "sign-in";
+
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -441,6 +444,10 @@ export const oauthPendingAttempts = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     consumedAt: integer("consumed_at", { mode: "timestamp" }),
+    // What the attempt was started for, `connect` or `sign-in`, decided when it
+    // started so a session that changes during the round trip cannot change
+    // it. Null for an attempt started before Rome recorded it.
+    intent: text("intent").$type<OAuthAttemptIntent>(),
   },
   (table) => [index("idx_oauth_pending_attempts_expires_at").on(table.expiresAt)],
 );
@@ -470,15 +477,14 @@ export const projectSyncLinks = sqliteTable("project_sync_links", {
 });
 
 /**
- * Whether a `rome_sessions` row is a guardian chat: a channel row on the
- * webchat channel. The chat indexes below use it as their WHERE, and
- * `isWebchatChat` in `db/session-kind.ts` is the same text, which is what lets
- * SQLite page the sidebar off them. That needs the constants inlined rather
- * than bound, and the unary `+` keeps SQLite off the `source_channel` indexes,
- * which would find the chats but then sort them all.
+ * Whether a `rome_sessions` row is a guardian chat: a channel row whose
+ * session is a speaker in a dashboard chat. The chat indexes below use it as
+ * their WHERE, and `isWebchatChat` in `db/session-kind.ts` is the same text,
+ * which is what lets SQLite page the sidebar off them. That needs the
+ * constants inlined rather than bound.
  */
-export function webchatChatWhere(table: { type: SQLiteColumn; sourceChannel: SQLiteColumn }) {
-  return sql`(${table.type} = 'channel' and +${table.sourceChannel} = 'webchat')`;
+export function webchatChatWhere(table: { type: SQLiteColumn; chatPlatform: SQLiteColumn }) {
+  return sql`(${table.type} = 'channel' and ${table.chatPlatform} = 'webchat')`;
 }
 
 export const romeSessions = sqliteTable(
@@ -536,8 +542,19 @@ export const romeSessions = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     activityAt: integer("activity_at", { mode: "timestamp" }).notNull(),
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
+    // The chat this row's session is one of Rome's speakers in, its platform,
+    // and the platform's thread id when the speaker is in a thread. Null on rows that are
+    // not chats (subagent, fork, action runs). Vocabulary: docs/domains/chats.md.
+    // Nothing writes or reads them until the Chats switch.
+    chatId: integer("chat_id"),
+    chatPlatform: text("chat_platform"),
+    threadId: text("thread_id"),
+    // The one of Rome's accounts this speaker speaks as: the channel's platform
+    // account, else the channel's name, and `agent:<name>` on the dashboard.
+    accountId: text("account_id"),
   },
   (table) => [
+    index("idx_rome_sessions_chat").on(table.chatId, table.threadId),
     index("idx_rome_sessions_owner_key").on(table.ownerKey),
     index("idx_rome_sessions_project_path").on(table.projectPath),
     // Sidebar paging for guardian chats. See `webchatChatWhere`.
@@ -555,6 +572,103 @@ export const romeSessions = sqliteTable(
         sql`${table.type} = 'channel' AND ${table.sourceChannel} IS NOT NULL AND ${table.sourceThreadId} IS NOT NULL`,
       ),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
+  ],
+);
+
+// Chats' record of a chat: one row per place, however many of Rome's accounts
+// are in it. Vocabulary: docs/domains/chats.md#chat.
+export const chats = sqliteTable(
+  "chats",
+  {
+    // AUTOINCREMENT, so a deleted chat's id is never handed out again.
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    platform: text("platform").notNull(),
+    // The adapter's key for the chat, unique on its platform: the platform's
+    // group id, or both ends of a direct message (connections/chat-ids.ts). The
+    // dashboard keys a chat by its first speaker's session id. Chats compares it and
+    // never reads it.
+    key: text("key").notNull(),
+    kind: text("kind").notNull(), // 'dm' | 'group'
+    name: text("name"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_chats_key").on(table.platform, table.key)],
+);
+
+// What was said in a chat, once, whoever heard it. The sender is an account,
+// and for Rome's lines also the agent that spoke.
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    // AUTOINCREMENT, so a quote can never come to name a later line that took
+    // a deleted line's id.
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    // The adapter's key for the message, unique in its chat: the platform's
+    // message id. A redelivery, or a group message heard on two of Rome's
+    // accounts, finds its key on record. A dashboard line is keyed by its id.
+    key: text("key").notNull(),
+    // The platform's thread id; null in the open chat.
+    threadId: text("thread_id"),
+    senderAccountId: text("sender_account_id"),
+    // The agent that said the line. Set on exactly the lines from Rome.
+    senderAgent: text("sender_agent"),
+    senderName: text("sender_name"),
+    text: text("text").notNull(),
+    parts: text("parts").notNull(), // JSON array of blocks, as composed
+    // The line this one quotes, when Rome holds it.
+    replyToMessageId: integer("reply_to_message_id"),
+    saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A place's lines by time. Within one second lines keep the order they
+    // were recorded in.
+    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+  ],
+);
+
+// Agents' link from a turn to a chat message: the message prompted the turn,
+// was its answer, or was caught up on by it. One row per message per speaker, so
+// two of Rome's agents in one group each keep their own.
+export const agentTurnMessages = sqliteTable(
+  "agent_turn_messages",
+  {
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    // Null for a prompt still queued.
+    turnId: text("turn_id"),
+    role: text("role").notNull(), // 'prompt' | 'answer' | 'seen'
+    inputState: text("input_state").$type<AgentInputState>(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.sessionId] }),
+    index("idx_agent_turn_messages_turn").on(table.sessionId, table.turnId),
+  ],
+);
+
+// The adapters' address store: where one of Rome's accounts reaches a
+// chat, or a thread in it, when the chat's key is not its address, as on a
+// platform that gives a direct message an id of its own (Feishu's p2p chat,
+// Discord's DM channel). Chats never reads it.
+export const chatAddresses = sqliteTable(
+  "chat_addresses",
+  {
+    platform: text("platform").notNull(),
+    // Rome's account, by its platform id.
+    accountId: text("account_id").notNull(),
+    chatKey: text("chat_key").notNull(),
+    // The thread the address reaches, or '' for the chat itself.
+    threadId: text("thread_id").notNull().default(""),
+    address: text("address").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId, table.chatKey, table.threadId] }),
+    index("idx_chat_addresses_address").on(table.platform, table.accountId, table.address),
   ],
 );
 
@@ -583,10 +697,24 @@ export const conciergeTasks = sqliteTable(
     rank: integer("rank"),
     sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
     /**
-     * The Concierge chat message the row points back to. Not a foreign key: the
-     * message may be gone, and the panel then offers no jump. The text is never copied.
+     * The Concierge chat the row came from, where its results go. Null is the
+     * main chat, so a row from a deleted chat reports there.
      */
-    sourceMessageId: text("source_message_id"),
+    chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    /**
+     * The Concierge chat message the row points back to, in Chats. Cleared when
+     * the message goes, and the panel then offers no jump. The text is never
+     * copied.
+     */
+    sourceMessageId: integer("source_message_id").references(() => chatMessages.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * The legacy chat row the row pointed back to before the Chats switch,
+     * until the switch's backfill finds that row's message in Chats. Dropped
+     * with the legacy rows.
+     */
+    legacySourceMessageId: text("legacy_source_message_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */
@@ -598,6 +726,45 @@ export const conciergeTasks = sqliteTable(
     uniqueIndex("idx_concierge_tasks_session")
       .on(table.sessionId)
       .where(sql`${table.sessionId} is not null`),
+  ],
+);
+
+/**
+ * Events from what the Concierge follows that its triage kept. An `important`
+ * one goes to the Concierge after its batch, and every one, important or not,
+ * goes into the next digest. Only the triage's one-line description is kept,
+ * never the event's text. A row is owed until it was offered and digested, so
+ * a restart loses none.
+ */
+export const conciergeFollowItems = sqliteTable(
+  "concierge_follow_items",
+  {
+    id: text("id").primaryKey(),
+    /** The event's stable id from its connection, so a repeat is kept once. */
+    eventId: text("event_id").notNull(),
+    source: text("source").notNull(),
+    kind: text("kind").notNull(),
+    target: text("target").notNull(),
+    decision: text("decision", { enum: ["important", "digest"] }).notNull(),
+    /** Why triage decided so, in one line. */
+    reason: text("reason").notNull(),
+    /** What happened, in one line, as triage wrote it. */
+    line: text("line").notNull(),
+    url: text("url"),
+    /**
+     * The Concierge chat its follow reported to when triage kept it. Null is
+     * the main chat. No reference: a chat that is gone reports to the main chat.
+     */
+    chatId: text("chat_id"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /** Set once an important item went to the Concierge, or the hourly cap skipped it. */
+    offeredAt: integer("offered_at", { mode: "timestamp_ms" }),
+    /** Set once a digest included the item. */
+    digestedAt: integer("digested_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("idx_concierge_follow_items_event").on(table.eventId),
+    index("idx_concierge_follow_items_digest").on(table.digestedAt),
   ],
 );
 
@@ -872,6 +1039,10 @@ export const routines = sqliteTable("routines", {
 
   actionName: text("action_name").notNull(),
   args: text("args", { mode: "json" }).notNull(), // JSON array
+  // Whether a run's record keeps the payload that fired it. Off for a routine
+  // whose payloads are private and large, such as a whole mail: its runs then
+  // keep only the payload's size.
+  keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
 
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
@@ -1051,15 +1222,31 @@ export const channels = sqliteTable(
   ],
 );
 
-// Chats' record of a connected account: one row per connection that lets
-// Rome chat, keyed by that connection and holding the agent that speaks
-// through the account, null for none. It lives exactly as long as its
-// connection. Vocabulary: docs/domains/chats.md#connected-account.
-export const connectedAccounts = sqliteTable("connected_accounts", {
-  connectionId: text("connection_id")
-    .primaryKey()
-    .references(() => connections.id, { onDelete: "cascade" }),
-  agent: text("agent"),
+// Chats' record of a connected account: one row per account a connection that
+// lets Rome chat has reached, keyed by the account (the platform and the
+// platform's own id) and holding the agent that speaks through it, null for
+// none. The row outlives the connection, so disconnecting keeps the agent and
+// connecting the same account again finds it. A connection whose grant has
+// not reported its account yet has no row.
+// Vocabulary: docs/domains/chats.md#connected-account.
+export const connectedAccounts = sqliteTable(
+  "connected_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    agent: text("agent"),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
+);
+
+// An agent link the move to account keys could not place yet, because its
+// connection had not recorded the account it reaches. The boot pass that
+// records grants' accounts places each one, and a connection that reports its
+// account later takes its link then. A row goes once placed, or once its
+// connection is gone.
+export const connectedAccountsUnplaced = sqliteTable("connected_accounts_unplaced", {
+  connectionId: text("connection_id").primaryKey(),
+  agent: text("agent").notNull(),
 });
 
 // The grant ledger. Rows record outcomes only — never step/flow state

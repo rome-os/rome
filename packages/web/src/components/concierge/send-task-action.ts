@@ -1,5 +1,4 @@
 import type { ConciergeTaskAction, ConciergeTaskDto } from "@rome/api-types/concierge";
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import { postSessionTurnJson } from "@/lib/chat-api";
 import { randomUUID } from "@/lib/random-uuid";
 import { beginPending, failPending } from "./task-pending";
@@ -29,22 +28,24 @@ export function pressText(
 }
 
 /**
- * Presses a panel button: it sends the Concierge the same message the guardian
- * could type, and the Concierge does the work and writes the row. The priority
+ * Presses a panel button: it sends the Concierge, in the chat the row came
+ * from, the same message the guardian could type, and the Concierge does the work and writes the row. The priority
  * is `next`: the message joins a running turn or waits for it, and never cuts it
  * off. With `replyToMessageId` the message is a reply to that message.
  */
 export async function sendTaskAction(
-  task: Pick<ConciergeTaskDto, "id" | "updatedAt">,
+  task: Pick<ConciergeTaskDto, "id" | "updatedAt" | "conciergeChat">,
   action: ConciergeTaskAction,
   text: string,
   replyToMessageId?: string,
 ): Promise<void> {
   // The message keeps this id, so the press can be matched with the turn that takes it in.
   const inputId = randomUUID();
-  beginPending(task.id, action, task.updatedAt, inputId);
+  // The press goes to the Concierge chat the row came from, where its results go.
+  const chatId = task.conciergeChat.id;
+  beginPending(task.id, action, task.updatedAt, inputId, chatId);
   try {
-    const sent = await postSessionTurnJson(CONCIERGE_CHAT_ID, {
+    const sent = await postSessionTurnJson(chatId, {
       inputId,
       text,
       priority: "next",

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import { REST, type RequestMethod, Routes } from "discord.js";
-import type { DiscordAdapter } from "../../../channels/discord.js";
+import { REST, type RequestMethod, type RESTOptions, Routes } from "discord.js";
+import { DiscordAdapter } from "../../../connections/kinds/discord/discord.js";
 import { comparable, loadCapture } from "./capture.js";
 import textCapture from "./captures/discord-text.capture.json" with { type: "json" };
 import { DISCORD_DM, DISCORD_TOKEN, DiscordPeer } from "./discord.js";

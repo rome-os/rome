@@ -1,7 +1,6 @@
-import { sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { describe, expect, it } from "@rstest/core";
 import type { ActionResult, RomeAppContext } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
+import type { ChatLine, ChatReads, RecentChat } from "@rome-os/app-runtime/chats";
 import { gatherGuardianContext } from "./guardian-context.js";
 
 const now = Date.UTC(2026, 9, 23, 18, 0, 0);
@@ -42,37 +41,46 @@ const cloudProfile = {
   },
 };
 
-let testDb: TestDb;
-beforeEach(() => {
-  testDb = createTestDb();
-});
-afterEach(() => testDb.close());
-
-function chat(id: string, name: string, extra: { owner?: string; archived?: boolean } = {}) {
-  testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, owner_key, archived_at, created_at, activity_at)
-    VALUES (${id}, ${name}, 'channel', 'webchat', ${id}, ${extra.owner ?? null},
-      ${extra.archived ? sec(1) : null}, ${sec(100)}, ${sec(1)})
-  `);
-}
-
-function message(
-  id: string,
-  session: string,
-  role: string,
-  content: string,
-  hoursAgo: number,
-  actor?: object,
-) {
-  testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, created_at, actor)
-    VALUES (${id}, ${session}, ${role}, ${content}, ${sec(hoursAgo)}, ${actor ? JSON.stringify(actor) : null})
-  `);
-}
-
-function appContext(profile: ActionResult = { status: "error", error: "unavailable" }) {
+/** Chat reads over the chats given, each with its lines, as a host that
+ *  offers Chats hands them. */
+function fakeReads(
+  chats: Array<{ chat: Partial<RecentChat> & { sessionId: string }; lines: ChatLine[] }>,
+): ChatReads {
   return {
-    db: { connection: testDb.db },
+    async recentChats({ since }) {
+      return chats
+        .filter(({ lines }) => lines.some((line) => line.createdAt >= since))
+        .map(({ chat }) => ({
+          chat: { platform: "webchat", id: 1 },
+          name: "Chat",
+          threadName: null,
+          ownerKey: "guardian",
+          archived: false,
+          channel: null,
+          agentName: null,
+          projectName: null,
+          projectPath: null,
+          startedAt: new Date(0),
+          ...chat,
+        }));
+    },
+    async transcript(sessionId) {
+      return chats.find(({ chat }) => chat.sessionId === sessionId)?.lines ?? [];
+    },
+    async traces() {
+      return [];
+    },
+  };
+}
+
+type FakeChat = Parameters<typeof fakeReads>[0][number];
+
+function appContext(
+  profile: ActionResult = { status: "error", error: "unavailable" },
+  chats: FakeChat[] = [],
+) {
+  return {
+    repositories: { chats: fakeReads(chats) },
     runAction: async (name: string) => {
       expect(name).toBe("get_guardian_cloud_profile");
       return profile;
@@ -80,23 +88,47 @@ function appContext(profile: ActionResult = { status: "error", error: "unavailab
   } as unknown as RomeAppContext;
 }
 
-describe("gatherGuardianContext", () => {
-  it("reads only the guardian's own recent words in their own chats", async () => {
-    const guardian = { kind: "guardian", userId: "g" };
-    const visitor = { kind: "visitor", accountId: "v", email: "v@example.com" };
-    chat("mine", "Bakery orders");
-    chat("visited", "Shared demo");
-    chat("theirs", "Visitor chat", { owner: "visitor:v" });
-    chat("old", "Archived", { archived: true });
-    message("m1", "mine", "user", text("Can you track pickup orders?"), 2, guardian);
-    message("m2", "mine", "assistant", text("AGENT REPLY"), 2);
-    message("m3", "mine", "user", text("too old"), 60);
-    message("m4", "visited", "user", text("guardian start"), 3);
-    message("m5", "visited", "user", text("visitor request"), 3, visitor);
-    message("m6", "theirs", "user", text("owner request"), 3);
-    message("m7", "old", "user", text("archived note"), 3);
+function line(role: ChatLine["role"], content: string, hoursAgo: number, senderId?: string) {
+  return {
+    key: `${role}-${hoursAgo}-${content}`,
+    turnId: null,
+    role,
+    senderId: senderId ?? null,
+    senderName: null,
+    content,
+    createdAt: new Date(sec(hoursAgo) * 1000),
+  };
+}
 
-    const { chats } = await gatherGuardianContext(appContext(), "UTC", now);
+describe("gatherGuardianContext chats", () => {
+  it("reads only the guardian's own recent words in their own chats", async () => {
+    const context = appContext(undefined, [
+      {
+        chat: { sessionId: "mine", name: "Bakery orders" },
+        lines: [
+          line("user", text("Can you track pickup orders?"), 2, "guardian"),
+          line("assistant", text("AGENT REPLY"), 2),
+          line("user", text("too old"), 60),
+        ],
+      },
+      {
+        chat: { sessionId: "visited", name: "Shared demo" },
+        lines: [
+          line("user", text("guardian start"), 3),
+          line("user", text("visitor request"), 3, "visitor:v"),
+        ],
+      },
+      {
+        chat: { sessionId: "theirs", name: "Visitor chat", ownerKey: "visitor:v" },
+        lines: [line("user", text("owner request"), 3)],
+      },
+      {
+        chat: { sessionId: "old", name: "Archived", archived: true },
+        lines: [line("user", text("archived note"), 3)],
+      },
+    ]);
+
+    const { chats } = await gatherGuardianContext(context, "UTC", now);
 
     expect(chats).toContain('Chat "Bakery orders"');
     expect(chats).toContain("Can you track pickup orders?");
@@ -111,16 +143,27 @@ describe("gatherGuardianContext", () => {
       expect(chats).not.toContain(absent);
     }
   });
+});
 
+describe("gatherGuardianContext", () => {
   it("clips long messages and has no chats when nothing qualifies", async () => {
-    chat("mine", "Long");
-    message("m1", "mine", "user", text("x".repeat(1000)), 1);
-    const { chats } = await gatherGuardianContext(appContext(), "UTC", now);
+    const long = [
+      {
+        chat: { sessionId: "mine", name: "Long" },
+        lines: [line("user", text("x".repeat(1000)), 1)],
+      },
+    ];
+    const { chats } = await gatherGuardianContext(appContext(undefined, long), "UTC", now);
     expect(chats).toContain(`${"x".repeat(400)}…`);
     expect(chats).not.toContain("x".repeat(401));
 
-    testDb.db.run(sql`DELETE FROM rome_agent_messages`);
     expect((await gatherGuardianContext(appContext(), "UTC", now)).chats).toBeNull();
+  });
+
+  it("leaves the chats out when the host offers no chat reads", async () => {
+    const context = { ...appContext(), repositories: {} } as RomeAppContext;
+
+    expect((await gatherGuardianContext(context, "UTC", now)).chats).toBeNull();
   });
 
   it("renders the whole cloud profile as Markdown without depending on its schema", async () => {

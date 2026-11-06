@@ -28,7 +28,7 @@
     "@rstest/core": "^0.11.11",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",
-    "electron": "^44.9.3",
+    "electron": "^45.2.3",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "rome-desktop-base-web": "workspace:*",

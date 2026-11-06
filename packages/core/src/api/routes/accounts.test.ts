@@ -1,23 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
-import {
-  accountRef,
-  type AccountDirectory,
-  type AccountStream,
-  type DirectoryAccount,
-  type StreamAccount,
-} from "@rome/api-types/people";
+import { accountRef, type AccountDirectory, type DirectoryAccount } from "@rome/api-types/people";
 import { accountsRoutes } from "./accounts.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 
-// The two account reads over one set of sources — the links, the sentinel log
-// and the channel mirrors. GET /accounts is the contacts list: every account
-// Rome has observed, by name, carrying nothing about what anyone said. GET
-// /accounts/stream is the recents surface: the accounts something has happened
-// on, newest first, with the line to preview. These tests pin what each
-// answers, what each filter narrows, and that the sentinel a dismissal is filed
-// under never reaches a client.
+// The account read over its sources — the links, the sentinel log and the
+// channel mirrors. GET /accounts is the contacts list: every account Rome has
+// observed, by name, carrying nothing about what anyone said. These tests pin
+// what it answers, what each filter narrows, and that the sentinel a dismissal
+// is filed under never reaches a client.
 
 const SILENT_JID = "15550001111@s.whatsapp.net";
 const TALKING_JID = "15550002222@s.whatsapp.net";
@@ -73,7 +65,6 @@ describe("Accounts API", () => {
     waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "whatsapp", id: LINKED_JID }],
     });
 
@@ -95,12 +86,6 @@ describe("Accounts API", () => {
     const res = await app.request(`/accounts${query}`);
     expect(res.status).toBe(200);
     return (await res.json()) as AccountDirectory;
-  }
-
-  async function fetchStream(query = ""): Promise<AccountStream> {
-    const res = await app.request(`/accounts/stream${query}`);
-    expect(res.status).toBe(200);
-    return (await res.json()) as AccountStream;
   }
 
   const find = <T extends DirectoryAccount>(page: { accounts: T[] }, ref: string): T | undefined =>
@@ -130,177 +115,6 @@ describe("Accounts API", () => {
         "state",
       ]);
     }
-  });
-
-  it("previews the newest thing on a stream row, and says nothing else about it", async () => {
-    const stream = await fetchStream();
-    const tina = find(stream, `whatsapp:${TALKING_JID}`)!;
-    expect(tina.latest).toEqual({
-      source: "whatsapp",
-      timestamp: Math.floor(new Date("2026-08-17T10:00:00Z").getTime() / 1000),
-      preview: "hello from tina",
-    });
-    // The preview is the whole of what a stream row says about a history. No
-    // count rides beside it: none is read on this surface, so a client cannot
-    // start rendering one.
-    for (const account of stream.accounts) {
-      expect(Object.keys(account).sort()).toEqual([
-        "addresses",
-        "channel",
-        "channelUserId",
-        "displayName",
-        "latest",
-        "personId",
-        "personName",
-        "state",
-      ]);
-    }
-  });
-
-  describe("overlapping stream reads", () => {
-    /** Hold the WhatsApp store's head reads until `open` is called, counting
-     *  each account they are asked about. */
-    function gateWhatsAppHeads() {
-      const store = deps.channels.find((channel) => channel.name === "whatsapp")?.messages
-        ?.byAccount;
-      if (!store) throw new Error("the test deps carry a WhatsApp store");
-      const latest = store.latest.bind(store);
-      const asked: string[] = [];
-      let open!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        open = resolve;
-      });
-      const control = { failing: false };
-      store.latest = async (accounts) => {
-        asked.push(...accounts.flatMap((account) => account.addresses));
-        await gate;
-        if (control.failing) throw new Error("store unavailable");
-        return latest(accounts);
-      };
-      return { asked, open, control };
-    }
-
-    /**
-     * Count finished directory reads. Naming is a directory read's last step;
-     * once it has answered, everything up to joining the heads is synchronous,
-     * so by the next timer tick that read has joined.
-     */
-    function countDirectoryReads() {
-      const names = deps.accountNames;
-      const displayNames = names.displayNames.bind(names);
-      const count = { done: 0 };
-      names.displayNames = async (accounts) => {
-        const answer = await displayNames(accounts);
-        count.done += 1;
-        return answer;
-      };
-      return count;
-    }
-
-    /** Wait until `check` holds, failing after a deadline rather than guessing
-     *  how long the reads in between take. */
-    async function until(check: () => boolean) {
-      const deadline = Date.now() + 2_000;
-      while (!check()) {
-        if (Date.now() > deadline) throw new Error("timed out waiting");
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    }
-
-    it("share the head reads, and read the directory afresh each time", async () => {
-      const { asked, open } = gateWhatsAppHeads();
-      const first = fetchStream();
-      await until(() => asked.includes(TALKING_JID));
-
-      // A write lands while the first read is waiting on its heads.
-      await deps.peopleRepo.dismiss({ platform: "whatsapp", id: TALKING_JID });
-      const directory = countDirectoryReads();
-      const second = fetchStream();
-      await until(() => directory.done === 1);
-      open();
-
-      const [before, after] = await Promise.all([first, second]);
-      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
-      expect(find(before, `whatsapp:${TALKING_JID}`)?.state).toBe("unlinked");
-      expect(find(after, `whatsapp:${TALKING_JID}`)?.state).toBe("dismissed");
-      expect(find(after, `whatsapp:${TALKING_JID}`)?.latest.preview).toBe("hello from tina");
-    });
-
-    it("read heads of their own for an account the running read did not cover", async () => {
-      const { asked, open } = gateWhatsAppHeads();
-      const first = fetchStream();
-      await until(() => asked.includes(TALKING_JID));
-
-      const NEW_JID = "15550004444@s.whatsapp.net";
-      await deps.whatsAppStoreRepo.upsertContacts([
-        { jid: NEW_JID, phoneNumber: "15550004444", name: "Newcomer" },
-      ]);
-      await deps.whatsAppStoreRepo.upsertMessages([
-        {
-          id: "wa-new",
-          chatJid: NEW_JID,
-          senderJid: NEW_JID,
-          fromMe: false,
-          timestamp: new Date("2026-08-17T12:00:00Z"),
-          type: "text",
-          text: "just arrived",
-          hasMedia: false,
-        },
-      ]);
-      const second = fetchStream();
-      await until(() => asked.includes(NEW_JID));
-      // A third read joins both: the first read's heads and the second's.
-      const directory = countDirectoryReads();
-      const third = fetchStream();
-      await until(() => directory.done === 1);
-      open();
-
-      const [before, after, latest] = await Promise.all([first, second, third]);
-      expect(find(before, `whatsapp:${NEW_JID}`)).toBeUndefined();
-      expect(find(after, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
-      expect(find(latest, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
-      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
-      expect(asked.filter((address) => address === NEW_JID)).toHaveLength(1);
-    });
-
-    it("fail together on a failed shared read, and do not keep it", async () => {
-      const { asked, open, control } = gateWhatsAppHeads();
-      control.failing = true;
-      const first = app.request("/accounts/stream");
-      await until(() => asked.includes(TALKING_JID));
-      const directory = countDirectoryReads();
-      const second = app.request("/accounts/stream");
-      await until(() => directory.done === 1);
-      open();
-
-      expect((await first).status).toBe(500);
-      expect((await second).status).toBe(500);
-      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
-
-      control.failing = false;
-      expect(find(await fetchStream(), `whatsapp:${TALKING_JID}`)?.latest.preview).toBe(
-        "hello from tina",
-      );
-      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(2);
-    });
-
-    it("read afresh once the running read has settled", async () => {
-      const { asked, open } = gateWhatsAppHeads();
-      open();
-      await fetchStream();
-      await fetchStream();
-      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(2);
-    });
-  });
-
-  it("keeps an account nothing has happened on off the stream", async () => {
-    const stream = await fetchStream();
-    expect(find(stream, `whatsapp:${SILENT_JID}`)).toBeUndefined();
-    // Including under a search: an account with no dynamic has no position in
-    // an order made of timestamps, whatever was typed.
-    expect((await fetchStream("?q=silent%20sam")).accounts).toEqual([]);
-    // The contacts list is where that contact is looked up.
-    expect(find(await fetchPage("?q=silent%20sam"), `whatsapp:${SILENT_JID}`)).toBeDefined();
   });
 
   it("names the person a linked account belongs to, and keeps the platform's own name", async () => {
@@ -335,7 +149,6 @@ describe("Accounts API", () => {
 
     const res = await app.request("/accounts?state=archived");
     expect(res.status).toBe(400);
-    expect((await app.request("/accounts/stream?state=archived")).status).toBe(400);
   });
 
   it("counts every state over the whole directory, not over the page", async () => {
@@ -356,19 +169,16 @@ describe("Accounts API", () => {
     const silent = find(page, `whatsapp:${SILENT_JID}`)!;
     expect(silent.displayName).toBe("Silent Sam");
     // The whole address book is the listing, so the unlinked count is everyone
-    // Rome has not placed rather than the senders waiting on a decision. The
-    // stream's counts answer that narrower question.
+    // Rome has not placed rather than the senders waiting on a decision.
     expect(page.counts.unlinked).toBe(
       page.accounts.filter((account) => account.state === "unlinked").length,
     );
-    expect((await fetchStream()).counts.unlinked).toBeLessThan(page.counts.unlinked);
   });
 
   it("lists an account on a channel with no history at all", async () => {
     const linkedSilent = await deps.peopleRepo.create({
       displayName: "Quiet Link",
       bondLevel: "other",
-      approved: true,
       links: [{ platform: "signal", id: "sig-quiet" }],
     });
     const account = find(await fetchPage(), "signal:sig-quiet")!;
@@ -443,12 +253,6 @@ describe("Accounts API", () => {
     expect(split).toHaveLength(1);
     expect(accountRef(split[0])).toBe(`whatsapp:${phoneJid}`);
     expect(split[0].addresses).toEqual([phoneJid, lidJid].sort());
-    // And one row on the stream too, previewing what the other address said.
-    const streamed = (await fetchStream()).accounts.filter((account) =>
-      account.addresses.includes(lidJid),
-    );
-    expect(streamed).toHaveLength(1);
-    expect(streamed[0].latest.preview).toBe("from the lid address");
   });
 
   it("pages by an opaque cursor that visits every account exactly once", async () => {
@@ -475,13 +279,6 @@ describe("Accounts API", () => {
 
   it("rejects a cursor that names no position rather than answering the first page", async () => {
     expect((await app.request("/accounts?cursor=not-a-cursor")).status).toBe(400);
-    expect((await app.request("/accounts/stream?cursor=not-a-cursor")).status).toBe(400);
-    // The two orders are different orders: a position in one names none in the
-    // other, and resuming with the wrong one would skip or repeat rows.
-    const streamCursor = (await fetchStream("?limit=1")).nextCursor!;
-    expect((await app.request(`/accounts?cursor=${encodeURIComponent(streamCursor)}`)).status).toBe(
-      400,
-    );
   });
 
   it("orders the directory by display name", async () => {
@@ -490,11 +287,5 @@ describe("Accounts API", () => {
     expect(names).toEqual(
       [...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
     );
-  });
-
-  it("orders the stream by newest activity", async () => {
-    const stream: AccountStream = await fetchStream();
-    const timestamps = stream.accounts.map((account: StreamAccount) => account.latest.timestamp);
-    expect(timestamps).toEqual([...timestamps].sort((a, b) => b - a));
   });
 });

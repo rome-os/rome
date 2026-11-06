@@ -1,15 +1,12 @@
-import { createAppLogger, defineAction, z } from "@rome-os/app-runtime";
+import { createAppLogger, defineAction, getCurrentActionContext, z } from "@rome-os/app-runtime";
 import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 import type { SendUserMessageOutput } from "./types.js";
 export type { SendUserMessageOutput } from "./types.js";
 
 const log = createAppLogger("send-user-message");
 
-// This action drives the same HTTP routes the dashboard composer uses, so the
-// message is a real guardian turn — user-attributed transcript entry, session
-// naming, /skill expansion, SSE stream — not a backend continuation. In-process
-// callers hit the loopback listener, which resolves as the guardian by design
-// (core lib/guardian-session.ts): the container is the security boundary.
+// Only the loopback listener accepts the source attribution. The
+// turn actor stays unchanged, independently of who sent the message.
 function getInternalApiBaseUrl(): string {
   const port = process.env.INTERNAL_API_PORT?.trim() || "4141";
   return `http://127.0.0.1:${port}`;
@@ -20,7 +17,7 @@ export const sendUserMessageInputSchema = z.object({
     .string()
     .min(1)
     .describe(
-      "The message, written exactly as the guardian would type it into the webchat composer " +
+      "The message as webchat composer input " +
         "(markdown; a leading /skill-name invokes that skill, same as typed input).",
     ),
   sessionId: z
@@ -148,12 +145,17 @@ export function createSendUserMessageAction(
         sessionId = session.id;
       }
 
+      const context = getCurrentActionContext();
       const res = await fetchImpl(
         `${baseUrl}/api/chat/sessions/${encodeURIComponent(sessionId)}/turns`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: input.text }),
+          body: JSON.stringify({
+            text: input.text,
+            automatedSource: context?.initiator ?? "unknown",
+            automatedActorKind: context?.actorKind ?? "anonymous",
+          }),
         },
       );
       if (!res.ok) {
@@ -191,18 +193,16 @@ export function createSendUserMessageAction(
         }
       }
 
-      log.info("sent guardian webchat message", { sessionId, turnId, createdSession });
+      log.info("sent automated webchat message", { sessionId, turnId, createdSession });
       const data: SendUserMessageOutput = { sessionId, turnId, createdSession };
       return { status: "ok", data };
     },
     // Verbatim message text, like summon's prompt: the guardian must see the
-    // words that will be said in their name, not a paraphrase. The raw session
+    // words that will be sent, not a paraphrase. The raw session
     // UUID stays out of the card (same rule as send_message's threadId).
     preview: ({ text, sessionId, agentName }) => ({
       kind: "generic",
-      title: sessionId
-        ? "Continue a webchat conversation as the guardian"
-        : "Start a webchat conversation as the guardian",
+      title: sessionId ? "Continue a webchat conversation" : "Start a webchat conversation",
       summary: text,
       ...(sessionId ? {} : { fields: [{ label: "Agent", value: agentName?.trim() || "main" }] }),
     }),

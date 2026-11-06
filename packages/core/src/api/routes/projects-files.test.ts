@@ -21,6 +21,7 @@ import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { readArchivePaths } from "../../test/file-browser.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
 // Projects-files routes over the real stack (edge-only fakes, #763): the
 // projects root is a real temp directory reached via ROME_PROJECTS_ROOT,
@@ -132,7 +133,7 @@ describe("Projects files API", () => {
     process.env.PATH = `${binDir}:${process.env.PATH}`;
 
     testDb = createTestDb();
-    webchatRepo = new WebChatRepository(testDb.db);
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
     settingsRepo = new SettingsRepository(testDb.db);
   });
 

@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { createWorkspaceStore, WorkspaceStoreContext } from "./workspace-store";
 
@@ -13,19 +13,30 @@ type Selection = {
 const browser: {
   onSelectionChange?: (selection: Selection) => void;
   shown: (string | undefined)[];
-} = { shown: [] };
+  initialFolders: (string | undefined)[];
+  selection?: { path: string; type: string } | null;
+} = { shown: [], initialFolders: [] };
 const updateProjectsSelection = rs.fn();
 
 rs.mock("@/components/file-browser-page", () => ({
   FileBrowserPage: (props: {
     onSelectionChange?: (selection: Selection) => void;
-    externalSelection?: { path: string } | null;
+    externalSelection?: { path: string; type: string } | null;
+    initialSelectedFolderPath?: string;
   }) => {
     browser.onSelectionChange = props.onSelectionChange;
+    browser.selection = props.externalSelection;
+    // The real page freezes this prop at mount, so only the first render counts.
+    if (browser.initialFolders.length === 0) {
+      browser.initialFolders.push(props.initialSelectedFolderPath);
+    }
     const path = props.externalSelection?.path;
     if (browser.shown.at(-1) !== path) browser.shown.push(path);
     return null;
   },
+}));
+rs.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
 }));
 rs.mock("./use-free-cells", () => ({
   updateProjectsSelection: (...args: unknown[]) => updateProjectsSelection(...args),
@@ -61,10 +72,49 @@ beforeEach(() => {
   updateProjectsSelection.mockClear();
   browser.onSelectionChange = undefined;
   browser.shown = [];
+  browser.initialFolders = [];
+  browser.selection = undefined;
 });
 afterEach(() => {
   cleanup();
   rs.unstubAllGlobals();
+});
+
+describe("ProjectsWidget restore", () => {
+  it("pre-selects the root folder when nothing is saved", () => {
+    mount();
+    expect(browser.initialFolders).toEqual(["projects"]);
+    expect(screen.queryByText("view.loadingFile")).toBeNull();
+  });
+
+  it("pre-selects no folder when a saved location is restored", async () => {
+    stubResolve("file");
+    mount("projects/docs/a.md");
+    expect(browser.initialFolders).toEqual([undefined]);
+    expect(screen.getByText("view.loadingFile")).toBeTruthy();
+    await waitFor(() =>
+      expect(browser.selection).toEqual({ path: "projects/docs/a.md", type: "file" }),
+    );
+    expect(screen.queryByText("view.loadingFile")).toBeNull();
+  });
+
+  it("falls back to the root folder when the saved location is missing", async () => {
+    stubResolve("missing");
+    mount("projects/gone");
+    expect(browser.initialFolders).toEqual([undefined]);
+    await waitFor(() => expect(browser.selection).toEqual({ path: "projects", type: "directory" }));
+    expect(screen.queryByText("view.loadingFile")).toBeNull();
+  });
+
+  it("falls back to the root folder when the lookup fails", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response("", { status: 503 })),
+    );
+    mount("projects/a.md");
+    await waitFor(() => expect(browser.selection).toEqual({ path: "projects", type: "directory" }));
+    expect(updateProjectsSelection).not.toHaveBeenCalled();
+  });
 });
 
 describe("ProjectsWidget location persistence", () => {

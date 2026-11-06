@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
-import { romeAgentMessages } from "../../db/schema.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 
@@ -15,6 +14,7 @@ interface WireMessage {
 interface WirePage {
   messages: WireMessage[];
   nextCursor: string | null;
+  layout?: unknown;
 }
 
 const SESSION_ID = "paging-session";
@@ -25,11 +25,14 @@ describe("GET /chat/sessions/:id/messages paging", () => {
   let testDb: TestDb;
   let deps: TestDeps;
 
-  async function setCreatedAt(id: string, seconds: number) {
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date(seconds * 1000) })
-      .where(eq(romeAgentMessages.id, id));
+  /** Moves row `id` to `seconds`, the session's own row or its chat line
+   *  alike. A session sees what was said in its chat since it was made, so
+   *  it moves back with them. */
+  function setCreatedAt(id: string, seconds: number) {
+    testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${seconds} WHERE id = ${id}`);
+    testDb.db.run(sql`UPDATE chat_messages SET said_at = ${seconds} WHERE key = ${id}`);
+    testDb.db.run(sql`UPDATE rome_sessions SET created_at = min(created_at, ${seconds})
+      WHERE id = ${SESSION_ID}`);
   }
 
   /** One turn: user, trace (with blocks), assistant, all inside `startSeconds`..+2. */
@@ -115,6 +118,28 @@ describe("GET /chat/sessions/:id/messages paging", () => {
 
     expect(page.messages.map((m) => m.id)).toEqual(["u-3", "t-3", "a-3", "u-4", "t-4", "a-4"]);
     expect(page.nextCursor).toEqual(expect.any(String));
+  });
+
+  it("carries the saved layout on the first page only", async () => {
+    for (let i = 0; i < 3; i += 1) await seedTurn(i, BASE_SECONDS + i * 10);
+    const layout = [{ id: "w1", type: "projects", order: 1 }];
+    await deps.webchatRepo.saveLayout(SESSION_ID, layout);
+
+    const first = await getPage("?limit=1");
+    expect(first.layout).toEqual(layout);
+    expect(first.nextCursor).toEqual(expect.any(String));
+
+    const older = await getPage(`?limit=1&before=${encodeURIComponent(first.nextCursor ?? "")}`);
+    expect(older.messages.length).toBeGreaterThan(0);
+    expect("layout" in older).toBe(false);
+  });
+
+  it("reports a null layout on the first page when none was saved", async () => {
+    await seedTurn(0, BASE_SECONDS);
+
+    const page = await getPage("?limit=5");
+
+    expect(page.layout).toBeNull();
   });
 
   it("walks back through every turn exactly once and ends with a null cursor", async () => {

@@ -10,7 +10,7 @@ import {
 } from "./agent-session-key.js";
 
 // Stored rows look sessions up by these exact strings, so a builder that
-// changes its output strands every existing provider thread.
+// changes its output strands every existing model thread.
 describe("agent session keys", () => {
   it("spells webchat keys as stored rows expect", () => {
     expect(webchatSessionKey("chat-1")).toBe("webchat:chat-1");

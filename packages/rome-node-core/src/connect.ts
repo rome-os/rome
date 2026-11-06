@@ -6,7 +6,7 @@ import { connectGateway } from "./client.js";
 import { createNodeSocket } from "./socket.js";
 import type { DeviceSession } from "./login.js";
 import type { CredentialStore } from "./storage.js";
-import { createExecutor } from "./executor.js";
+import { createExecutor, type HostAudit } from "./executor.js";
 import { validId } from "./protocol.js";
 
 export type HostCredential = DeviceSession & { name: string };
@@ -23,6 +23,8 @@ export interface HostOptions {
   credentials: CredentialStore<HostCredential>;
   authorize(cloudUrl: string, name: string, signal: AbortSignal): Promise<DeviceSession>;
   onEvent?(event: HostEvent): void;
+  /** Every remote request is recorded here before it runs. An unavailable log refuses them. */
+  audit: HostAudit;
 }
 
 /** Runs until aborted or authorization ends. The caller owns interaction and credential storage. */
@@ -82,6 +84,7 @@ export async function connectHost(options: HostOptions): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const executor = createExecutor(
       active.name,
+      options.audit,
       (message) => connection.send(message),
       [active.token],
       (frame) => connection.sendFrame(frame),
@@ -93,13 +96,15 @@ export async function connectHost(options: HostOptions): Promise<void> {
       signal.removeEventListener("abort", abort);
       executor.disconnect();
       connection.stop();
-      if (error) reject(error);
-      else resolve();
+      // Requests the disconnect cut off write their end records before the host stops.
+      void Promise.race([executor.idle(), delay(3000, undefined, { ref: false })]).then(() =>
+        error ? reject(error) : resolve(),
+      );
     };
     const abort = () => finish();
     const connection = connectGateway({
       gatewayUrl,
-      deviceToken: active.token,
+      getToken: () => active.token,
       createSocket: createNodeSocket,
       beforeConnect: async () => {
         try {
@@ -114,6 +119,16 @@ export async function connectHost(options: HostOptions): Promise<void> {
       },
       onFrame: (frame) => void executor.receiveFrame(frame),
       onStatus: (status) => {
+        options.audit.host(
+          {
+            event: "connection",
+            status,
+            deviceId: active.deviceId,
+            name: active.name,
+            cloudOrigin: cloudUrl,
+          },
+          [active.token],
+        );
         options.onEvent?.({ type: "connection", status });
         if (status !== "online" && status !== "connecting") executor.disconnect();
         if (status === "revoked" || status === "superseded") {

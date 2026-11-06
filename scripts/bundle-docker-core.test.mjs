@@ -60,15 +60,11 @@ test("the relocated Caddy generator runs without Core workspace dependencies", a
     [
       "-e",
       `const { generateCaddyfile } = require(${JSON.stringify(outfile)});
-       console.log(generateCaddyfile({
-         enableAccessControl: true,
-         allowedApps: ["@alice/calendar"],
-         cloudEmailAccess: {},
-       }));`,
+       console.log(generateCaddyfile());`,
     ],
     { cwd: directory, encoding: "utf8" },
   );
-  assert.ok(output.includes("/apps/%40alice%2Fcalendar"));
+  assert.ok(output.includes("forward_auth"));
 });
 
 test("compiled People contracts run in plain Node without TypeScript source resolution", async (t) => {
@@ -104,7 +100,10 @@ test("compiled People contracts run in plain Node without TypeScript source reso
 // only visible in the image — the source tree keeps working under tsx.
 test("bundles the WeChat scripts the compiled runtime reads from dist", async () => {
   const expected = [
-    ["packages/core/src/channels/wechat-user-send-driver.py", "dist/wechat-user-send-driver.py"],
+    [
+      "packages/core/src/connections/kinds/wechat-user/wechat-user-send-driver.py",
+      "dist/wechat-user-send-driver.py",
+    ],
   ];
 
   for (const [source, destination] of expected) {

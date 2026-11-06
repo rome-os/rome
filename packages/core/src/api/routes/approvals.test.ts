@@ -9,7 +9,6 @@ import {
   identityConnectionKindOf,
 } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import type { ApprovalHandler } from "../../actions/approval-handler.js";
 
@@ -41,40 +40,6 @@ describe("Approvals API", () => {
   afterEach(() => {
     testDb.close();
     rs.restoreAllMocks();
-  });
-
-  it("closes a stored pairing request and refuses to approve it", async () => {
-    const repo = new ApprovalsRepository(testDb.db);
-    const id = await repo.create({
-      type: "person_mapping",
-      requestedBy: "telegram:123",
-      description: "Pair Alice on telegram",
-      payload: {
-        action: "channel_pairing",
-        channel: "telegram",
-        connectionId: "bot",
-        channelUserId: "123",
-        displayName: "Alice",
-        expiresAt: Date.now() + 60_000,
-        failedAttempts: 0,
-        lastGuidanceAt: 0,
-      },
-    });
-    const response = await app.request(`/approvals/${id}/approve`, {
-      method: "POST",
-      headers: { "sec-fetch-site": "same-origin" },
-    });
-    expect(response.status).toBe(409);
-    expect(await repo.findById(id)).toMatchObject({
-      status: "rejected",
-      payload: { resolution: "expired" },
-    });
-    const person = await new PeopleRepository(testDb.db).byAccount({
-      platform: "telegram",
-      id: "123",
-    });
-    expect(person).toBeNull();
-    expect(approvalHandler.onApproved).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -130,13 +95,6 @@ describe("Approvals API", () => {
           ).toBe(403);
         }
       }
-    });
-
-    it("validates pairing history offsets", async () => {
-      for (const offset of ["-1", "1.5", "nope", "9007199254740992"]) {
-        expect((await app.request(`/approvals?pairingHistoryOffset=${offset}`)).status).toBe(400);
-      }
-      expect((await app.request("/approvals?pairingHistoryOffset=100")).status).toBe(200);
     });
 
     it("lists baseline approvals (unfiltered)", async () => {

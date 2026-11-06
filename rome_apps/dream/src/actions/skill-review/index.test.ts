@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
@@ -10,6 +9,7 @@ import { createTestDb, type TestDb } from "../../../../../packages/core/src/test
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 import { resolveProjectWorkingDirWithinRoot } from "../../../../../packages/core/src/webchat/projects.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
+import { type FakeChat, fakeChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction } from "./index.js";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/migrations");
@@ -25,6 +25,8 @@ const actionConfig = {
 } as const;
 
 let testDb: TestDb;
+// The chats a test seeds, as Chats lists them.
+let chats: FakeChat[];
 let carrierDir: string;
 let installCalls: Array<Record<string, unknown>>;
 let installResult: { status: "ok"; data: unknown } | { status: "error"; error: string };
@@ -32,6 +34,7 @@ let installResult: { status: "ok"; data: unknown } | { status: "error"; error: s
 beforeEach(() => {
   carrierDir = join(mkdtempSync(join(tmpdir(), "skill-review-")), "user-skills");
   installCalls = [];
+  chats = [];
   installResult = { status: "ok", data: {} };
   testDb = createTestDb();
   migrate(testDb.db as never, {
@@ -51,11 +54,18 @@ const appDb = () => ({
   tableName: (name: string) => `dream__${name}`,
 });
 
-function seedSession(id: string, type: string, createdAt: number, name = id): void {
-  testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-    VALUES (${id}, ${name}, ${type}, ${createdAt}, ${createdAt})
-  `);
+/** A session active at `activeAt`, in the chat Chats lists it in. A
+ *  background run stands in no chat, so Chats never lists one. */
+function seedSession(id: string, type: string, activeAt: number, name = id): void {
+  if (type === "action") return;
+  chats.push({
+    chat: {
+      sessionId: id,
+      name,
+      ...(type === "channel" ? { channel: { name: "telegram", kind: "telegram" } } : {}),
+    },
+    lines: [{ role: "user", content: "hello", createdAt: new Date(activeAt * 1000) }],
+  });
 }
 
 function makeDeps(
@@ -76,6 +86,7 @@ function makeDeps(
     } as unknown as AgentRunner,
     appContext: {
       db: appDb(),
+      repositories: { chats: fakeChatReads(chats) },
       async runAction(name: string, args: Record<string, unknown>) {
         installCalls.push({ name, ...args });
         return installResult;
@@ -469,5 +480,33 @@ describe("skill_review", () => {
     ).execute({});
 
     expect(installCalls).toEqual([]);
+  });
+});
+
+describe("skill_review through Chats", () => {
+  it("reviews the most recently active dashboard chat, by its name", async () => {
+    const now = new Date();
+    const reads = fakeChatReads([
+      {
+        chat: { sessionId: "web-active", name: "Fix the deploy script" },
+        lines: [{ role: "user", content: "deploy", createdAt: now }],
+      },
+      {
+        chat: { sessionId: "group", channel: { name: "telegram", kind: "telegram" } },
+        lines: [{ role: "user", content: "hi", createdAt: now }],
+      },
+    ]);
+    const runCalls: Array<{ prompt: string }> = [];
+    const deps = makeDeps([{ type: "result", content: "done" }], runCalls);
+    Object.assign(deps.appContext, { repositories: { chats: reads } });
+
+    await createAction(actionConfig, deps).execute({});
+
+    expect(runCalls[0]?.prompt).toContain("web-active");
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({
+      reviewedSessionId: "web-active",
+      reviewedSessionName: "Fix the deploy script",
+    });
   });
 });

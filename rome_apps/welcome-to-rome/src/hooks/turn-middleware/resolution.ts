@@ -1,4 +1,4 @@
-// When the guardian resolves an inline card or a handoff in webchat, the calling
+// When the guardian resolves an inline card in webchat, the calling
 // agent is re-driven on a fresh turn whose prompt embeds the resolved artifact
 // as a fenced JSON block (`interpretInteractionResult` in core's webchat route).
 // A scripted turn reads the artifact back out of that prompt — these helpers are
@@ -20,7 +20,7 @@ export function readResolutionJson(prompt: string): Record<string, unknown> | nu
     : null;
 }
 
-/** Detect a dismissed interaction (the guardian closed the card/handoff without
+/** Detect a dismissed interaction (the guardian closed the card without
  *  producing a result). */
 export function isDismissedInteraction(prompt: string): boolean {
   return prompt.includes("dismissed the interaction");

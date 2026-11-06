@@ -81,6 +81,9 @@ export interface ConnectionCard {
   link: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts: boolean;
+  /** Rome holds access, but its channel does not know which account it is,
+   *  so it hears and sends nothing. */
+  accountUnknown?: boolean;
 }
 
 /** Fixed dashboard ordering: Talk channels, then OAuth services; services
@@ -217,7 +220,14 @@ function toCard(connection: ApiConnection): ConnectionCard {
     linkReported: connection.agent !== undefined,
     link: connection.link ?? null,
     severalAccounts: connection.severalAccounts === true,
+    ...(accountUnknown(connection) ? { accountUnknown: true } : {}),
   };
+}
+
+/** A working connection whose channel does not know its account hears and
+ *  sends nothing. */
+function accountUnknown(connection: ApiConnection): boolean {
+  return connection.accountUnknown === true && connection.state === "working";
 }
 
 /** The Composio ACCOUNT broker as a card. Not a registry connection — its Auth
@@ -296,6 +306,7 @@ export function buildConnectionCards(
     if (card) {
       card.slots.push(...sessionSlots);
       card.degradation ??= runtimeDegradation(connection);
+      if (accountUnknown(connection)) card.accountUnknown = true;
     } else {
       cards.set(brand, {
         route: brand,
@@ -309,6 +320,7 @@ export function buildConnectionCards(
         linkReported: false,
         link: null,
         severalAccounts: false,
+        ...(accountUnknown(connection) ? { accountUnknown: true } : {}),
       });
     }
   }
@@ -355,45 +367,9 @@ function labelAccounts(cards: ConnectionCard[]): void {
   }
 }
 
-/** The two views of the Connections page. */
-export type ConnectionTab = "connected" | "available";
-
-/** The groups the Connections page sorts cards into. Channels the guardian
- *  talks to Rome through are Messaging; accounts Rome acts in (Rome OAuth and
- *  the Composio broker) are Accounts. */
-export type ConnectionGroup = "messaging" | "accounts";
-
 /** A card is connected while any of its accounts gives Rome access, working or
  *  broken. A broken one stays connected so it is fixed where it is listed,
  *  instead of reading as something new to add. */
 export function isConnectedCard(card: ConnectionCard): boolean {
   return card.slots.some((slot) => slot.state !== null);
-}
-
-export function connectionGroup(card: ConnectionCard): ConnectionGroup {
-  return card.kind === "channel" ? "messaging" : "accounts";
-}
-
-/** Splits the cards into the groups of one tab, in group order. A card that
- *  needs attention leads its group; the rest keep the list order. An empty
- *  group is left out unless `keep` names it, for a caller that adds rows of
- *  its own to that group. */
-export function groupConnectionCards(
-  cards: ConnectionCard[],
-  needsAttention: (card: ConnectionCard) => boolean,
-  keep: Partial<Record<ConnectionGroup, boolean>> = {},
-): { group: ConnectionGroup; cards: ConnectionCard[] }[] {
-  const order: ConnectionGroup[] = ["messaging", "accounts"];
-  return order
-    .map((group) => {
-      const inGroup = cards.filter((card) => connectionGroup(card) === group);
-      return {
-        group,
-        cards: [
-          ...inGroup.filter(needsAttention),
-          ...inGroup.filter((card) => !needsAttention(card)),
-        ],
-      };
-    })
-    .filter((entry) => entry.cards.length > 0 || keep[entry.group] === true);
 }

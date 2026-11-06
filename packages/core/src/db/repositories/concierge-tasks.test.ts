@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { romeAgentMessages } from "../schema.js";
-import { WebChatRepository } from "./webchat.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
+import { chatMessages } from "../schema.js";
+import type { WebChatRepository } from "./webchat.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 
 const DAY = 86_400_000;
@@ -15,7 +16,7 @@ describe("ConciergeTasksRepository", () => {
   beforeEach(() => {
     testDb = createTestDb();
     repo = new ConciergeTasksRepository(testDb.db);
-    chats = new WebChatRepository(testDb.db);
+    chats = new ChatsWebChatRepository(testDb.db);
   });
   afterEach(() => testDb.close());
 
@@ -116,14 +117,15 @@ describe("ConciergeTasksRepository", () => {
       await chats.createSession("concierge", "Concierge");
       const messageId = await say("concierge");
       const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: messageId }]);
-      expect(row.sourceMessageId).toBe(messageId);
+      // The row holds the message's id in Chats, and answers its key.
+      expect(row.sourceMessageId).toEqual(expect.any(Number));
       expect(await sourceOf(row.id)).toBe(messageId);
       expect((await repo.listForPanel(new Date(0)))[0].sourceMessageId).toBe(messageId);
 
-      testDb.db.delete(romeAgentMessages).where(eq(romeAgentMessages.id, messageId)).run();
+      testDb.db.delete(chatMessages).where(eq(chatMessages.key, messageId)).run();
       expect(await sourceOf(row.id)).toBeNull();
-      // The row keeps the id it was given: nothing is copied or cleared.
-      expect((await repo.get(row.id))?.sourceMessageId).toBe(messageId);
+      // The message's going clears the row's pointer; no text was copied.
+      expect((await repo.get(row.id))?.sourceMessageId).toBeNull();
     });
 
     it("counts only a user or assistant message of the Concierge chat", async () => {
@@ -133,12 +135,9 @@ describe("ConciergeTasksRepository", () => {
       const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: foreign }]);
       expect(await sourceOf(row.id)).toBeNull();
 
-      const trace = await say("concierge");
-      testDb.db
-        .update(romeAgentMessages)
-        .set({ role: "trace" })
-        .where(eq(romeAgentMessages.id, trace))
-        .run();
+      // A trace is the agent's own row, never a message of the chat.
+      const trace = "trace-1";
+      await chats.addMessage(trace, "concierge", "trace", "[]", "turn-1");
       await repo.upsertMany([{ id: row.id, sourceMessageId: trace }]);
       expect(await sourceOf(row.id)).toBeNull();
     });
@@ -157,6 +156,104 @@ describe("ConciergeTasksRepository", () => {
     it("is null for a row that never had one", async () => {
       const [row] = await repo.upsertMany([{ title: "A" }]);
       expect(await sourceOf(row.id)).toBeNull();
+    });
+    it("looks the message up in the row's own Concierge chat", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const inTopic = await say("topic-1");
+      const [row] = await repo.upsertMany([
+        { title: "A", chatId: "topic-1", sourceMessageId: inTopic },
+      ]);
+      expect(await sourceOf(row.id)).toBe(inTopic);
+      // The same message named for a row of the main chat is not its source.
+      const [other] = await repo.upsertMany([{ title: "B", sourceMessageId: inTopic }]);
+      expect(await sourceOf(other.id)).toBeNull();
+    });
+  });
+
+  describe("Concierge chat of a row", () => {
+    it("is the main chat unless the row names another, and the main chat once that chat is gone", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [main, topic] = await repo.upsertMany([
+        { title: "A", chatId: "concierge" },
+        { title: "B", chatId: "topic-1" },
+      ]);
+      // The main chat is stored as no chat.
+      expect(main.chatId).toBeNull();
+      expect((await repo.getWithChat(main.id))?.conciergeChat).toEqual({
+        id: "concierge",
+        name: "Concierge",
+        main: true,
+      });
+      expect((await repo.getWithChat(topic.id))?.conciergeChat).toEqual({
+        id: "topic-1",
+        name: "Calendar",
+        main: false,
+      });
+      await chats.deleteSession("topic-1");
+      expect((await repo.getWithChat(topic.id))?.conciergeChat.main).toBe(true);
+    });
+
+    it("gives a finished row of an archived chat to the main chat, where its buttons can write", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [done] = await repo.upsertMany([{ title: "Old", chatId: "topic-1", state: "done" }]);
+      expect((await repo.getWithChat(done.id))?.conciergeChat.id).toBe("topic-1");
+      await chats.archiveSession("topic-1");
+      expect((await repo.getWithChat(done.id))?.conciergeChat).toEqual({
+        id: "concierge",
+        name: "Concierge",
+        main: true,
+      });
+      // The row still names its chat, so unarchiving gives it back.
+      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
+    });
+
+    it("moves only the unfinished rows of a chat to the main chat, and announces each", async () => {
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [open, done] = await repo.upsertMany([
+        { title: "A", chatId: "topic-1", state: "doing" },
+        { title: "B", chatId: "topic-1", state: "done" },
+      ]);
+      const announced: string[] = [];
+      repo.onChange(({ row }) => announced.push(row.id));
+      expect(await repo.moveToMainChat("topic-1")).toBe(1);
+      expect((await repo.get(open.id))?.chatId).toBeNull();
+      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
+      expect(announced).toEqual([open.id]);
     });
   });
 

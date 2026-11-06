@@ -75,13 +75,16 @@ export interface SetupTrayOptions {
   getMainWindow: () => BrowserWindow | null;
   ensureMainWindow: () => Promise<BrowserWindow> | BrowserWindow;
   openSettings: () => void;
+  /** Opens this computer's local audit log. Omitted, the menu has no such item. */
+  openAuditLog?: () => void;
   runtime: Runtime;
   /** Null where the pill does not exist (every platform but macOS). */
   floatingPill: FloatingPill | null;
 }
 
 export function setupTray(options: SetupTrayOptions): Tray {
-  const { getMainWindow, ensureMainWindow, openSettings, runtime, floatingPill } = options;
+  const { getMainWindow, ensureMainWindow, openSettings, openAuditLog, runtime, floatingPill } =
+    options;
 
   tray = new Tray(resolveTrayIcon());
   tray.setToolTip("Rome");
@@ -118,6 +121,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
         label: "Settings…",
         click: openSettings,
       },
+      ...(openAuditLog ? [{ label: "Audit Log…", click: openAuditLog }] : []),
       // The floating icon is off until it is ticked here, and this is the way
       // back after its own menu has hidden it.
       ...(floatingPill

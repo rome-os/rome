@@ -2,7 +2,8 @@
 // answered from People's repository.
 //
 // The SDK's names are a published contract, so they stay as apps know them:
-// `channelMappings` on each person and `addChannelMapping` for a link. This is
+// `channelMappings` on each person, and `addChannelMapping`, which is refused
+// with every other way an app could make a link. This is
 // the one place they are translated, so the repository itself speaks People's
 // language. An app names an account either as the `Account` value or, as it
 // did before accounts, by the channel it heard it on. People names it by the
@@ -10,7 +11,7 @@
 
 import type { PersonMappingRepository, PersonRecord } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
-import type { PlatformOfChannel } from "../channels/channel.js";
+import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import type { PeopleRepository, Person } from "../db/repositories/people.js";
 
 function toRecord(person: Person): PersonRecord {
@@ -23,6 +24,13 @@ function toRecord(person: Person): PersonRecord {
     channelMappings: accounts.map(({ platform, id }) => ({ channel: platform, channelUserId: id })),
     accounts,
   };
+}
+
+/** Only the guardian links an account to a person (docs/domains/people.md#link),
+ *  so an app's request for one is refused rather than recorded. The SDK keeps
+ *  the methods so apps built against it still compile. */
+function refuseLink(): never {
+  throw new Error("Apps cannot link accounts to persons. Only the guardian links an account.");
 }
 
 /** `platformOfChannel` reads a channel an app names as its platform. Absent,
@@ -54,22 +62,15 @@ export function appPersonMapping(
       const person = await people.byAccount({ platform, id });
       return person && toRecord(person);
     },
-    create({ channelMappings, accounts, ...person }) {
-      return people.create({
-        ...person,
-        links: [
-          ...(channelMappings ?? []).map((mapping) =>
-            accountOn(mapping.channel, mapping.channelUserId),
-          ),
-          ...(accounts ?? []).map(({ platform, id }) => ({ platform, id })),
-        ],
-      });
+    async create({ channelMappings, accounts, ...person }) {
+      if ((channelMappings?.length ?? 0) + (accounts?.length ?? 0) > 0) refuseLink();
+      return people.create({ ...person, links: [] });
     },
-    async addChannelMapping(personId, channel, channelUserId) {
-      return people.linkStated(accountOn(channel, channelUserId), personId);
+    async addChannelMapping() {
+      refuseLink();
     },
-    async addAccount(personId, { platform, id }) {
-      return people.linkStated({ platform, id }, personId);
+    async addAccount() {
+      refuseLink();
     },
   };
 }

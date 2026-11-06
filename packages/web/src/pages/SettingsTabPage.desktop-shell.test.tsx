@@ -11,16 +11,6 @@ rs.mock("@/components/system-diagnosis-section", () => ({
   SystemDiagnosisSection: () => null,
 }));
 
-rs.mock("@/hooks/use-tailscale-connect", () => ({
-  useTailscaleConnect: () => ({
-    authUrl: null,
-    connecting: false,
-    error: null,
-    handleConnect: rs.fn(),
-    clearAuthUrl: rs.fn(),
-  }),
-}));
-
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -36,7 +26,7 @@ function renderAdvanced() {
     const url = String(input);
     const body =
       url === "/api/public-access"
-        ? { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} }
+        ? { allowedApps: [], cloudEmailAccess: {} }
         : url === "/api/dashboard-access"
           ? { cloudEmailAccess: [] }
           : {};
@@ -56,12 +46,12 @@ function renderAdvanced() {
 }
 
 describe("Advanced settings inside the Mac app", () => {
-  it("shows the System section in a browser", async () => {
+  it("shows the version and upgrade card in a browser", async () => {
     renderAdvanced();
-    expect(await screen.findByRole("heading", { name: "System" })).toBeDefined();
+    expect(await screen.findByText("Current version")).toBeDefined();
   });
 
-  it("omits it when the desktop preload has exposed its bridge", async () => {
+  it("omits the card when the desktop preload has exposed its bridge", async () => {
     // The section relays to Rome Cloud, which answers for the account's hosted
     // instance rather than the Mac showing the page.
     window.rome = {};
@@ -69,7 +59,8 @@ describe("Advanced settings inside the Mac app", () => {
 
     // Wait for a sibling that is not gated, so the assertion cannot pass just
     // because the tab has not rendered yet.
-    expect(await screen.findByRole("heading", { name: "Advanced Settings" })).toBeDefined();
-    expect(screen.queryByRole("heading", { name: "System" })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Features" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "System" })).toBeDefined();
+    expect(screen.queryByText("Current version")).toBeNull();
   });
 });

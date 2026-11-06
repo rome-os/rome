@@ -11,10 +11,19 @@
 // Direct threads only. Each store scopes itself by the account's own addresses,
 // so a group conversation — addressed by the group rather than by the person —
 // never reaches a person's timeline.
+//
+// The guardian's chats only. A person's timeline holds what passed between
+// their account and the guardian's own connected accounts, the ones linked to
+// the guardian. What an agent's own account said to them, and what Rome only
+// triaged, belong to those chats and are not read here.
 
 import type { Account } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
-import { foldAccounts, type AccountFold, type AddressBooks } from "../channels/account-fold.js";
+import {
+  foldAccounts,
+  type AccountFold,
+  type AddressBooks,
+} from "../chats/accounts/account-fold.js";
 import {
   addressBooks,
   storedOn,
@@ -22,11 +31,11 @@ import {
   messageStores,
   type Channels,
   type PlatformOfChannel,
-} from "../channels/channel.js";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
-import { agentMessages } from "../channels/messages-agent.js";
-import { sentinelLogMessages } from "../channels/messages-sentinel.js";
+} from "../chats/connected-accounts/connected-account.js";
+import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
+import { chatsAgentMessages } from "../chats/history/messages-agent.js";
 import type { DrizzleDb } from "../db/index.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 
 /**
  * The stores a person's history is read from, in the order they claim an
@@ -35,23 +44,44 @@ import type { DrizzleDb } from "../db/index.js";
  *
  * The order is a precedence: a channel's own store answers for the conversation
  * as the channel has it, so every one of them outranks Rome's transcript of
- * the same messages, which in turn outranks the sentinel's triage record. An
- * account only the sentinel saw still gets its exchanges — the sentinel is
- * last, not excluded.
+ * the same messages.
  *
- * The cost of that precedence: an account whose channel answers for the
- * conversation shows the conversation, and the sentinel's own record of an exchange inside it
- * stays behind Rome's reply as the channel delivered it.
+ * The sentinel's triage record is not among them. It is what Rome checked
+ * before deciding whether to answer, not a chat with the guardian.
  *
  * A channel joins by answering for a history, which is an entry in the channel list
- * (channel-list.ts). Rome's own two stores belong to no channel and answer for
- * every one, which is why they are named here and sit behind all of them.
+ * (channel-list.ts). Rome's transcript belongs to no channel and answers for
+ * every one, which is why it is named here and sits behind all of them.
  */
 export function personMessageStores(deps: {
   db: DrizzleDb;
   channels: Channels;
+  platformOfChannel: PlatformOfChannel;
+  /** Rome's own account on a channel, or null while its record knows none. */
+  accountOf?: (channel: string) => Account | null;
 }): AccountMessages[] {
-  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
+  const transcript = chatsAgentMessages(deps.db, (channel) => deps.accountOf?.(channel) ?? null);
+  return [...messageStores(deps.channels), transcript];
+}
+
+/**
+ * Whether a channel's account is one of the guardian's own: an account linked
+ * to the guardian (docs/concepts/people.md#account). A channel whose record
+ * knows no account is nobody's, so it is not the guardian's either.
+ *
+ * Read once per request: the guardian's links are a handful, and every
+ * channel a timeline is read under is asked.
+ */
+export async function guardianChannels(deps: {
+  peopleRepo: Pick<PeopleRepository, "all">;
+  accountOf?: (channel: string) => Account | null;
+}): Promise<(channel: string) => boolean> {
+  const guardian = (await deps.peopleRepo.all()).find((person) => person.bondLevel === "guardian");
+  const own = new Set((guardian?.links ?? []).map((link) => `${link.platform}\u0000${link.id}`));
+  return (channel) => {
+    const account = deps.accountOf?.(channel);
+    return account != null && own.has(`${account.platform}\u0000${account.id}`);
+  };
 }
 
 /**
@@ -77,7 +107,14 @@ export function personMessageStores(deps: {
  * directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { channels: Channels; platformOfChannel?: PlatformOfChannel; recordedOn?: RecordedOn },
+  deps: {
+    channels: Channels;
+    platformOfChannel?: PlatformOfChannel;
+    recordedOn?: RecordedOn;
+    /** Which channels are the guardian's own (`guardianChannels`). Absent,
+     *  every channel on the platform is read. */
+    guardians?: (channel: string) => boolean;
+  },
   groups: readonly (readonly Account[])[],
 ): Promise<MessageAccount[][]> {
   const links = groups.flat();
@@ -89,7 +126,9 @@ export async function timelineAccounts(
   const storedUnder = (platform: string) => {
     let names = stored.get(platform);
     if (!names) {
-      names = storedOn(deps.channels, platformOfChannel, platform, deps.recordedOn);
+      names = storedOn(deps.channels, platformOfChannel, platform, deps.recordedOn).filter(
+        (name) => deps.guardians?.(name) ?? true,
+      );
       stored.set(platform, names);
     }
     return names;
@@ -121,25 +160,30 @@ function accountsOf(
   storedUnder: (platform: string) => string[],
   links: readonly Account[],
 ): MessageAccount[] {
-  const byAccount = new Map<string, MessageAccount[]>();
+  const byAccount = new Map<string, { platform: string; addresses: Set<string> }>();
   for (const link of links) {
     const key = fold.key(link.platform, link.id);
-    if (byAccount.has(key)) continue;
-    byAccount.set(
-      key,
-      perChannel({
-        channel: link.platform,
-        storedUnder: storedUnder(link.platform),
-        // The link's own address among them, whatever the book says: a
-        // platform that folds nothing onto it is still read at the address the
-        // guardian stored.
-        addresses: [
-          ...new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
-        ],
-      }),
-    );
+    const held = byAccount.get(key);
+    // Every link's own address among them, whatever the book says: a platform
+    // that folds nothing onto it is still read at the address the guardian
+    // stored, and a second link onto the account is matched by its own
+    // address even where the book does not list it.
+    if (held) {
+      held.addresses.add(link.id);
+      continue;
+    }
+    byAccount.set(key, {
+      platform: link.platform,
+      addresses: new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
+    });
   }
-  return [...byAccount.values()].flat();
+  return [...byAccount.values()].flatMap((account) =>
+    perChannel({
+      channel: account.platform,
+      storedUnder: storedUnder(account.platform),
+      addresses: [...account.addresses],
+    }),
+  );
 }
 
 /**

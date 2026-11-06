@@ -7,8 +7,8 @@
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the
-// inbound `ChannelMessage`, media download, send, history — is
-// `TelegramUserAdapter` (packages/core/src/channels/telegram-user.ts), wrapped
+// inbound `ChannelMessage`, media download, send — is
+// `TelegramUserAdapter` (packages/core/src/connections/kinds/telegram-user/telegram-user.ts), wrapped
 // here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
 // drive it. The transport already speaks the channel's record, so inbound and
 // send pass through without a projection.
@@ -34,7 +34,6 @@
 // registry already drops faults from superseded epochs (a re-login rebuilds the
 // epoch and the old epoch's in-flight probe fault is discarded).
 
-import type { ChannelMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
@@ -43,7 +42,7 @@ import {
   TelegramUserAdapter,
   type TelegramUserLoginHandle,
   type TelegramUserSettings,
-} from "../../channels/telegram-user.js";
+} from "../kinds/telegram-user/telegram-user.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -55,12 +54,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  directoryCursorOffset,
-  directoryPage,
-  historyQueryLimit,
-  historyWindowHours,
-} from "./talk-features.js";
+import { directoryCursorOffset, directoryPage } from "./talk-features.js";
 
 // The `session` grant's profile — the non-secret half of the user-account login
 // (who the account is, its phone, when it connected). Declared next to the
@@ -218,9 +212,9 @@ function parseTelegramUserCredentials(
  *   5. stop the login client, then return the terminal grant: the serialized
  *      session material + identity profile.
  * The runtime performs the single durable write from the returned grant;
- * cancel/abandon stops the login client and writes nothing. Unlike the bot
- * channels there is no guardian-link step — a user session IS the guardian's own
- * account, so no `guardianChannelUserId` is mapped.
+ * cancel/abandon stops the login client and writes nothing. A user session is
+ * the guardian's own account, so the grant names it as theirs
+ * (`guardianChannelUserId`), the same id `accountIdOf` records on the channel.
  */
 export function makeTelegramUserSetup(deps: {
   openLogin: (apiId: number, apiHash: string) => TelegramUserLoginHandle;
@@ -319,6 +313,9 @@ export function makeTelegramUserSetup(deps: {
       return {
         credential: { material, expiresAt: "never" },
         profile,
+        ...(account.userId
+          ? { guardianChannelUserId: account.userId, addsGuardianAccount: true }
+          : {}),
         summary: {
           title: "Telegram account connected",
           body: [
@@ -370,7 +367,6 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
     auth: session,
     capabilities: {
       talker: {
-        history: true,
         build(cred, kit): Talker {
           const settings = telegramUserSettingsFromMaterial(cred.material as SecretRecord);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -447,25 +443,6 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
           const features: TalkFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
-            },
-            history: {
-              async query(input) {
-                const lines = await adapter.fetchHistory(
-                  input.chatId ?? null,
-                  historyWindowHours(input.since),
-                );
-                return lines.slice(0, historyQueryLimit(input.limit)).map(
-                  (line): ChannelMessage => ({
-                    ...line,
-                    channel: "telegram_user",
-                    // The account's own lines are the ones GramJS marks `out`.
-                    direction:
-                      (line.raw as { out?: unknown } | null | undefined)?.out === true
-                        ? "outbound"
-                        : "inbound",
-                  }),
-                );
-              },
             },
             directory,
           };

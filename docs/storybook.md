@@ -62,35 +62,6 @@ production behavior and belong to application-flow coverage.
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
 the auth query cache, and service-backed submit or setup flows.
 
-### Pairing components
-
-The pairing stories render the production components in
-[`pairing-views.tsx`](../packages/web/src/components/pairing/pairing-views.tsx).
-These components take account data, operation state, and callbacks through props.
-They use `useTranslation()` for UI copy and reuse the dashboard's UI primitives and semantic theme
-tokens. They require no query client, router, or Rome backend.
-
-[`PairingApproval.tsx`](../packages/web/src/components/PairingApproval.tsx) owns queries, mutations,
-clipboard writes, and navigation composition.
-The presentation adapter maps approval records to component data. The views format dates and UI copy.
-Connections and Activity continue to use this shared container.
-
-| Component | States | Example |
-| --- | --- | --- |
-| `PairingRequestCard` | Pending, submitting, failed, approved, rejected, expired, long identity | [Interactive](http://localhost:6006/?path=/story/connections-pairing-request--interactive) |
-| `PairingConfirmationDialog` | Confirmation, submitting, failed | [Confirm](http://localhost:6006/?path=/story/connections-pairing-confirmation--confirm) |
-| `PairingRequestsSection` | Empty, loading, failed, multiple requests | [Multiple requests](http://localhost:6006/?path=/story/connections-pairing-requests--multiple-requests) |
-
-The verification code is previewed inside Request stories rather than as a separate story group.
-The Interactive story keeps approval, rejection, and copy feedback in local React state.
-It does not authorize accounts or write to the clipboard.
-The fixture timestamps are fixed. Use the language and color-mode toolbars to check the same
-states in English or Chinese and light or dark themes.
-
-The pairing browser checks cover local interaction callbacks, submission guards, and narrow layouts.
-They observe service requests throughout the interactive flow without intercepting them.
-The `PairingApproval` tests retain coverage for mutation and clipboard boundaries.
-
 ## Agent workflow
 
 Start Storybook before connecting an agent. The official `@storybook/addon-mcp` exposes a local

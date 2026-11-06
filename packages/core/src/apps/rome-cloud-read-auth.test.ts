@@ -17,24 +17,26 @@ describe("withRomeCloudReadAuth", () => {
     else process.env.PANTHEON_BASE_ORIGIN = previousOrigin;
   });
 
-  it("adds the instance token for the Rome Cloud origin", () => {
-    expect(withRomeCloudReadAuth(new URL(`${CLOUD}/api/store/listings`), { accept: "x" })).toEqual({
+  it("adds the instance token for the Rome Cloud origin", async () => {
+    expect(
+      await withRomeCloudReadAuth(new URL(`${CLOUD}/api/store/listings`), { accept: "x" }),
+    ).toEqual({
       accept: "x",
       authorization: "Bearer romeinst_test-token",
     });
   });
 
-  it("never sends the token to another origin", () => {
+  it("never sends the token to another origin", async () => {
     expect(
-      withRomeCloudReadAuth(new URL("https://elsewhere.example.com/api/store/listings"), {
+      await withRomeCloudReadAuth(new URL("https://elsewhere.example.com/api/store/listings"), {
         accept: "x",
       }),
     ).toEqual({ accept: "x" });
   });
 
-  it("stays anonymous without a token", () => {
+  it("stays anonymous without a token", async () => {
     setInstanceTokenInMemory(null);
-    expect(withRomeCloudReadAuth(new URL(`${CLOUD}/api/store/listings`), {})).toEqual({});
+    expect(await withRomeCloudReadAuth(new URL(`${CLOUD}/api/store/listings`), {})).toEqual({});
   });
 
   it("authenticates bundle downloads so invite-only apps can install", async () => {

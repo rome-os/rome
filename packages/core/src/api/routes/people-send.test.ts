@@ -9,31 +9,26 @@ import type {
   TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
-import { accountsRoutes } from "./accounts.js";
 import {
   createTestConnections,
   createTestDb,
   buildTestDeps,
+  ownedByGuardian,
   testChannels,
   type TestDb,
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import {
-  channels as channelRows,
-  connectionGrants,
-  romeAgentMessages,
-  romeSessions,
-} from "../../db/schema.js";
-import { channelList } from "../../channels/channel-list.js";
-import { channelChatId } from "../../db/session-kind.js";
-import { conversationPlatformMessageId } from "../../db/repositories/webchat.js";
+import { sayOnChannel } from "../../test/speakers.js";
+import { channels as channelRows, chatMessages, connectionGrants } from "../../db/schema.js";
+import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
 
 // Sending to a person.
 //
 // What these pin is the rule the surface rests on: a send names the account it
-// is for and Rome never chooses one, and the answer says whether the channel
-// took the message, with the channel's own words when it did not.
+// is for and Rome never chooses one, it goes out only from the guardian's own
+// connected accounts, and the answer says whether the channel took the
+// message, with the channel's own words when it did not.
 
 const TG = "tg-send-target";
 const OTHER_TG = "tg-someone-else";
@@ -51,12 +46,14 @@ describe("People send API", () => {
     testDb = createTestDb();
     await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
+    ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", [
+      { channel: "telegram", platform: "telegram" },
+    ]);
     app = new Hono().route("/", peopleRoutes(deps));
 
     personId = await deps.peopleRepo.create({
       displayName: "Send Target",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "telegram", id: TG }],
     });
   });
@@ -69,7 +66,7 @@ describe("People send API", () => {
     });
 
   const timeline = async (id = personId): Promise<TimelinePage> => {
-    const res = await app.request(`/people/${id}/messages`);
+    const res = await app.request(`/people/${id}/messages?channel=telegram&channelUserId=${TG}`);
     return (await res.json()) as TimelinePage;
   };
 
@@ -86,6 +83,13 @@ describe("People send API", () => {
     const sent = (await res.json()) as SentMessage;
     expect(sent.ref).toMatch(new RegExp(`^${TG}:`));
     expect(sent.timestamp).toBeGreaterThan(0);
+    // Said in Chats, in the direct message with the account, which is what
+    // the person's timeline reads.
+    expect(
+      testDb.db.all<{ kind: string; text: string }>(
+        sql`SELECT c.kind, m.text FROM chat_messages m JOIN chats c ON c.id = m.chat_id`,
+      ),
+    ).toEqual([{ kind: "dm", text: "on my way" }]);
     expect((await timeline()).entries.map((entry) => entry.body)).toContain("on my way");
 
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
@@ -148,8 +152,26 @@ describe("People send API", () => {
     // Nothing has happened on it yet, which is a different answer from zero.
     expect(account.latestAt).toBeNull();
 
-    await send({ channel: "telegram", channelUserId: TG, text: "now there is history" });
+    const res = await send({
+      channel: "telegram",
+      channelUserId: TG,
+      text: "now there is history",
+    });
+    expect(res.status).toBe(200);
     expect((await accountOf("telegram")).latestAt).toBeGreaterThan(0);
+  });
+
+  it("sends only from the guardian's own accounts", async () => {
+    // The Telegram channel's account is an agent's once the guardian no longer
+    // holds it, so a person's page cannot send there: the message would land
+    // in a chat the page does not show.
+    await deps.peopleRepo.unlink({ platform: "telegram", id: "guardian-on-telegram" });
+
+    expect((await accountOf("telegram")).send).toBe("not-connected");
+    const res = await send({ channel: "telegram", channelUserId: TG, text: "hello" });
+    expect(res.status).toBe(409);
+    expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
   it("reports a channel with no connection as not-connected", async () => {
@@ -166,7 +188,6 @@ describe("People send API", () => {
 describe("People send API — after the channel answers", () => {
   let testDb: TestDb;
   let deps: TestDeps;
-  let app: Hono;
   let personId: string;
 
   // A WhatsApp contact reachable two ways. WhatsApp addresses one person by
@@ -179,7 +200,9 @@ describe("People send API — after the channel answers", () => {
     testDb = createTestDb();
     await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db, { channels: ["whatsapp", "telegram"] });
-    app = new Hono().route("/", peopleRoutes(deps));
+    ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", [
+      { channel: "whatsapp", platform: "whatsapp" },
+    ]);
 
     await deps.whatsAppStoreRepo.upsertContacts([
       { jid: PN, phoneNumber: "15550007777", name: "Folded Contact" },
@@ -190,26 +213,8 @@ describe("People send API — after the channel answers", () => {
     personId = await deps.peopleRepo.create({
       displayName: "Folded Contact",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "whatsapp", id: LID }],
     });
-  });
-
-  it("keeps a delivered send delivered when Rome's own record of it fails", async () => {
-    // The provider accepted the message: it is out on a network Rome does not
-    // own. A local write failing afterwards cannot take it back, and reporting
-    // the send as failed invites a retry that delivers a second real message.
-    deps.webchatRepo.recordOutboundConversationMessage = async () => {
-      throw new Error("disk is full");
-    };
-
-    const res = await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "went out anyway" }),
-    });
-
-    expect(res.status).toBe(200);
   });
 
   it("answers no-conversation when the channel throws looking for a thread", async () => {
@@ -275,6 +280,11 @@ describe("People on an account whose channel id is opaque", () => {
       })
       .run();
     grant("test:telegram", ME);
+    // Both of Rome's Telegram accounts here are the guardian's own, so a
+    // person's page reads and sends through either.
+    await seedBaseline(testDb.db);
+    base.peopleRepo.linkStated(ME, "guardian");
+    base.peopleRepo.linkStated(SECOND, "guardian");
     deps = {
       ...base,
       channels: channelList({
@@ -294,43 +304,26 @@ describe("People on an account whose channel id is opaque", () => {
     personId = await deps.peopleRepo.create({
       displayName: "Ada",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "telegram", id: ADA }],
     });
 
-    // What Ada said to that account, as Rome's transcript holds it.
-    const sessionId = channelChatId(OPAQUE, ADA);
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: sessionId,
-        name: sessionId,
-        type: "channel",
-        sourceChannel: OPAQUE,
-        sourceThreadId: ADA,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-ada",
-        sessionId,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "hello from Ada" }]),
-        senderId: ADA,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    // What Ada said to that account, as Chats holds it.
+    sayOnChannel(deps, {
+      channel: OPAQUE,
+      address: ADA,
+      key: "m-ada",
+      text: "hello from Ada",
+      at: new Date(1_000_000),
+    });
   });
 
   const person = async (): Promise<PersonResource> =>
     (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
 
   const timeline = async (): Promise<TimelinePage> =>
-    (await (await app.request(`/people/${personId}/messages`)).json()) as TimelinePage;
+    (await (
+      await app.request(`/people/${personId}/messages?channel=telegram&channelUserId=${ADA}`)
+    ).json()) as TimelinePage;
 
   it("links the account under its connection kind and reads it as sendable", async () => {
     expect((await person()).accounts).toMatchObject([
@@ -338,11 +331,10 @@ describe("People on an account whose channel id is opaque", () => {
     ]);
   });
 
-  it("shows the account's conversation on the person's timeline", async () => {
+  it("shows the account's conversation on its timeline", async () => {
     const entries = (await timeline()).entries;
     expect(entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
-    // Named by the link's key, which is the account's channel on the wire, so
-    // a client's per-account view of the timeline holds it.
+    // Named by the link's key, which is the account's channel on the wire.
     expect(entries[0]?.source).toBe("telegram");
   });
 
@@ -357,20 +349,21 @@ describe("People on an account whose channel id is opaque", () => {
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: ADA, message: { text: "hi Ada" } },
     ]);
-    // Rome's line joins the conversation the account already holds, rather
-    // than one under the service's name.
+    // Rome's line joins the conversation the account already holds, said in
+    // Chats as the opaque account's.
     const entries = (await timeline()).entries;
     expect(entries.map((entry) => [entry.body, entry.source])).toEqual([
       ["hi Ada", "telegram"],
       ["hello from Ada", "telegram"],
     ]);
-    const held = testDb.db
-      .select({ sessionId: romeAgentMessages.sessionId })
-      .from(romeAgentMessages)
-      .all();
-    expect(held.map((row) => row.sessionId)).toEqual([
-      channelChatId(OPAQUE, ADA),
-      channelChatId(OPAQUE, ADA),
+    expect(
+      testDb.db.all<{ kind: string; account: string | null; text: string }>(sql`
+        SELECT c.kind, m.sender_account_id AS account, m.text
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id ORDER BY m.id
+      `),
+    ).toEqual([
+      { kind: "dm", account: ADA, text: "hello from Ada" },
+      { kind: "dm", account: ME.id, text: "hi Ada" },
     ]);
   });
 
@@ -422,23 +415,16 @@ describe("People on an account whose channel id is opaque", () => {
         linkedInAccounts: deps.linkedInAccounts,
       }),
     };
-    app = new Hono().route("/", peopleRoutes(rebooted)).route("/", accountsRoutes(rebooted));
+    app = new Hono().route("/", peopleRoutes(rebooted));
 
     expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
-    const stream = (await (await app.request("/accounts/stream")).json()) as {
-      accounts: Array<{ channel: string; channelUserId: string }>;
-    };
-    expect(stream.accounts).toContainEqual(
-      expect.objectContaining({ channel: "telegram", channelUserId: ADA }),
-    );
   });
 
-  // Two of Rome's accounts hold Ada's history in two different stores: an old
-  // transcript under a released account, and a recent exchange only the
-  // sentinel triaged under the live one. Each channel's history comes from its
-  // own store, so neither hides the other.
-  it("reads each of Rome's accounts' history from the store that holds it", async () => {
-    testDb.db.delete(romeAgentMessages).run();
+  // A released account whose record knows no account is nobody's, so not the
+  // guardian's, and the triage record is not a chat with the guardian: what
+  // Ada said through either is not on her page.
+  it("reads neither the triage record nor an account that is not the guardian's", async () => {
+    testDb.db.delete(chatMessages).run();
     testDb.db
       .insert(channelRows)
       .values({
@@ -448,31 +434,13 @@ describe("People on an account whose channel id is opaque", () => {
         createdAt: new Date(0),
       })
       .run();
-    const oldSession = channelChatId("tg-old", ADA);
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: oldSession,
-        name: oldSession,
-        type: "channel",
-        sourceChannel: "tg-old",
-        sourceThreadId: ADA,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-old",
-        sessionId: oldSession,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "said long ago" }]),
-        senderId: ADA,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    sayOnChannel(deps, {
+      channel: "tg-old",
+      address: ADA,
+      key: "m-old",
+      text: "said long ago",
+      at: new Date(1_000_000),
+    });
     await deps.sentinelLogRepo.create({
       messageId: "tg-recent",
       channel: OPAQUE,
@@ -482,17 +450,8 @@ describe("People on an account whose channel id is opaque", () => {
       action: "escalated",
     });
 
-    expect((await timeline()).entries.map((entry) => entry.body)).toEqual([
-      "said just now",
-      "said long ago",
-    ]);
-    expect((await person()).latest?.preview).toBe("said just now");
-    const stream = (await (
-      await new Hono().route("/", accountsRoutes(deps)).request("/accounts/stream")
-    ).json()) as { accounts: Array<{ channelUserId: string; latest: { preview: string } }> };
-    expect(stream.accounts.find((row) => row.channelUserId === ADA)?.latest.preview).toBe(
-      "said just now",
-    );
+    expect((await timeline()).entries).toEqual([]);
+    expect((await person()).accounts[0]?.latestAt).toBeNull();
   });
 
   describe("naming the account a send goes out from", () => {

@@ -39,7 +39,6 @@ export interface Person {
   displayName: string;
   bondLevel: BondLevel;
   profilePath: string | null;
-  approved: boolean;
   createdAt: Date;
   links: PersonLink[];
 }
@@ -49,7 +48,6 @@ export interface NewPerson {
   displayName: string;
   bondLevel: BondLevel;
   profilePath?: string;
-  approved?: boolean;
 }
 
 /** The fields of a person that change in place. */
@@ -57,7 +55,6 @@ export type PersonChanges = Partial<{
   displayName: string;
   bondLevel: BondLevel;
   profilePath: string | null;
-  approved: boolean;
 }>;
 
 /** A dismissed account. */
@@ -129,7 +126,6 @@ function toPerson(row: PersonRow, links: PersonLink[]): Person {
     displayName: row.displayName,
     bondLevel: row.bondLevel,
     profilePath: row.profilePath,
-    approved: row.approved ?? false,
     createdAt: row.createdAt,
     links,
   };
@@ -710,7 +706,6 @@ export class PeopleRepository {
         displayName: data.displayName,
         bondLevel: data.bondLevel,
         profilePath: data.profilePath ?? null,
-        approved: data.approved ?? false,
         createdAt: new Date(),
       })
       .run();

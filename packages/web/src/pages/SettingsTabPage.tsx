@@ -2,14 +2,14 @@ import { DevicesSection } from "@/components/devices-section";
 import {
   Measure,
   Section,
+  SectionDescription,
   SectionHeader,
   SectionHeading,
   SectionTitle,
-  SectionDescription,
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
-import { SpokenRecapsSection } from "@/components/spoken-recaps-section";
+import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -84,7 +84,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -100,12 +99,12 @@ import {
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
+import { AppKeysSection } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { SystemUpgradeSection } from "@/components/system-upgrade-section";
 import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
-import { useTailscaleConnect } from "@/hooks/use-tailscale-connect";
 import { useInvalidateSettings } from "@/hooks/use-settings";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
@@ -113,14 +112,6 @@ import { parseEmailTextarea } from "@/lib/email-list";
 import { StatusIndicator } from "@/lib/connection-status";
 import type { ThemePreference } from "@/lib/theme";
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, type SupportedLanguage } from "@/i18n";
-import {
-  accessControlChecksPassed,
-  describeTailscaleCertError,
-  probeTailnetReachable,
-  requestSessionHandoff,
-  submitSessionHandoff,
-  type SessionHandoffPayload,
-} from "@/lib/access-control-client";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
 import {
@@ -131,15 +122,10 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
-/** How a reply streams to Feishu: edited messages, or streaming cards. */
-type FeishuStreamingStyle = "message" | "card";
-
 interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableImpersonation?: boolean;
-  enableReplyStreaming?: boolean;
-  feishuReplyStreamingStyle?: FeishuStreamingStyle;
   experimentalConcierge?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
@@ -150,40 +136,6 @@ type ConfigurableProviderId = "openai" | "anthropic";
 type TierModelMappings = Partial<
   Record<ConfigurableProviderId, Partial<Record<ModelTier, string>>>
 >;
-
-interface TailscaleDevice {
-  id: string;
-  hostname: string;
-  name: string;
-  os: string;
-  addresses: string[];
-  clientVersion: string;
-  lastSeen: string;
-  online: boolean;
-}
-
-interface TailscalePeer {
-  hostname: string;
-  fqdn: string;
-  ip: string;
-  os: string;
-  online: boolean;
-  isSelf: boolean;
-}
-
-interface TailscaleState {
-  mode: "daemon" | "oauth";
-  // Daemon mode fields
-  status?: string;
-  ip?: string;
-  hostname?: string;
-  fqdn?: string;
-  advertiseExitNode?: boolean;
-  peers?: TailscalePeer[];
-  // OAuth mode fields
-  configured?: boolean;
-  devices?: TailscaleDevice[];
-}
 
 // ── Tabs ───────────────────────────────────────────────
 
@@ -199,9 +151,8 @@ export const TABS = [
 
 type Tab = (typeof TABS)[number];
 
-// Only these tabs read what `loadAll` fetches (/api/settings plus the tailscale
-// device list). Connections, Devices, Channels and Favors own their requests, and
-// Appearance reads the theme/i18n context, so neither the initial settings load
+// Only these tabs read what `loadAll` fetches (/api/settings). Connections,
+// Devices, Channels and Favors own their requests, and Appearance reads the theme/i18n context, so neither the initial settings load
 // nor a settings failure has anything to say about them — gating every tab on one
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
@@ -230,11 +181,6 @@ export default function SettingsPage() {
   const [composio, setComposio] = useState<ComposioCliStatus | null>(null);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
-  const [tailscale, setTailscale] = useState<TailscaleState>({
-    mode: "oauth",
-    configured: false,
-    devices: [],
-  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -280,15 +226,11 @@ export default function SettingsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [settingsResponse, tailscaleResponse] = await Promise.all([
-        fetch("/api/settings"),
-        fetch("/api/tailscale/devices"),
-      ]);
+      const settingsResponse = await fetch("/api/settings");
       if (!settingsResponse.ok) {
         throw new Error(await getApiErrorMessage(settingsResponse, t("page.loadFailedFallback")));
       }
       setSettings(await settingsResponse.json());
-      if (tailscaleResponse.ok) setTailscale(await tailscaleResponse.json());
     } catch (err) {
       console.error("Failed to load settings data", err);
       setLoadError(err instanceof Error ? err.message : t("page.loadFailedFallback"));
@@ -395,11 +337,15 @@ export default function SettingsPage() {
               onFlash={(message) => toast.error(message)}
             />
           )}
-          {activeTab === "Devices" && <DevicesSection />}
+          {activeTab === "Devices" && (
+            <Measure>
+              <DevicesSection />
+            </Measure>
+          )}
           {activeTab === "Channels" && (
-            <div className="max-w-3xl">
+            <Measure>
               <ChannelsSettingsPage />
-            </div>
+            </Measure>
           )}
           {activeTab === "Favors" && (
             <Measure>
@@ -410,13 +356,7 @@ export default function SettingsPage() {
             <AiToolsPanel showRomeCredits showUsage={settings.showAiToolUsage ?? true} />
           )}
           {activeTab === "Advanced" && (
-            <AdvancedSection
-              settings={settings}
-              onSave={saveSettings}
-              saving={saving}
-              tailscale={tailscale}
-              onRefresh={loadAll}
-            />
+            <AdvancedSection settings={settings} onSave={saveSettings} saving={saving} />
           )}
         </>
       )}
@@ -791,15 +731,6 @@ function FavorsSection() {
 
   return (
     <Section>
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>Favors</SectionTitle>
-          <SectionDescription>
-            Balance, payments, and paid app actions settled through Rome Cloud.
-          </SectionDescription>
-        </SectionHeading>
-      </SectionHeader>
-
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent>
@@ -965,14 +896,10 @@ function AdvancedSection({
   settings,
   onSave,
   saving,
-  tailscale,
-  onRefresh,
 }: {
   settings: SettingsData;
   onSave: (p: Record<string, unknown>) => Promise<void>;
   saving: boolean;
-  tailscale: TailscaleState;
-  onRefresh: () => Promise<void>;
 }) {
   const { t } = useTranslation("settings");
   const [showEasterEgg, setShowEasterEgg] = useState(false);
@@ -993,43 +920,29 @@ function AdvancedSection({
 
   return (
     <Measure>
-      <Section className="gap-6">
-        <SectionHeader>
-          <SectionTitle>{t("advanced.title")}</SectionTitle>
-        </SectionHeader>
-        {/* Not rendered in the Mac app. Its check and upgrade actions relay to
-          Rome Cloud, which resolves them against the account's *hosted*
-          instance — a machine other than the one showing the page. The version
-          card above them is read from the local build and is correct on
-          desktop, but it is not worth splitting the section to keep: the Mac
-          app has its own version surface, and a panel whose only button acts
-          on somewhere else is worse than an absent one.
-
-          This is a mitigation. It keys on which window is rendering, not on
-          what kind of backend is behind the page, so the same dashboard opened
-          in a browser at the loopback port still shows it. */}
-        {!isElectronShell() && <SystemUpgradeSection />}
-        <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
-        <SystemDiagnosisSection />
+      <Section className="gap-8">
         <Section>
           <SectionHeader>
-            <SectionTitle>{t("advanced.feedback.title")}</SectionTitle>
+            <SectionTitle>{t("system.title")}</SectionTitle>
           </SectionHeader>
-          <FormRows>
-            <SettingsToggleRow
-              title={t("advanced.feedback.agentReports.title")}
-              description={t("advanced.feedback.agentReports.description")}
-              label={t("advanced.feedback.agentReports.toggleLabel")}
-              checked={settings["feedback.agentReportsEnabled"] ?? true}
-              onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
-              disabled={saving}
-            />
-          </FormRows>
+          {/* Not rendered in the Mac app. Its check and upgrade actions relay to
+            Rome Cloud, which resolves them against the account's *hosted*
+            instance — a machine other than the one showing the page. The version
+            card above them is read from the local build and is correct on
+            desktop, but it is not worth splitting the section to keep: the Mac
+            app has its own version surface, and a panel whose only button acts
+            on somewhere else is worse than an absent one.
+
+            This is a mitigation. It keys on which window is rendering, not on
+            what kind of backend is behind the page, so the same dashboard opened
+            in a browser at the loopback port still shows it. */}
+          {!isElectronShell() && <SystemUpgradeSection />}
+          <SystemDiagnosisSection details={<RelayHealthSection />} />
         </Section>
-        <SpokenRecapsSection />
+        <AppKeysSection />
+        <FeaturesSection settings={settings} onSave={onSave} saving={saving} />
+        <AccessControlSection settings={settings} onSave={onSave} saving={saving} />
         <ComputerUseSection />
-        <PresentationModeSection />
-        <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -1041,25 +954,24 @@ function AdvancedSection({
  * `@/lib/presentation-mode`), not a guardian setting — deliberately no `onSave`,
  * nothing goes to `/api/settings`. It masks pinned-agent identity across chat
  * surfaces so screen recordings look like a normal conversation. */
-function PresentationModeSection() {
+function PresentationModeRow() {
   const { t } = useTranslation("settings");
   const enabled = usePresentationMode();
 
   return (
-    <FormRows>
-      <SettingsToggleRow
-        title={t("advanced.presentationMode.title")}
-        description={t("advanced.presentationMode.description")}
-        label={t("advanced.presentationMode.toggleLabel")}
-        checked={enabled}
-        onChange={setPresentationMode}
-      />
-    </FormRows>
+    <SettingsToggleRow
+      title={t("advanced.presentationMode.title")}
+      description={t("advanced.presentationMode.description")}
+      label={t("advanced.presentationMode.toggleLabel")}
+      checked={enabled}
+      onChange={setPresentationMode}
+    />
   );
 }
 
 function SettingsToggleRow({
   title,
+  badge,
   description,
   label,
   checked,
@@ -1067,6 +979,7 @@ function SettingsToggleRow({
   disabled,
 }: {
   title: string;
+  badge?: string;
   description?: string;
   label: string;
   checked: boolean;
@@ -1077,11 +990,15 @@ function SettingsToggleRow({
   return (
     <FormRow>
       <FormRowHeading>
-        <FormRowLabel htmlFor={id}>{title}</FormRowLabel>
-        {description && <FormRowDescription>{description}</FormRowDescription>}
-        <FormRowLabel htmlFor={id} className="text-aux text-muted-foreground">
-          {label}
+        <FormRowLabel htmlFor={id}>
+          {title}
+          {badge && (
+            <Badge variant="muted" className="ml-2 align-middle">
+              {badge}
+            </Badge>
+          )}
         </FormRowLabel>
+        {description && <FormRowDescription>{description}</FormRowDescription>}
       </FormRowHeading>
       <FormRowControl>
         <Switch
@@ -1106,27 +1023,21 @@ function DeveloperSettingsSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  // Mount the relay widget only while the section is expanded so its status
-  // polling doesn't run for everyone who merely opens the Advanced tab.
-  const [open, setOpen] = useState(false);
 
   return (
-    <details className="group" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="list-none rounded-8 py-1 text-left [&::-webkit-details-marker]:hidden">
-        <span className="block text-section text-foreground">
-          {t("advanced.developerSettings.title")}
-        </span>
-      </summary>
-      <Section className="mt-3">
+    <>
+      <Section>
+        <SectionHeader>
+          <SectionTitle>{t("advanced.developerSettings.title")}</SectionTitle>
+        </SectionHeader>
         <FormRows>
-          <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
         </FormRows>
-        {open && <RelayHealthSection />}
       </Section>
-    </details>
+      <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+    </>
   );
 }
 
@@ -1194,12 +1105,14 @@ function TierModelMappingsAdvancedSection({
   }
 
   return (
-    <FormRow className="block">
-      <FormRowHeading>
-        <FormRowLabel>{t("advanced.tierModelMappings.title")}</FormRowLabel>
-        <FormRowDescription>{t("advanced.tierModelMappings.description")}</FormRowDescription>
-      </FormRowHeading>
-      <FormRows className="mt-3 max-w-none">
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("advanced.tierModelMappings.title")}</SectionTitle>
+          <SectionDescription>{t("advanced.tierModelMappings.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <FormRows>
         {TIER_MODEL_MAPPING_FIELDS.map(({ provider, tier, placeholder }) => {
           const id = `tier-model-${provider}-${tier}`;
           return (
@@ -1212,7 +1125,7 @@ function TierModelMappingsAdvancedSection({
               <FormRowControl>
                 <Input
                   id={id}
-                  className="w-64"
+                  className="w-44 sm:w-64"
                   value={mappings[provider]?.[tier] ?? ""}
                   placeholder={placeholder}
                   onChange={(event) => update(provider, tier, event.target.value)}
@@ -1223,10 +1136,10 @@ function TierModelMappingsAdvancedSection({
           );
         })}
       </FormRows>
-      <Button type="button" size="sm" className="mt-3" onClick={save} disabled={saving}>
+      <Button type="button" size="sm" className="self-start" onClick={save} disabled={saving}>
         {t("advanced.tierModelMappings.save")}
       </Button>
-    </FormRow>
+    </Section>
   );
 }
 
@@ -1424,43 +1337,6 @@ function CopyValueButton({ value }: { value: string }) {
   );
 }
 
-type ToggleSwitchProps = {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-} & ({ label: string; ariaLabel?: string } | { label?: undefined; ariaLabel: string });
-
-function ToggleSwitch({
-  checked,
-  onChange,
-  label,
-  ariaLabel,
-  disabled = false,
-}: ToggleSwitchProps) {
-  if (!label) {
-    return (
-      <Switch
-        checked={checked}
-        onCheckedChange={onChange}
-        disabled={disabled}
-        aria-label={ariaLabel}
-      />
-    );
-  }
-
-  return (
-    <FieldLabel
-      className={cn(
-        "flex items-center gap-3 text-left",
-        disabled && "cursor-not-allowed opacity-50",
-      )}
-    >
-      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
-      {label}
-    </FieldLabel>
-  );
-}
-
 function ModelSelectorAdvancedSection({
   settings,
   onSave,
@@ -1517,13 +1393,10 @@ function ImpersonationAdvancedSection({
   );
 }
 
-/** Features still being tried out, each off until a guardian switches it on.
- *  Reply streaming is the first: with it off, Rome sends each reply whole. The
- *  setting is `enableReplyStreaming`, read by the host on every reply.
- *  `feishuReplyStreamingStyle` chooses how a reply streams to Feishu, cards
- *  unless it says messages, read for each message a reply creates.
- *  `experimentalConcierge` shows the Concierge chat under Chats. */
-function ExperimentalFeaturesSection({
+/** Switches for what Rome does in chats. Concierge is still being tried out,
+ *  so it carries an Experimental badge; `experimentalConcierge` shows its chat
+ *  under Chats. */
+function FeaturesSection({
   settings,
   onSave,
   saving,
@@ -1533,21 +1406,7 @@ function ExperimentalFeaturesSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
-  const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
-    settings.feishuReplyStreamingStyle === "message" ? "message" : "card",
-  );
   const [concierge, setConcierge] = useState(settings.experimentalConcierge ?? false);
-
-  function toggleReplyStreaming(next: boolean) {
-    setReplyStreaming(next);
-    void onSave({ enableReplyStreaming: next });
-  }
-
-  function chooseFeishuStyle(next: FeishuStreamingStyle) {
-    setFeishuStyle(next);
-    void onSave({ feishuReplyStreamingStyle: next });
-  }
 
   function toggleConcierge(next: boolean) {
     setConcierge(next);
@@ -1557,52 +1416,20 @@ function ExperimentalFeaturesSection({
   return (
     <Section>
       <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>{t("advanced.experimental.title")}</SectionTitle>
-          <SectionDescription>{t("advanced.experimental.description")}</SectionDescription>
-        </SectionHeading>
+        <SectionTitle>{t("advanced.features.title")}</SectionTitle>
       </SectionHeader>
       <FormRows>
         <SettingsToggleRow
-          title={t("advanced.experimental.replyStreaming.title")}
-          description={t("advanced.experimental.replyStreaming.description")}
-          label={t("advanced.experimental.replyStreaming.toggleLabel")}
-          checked={replyStreaming}
-          onChange={toggleReplyStreaming}
-          disabled={saving}
-        />
-        <FormRow>
-          <FormRowHeading>
-            <FormRowLabel>{t("advanced.experimental.feishuStreamingStyle.title")}</FormRowLabel>
-            <FormRowDescription>
-              {t("advanced.experimental.feishuStreamingStyle.description")}
-            </FormRowDescription>
-          </FormRowHeading>
-          <FormRowControl>
-            <SegmentedControl
-              aria-label={t("advanced.experimental.feishuStreamingStyle.title")}
-              size="sm"
-              value={feishuStyle}
-              onValueChange={chooseFeishuStyle}
-              disabled={saving || !replyStreaming}
-              options={[
-                {
-                  value: "message",
-                  label: t("advanced.experimental.feishuStreamingStyle.message"),
-                },
-                { value: "card", label: t("advanced.experimental.feishuStreamingStyle.card") },
-              ]}
-            />
-          </FormRowControl>
-        </FormRow>
-        <SettingsToggleRow
           title={t("advanced.experimental.concierge.title")}
+          badge={t("advanced.experimental.badge")}
           description={t("advanced.experimental.concierge.description")}
           label={t("advanced.experimental.concierge.toggleLabel")}
           checked={concierge}
           onChange={toggleConcierge}
           disabled={saving}
         />
+        <SpokenRecapsRows />
+        <PresentationModeRow />
       </FormRows>
     </Section>
   );
@@ -1628,7 +1455,6 @@ function AiToolUsageAdvancedSection({
   return (
     <SettingsToggleRow
       title={t("advanced.aiToolUsage.title")}
-      description={t("advanced.aiToolUsage.description")}
       label={t("advanced.aiToolUsage.toggleLabel")}
       checked={enabled}
       onChange={toggle}
@@ -1719,558 +1545,37 @@ function AdvancedEasterEggOverlay({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ── Section: Tailscale ─────────────────────────────────
-
 // ── Section: Access Control ───────────────────────────
-// One first-level section with two subsections: who can sign in from the
-// public host (allowed Rome Cloud emails), then the Tailscale network with
-// its restrict-to-tailnet toggle.
+// Who can sign in from the public host (allowed Rome Cloud emails).
 
 function AccessControlSection({
-  tailscale,
-  onRefresh,
+  settings,
+  onSave,
+  saving,
 }: {
-  tailscale: TailscaleState;
-  onRefresh: () => Promise<void>;
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
 }) {
   const { t } = useTranslation("settings");
   return (
     <Section>
       <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>{t("publicAccess.title")}</SectionTitle>
-          <SectionDescription>{t("publicAccess.description")}</SectionDescription>
-        </SectionHeading>
+        <SectionTitle>{t("publicAccess.title")}</SectionTitle>
       </SectionHeader>
       <AllowedCloudEmailsSection />
-      <Card>
-        <CardContent>
-          <TailscaleSection tailscale={tailscale} onRefresh={onRefresh} />
-          <TailnetRestrictionSection />
-        </CardContent>
-      </Card>
+      <FormRows>
+        <SettingsToggleRow
+          title={t("advanced.feedback.agentReports.title")}
+          description={t("advanced.feedback.agentReports.description")}
+          label={t("advanced.feedback.agentReports.toggleLabel")}
+          checked={settings["feedback.agentReportsEnabled"] ?? true}
+          onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
+          disabled={saving}
+        />
+      </FormRows>
     </Section>
   );
-}
-
-function TailscaleSection({
-  tailscale,
-  onRefresh,
-}: {
-  tailscale: TailscaleState;
-  onRefresh: () => Promise<void>;
-}) {
-  if (tailscale.mode === "daemon") {
-    return <TailscaleDaemonSection tailscale={tailscale} onRefresh={onRefresh} />;
-  }
-  return <TailscaleOAuthSection tailscale={tailscale} onRefresh={onRefresh} />;
-}
-
-// ── Daemon mode (Docker) ──────────────────────────────
-
-function TailscaleDaemonSection({
-  tailscale,
-  onRefresh,
-}: {
-  tailscale: TailscaleState;
-  onRefresh: () => Promise<void>;
-}) {
-  const { t } = useTranslation("settings");
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [disconnectError, setDisconnectError] = useState<string | null>(null);
-  const [savingExitNode, setSavingExitNode] = useState(false);
-  const [exitNodeError, setExitNodeError] = useState<string | null>(null);
-
-  const isConnected = tailscale.status === "connected";
-  const exitNodeEnabled = tailscale.advertiseExitNode === true;
-  const {
-    connecting,
-    authUrl,
-    error,
-    connect: handleConnect,
-    clearAuthUrl,
-  } = useTailscaleConnect(onRefresh);
-  const isAuthenticating = tailscale.status === "authenticating" || !!authUrl;
-
-  // Auto-poll while authenticating to detect when auth completes
-  useEffect(() => {
-    if (!isAuthenticating) return;
-    const interval = setInterval(async () => {
-      await onRefresh();
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [isAuthenticating, onRefresh]);
-
-  // Clear authUrl when connected
-  useEffect(() => {
-    if (isConnected && authUrl) {
-      clearAuthUrl();
-    }
-  }, [isConnected, authUrl, clearAuthUrl]);
-
-  async function handleDisconnect() {
-    setDisconnecting(true);
-    setDisconnectError(null);
-    try {
-      const res = await fetch("/api/tailscale/connect", { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setDisconnectError(data.error || t("common.connectionFailed"));
-        return;
-      }
-      clearAuthUrl();
-      await onRefresh();
-    } catch {
-      setDisconnectError(t("common.networkError"));
-    } finally {
-      setDisconnecting(false);
-    }
-  }
-
-  async function handleExitNodeToggle(nextEnabled: boolean) {
-    setSavingExitNode(true);
-    setExitNodeError(null);
-    try {
-      const res = await fetch("/api/tailscale/exit-node", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: nextEnabled }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setExitNodeError(data.error || t("tailscale.exitNode.updateFailed"));
-        return;
-      }
-      await onRefresh();
-    } catch {
-      setExitNodeError(t("tailscale.exitNode.updateFailed"));
-    } finally {
-      setSavingExitNode(false);
-    }
-  }
-
-  const status = isConnected
-    ? t("tailscale.status.connected")
-    : isAuthenticating
-      ? t("tailscale.status.authenticating")
-      : t("tailscale.status.notConnected");
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="text-ui text-foreground">{t("tailscale.title")}</h3>
-          <StatusIndicator
-            status={{
-              label: status,
-              tone: isConnected ? "success" : isAuthenticating ? "attention" : "muted",
-            }}
-          />
-          <span className="text-aux text-subtle-foreground">{t("tailscale.daemonMode")}</span>
-        </div>
-        {isConnected ? (
-          <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
-            {disconnecting ? t("common.disconnecting") : t("common.disconnect")}
-          </Button>
-        ) : !isAuthenticating ? (
-          <Button variant="outline" onClick={handleConnect} disabled={connecting}>
-            {connecting ? t("common.connecting") : t("tailscale.connectButton")}
-          </Button>
-        ) : null}
-      </div>
-
-      {error && <p className="mb-4 text-ui text-destructive-fg">{error}</p>}
-      {disconnectError && <p className="mb-4 text-ui text-destructive-fg">{disconnectError}</p>}
-      {exitNodeError && <p className="mb-4 text-ui text-destructive-fg">{exitNodeError}</p>}
-
-      {/* Authenticating state — show auth URL */}
-      {isAuthenticating && authUrl && (
-        <Alert variant="warning" className="mb-4 p-4">
-          <Spinner label={t("tailscale.status.authenticating")} />
-          <AlertTitle>{t("tailscale.authPrompt")}</AlertTitle>
-          <AlertDescription className="min-w-0">
-            <a
-              href={authUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block truncate underline hover:no-underline"
-            >
-              {authUrl}
-            </a>
-            <p className="mt-2 text-aux">{t("tailscale.polling")}</p>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* Connected state — show info card + peers */}
-      {isConnected && (
-        <>
-          <Alert variant="success" className="mb-4 p-4">
-            <AlertDescription className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-aux">{t("tailscale.infoLabels.ip")}</p>
-                <p className="font-mono text-ui text-foreground">{tailscale.ip || "—"}</p>
-              </div>
-              <div>
-                <p className="text-aux">{t("tailscale.infoLabels.hostname")}</p>
-                <p className="text-ui text-foreground">{tailscale.hostname || "—"}</p>
-              </div>
-              <div>
-                <p className="text-aux">{t("tailscale.infoLabels.fqdn")}</p>
-                <p className="font-mono text-ui text-foreground">{tailscale.fqdn || "—"}</p>
-              </div>
-            </AlertDescription>
-          </Alert>
-
-          {tailscale.peers && tailscale.peers.length > 0 && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("tailscale.peersTable.hostname")}</TableHead>
-                  <TableHead>{t("tailscale.peersTable.fqdn")}</TableHead>
-                  <TableHead>{t("tailscale.peersTable.ip")}</TableHead>
-                  <TableHead>{t("tailscale.peersTable.os")}</TableHead>
-                  <TableHead>{t("tailscale.peersTable.status")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tailscale.peers.map((peer) => (
-                  <TableRow key={peer.fqdn}>
-                    <TableCell>
-                      <span className="text-foreground">{peer.hostname}</span>
-                      {peer.isSelf && (
-                        <span className="ml-2 inline-flex items-center rounded-full bg-info-bg px-2 py-1 text-badge text-info-fg">
-                          {t("tailscale.peersTable.thisDevice")}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-aux text-muted-foreground">
-                      {peer.fqdn}
-                    </TableCell>
-                    <TableCell className="font-mono text-aux text-muted-foreground">
-                      {peer.ip}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{peer.os}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-1 text-badge ${
-                          peer.online
-                            ? "bg-success-bg text-success-fg"
-                            : "bg-surface-muted text-muted-foreground"
-                        }`}
-                      >
-                        {peer.online ? t("common.online") : t("common.offline")}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-
-          {tailscale.peers && tailscale.peers.length === 0 && (
-            <p className="text-ui text-muted-foreground">{t("tailscale.noPeers")}</p>
-          )}
-
-          <Card className="mt-4">
-            <CardHeader>
-              {/* h4, not CardTitle's h3: this panel is nested inside the Tailscale
-                  section, so it labels a control rather than heading a section.
-                  "Exit node" is a term rather than a fact, so its meaning sits in
-                  a tooltip and the row carries no description. */}
-              <div className="flex items-center gap-2">
-                <h4 className="text-ui text-foreground">{t("tailscale.exitNode.title")}</h4>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label={t("tailscale.exitNode.termTooltip")}
-                      >
-                        <Info className="size-3.5" aria-hidden />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("tailscale.exitNode.termTooltip")}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <CardAction>
-                <ToggleSwitch
-                  checked={exitNodeEnabled}
-                  onChange={handleExitNodeToggle}
-                  disabled={disconnecting || savingExitNode}
-                  ariaLabel={t("tailscale.exitNode.title")}
-                />
-              </CardAction>
-            </CardHeader>
-            {savingExitNode && (
-              <CardContent>
-                <p className="text-aux text-subtle-foreground">
-                  {t("tailscale.exitNode.updating")}
-                </p>
-              </CardContent>
-            )}
-          </Card>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── OAuth mode (host) ─────────────────────────────────
-
-function TailscaleOAuthSection({
-  tailscale,
-  onRefresh,
-}: {
-  tailscale: TailscaleState;
-  onRefresh: () => Promise<void>;
-}) {
-  const { t } = useTranslation("settings");
-  const [showModal, setShowModal] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [disconnectError, setDisconnectError] = useState<string | null>(null);
-
-  async function handleDisconnect() {
-    setDisconnecting(true);
-    setDisconnectError(null);
-    try {
-      const res = await fetch("/api/tailscale/connect", { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setDisconnectError(data.error || t("common.connectionFailed"));
-        return;
-      }
-      await onRefresh();
-    } catch {
-      setDisconnectError(t("common.networkError"));
-    } finally {
-      setDisconnecting(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="text-ui text-foreground">{t("tailscale.title")}</h3>
-          <StatusIndicator
-            status={
-              tailscale.configured
-                ? { label: t("tailscale.status.connected"), tone: "success" }
-                : { label: t("tailscale.status.notConfigured"), tone: "muted" }
-            }
-          />
-        </div>
-        {tailscale.configured ? (
-          <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
-            {disconnecting ? t("common.disconnecting") : t("common.disconnect")}
-          </Button>
-        ) : (
-          <Button variant="outline" onClick={() => setShowModal(true)}>
-            {t("tailscale.connectButtonOauth")}
-          </Button>
-        )}
-      </div>
-
-      {disconnectError && <p className="mb-4 text-ui text-destructive-fg">{disconnectError}</p>}
-
-      {/* Desktop app download banner */}
-      <Alert variant="info" className="mb-4">
-        <AlertDescription>
-          {t("tailscale.downloadBannerPrefix")}{" "}
-          <a
-            href="https://tailscale.com/download"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:no-underline"
-          >
-            {t("tailscale.downloadBannerLink")}
-          </a>{" "}
-          {t("tailscale.downloadBannerSuffix")}
-        </AlertDescription>
-      </Alert>
-
-      {tailscale.configured && tailscale.devices && tailscale.devices.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("tailscale.devicesTable.name")}</TableHead>
-              <TableHead>{t("tailscale.devicesTable.os")}</TableHead>
-              <TableHead>{t("tailscale.devicesTable.ipAddresses")}</TableHead>
-              <TableHead>{t("tailscale.devicesTable.version")}</TableHead>
-              <TableHead>{t("tailscale.devicesTable.status")}</TableHead>
-              <TableHead>{t("tailscale.devicesTable.lastSeen")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {tailscale.devices.map((device) => (
-              <TableRow key={device.id}>
-                <TableCell>
-                  <div className="text-ui text-foreground">{device.hostname}</div>
-                  <div className="text-aux text-muted-foreground">{device.name}</div>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{device.os}</TableCell>
-                <TableCell>
-                  <div className="space-y-1">
-                    {device.addresses.map((addr) => (
-                      <div key={addr} className="font-mono text-aux text-muted-foreground">
-                        {addr}
-                      </div>
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell className="font-mono text-aux text-muted-foreground">
-                  {device.clientVersion}
-                </TableCell>
-                <TableCell>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-1 text-badge ${
-                      device.online
-                        ? "bg-success-bg text-success-fg"
-                        : "bg-surface-muted text-muted-foreground"
-                    }`}
-                  >
-                    {device.online ? t("common.online") : t("common.offline")}
-                  </span>
-                </TableCell>
-                <TableCell className="text-aux text-muted-foreground">
-                  {new Date(device.lastSeen).toLocaleString()}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-
-      {tailscale.configured && (!tailscale.devices || tailscale.devices.length === 0) && (
-        <p className="text-ui text-muted-foreground">{t("tailscale.noDevices")}</p>
-      )}
-
-      {showModal && (
-        <TailscaleConnectModal
-          onClose={() => setShowModal(false)}
-          onConnected={async () => {
-            setShowModal(false);
-            await onRefresh();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function TailscaleConnectModal({
-  onClose,
-  onConnected,
-}: {
-  onClose: () => void;
-  onConnected: () => Promise<void>;
-}) {
-  const { t } = useTranslation("settings");
-  const uid = useId();
-  const clientIdRef = useRef<HTMLInputElement | null>(null);
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleConnect() {
-    if (!clientId.trim() || !clientSecret.trim()) return;
-    setConnecting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/tailscale/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, clientSecret }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || t("common.connectionFailed"));
-        return;
-      }
-      await onConnected();
-    } catch {
-      setError(t("common.networkError"));
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  return (
-    <Dialog open onClose={onClose} size="sm" initialFocusRef={clientIdRef} className="p-6">
-      <DialogTitle className="mb-4">{t("tailscale.modal.title")}</DialogTitle>
-      <DialogDescription className="mb-4">
-        {t("tailscale.modal.introPrefix")}{" "}
-        <a
-          href="https://login.tailscale.com/admin/settings/oauth"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-info-fg hover:underline"
-        >
-          {t("tailscale.modal.introLink")}
-        </a>
-        <Trans
-          i18nKey="tailscale.modal.introSuffix"
-          ns="settings"
-          components={{ code: <code className="font-mono" /> }}
-        />
-      </DialogDescription>
-
-      {error && <p className="mb-3 text-ui text-destructive-fg">{error}</p>}
-
-      <div className="space-y-3">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-tailscale-client-id`}>
-            {t("tailscale.modal.clientIdLabel")}
-          </FieldLabel>
-          <Input
-            ref={clientIdRef}
-            id={`${uid}-tailscale-client-id`}
-            type="text"
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            placeholder={t("tailscale.modal.clientIdPlaceholder")}
-            className="w-full"
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-tailscale-client-secret`}>
-            {t("tailscale.modal.clientSecretLabel")}
-          </FieldLabel>
-          <Input
-            id={`${uid}-tailscale-client-secret`}
-            type="password"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            placeholder={t("tailscale.modal.clientSecretPlaceholder")}
-            className="w-full"
-          />
-        </Field>
-      </div>
-
-      <div className="mt-5 flex justify-end gap-3">
-        <Button variant="outline" size="default" onClick={onClose}>
-          {t("tailscale.modal.cancel")}
-        </Button>
-        <Button
-          size="default"
-          onClick={handleConnect}
-          disabled={connecting || !clientId.trim() || !clientSecret.trim()}
-        >
-          {connecting ? t("common.connecting") : t("common.connect")}
-        </Button>
-      </div>
-    </Dialog>
-  );
-}
-
-interface PublicAccessConfig {
-  enableAccessControl: boolean;
-  allowedApps: string[];
-  cloudEmailAccess: Record<string, string[]>;
 }
 
 interface DashboardAccessConfig {
@@ -2414,13 +1719,7 @@ function AllowedCloudEmailsSection() {
             {t("publicAccess.dashboardEmails.add")}
           </Button>
         </div>
-        {draftError ? (
-          <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>
-        ) : (
-          <p className="mt-2 text-aux text-muted-foreground">
-            {t("publicAccess.dashboardEmails.help")}
-          </p>
-        )}
+        {draftError && <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>}
 
         {emails.length > 0 ? (
           <ul className="mt-4 space-y-2">
@@ -2453,233 +1752,5 @@ function AllowedCloudEmailsSection() {
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function TailnetRestrictionSection() {
-  const { t } = useTranslation("settings");
-  const [config, setConfig] = useState<PublicAccessConfig>({
-    enableAccessControl: false,
-    allowedApps: [],
-    cloudEmailAccess: {},
-  });
-  const [tailnetDns, setTailnetDns] = useState<string | null>(null);
-  const [httpsEnabled, setHttpsEnabled] = useState<boolean | null>(null);
-  const [certReady, setCertReady] = useState<boolean | null>(null);
-  const [certError, setCertError] = useState<string | null>(null);
-  const [tailnetReachable, setTailnetReachable] = useState(false);
-  const [checkingTailnetReachable, setCheckingTailnetReachable] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [toast, setToast] = useState("");
-  const [toastIsError, setToastIsError] = useState(false);
-  const handoffInFlightRef = useRef(false);
-
-  const fetchTailnetStatus = useCallback(async (): Promise<{
-    tailnetDns: string | null;
-    httpsEnabled: boolean | null;
-    certReady: boolean | null;
-    certError: string | null;
-  }> => {
-    try {
-      const response = await fetch("/api/tailnet");
-      if (!response.ok) {
-        return {
-          tailnetDns: null,
-          httpsEnabled: null,
-          certReady: null,
-          certError: null,
-        };
-      }
-      const data = await response.json();
-      return {
-        tailnetDns: typeof data.tailnetDns === "string" ? data.tailnetDns : null,
-        httpsEnabled:
-          data.httpsEnabled === true ? true : data.httpsEnabled === false ? false : null,
-        certReady: data.certReady === true ? true : data.certReady === false ? false : null,
-        certError: typeof data.certError === "string" ? data.certError : null,
-      };
-    } catch {
-      return {
-        tailnetDns: null,
-        httpsEnabled: null,
-        certReady: null,
-        certError: null,
-      };
-    }
-  }, []);
-
-  const checkTailnetReachable = useCallback(async (dns: string) => {
-    setCheckingTailnetReachable(true);
-    try {
-      setTailnetReachable(await probeTailnetReachable(dns));
-    } finally {
-      setCheckingTailnetReachable(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    Promise.all([
-      fetchJson<PublicAccessConfig>("/api/public-access", {
-        fallback: "Failed to load public access.",
-      }).catch(
-        (): PublicAccessConfig => ({
-          enableAccessControl: false,
-          allowedApps: [],
-          cloudEmailAccess: {},
-        }),
-      ),
-      fetchTailnetStatus(),
-    ])
-      .then(([publicAccess, tailnetStatus]) => {
-        setConfig(publicAccess);
-        setTailnetDns(tailnetStatus.tailnetDns);
-        setHttpsEnabled(tailnetStatus.httpsEnabled);
-        setCertReady(tailnetStatus.certReady);
-        setCertError(tailnetStatus.certError);
-      })
-      .finally(() => setLoaded(true));
-  }, [fetchTailnetStatus]);
-
-  useEffect(() => {
-    if (!tailnetDns || httpsEnabled !== true || certReady !== true || tailnetReachable) {
-      if (!tailnetDns || httpsEnabled !== true || certReady !== true) {
-        setTailnetReachable(false);
-      }
-      return;
-    }
-    checkTailnetReachable(tailnetDns);
-    const interval = setInterval(() => checkTailnetReachable(tailnetDns), 5000);
-    return () => clearInterval(interval);
-  }, [tailnetDns, httpsEnabled, certReady, tailnetReachable, checkTailnetReachable]);
-
-  useEffect(() => {
-    if (tailnetDns && httpsEnabled === true && certReady === true) return;
-    const interval = setInterval(() => {
-      fetchTailnetStatus().then((tailnetStatus) => {
-        setTailnetDns(tailnetStatus.tailnetDns);
-        setHttpsEnabled(tailnetStatus.httpsEnabled);
-        setCertReady(tailnetStatus.certReady);
-        setCertError(tailnetStatus.certError);
-      });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [tailnetDns, httpsEnabled, certReady, fetchTailnetStatus]);
-
-  async function save(updated: PublicAccessConfig): Promise<boolean> {
-    setSaving(true);
-    try {
-      const latestTailnetStatus = await fetchTailnetStatus();
-      const latestTailnetDns = latestTailnetStatus.tailnetDns;
-      const latestHttpsEnabled = latestTailnetStatus.httpsEnabled;
-      const latestCertReady = latestTailnetStatus.certReady;
-      const latestTailnetReachable =
-        latestTailnetDns && latestHttpsEnabled === true && latestCertReady === true
-          ? await probeTailnetReachable(latestTailnetDns)
-          : false;
-
-      setTailnetDns(latestTailnetDns);
-      setHttpsEnabled(latestHttpsEnabled);
-      setCertReady(latestCertReady);
-      setCertError(latestTailnetStatus.certError);
-      setTailnetReachable(latestTailnetReachable);
-
-      const enabling = updated.enableAccessControl && !config.enableAccessControl;
-      if (enabling && !accessControlChecksPassed(latestHttpsEnabled, latestTailnetReachable)) {
-        throw new Error(t("publicAccess.openFirst"));
-      }
-
-      const targetHost = latestTailnetDns?.replace(/\.$/, "") ?? null;
-      const needsCrossHostHandoff =
-        enabling && !!targetHost && window.location.hostname !== targetHost;
-
-      let handoff: SessionHandoffPayload | null = null;
-      if (needsCrossHostHandoff) {
-        handoff = await requestSessionHandoff(targetHost, "/settings/advanced");
-        if (!handoff) {
-          throw new Error(t("publicAccess.handoffFailed"));
-        }
-      }
-
-      const response = await fetch("/api/public-access", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated),
-      });
-      if (!response.ok) {
-        throw new Error(await getApiErrorMessage(response, t("publicAccess.saveFailedFallback")));
-      }
-
-      setConfig(updated);
-      setToastIsError(false);
-      setToast(t("publicAccess.savedFlash"));
-      setTimeout(() => setToast(""), 2500);
-
-      if (needsCrossHostHandoff && handoff && !handoffInFlightRef.current) {
-        handoffInFlightRef.current = true;
-        submitSessionHandoff(targetHost, handoff);
-      }
-      return true;
-    } catch (error) {
-      setToastIsError(true);
-      setToast(error instanceof Error ? error.message : t("publicAccess.saveFailedFallback"));
-      setTimeout(() => setToast(""), 2500);
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!loaded) return null;
-
-  const canTurnOnAccessControl =
-    config.enableAccessControl || accessControlChecksPassed(httpsEnabled, tailnetReachable);
-
-  return (
-    <div className="mt-6 border-t border-border pt-4">
-      {toast && (
-        <div
-          className={`mb-4 rounded-8 border px-4 py-2 text-ui ${
-            toastIsError
-              ? "border-destructive-border bg-destructive-bg text-destructive-fg"
-              : "border-success-border bg-success-bg text-success-fg"
-          }`}
-        >
-          {toast}
-        </div>
-      )}
-
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h4 className="text-ui text-foreground">{t("publicAccess.toggleLabel")}</h4>
-          {config.enableAccessControl ? (
-            <p className="mt-1 text-aux text-success-fg">{t("publicAccess.restrictedNote")}</p>
-          ) : !tailnetDns ? (
-            <p className="mt-1 text-aux text-muted-foreground">
-              {t("publicAccess.needTailscaleNote")}
-            </p>
-          ) : httpsEnabled === true && certReady !== true && certError ? (
-            <p className="mt-1 text-aux text-warning-fg">{describeTailscaleCertError(certError)}</p>
-          ) : httpsEnabled !== true || certReady !== true ? (
-            <p className="mt-1 text-aux text-muted-foreground">{t("publicAccess.needHttpsNote")}</p>
-          ) : !tailnetReachable ? (
-            <p className="mt-1 text-aux text-muted-foreground">
-              {t("publicAccess.openTailnetNote")}
-              {checkingTailnetReachable ? t("publicAccess.checkingSuffix") : ""}
-            </p>
-          ) : (
-            <p className="mt-1 text-aux text-muted-foreground">
-              {t("publicAccess.publicEnabledNote")}
-            </p>
-          )}
-        </div>
-        <ToggleSwitch
-          checked={config.enableAccessControl}
-          onChange={(enableAccessControl) => void save({ ...config, enableAccessControl })}
-          disabled={saving || (!config.enableAccessControl && !canTurnOnAccessControl)}
-          ariaLabel={t("publicAccess.toggleLabel")}
-        />
-      </div>
-    </div>
   );
 }

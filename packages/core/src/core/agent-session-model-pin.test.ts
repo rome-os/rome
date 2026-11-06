@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import {
+  type AgentTurnFailedBeforeStart,
+  createAgentLifecycleDispatcher,
+} from "./agent-lifecycle.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -20,7 +22,7 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import {
   createEmptyLegacyArtifactBindings,
@@ -52,8 +54,10 @@ function createProvider(id: ProviderId) {
       },
       params,
     );
-    session.providerThreadId = params.providerThreadId ?? `native-${params.sessionId}`;
-    return session;
+    return {
+      ...session,
+      modelThreadId: params.thread.kind === "resume" ? params.thread.modelThreadId : `native-${id}`,
+    };
   });
   const provider: ModelProvider = {
     id,
@@ -81,8 +85,7 @@ describe("agent model pins through AgentSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
-  let sessionManager: SessionManager;
-  let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
@@ -99,6 +102,7 @@ describe("agent model pins through AgentSessionManager", () => {
   function createManager(
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
+    lifecycleDispatcher = createAgentLifecycleDispatcher(),
   ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -106,8 +110,7 @@ describe("agent model pins through AgentSessionManager", () => {
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager,
-        sessionsRepo,
+        sessionRepository,
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
@@ -121,7 +124,7 @@ describe("agent model pins through AgentSessionManager", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        lifecycleDispatcher,
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },
@@ -135,8 +138,7 @@ describe("agent model pins through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionsRepo = new SessionsRepository(testDb.db);
-    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
     state = healthyState();
@@ -160,10 +162,10 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(openai.openSession).toHaveBeenCalledTimes(1);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
     expect(anthropic.openSession).not.toHaveBeenCalled();
-    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: MODEL,
-      providerThreadId: `native-${session.sessionId}`,
+      modelThreadId: "native-openai",
     });
   });
 
@@ -177,7 +179,7 @@ describe("agent model pins through AgentSessionManager", () => {
       workingDir: directory,
     });
     await collect(session.sendTurn({ prompt: "credits" }).events);
-    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: "gpt-6.1-sol",
     });
@@ -280,6 +282,30 @@ describe("agent model pins through AgentSessionManager", () => {
     state.codex.quotaExhausted = false;
     await collect(session.sendTurn({ prompt: "retry" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
+  });
+
+  it("tells in-process listeners once of a later turn that fails before it starts", async () => {
+    const lifecycle = createAgentLifecycleDispatcher();
+    const finished: string[] = [];
+    const failedBeforeStart: AgentTurnFailedBeforeStart[] = [];
+    lifecycle.onFinished((event) => finished.push(event.turn.turnId));
+    lifecycle.onFailedBeforeStart((event) => failedBeforeStart.push(event));
+    const session = await createManager(false, false, lifecycle).acquire(key, {
+      workingDir: directory,
+    });
+    const first = session.sendTurn({ prompt: "first" });
+    await collect(first.events);
+    state.codex.quotaExhausted = true;
+    const blocked = session.sendTurn({ prompt: "blocked" });
+    await collect(blocked.events);
+
+    expect(finished).toEqual([first.turnId]);
+    expect(failedBeforeStart).toEqual([
+      {
+        turn: expect.objectContaining({ turnId: blocked.turnId }),
+        error: expect.stringContaining("Selected model provider is unavailable"),
+      },
+    ]);
   });
 
   it("enforces known model entitlements instead of substituting a tier model", async () => {

@@ -1,3 +1,4 @@
+import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { z } from "zod";
@@ -31,6 +32,10 @@ const taskSchema = z.object({
   dueAt: z.number().nullable(),
   rank: z.number().nullable(),
   chat: z.object({ id: z.string(), name: z.string() }).nullable(),
+  // A row that names no Concierge chat is the main chat's.
+  conciergeChat: z
+    .object({ id: z.string(), name: z.string(), main: z.boolean() })
+    .default({ id: CONCIERGE_CHAT_ID, name: "Concierge", main: true }),
   // A server from before the field sends none.
   sourceMessageId: z.string().nullable().default(null),
   createdAt: z.number(),

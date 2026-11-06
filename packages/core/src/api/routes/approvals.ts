@@ -11,7 +11,7 @@ type ApprovalStatus = "pending" | "approved" | "rejected" | "auto_approved";
 const VALID_STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected", "auto_approved"];
 
 async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "reject") {
-  const { approvalHandler, approvalsRepo, peopleRepo, platformOfChannel } = deps;
+  const { approvalHandler, approvalsRepo } = deps;
   const approvalId = c.req.param("id") as string;
   const actor = await currentSessionActor();
   if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
@@ -42,26 +42,6 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
     });
   }
 
-  if (action === "reject" && approval.type === "person_mapping") {
-    const payload = approval.payload as Record<string, unknown> | null;
-    if (payload?.action === "auto_mapped_existing") {
-      const channel = payload.channel;
-      const channelUserId = payload.channelUserId;
-      if (typeof channel === "string" && typeof channelUserId === "string") {
-        try {
-          await peopleRepo.unlink({ platform: platformOfChannel(channel), id: channelUserId });
-        } catch (err) {
-          log.error("failed to cleanup auto-mapped channel mapping on rejection", {
-            approvalId,
-            channel,
-            channelUserId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    }
-  }
-
   return c.json({ ok: true, status: "accepted", approvalId, action, approval }, 202);
 }
 
@@ -84,14 +64,10 @@ export function approvalsRoutes(deps: ApiDeps): Hono {
   });
   app.get("/approvals", async (c) => {
     const status = c.req.query("status");
-    const offset = Number(c.req.query("pairingHistoryOffset") ?? "0");
-    if (!Number.isSafeInteger(offset) || offset < 0)
-      return c.json({ error: "Invalid history offset" }, 400);
     const rows = await deps.approvalsRepo.list(
       status && VALID_STATUSES.includes(status as ApprovalStatus)
         ? (status as ApprovalStatus)
         : undefined,
-      offset,
     );
     return c.json(rows);
   });

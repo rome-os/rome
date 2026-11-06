@@ -1,18 +1,23 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
+import { sql } from "drizzle-orm";
+import type { ChatDescriptor, ChatId, ChatRef, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
-import { createTestDb, kindChannelOf, testChatRepository, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, testChatsWiring, type TestDb } from "../test/helpers.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
-import type { Channels } from "../channels/channel.js";
-import { connectionPorts } from "../channels/connection-ports.js";
+import type { Channels } from "../chats/connected-accounts/connected-account.js";
+import { connectionPorts } from "../chats/connected-accounts/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { ChatRepository } from "../chats/chat-repository.js";
-import { chatKey } from "../chats/place.js";
+import { chatsWiring } from "../chats-wiring.js";
+import { openChannelChat } from "../connections/open-chat.js";
+import { startChannelChat } from "../connections/channel-chat.js";
+import { MessageRepository } from "../chats/storage/message-repository.js";
+import { placeIn } from "../chats/storage/place.js";
+import { ChatAddresses } from "../connections/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function directoryDescriptor(
   service: "discord" | "feishu" | "wechat" | "agents",
@@ -69,8 +74,24 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
       if (!built.has(name))
         built.set(name, connectionPorts({ registry, channelOf: kindChannelOf }, name));
       const ports = built.get(name);
-      return ports ? [{ name, accounts: null, ...ports }] : [];
+      return ports ? [{ name, accounts: null, messages: null, ...ports }] : [];
     });
+}
+
+/** The speaker of the channel's account at a channel address, in the chat
+ *  the address keys, as a message reaching it opens it. */
+function openSpeaker(
+  db: TestDb["db"],
+  input: EnsureChannelChatInput,
+  wired: ReturnType<typeof chatsWiring> = testChatsWiring(db),
+) {
+  return openChannelChat(
+    {
+      webchatRepo: new ChatsWebChatRepository(db),
+      speakers: { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers },
+    },
+    input,
+  );
 }
 
 describe("ChatSettingsService", () => {
@@ -109,7 +130,7 @@ describe("ChatSettingsService", () => {
     const discord = await connectLive(registry, "discord");
     const feishu = await connectLive(registry, "feishu");
     const wechat = await connectLive(registry, "wechat");
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const repository = new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db));
     const service = new ChatSettingsService({
       repository,
       connections: registry,
@@ -145,6 +166,64 @@ describe("ChatSettingsService", () => {
       listed,
     };
   }
+
+  it("places what it stores in chats, and leaves the legacy source columns empty", async () => {
+    const { repository, service, parent, childDescriptor } = await setup();
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian", id: "guardian-1" },
+    });
+    repository.mutate(childDescriptor, childDescriptor.connectionKind, {
+      settings: null,
+      agentName: undefined,
+    });
+
+    const rows = testDb!.db.all<{
+      thread_id: string | null;
+      chat_id: number | null;
+      source_channel: string | null;
+      source_thread_id: string | null;
+      source_thread_name: string | null;
+      source_thread_type: string | null;
+    }>(sql`SELECT thread_id, chat_id, source_channel, source_thread_id, source_thread_name,
+             source_thread_type FROM rome_sessions ORDER BY thread_id IS NOT NULL`);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.thread_id).toBe("child");
+    for (const row of rows) {
+      expect(row.chat_id).not.toBeNull();
+      expect(row).toMatchObject({
+        source_channel: null,
+        source_thread_id: null,
+        source_thread_name: null,
+        source_thread_type: null,
+      });
+    }
+  });
+
+  it("keeps the legacy source columns on a thread whose parent Rome holds no speaker for", async () => {
+    const { repository, childDescriptor } = await setup();
+    repository.mutate(childDescriptor, childDescriptor.connectionKind, {
+      settings: null,
+      agentName: undefined,
+    });
+
+    // The legacy chats backfill places this row by its source columns.
+    expect(
+      testDb!.db.all(
+        sql`SELECT chat_id, parent_session_id, source_channel, source_thread_id
+            FROM rome_sessions WHERE thread_id = 'child'`,
+      ),
+    ).toEqual([
+      {
+        chat_id: null,
+        parent_session_id: null,
+        source_channel: "discord",
+        source_thread_id: "child",
+      },
+    ]);
+  });
 
   it("keeps settings on the parent while threads inherit without overrides", async () => {
     const { repository, service, changed, parent, child, childDescriptor, listed } = await setup();
@@ -268,7 +347,7 @@ describe("ChatSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "guardian-1" },
     });
-    await new WebChatRepository(testDb!.db).ensureChannelChat({
+    await openSpeaker(testDb!.db, {
       channel: "discord",
       threadId: "first-seen-topic",
       parentThreadId: "parent",
@@ -340,8 +419,8 @@ describe("ChatSettingsService", () => {
 
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
-    const webchat = new WebChatRepository(testDb!.db);
-    await webchat.ensureChannelChat({
+    const webchat = new ChatsWebChatRepository(testDb!.db);
+    await openSpeaker(testDb!.db, {
       channel: "discord",
       threadId: "dm-1",
       threadName: "Ray",
@@ -404,7 +483,7 @@ describe("ChatSettingsService", () => {
     ).toContain("dm-1");
 
     expect(repository.find("discord", "dm-1" as ChatId)).toMatchObject({
-      sourceThreadType: "private",
+      kind: "dm",
       channelSettings: null,
     });
     expect(changed).toHaveBeenCalledTimes(2);
@@ -418,14 +497,14 @@ describe("ChatSettingsService", () => {
     registry.register(directoryDescriptor("agents", () => []));
     const agents = await connectLive(registry, "agents");
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db)),
+      repository: new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db)),
       connections: registry,
       channelOf: kindChannelOf,
       channels: () => [],
       listAgents: () => [],
       onChanged: () => {},
     });
-    await new WebChatRepository(testDb.db).ensureChannelChat({
+    await openSpeaker(testDb.db, {
       channel: "agents",
       threadId: "dm-1",
       threadType: "private",
@@ -589,7 +668,7 @@ describe("ChatSettingsService", () => {
     });
     // discord has lost its channel record, as while `registry.remove` evicts it.
     const unrecorded = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb!.db, testChatRepository(testDb!.db)),
+      repository: new ChatSettingsRepository(testDb!.db, testChatsWiring(testDb!.db)),
       connections: registry,
       channelOf: (connection) => (connection.id === discord.id ? null : connection.connectionKind),
       channels: () => [],
@@ -678,20 +757,29 @@ describe("ChatSettingsService", () => {
     registry.register(directoryDescriptor("wechat", () => []));
     const sales = await connectLive(registry, "feishu");
     const support = await connectLive(registry, "wechat");
+    // The account the sales channel is paired as, which a re-pairing
+    // changes, and the channel it is, which a reconnect changes.
+    const paired: { sales: string | null; salesChannel: string } = {
+      sales: "ou_sales",
+      salesChannel: "feishu",
+    };
     const channelOf = (connection: { id: string }) =>
-      connection.id === sales.id ? "feishu" : "feishu-2";
-    const chats = new ChatRepository(testDb.db, {
-      namesOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
+      connection.id === sales.id ? paired.salesChannel : "feishu-2";
+    const wired = chatsWiring(testDb.db, {
+      channelsOn: (platform) => (platform === "feishu" ? [paired.salesChannel, "feishu-2"] : []),
       accountOf: (name) =>
-        name === "feishu"
-          ? { platform: "feishu", id: "ou_sales" }
+        name === paired.salesChannel
+          ? paired.sales === null
+            ? null
+            : { platform: "feishu", id: paired.sales }
           : name === "feishu-2"
             ? { platform: "feishu", id: "ou_support" }
             : null,
       platformOfChannel: (name) => (name.startsWith("feishu") ? "feishu" : name),
     });
+    const repository = new ChatSettingsRepository(testDb.db, wired);
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, chats),
+      repository,
       connections: registry,
       channelOf,
       channels: () => [],
@@ -710,7 +798,12 @@ describe("ChatSettingsService", () => {
       });
     }
 
-    return { service, chats, throughSales, throughSupport };
+    /** Rome's speaker in the group through `channel`, opened by a message
+     *  that names no kind. */
+    const standIn = (channel: "feishu" | "feishu-2") =>
+      openSpeaker(testDb!.db, { channel, threadId: "oc_group", agentName: "main" }, wired);
+
+    return { registry, service, repository, wired, paired, standIn, throughSales, throughSupport };
   }
 
   it("serializes writers through two of Rome's accounts in one group", async () => {
@@ -741,15 +834,10 @@ describe("ChatSettingsService", () => {
     }
   });
 
-  it("keeps a group's rule when rows stored with no type join it", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null, {
-      threadType: null,
-    });
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_support" }, null, {
-      threadType: null,
-    });
+  it("keeps a group's rule across the speakers of Rome's accounts in it", async () => {
+    const { service, standIn, throughSales, throughSupport } = await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await standIn("feishu-2");
 
     await service.update({
       ref: throughSales,
@@ -773,12 +861,11 @@ describe("ChatSettingsService", () => {
   });
 
   it("keeps each of Rome's accounts' agent choice in a group its own", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([
+    const { service, standIn, throughSales, throughSupport } = await twoAccountsInOneGroup([
       "pm-assistant",
     ]);
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_support" }, null);
+    await standIn("feishu");
+    await standIn("feishu-2");
 
     await service.update({
       ref: throughSales,
@@ -800,101 +887,467 @@ describe("ChatSettingsService", () => {
     });
   });
 
-  it("keeps a row with no type apart from a group its platform never named it in", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    const support = { platform: "feishu", id: "ou_support" };
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    chats.startIfMissing(key, "group", support, null, { threadType: null });
-    await service.update({
-      ref: throughSales,
-      set: { enabled: false },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-
-    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    await service.update({
-      ref: throughSupport,
-      set: { routing: { agentName: "main" } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    expect((await service.get(throughSales)).effective.enabled).toBe(false);
-    expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
-  });
-
-  it("starts no group at an address neither a row nor its platform has named", async () => {
-    const { service, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
-
-    await service.update({
-      ref: throughSales,
-      set: { session: { reset: { mode: "daily", atHour: 4 } } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-    await service.update({
-      ref: throughSupport,
-      set: { session: { reset: { mode: "none" } } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-
-    expect((await service.get(throughSales)).effective.session.reset).toEqual({
-      mode: "daily",
-      atHour: 4,
-    });
-    expect((await service.get(throughSupport)).effective.session.reset).toEqual({ mode: "none" });
-  });
-
-  it("reads no group's rule at an address an account has no row at and no kind for", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    await service.update({
-      ref: throughSales,
-      set: { enabled: false },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-
-    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    await service.update({
-      ref: throughSupport,
-      set: { session: { reset: { mode: "none" } } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-    expect((await service.get(throughSupport)).overrides).toEqual({
-      session: { reset: { mode: "none" } },
-    });
-    expect((await service.get(throughSales)).effective.enabled).toBe(false);
-  });
-
-  it("leaves a row stored with no type apart when its edit is refused", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    const support = { platform: "feishu", id: "ou_support" };
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    chats.startIfMissing(key, "group", support, null, { threadType: null });
-    await service.update({
-      ref: throughSales,
-      set: { enabled: false },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
+  it("refuses a rule at an address whose kind neither a speaker, its platform nor the address names", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
 
     await expect(
       service.update({
-        ref: throughSupport,
-        set: { session: { reset: { mode: "idle", idleMinutes: 0 } as never } },
+        ref: throughSales,
+        set: { session: { reset: { mode: "daily", atHour: 4 } } },
         clear: [],
         actor: { kind: "guardian" },
       }),
-    ).rejects.toThrow("idleMinutes");
+    ).rejects.toThrow("is a group or a direct message");
+    expect(wired.chats.list("feishu")).toEqual([]);
+  });
 
-    expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
+  it("reads a group's rule through an account with no speaker there, once Rome holds the group", async () => {
+    const { service, standIn, throughSales, throughSupport } = await twoAccountsInOneGroup(
+      [],
+      false,
+    );
+    await standIn("feishu");
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    // Rome holds a group there through Sales, so the address is a group.
+    expect((await service.get(throughSupport)).effective.enabled).toBe(false);
+    await service.update({
+      ref: throughSupport,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    for (const ref of [throughSales, throughSupport]) {
+      expect((await service.get(ref)).effective).toMatchObject({
+        enabled: false,
+        session: { reset: { mode: "none" } },
+      });
+    }
+  });
+
+  it("reads a group's rule as the newest one Rome's speakers there hold", async () => {
+    const { service, repository, standIn, throughSales, throughSupport } =
+      await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await standIn("feishu-2");
+    // Rows from before the rule was shared hold rules of their own.
+    const rule = (enabled: boolean, updatedAt: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        overrides: { enabled },
+        updatedAt,
+        updatedBy: { kind: "guardian" },
+      });
+    const [sales, support] = ["feishu", "feishu-2"].map(
+      (channel) => repository.find(channel, "oc_group" as ChatId)!,
+    );
+    testDb!.db.run(
+      sql`UPDATE rome_sessions SET channel_settings = ${rule(true, "2026-01-01T00:00:00.000Z")} WHERE id = ${sales!.id}`,
+    );
+    testDb!.db.run(
+      sql`UPDATE rome_sessions SET channel_settings = ${rule(false, "2026-02-01T00:00:00.000Z")} WHERE id = ${support!.id}`,
+    );
+
+    for (const ref of [throughSales, throughSupport]) {
+      expect((await service.get(ref)).effective.enabled).toBe(false);
+    }
+  });
+
+  it("checks a first rule against the kind the address names", async () => {
+    const { service, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+
+    expect((await service.get(ref)).supportedFields).toEqual(["session.reset"]);
+    await expect(
+      service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } }),
+    ).rejects.toThrow('Unsupported conversation setting "enabled"');
+  });
+
+  it("starts the direct message an address names when a rule is set before anything is said", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId);
+    expect(ruled).toMatchObject({ kind: "dm", placeName: null });
+    // It starts a second before it was placed, so a first message heard in
+    // that same second is one it has not seen.
+    expect(ruled!.createdAt.getTime()).toBeLessThan(Math.floor(Date.now() / 1000) * 1000);
+
+    // The first message from the other end finds the same speaker, in the
+    // same direct message.
+    const opened = await openSpeaker(
+      testDb!.db,
+      {
+        channel: "feishu",
+        threadId: "ou_ray",
+        threadName: "Ray",
+        threadType: "private",
+        agentName: "main",
+      },
+      wired,
+    );
+    expect(opened.id).toBe(ruled!.id);
+    // The address stood in for a name; the first message names the chat.
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
+    expect(repository.listKnown({ query: "Ray" }).map((row) => row.id)).toEqual([ruled!.id]);
+    expect(repository.find("feishu", "ou_ray" as ChatId)).toMatchObject({
+      kind: "dm",
+      chatId: ruled!.chatId,
+    });
+    expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("reads a direct message a send opened as one, though asked for a group", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    // A send opened the direct message at an address that names no kind,
+    // and stood no speaker in it.
+    startChannelChat(wired, { channel: "feishu", threadId: "oc_ray", threadType: "private" });
+    const ref = { ...throughSales, chatId: "oc_ray" as ChatId };
+
+    expect((await service.get(ref)).supportedFields).toEqual(["session.reset"]);
+    await expect(
+      service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } }),
+    ).rejects.toThrow('Unsupported conversation setting "enabled"');
+  });
+
+  it("reads a direct message a send opened after its address was read as one", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "oc_ray" as ChatId };
+    // Read before Rome held anything there, so its kind is only a guess.
+    await service.get(ref);
+    startChannelChat(wired, { channel: "feishu", threadId: "oc_ray", threadType: "private" });
+
+    expect((await service.get(ref)).supportedFields).toEqual(["session.reset"]);
+    await expect(
+      service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } }),
+    ).rejects.toThrow('Unsupported conversation setting "enabled"');
+  });
+
+  it("sets a rule in a direct message Rome holds with no speaker in it", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    // A send opened the direct message with the party oc_ray names, and kept
+    // no address for it.
+    wired.chats.start(wired.adapters.chatAt("feishu", "oc_ray", "dm"), "dm", null);
+    const ref = { ...throughSales, chatId: "oc_ray" as ChatId };
+
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(repository.find("feishu", "oc_ray" as ChatId)).toMatchObject({ kind: "dm" });
+    expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("finds a chat its platform has not named by the name its speaker shows", async () => {
+    const { service, repository, throughSales } = await twoAccountsInOneGroup([], false);
+    await service.update({
+      ref: { ...throughSales, chatId: "ou_ray" as ChatId },
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId)!;
+
+    expect(repository.listKnown({ query: "ou_ray" }).map((row) => row.id)).toEqual([ruled.id]);
+  });
+
+  it("places a speaker a rule starts before what its account already said there", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup();
+    // A send said something in the group before any rule, and opened no
+    // session.
+    const { chat } = startChannelChat(wired, { channel: "feishu", threadId: "oc_group" });
+    await new MessageRepository(testDb!.db).send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: { platform: "feishu", id: "ou_sales" }, agent: "main" },
+        parts: [{ type: "text", content: "hello" }],
+      },
+      async () => ({ key: "sent-1" }),
+    );
+    // Said well before the rule, so a placement at now would miss it.
+    const sentAt = new Date(Date.UTC(2026, 0, 1));
+    testDb!.db.run(sql`UPDATE chat_messages SET said_at = ${sentAt.getTime() / 1000}`);
+
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(repository.find("feishu", "oc_group" as ChatId)!.createdAt.getTime()).toBeLessThan(
+      sentAt.getTime(),
+    );
+  });
+
+  it("reads and writes one rule in a direct message its platform placed at another address", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const atPerson = { ...throughSales, chatId: "ou_ray" as ChatId };
+    const atChat = { ...throughSales, chatId: "oc_ray" as ChatId };
+    const reset = (mode: { mode: "none" } | { mode: "daily"; atHour: number }) =>
+      service.update({
+        ref: atPerson,
+        set: { session: { reset: mode } },
+        clear: [],
+        actor: { kind: "guardian" },
+      });
+    await reset({ mode: "none" });
+    const dm = repository.find("feishu", "ou_ray" as ChatId)!;
+    // Ray's first message reaches the direct message at its chat id, where
+    // the platform places it from then on, and opens a session there.
+    const key = wired.adapters.keyOf(wired.chats.find(dm.chatId!)!.ref);
+    new ChatAddresses(testDb!.db).bind(
+      { platform: "feishu", id: "ou_sales" },
+      key.externalId,
+      "oc_ray",
+    );
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "oc_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+    expect(opened.id).not.toBe(dm.id);
+
+    // The rule set before the message holds there.
+    expect((await service.get(atChat)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+
+    await reset({ mode: "daily", atHour: 4 });
+    for (const ref of [atPerson, atChat]) {
+      expect((await service.get(ref)).overrides).toEqual({
+        session: { reset: { mode: "daily", atHour: 4 } },
+      });
+    }
+    expect(repository.find("feishu", "oc_ray" as ChatId)?.id).toBe(opened.id);
+  });
+
+  it("stores a rule set at a person's id where messages from them will arrive", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    // A send reached Ray's direct message at its chat id, with no session.
+    const { key } = startChannelChat(wired, {
+      channel: "feishu",
+      threadId: "ou_ray",
+      threadType: "private",
+    });
+    new ChatAddresses(testDb!.db).bind(
+      { platform: "feishu", id: "ou_sales" },
+      key.externalId,
+      "oc_ray",
+    );
+
+    await service.update({
+      ref: { ...throughSales, chatId: "ou_ray" as ChatId },
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    // Ray's first reply arrives at the chat id and finds the rule's session.
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "oc_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+
+    expect(opened.id).toBe("channel:feishu:oc_ray");
+    expect((await service.get({ ...throughSales, chatId: "oc_ray" as ChatId })).overrides).toEqual({
+      session: { reset: { mode: "none" } },
+    });
+  });
+
+  it("names a chat a rule started by the first message the platform names", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    await service.update({
+      ref: { ...throughSales, chatId: "ou_ray" as ChatId },
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId)!;
+
+    // A message records its chat as the inbound recording does.
+    const chat = wired.chats.find(ruled.chatId!)!;
+    wired.chats.start(wired.adapters.keyOf(chat.ref), "dm", "Ray");
+
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
+    expect(repository.listKnown({ query: "Ray" }).map((row) => row.id)).toEqual([ruled.id]);
+  });
+
+  it("still reads a removed connection's rule once its channel lets go of its account", async () => {
+    const { registry, service, paired, standIn, throughSales } = await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    await registry.remove(throughSales.connectionId);
+    // Removing the connection vacates its channel, which knows no account
+    // from then on.
+    paired.sales = null;
+
+    expect((await service.get(throughSales)).effective.enabled).toBe(false);
+  });
+
+  it("names no chat after the address a direct message was first reached at", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const atPerson = { ...throughSales, chatId: "ou_ray" as ChatId };
+    const reset = (policy: { mode: "none" } | { mode: "daily"; atHour: number }) =>
+      service.update({
+        ref: atPerson,
+        set: { session: { reset: policy } },
+        clear: [],
+        actor: { kind: "guardian" },
+      });
+    await reset({ mode: "none" });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId)!;
+    // A send places the direct message at its chat id before Ray names it.
+    const chat = wired.chats.find(ruled.chatId!)!;
+    new ChatAddresses(testDb!.db).bind(
+      { platform: "feishu", id: "ou_sales" },
+      wired.adapters.keyOf(chat.ref).externalId,
+      "oc_ray",
+    );
+
+    await reset({ mode: "daily", atHour: 4 });
+    expect(wired.chats.find(ruled.chatId!)!.name).toBeNull();
+
+    wired.chats.start(wired.adapters.keyOf(chat.ref), "dm", "Ray");
+    expect(wired.chats.find(ruled.chatId!)!.name).toBe("Ray");
+  });
+
+  it("names no chat after the placeholder a session opened without a name took", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+    const input = {
+      channel: "feishu",
+      threadId: "ou_ray",
+      threadType: "private" as const,
+      agentName: "main",
+    };
+    await openSpeaker(testDb!.db, input, wired);
+
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBeNull();
+
+    await openSpeaker(testDb!.db, { ...input, threadName: "Ray" }, wired);
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
+  });
+
+  it("moves the speaker to the account its channel is paired as now when a rule is set", async () => {
+    const { service, repository, wired, paired, throughSales } = await twoAccountsInOneGroup();
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+    await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "ou_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+    const before = repository.find("feishu", "ou_ray" as ChatId)!;
+
+    paired.sales = "ou_sales_again";
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    const after = repository.find("feishu", "ou_ray" as ChatId);
+    expect(after).toMatchObject({ id: before.id, accountId: "ou_sales_again", kind: "dm" });
+    expect(after!.chatId).not.toBe(before.chatId);
+    expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("sets the rule on the speaker a reconnected channel speaks through", async () => {
+    const { service, repository, wired, paired, standIn, throughSales } =
+      await twoAccountsInOneGroup(["pm-assistant"]);
+    await standIn("feishu");
+    const retired = repository.find("feishu", "oc_group" as ChatId)!;
+    testDb!.db.run(sql`UPDATE rome_sessions SET created_at = 1 WHERE id = ${retired.id}`);
+    // Reconnected, the account speaks through a channel of a new name, and
+    // its first message there opens a session of its own in the same chat.
+    paired.salesChannel = "feishu-3";
+    const active = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu-3", threadId: "oc_group", agentName: "main" },
+      wired,
+    );
+
+    await service.update({
+      ref: throughSales,
+      set: { routing: { agentName: "pm-assistant" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(repository.find("feishu-3", "oc_group" as ChatId)).toMatchObject({
+      id: active.id,
+      agentName: "pm-assistant",
+    });
+  });
+
+  it("keeps a rule set after a reconnect for the first message through the new channel", async () => {
+    const { service, repository, wired, paired, standIn, throughSales } =
+      await twoAccountsInOneGroup(["pm-assistant"]);
+    await standIn("feishu");
+    paired.salesChannel = "feishu-3";
+
+    await service.update({
+      ref: throughSales,
+      set: { routing: { agentName: "pm-assistant" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu-3", threadId: "oc_group", agentName: "main" },
+      wired,
+    );
+
+    expect(opened.agentName).toBe("pm-assistant");
+    expect(repository.find("feishu-3", "oc_group" as ChatId)?.id).toBe(opened.id);
+  });
+
+  it("finds a speaker by the name of its chat, whatever its session is titled", async () => {
+    const { repository, standIn } = await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await standIn("feishu-2");
+    const [sales, support] = ["feishu", "feishu-2"].map(
+      (channel) => repository.find(channel, "oc_group" as ChatId)!,
+    );
+    {
+      // The chat is named Launch; one session's title is something else.
+      testDb!.db.run(sql`UPDATE chats SET name = 'Launch' WHERE id = ${sales!.chatId}`);
+      testDb!.db.run(sql`UPDATE rome_sessions SET name = 'Renamed' WHERE id = ${support!.id}`);
+    }
+
+    expect(
+      repository
+        .listKnown({ query: "Launch" })
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual([sales!.id, support!.id].sort());
+    expect(repository.listKnown({ query: "Renamed" })).toEqual([]);
   });
 
   it("paginates beyond a bounded live directory first page", async () => {
@@ -918,7 +1371,7 @@ describe("ChatSettingsService", () => {
     );
     await connectLive(registry, "discord");
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db)),
+      repository: new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db)),
       connections: registry,
       channelOf: kindChannelOf,
       channels: channelsOver(registry),
@@ -948,7 +1401,7 @@ describe("ChatSettingsService", () => {
     });
     registry.register(directoryDescriptor("discord", () => []));
     const discord = await connectLive(registry, "discord");
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const repository = new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db));
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {
         connectionId: discord.id,
@@ -998,8 +1451,8 @@ describe("ChatSettingsService", () => {
 
   it("keeps guardian chats out of conversation settings", async () => {
     testDb = createTestDb();
-    await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    await new ChatsWebChatRepository(testDb.db).createSession("chat-1", "Chat");
+    const repository = new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db));
 
     expect(repository.find("webchat", "chat-1" as ChatId)).toBeNull();
     expect(() =>
@@ -1015,6 +1468,6 @@ describe("ChatSettingsService", () => {
         { settings: null, agentName: undefined },
       ),
     ).toThrow("Webchat chats have no conversation settings");
-    expect(await new WebChatRepository(testDb.db).getSession("chat-2")).toBeNull();
+    expect(await new ChatsWebChatRepository(testDb.db).getSession("chat-2")).toBeNull();
   });
 });

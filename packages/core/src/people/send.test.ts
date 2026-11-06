@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
-import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
-import { send } from "../chats/send.js";
+import {
+  type Channel,
+  AccountNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
+import { send } from "../connections/send.js";
 import { directPlace, readSendStates, resolveSendTarget } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
@@ -19,7 +23,7 @@ describe("readSendStates", () => {
       channel(
         "unbacked",
         sending({
-          chatFor: () => Promise.reject(new ChannelNotConnected("unbacked")),
+          chatFor: () => Promise.reject(new AccountNotConnected("unbacked")),
         }),
       ),
       channel("read-only", null),
@@ -54,7 +58,7 @@ describe("readSendStates", () => {
 describe("a link on a platform Rome holds accounts on", () => {
   const open = (name: string) => channel(name, sending({ chatFor: async (id) => id as ChatId }));
   const unbacked = (name: string) =>
-    channel(name, sending({ chatFor: () => Promise.reject(new ChannelNotConnected(name)) }));
+    channel(name, sending({ chatFor: () => Promise.reject(new AccountNotConnected(name)) }));
   const link = { platform: "telegram", id: "u" };
   const platformOfChannel = (name: string) => (name.startsWith("tg-") ? "telegram" : name);
 
@@ -124,15 +128,12 @@ describe("a link on a platform Rome holds accounts on", () => {
             return { chatId };
           },
         });
-      const unused = () => Promise.reject(new Error("nothing is recorded for a refused send"));
       const deps = {
         channels: [recording("tg-first"), recording("tg-second")],
         platformOfChannel,
         sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
         accountOf: (name: string) =>
           recorded && !vacated.has(name) ? { platform: "telegram", id: `${name}-account` } : null,
-        webchatRepo: { ensureChannelChat: unused },
-        chatMessages: { recordSent: unused },
       };
 
       const found = await directPlace(deps, link);

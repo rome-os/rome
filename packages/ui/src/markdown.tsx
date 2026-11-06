@@ -411,8 +411,11 @@ function readSharedMermaidTheme(
   return resolved;
 }
 
-function useMarkdownMermaidTheme(theme?: MarkdownTheme): MermaidTheme {
-  const root = getThemeRoot(theme);
+// Only Markdown with a Mermaid fence needs the theme. Resolving it reads
+// computed style (a document-wide style recalc) and subscribing churns the
+// shared root observer, so a disabled instance does neither.
+function useMarkdownMermaidTheme(theme: MarkdownTheme | undefined, enabled: boolean): MermaidTheme {
+  const root = enabled ? getThemeRoot(theme) : null;
   const tokensKey = JSON.stringify({ ...DEFAULT_TOKENS, ...theme?.tokens });
   const subscribe = useCallback(
     (listener: () => void) => (root ? subscribeToThemeRoot(root, listener) : () => {}),
@@ -467,7 +470,7 @@ function MarkdownImpl({
     getMarkdownPlugins,
     getMarkdownPlugins,
   );
-  const { fontFamily, themeVariables } = useMarkdownMermaidTheme(theme);
+  const { fontFamily, themeVariables } = useMarkdownMermaidTheme(theme, hasMermaidFence);
   const mermaidOptions = useMemo<MermaidOptions>(() => {
     const baseConfig: MermaidConfig = {
       theme: "base",

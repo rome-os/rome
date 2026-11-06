@@ -7,6 +7,8 @@ export interface NodeDevice {
   /** `linux`, `darwin`, `win32`, or another platform name. Picks the icon. */
   platform?: string | null;
   status?: NodeDeviceStatus;
+  /** The device's audit log. While unavailable, the device refuses remote actions. */
+  audit?: { state: "ok" | "unavailable"; message?: string };
 }
 
 /**
@@ -34,6 +36,11 @@ export interface NodeThisDevice {
   busy?: boolean;
   /** The Rome Cloud page that removes this computer from the account. Its menu links there. */
   removeUrl?: string;
+  /**
+   * Opens this computer's audit log in the app's own local window. The app offers it only to
+   * its own Rome; the log itself never reaches this page.
+   */
+  openAuditLog?: () => void;
   onEnabledChange(enabled: boolean): void;
 }
 

@@ -513,6 +513,7 @@ export class AppInstaller {
         types: source.types ?? [],
         ensureAction: source.ensureAction,
       })),
+      ...(data.watchProvider ? { watchProvider: data.watchProvider } : {}),
     };
   }
 

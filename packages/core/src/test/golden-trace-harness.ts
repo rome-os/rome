@@ -13,16 +13,16 @@ import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
-import { SessionManager } from "../core/session-manager.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
-import { channelList } from "../channels/channel-list.js";
+import { channelList } from "../chats/connected-accounts/connected-account-list.js";
 import type { AgentEvent } from "../types.js";
+import { executeActionTool } from "./tool-calls.js";
 import {
   createTestConnections,
   createTestDb,
@@ -79,9 +79,8 @@ export interface GoldenTraceOptions {
 
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
-  const sessionsRepo = new SessionsRepository(testDb.db);
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
@@ -110,8 +109,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   });
   const manager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
+    sessionRepository,
     promptBuilder,
     actionRegistry,
     modelResolver,
@@ -193,7 +191,7 @@ export function makeSingleActionProvider(
   const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentEvent> {
     const id = randomUUID();
     yield { type: "tool_use", id, tool: actionName, input };
-    await params.executeAction(actionName, input);
+    await executeActionTool(params.tools, actionName, input, { toolUseId: id });
     yield { type: "tool_result", toolUseId: id, tool: actionName, output: { success: true } };
     yield {
       type: "result",

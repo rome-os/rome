@@ -17,7 +17,8 @@ export type SessionOwnerFilter =
   | { kind: "app"; appId: string }
   | { kind: "uninstalled" };
 
-export type SessionSourceFilter = { kind: "internal" } | { kind: "channel"; channel: string };
+/** Sessions that stand in no chat, or in a chat on one platform. */
+export type SessionSourceFilter = { kind: "noChat" } | { kind: "platform"; platform: string };
 
 export type SessionModelFilter =
   | { kind: "named"; provider?: string; name: string }
@@ -101,10 +102,22 @@ export interface RomeSessionExplorerRecord {
   projectPath: string | null;
   agentName: string | null;
   type: RomeSessionType;
-  sourceChannel: string | null;
-  sourceThreadId: string | null;
-  sourceThreadName: string | null;
-  sourceThreadType: string | null;
+  /** The platform of the chat the session stands in, `webchat` for a
+   *  dashboard chat, or null for a session that stands in no chat, such as
+   *  a subagent, a fork or an action run. Vocabulary:
+   *  docs/domains/participation.md#speaker. */
+  platform: string | null;
+  /** The one of Rome's accounts the session speaks as there, or null. */
+  accountId: string | null;
+  /** The chat the session stands in, and the thread in it, or null. */
+  chatId: string | null;
+  threadId: string | null;
+  /** The name of the place the session stands in: its chat's, or a
+   *  thread's own. */
+  placeName: string | null;
+  /** The kind of place the session stands in: a thread when its speaker
+   *  stands in one, else its chat's kind; null in no chat. */
+  placeKind: "directMessage" | "group" | "thread" | null;
   triggerKind: string | null;
   triggerName: string | null;
   triggerActionName: string | null;
@@ -128,7 +141,7 @@ export interface RomeSessionsPageResult {
   nextOffset: number | null;
   facets: {
     types: { value: string | null; count: number }[];
-    sourceChannels: { value: string | null; count: number }[];
+    platforms: { value: string | null; count: number }[];
   };
 }
 
@@ -155,8 +168,8 @@ export type SessionMetricDimensionValue =
       label: string;
     }
   | { dimension: "model"; state: "unknown"; label: string }
-  | { dimension: "source"; state: "internal"; channel: null; label: string }
-  | { dimension: "source"; state: "channel"; channel: string; label: string }
+  | { dimension: "source"; state: "noChat"; platform: null; label: string }
+  | { dimension: "source"; state: "platform"; platform: string; label: string }
   | { dimension: "type"; value: string; label: string }
   | { dimension: "agent"; name: string; label: string }
   | { dimension: "project"; path: string | null; label: string }

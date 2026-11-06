@@ -4,6 +4,15 @@ import { CloudError } from "./cloud.js";
 import * as cloudModule from "./cloud.js" with { rstest: "importActual" };
 import type { GatewayClientOptions } from "./client.js";
 
+/** Records nothing. Tests of the audit log itself use a real AuditStore. */
+const noAudit = {
+  hint: "",
+  start: async () => 1,
+  end: () => {},
+  host: () => {},
+  status: async () => ({ state: "ok" as const }),
+};
+
 const mocks = rs.hoisted(() => ({
   read: rs.fn(),
   write: rs.fn(),
@@ -26,6 +35,7 @@ function runHost(signal: AbortSignal) {
     signal,
     credentials: { load: mocks.read, save: mocks.write, clear: mocks.remove },
     authorize: mocks.login,
+    audit: noAudit,
   });
 }
 
@@ -57,14 +67,14 @@ describe("executor credential lifecycle", () => {
     await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
     expect(mocks.login).not.toHaveBeenCalled();
     expect(mocks.remove).not.toHaveBeenCalled();
-    expect(mocks.connect.mock.calls[0][0].deviceToken).toBe(saved.token);
+    expect(mocks.connect.mock.calls[0][0].getToken()).toBe(saved.token);
   });
   it("reuses a stored Rome desktop session as the device identity", async () => {
     const desktop = { ...saved, token: `romemob_${"b".repeat(43)}` };
     mocks.read.mockResolvedValue(desktop);
     await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
     expect(mocks.login).not.toHaveBeenCalled();
-    expect(mocks.connect.mock.calls[0][0].deviceToken).toBe(desktop.token);
+    expect(mocks.connect.mock.calls[0][0].getToken()).toBe(desktop.token);
   });
   it.each([
     null,

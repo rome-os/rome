@@ -37,7 +37,7 @@ systemPromptPrefix: Complete the requested coding task.
 - Without `modelId`, a tier is required. Legacy `model: opus|sonnet|haiku` remains accepted and normalizes to `large|medium|small`.
 - The same schema validates runtime agent loading and packed-app installation. Older Rome versions that do not recognize `modelId` reject it rather than silently ignoring the pin.
 
-An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model.
+An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model or the [Concierge provider failover](../adrs/concierge-provider-failover.md) applies.
 
 ## Session policy
 
@@ -91,9 +91,7 @@ provider's native structured-output API.
 - A successful terminal `result` carries the validated value in
   `structuredOutput`. `content` is that value's JSON serialization. Missing,
   invalid, or retry-exhausted provider output fails the turn.
-- Structured output is separate from a handoff's guardian-approved handback.
-  A handback may span several ordinary conversational turns. An
-  `outputSchema` turn may not park on that interaction.
+- An `outputSchema` turn may not park on an interaction.
 
 **Not to be confused with:**
 

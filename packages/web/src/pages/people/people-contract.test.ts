@@ -4,12 +4,8 @@ import {
   compareCodePoints,
   compareDisplayNames,
   comparePeople,
-  encodeStreamCursor,
-  latestDynamic,
   normalizeBondLevel,
-  parseStreamCursor,
   personMatchesQuery,
-  type StreamCursor,
   type DirectoryAccount,
   type PersonResource,
 } from "@rome/api-types/people";
@@ -46,8 +42,6 @@ const person = (over: Partial<PersonResource> & Pick<PersonResource, "id">): Per
   displayName: over.id,
   bondLevel: "other",
   accounts: [],
-  messageCount: 0,
-  latest: null,
   ...over,
 });
 
@@ -91,35 +85,6 @@ describe("timeline cursor", () => {
   });
 });
 
-describe("stream cursor", () => {
-  const cursor = (over: Partial<StreamCursor> = {}): StreamCursor => ({
-    timestamp: 300,
-    displayName: "a|b",
-    id: "whatsapp:41|7",
-    ...over,
-  });
-
-  it("round-trips a name and an id carrying the separator", () => {
-    // A display name is guardian-supplied text and an id carries a jid, so
-    // neither can be trusted to avoid the separator: an unescaped one shifts
-    // the split and resumes the page at a position no row occupies.
-    expect(parseStreamCursor(encodeStreamCursor(cursor()))).toEqual(cursor());
-  });
-
-  it("round-trips a row that has never done anything", () => {
-    expect(
-      parseStreamCursor(encodeStreamCursor(cursor({ timestamp: null })))?.timestamp,
-    ).toBeNull();
-  });
-
-  it("rejects a value that is not a cursor", () => {
-    expect(parseStreamCursor("whatsapp:a")).toBeNull();
-    expect(parseStreamCursor("nope|nope|")).toBeNull();
-    expect(parseStreamCursor("%E0%A4%A|a|whatsapp:a")).toBeNull();
-    expect(parseStreamCursor(null)).toBeNull();
-  });
-});
-
 describe("orderings are total", () => {
   it("separates canonically equivalent but distinct strings", () => {
     // `localeCompare` answers 0 for this pair, which would make two distinct
@@ -131,9 +96,8 @@ describe("orderings are total", () => {
   });
 
   it("separates two people whose names differ only by normalization", () => {
-    const at = { source: "whatsapp", timestamp: 300, preview: null };
-    const a = person({ id: "a", displayName: "José", latest: at });
-    const b = person({ id: "b", displayName: "Jose\u0301", latest: at });
+    const a = person({ id: "a", displayName: "José" });
+    const b = person({ id: "b", displayName: "Jose\u0301" });
 
     expect(comparePeople(a, b)).not.toBe(0);
   });
@@ -229,35 +193,6 @@ describe("what a search matches", () => {
 
     expect(accountMatchesQuery(named, "41755550111")).toBe(true);
     expect(accountMatchesQuery(named, "Clinic")).toBe(true);
-  });
-});
-
-describe("latestDynamic", () => {
-  const said = (over: Partial<Message> = {}) => entry({ body: "hello", ...over });
-
-  it("projects the head of the ordering, whatever it is", () => {
-    // One definition of "newest". A second comparison would settle a same-second
-    // tie on its own terms, and a row could preview one event while its timeline
-    // opened on another.
-    const inbound = said({ source: "telegram", direction: "inbound", ref: "a" });
-    const outbound = said({ source: "whatsapp", direction: "outbound", ref: "b" });
-    const ordered = [inbound, outbound].sort(compareMessages);
-
-    expect(latestDynamic(ordered)).toEqual({
-      source: ordered[0].source,
-      timestamp: ordered[0].timestamp,
-      preview: ordered[0].body,
-    });
-    // The reply wins the ordering, so it is what the row previews.
-    expect(latestDynamic(ordered)?.source).toBe("whatsapp");
-  });
-
-  it("carries a null body through as a null preview", () => {
-    expect(latestDynamic([said({ body: null })])?.preview).toBeNull();
-  });
-
-  it("is null for a row with no entries", () => {
-    expect(latestDynamic([])).toBeNull();
   });
 });
 

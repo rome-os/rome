@@ -141,6 +141,15 @@ function Identity({
         <span className="block truncate text-aux text-muted-foreground">
           {[platform, statusText].filter(Boolean).join(" · ")}
         </span>
+        {device.audit?.state === "unavailable" && (
+          <span
+            role="alert"
+            title={device.audit.message}
+            className="block text-aux text-destructive"
+          >
+            {m.card.auditUnavailable}
+          </span>
+        )}
       </span>
     </span>
   );
@@ -340,7 +349,8 @@ export function NodeDevices({
     >
       <SectionHeader>
         <SectionHeading>
-          <SectionTitle id="node-devices-title" className="text-title">
+          {/* The host's tab already names the page, so the title is for screen readers. */}
+          <SectionTitle id="node-devices-title" className="sr-only">
             {m.title}
           </SectionTitle>
           <ServiceProblem socket={socket} m={m} />

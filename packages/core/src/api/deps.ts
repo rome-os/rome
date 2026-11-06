@@ -1,4 +1,4 @@
-import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
+import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -7,11 +7,17 @@ import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
-import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
-import type { MessageRepository } from "../chats/message-repository.js";
+import type {
+  Channels,
+  PlatformOfChannel,
+  RecordedOn,
+} from "../chats/connected-accounts/connected-account.js";
+import type { SendRecording } from "../connections/send.js";
+import type { ChatRepository } from "../chats/storage/chat-repository.js";
+import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import type { AccountNames } from "../channels/account-names.js";
-import type { ExternalAgents } from "../channels/agents-accounts.js";
+import type { AccountNames } from "../chats/accounts/account-names.js";
+import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -35,13 +41,12 @@ import type { AppKeysRepository } from "../db/repositories/app-keys.js";
 import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import type { SessionManager } from "../core/session-manager.js";
-import type { SessionsRepository } from "../db/repositories/sessions.js";
+import type { SessionRepository } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { AIToolState } from "../core/ai-tool-state.js";
-import type { CodexAccountService } from "../core/codex/account-service.js";
+import type { CodexAccountService } from "../agent/index.js";
 import type { PublicAccessState } from "../lib/public-access-state.js";
 import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
 import type { RelayDrainer } from "../relay/drainer.js";
@@ -54,7 +59,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
-import type { AccountListening } from "../channels/account-agents.js";
+import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
@@ -91,7 +96,7 @@ export interface ApiDeps {
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (channels/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
@@ -116,8 +121,12 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
-  /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
+  /** Where a send into a place is said and put on record in Chats. */
+  recording: SendRecording;
+  /** The chats Rome takes part in, by their adapter's keys. */
+  chats: Pick<ChatRepository, "byKey">;
+  /** What was said in each chat, as Chats records it. */
+  messages: Pick<ChatLines, "read">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;
@@ -158,7 +167,8 @@ export interface ApiDeps {
     ReturnType<typeof createNodeDevicesService>,
     "getStatus" | "start" | "listFiles" | "listDevices" | "renameDevice" | "removeDevice"
   >;
-  provisionNodeCaller?: () => Promise<void>;
+  /** Starts what needs a linked instance: node caller, relay mailbox, favor sync. Never rejects. */
+  provisionAfterLink?: () => Promise<void>;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
    *  Never rejects. */
   autoConnectEmail?: () => Promise<void>;
@@ -175,8 +185,7 @@ export interface ApiDeps {
   appConnections?: AppConnectionsContextFactory;
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
-  sessionManager: SessionManager;
-  sessionsRepo: SessionsRepository;
+  sessionRepository: SessionRepository;
   agentSessionManager: AgentSessionManager;
   /** Lightweight, tool-free small-model request used to name a new chat. */
   conversationTitleGenerator: ConversationTitleGenerator;

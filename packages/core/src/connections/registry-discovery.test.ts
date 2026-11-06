@@ -9,7 +9,7 @@
 
 import { NO_GRANT } from "./grant.js";
 import { describe, it, expect } from "@rstest/core";
-import { sendThrough } from "../channels/connection-ports.js";
+import { sendThrough } from "../chats/connected-accounts/connection-ports.js";
 import { ConnectionRegistry } from "./registry.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { createTestDb } from "../test/helpers.js";

@@ -232,3 +232,57 @@ describe("Approval flow integration", () => {
     );
   });
 });
+
+describe("Execution records and omitted arguments", () => {
+  let testDb: TestDb;
+  let executionsRepo: ActionExecutionsRepository;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    executionsRepo = new ActionExecutionsRepository(testDb.db);
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  const engineFor = (...actions: Action[]) =>
+    new ActionEngine(makeRegistry(...actions), {
+      executions: executionsRepo,
+      approvals: new ApprovalsRepository(testDb.db),
+      journal: new ExecutionJournalRepository(testDb.db),
+    });
+
+  it("records an omitted argument by its size only, and still passes it to the action", async () => {
+    const execute = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
+    const parentOf = rs.fn(async (): Promise<ActionResult> => {
+      await callAction("child", { payload: { body: "nested keeps its args" } });
+      return { status: "ok" };
+    });
+    const engine = engineFor(
+      makeAction("root", { execute: parentOf }),
+      makeAction("child", { execute }),
+      makeAction("plain", { execute }),
+    );
+    const payload = { body: "a whole mail".repeat(20) };
+
+    await engine.run(
+      "root",
+      { source: "gmail", payload },
+      { initiator: "test", executionId: "r1", omitFromRecord: ["payload"] },
+    );
+    const root = await executionsRepo.findById("r1");
+    expect(root?.args).toEqual({
+      source: "gmail",
+      payload: { omitted: true, bytes: JSON.stringify(payload).length },
+    });
+    // A nested call does not inherit it.
+    expect(execute).toHaveBeenCalledWith(
+      { payload: { body: "nested keeps its args" } },
+      expect.anything(),
+    );
+
+    await engine.run("plain", { payload }, { initiator: "test", executionId: "r2" });
+    expect((await executionsRepo.findById("r2"))?.args).toEqual({ payload });
+  });
+});

@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { recordModelTurnMetrics } from "../telemetry.js";
 import type { ModelSession } from "./agent-runner.js";
+import { createRomeTools } from "./mcp/server.js";
 import type { ModelResolver } from "./model-resolver.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -89,24 +90,26 @@ export function createConversationTitleGenerator(
       const operation = (async () => {
         const resolution = await modelResolver.getModelProvider({ tier: "small" });
         const openedSession = await resolution.modelProvider.openSession({
-          model: resolution.model,
-          systemPrompt: TITLE_SYSTEM_PROMPT,
-          outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
-          agentName: "conversation-title",
-          getActionCatalog: () => [],
-          getSkillCatalog: () => [],
-          subagentTools: [],
-          builtinTools: [],
-          maxTurns: 1,
-          reasoningEffort: "low",
-          sessionId: randomUUID(),
-          isNewSession: true,
-          executeAction: async () => {
-            throw new Error("Conversation title generation cannot execute actions");
+          config: {
+            model: resolution.model,
+            systemPrompt: TITLE_SYSTEM_PROMPT,
+            builtinTools: [],
+            reasoningEffort: "low",
+            outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
+            maxTurns: 1,
           },
-          executeSubagent: async () => {
-            throw new Error("Conversation title generation cannot execute subagents");
-          },
+          tools: createRomeTools({
+            getActionCatalog: () => [],
+            getSkillCatalog: () => [],
+            subagentTools: [],
+            executeAction: async () => {
+              throw new Error("Conversation title generation cannot execute actions");
+            },
+            executeSubagent: async () => {
+              throw new Error("Conversation title generation cannot execute subagents");
+            },
+          }),
+          thread: { kind: "new" },
         });
         session = openedSession;
         if (timedOut) {
@@ -119,6 +122,9 @@ export function createConversationTitleGenerator(
           reasoningEffort: "low",
         });
         for await (const message of openedSession.events) {
+          if (message.type === "result" || message.type === "error") {
+            recordModelTurnMetrics(message.accounting, { agentName: "conversation-title" });
+          }
           if (message.type === "error") throw new Error(message.error);
           if (message.type !== "result") continue;
           const title = normalizeConversationTitle(structuredTitle(message.structuredOutput));

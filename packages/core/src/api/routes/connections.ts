@@ -29,13 +29,13 @@ import type {
 import type { SetupManager } from "../../connections/setup/manager.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { accountLinkOf } from "../../channels/account-links.js";
+import { accountLinkOf } from "../../chats/connected-accounts/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
 
 /** What a connection lets Rome do, by capability. `talk` repeats `chat` under
  *  its old name for dashboard tabs opened before the rename. */
-type WireCapabilities = Record<Capability, CapabilityStatus> & {
+export type WireCapabilities = Record<Capability, CapabilityStatus> & {
   /** @deprecated Read `chat`. */
   talk: CapabilityStatus;
 };
@@ -74,17 +74,17 @@ interface GrantDisplayView {
 /** Where the guardian goes to (re-)grant this connection's grants. Resolved
  *  server-side for Rome Cloud-brokered OAuth connection kinds; null for connection kinds whose
  *  connect setup is dashboard-local (channels). */
-interface ConnectHint {
+export interface ConnectHint {
   url: string | null;
   available: boolean;
   unavailableReason: string | null;
 }
 
-interface ConnectionView
+export interface ConnectionView
   extends Required<
       Pick<ConnectionAccountFields, "channel" | "platform" | "account" | "link" | "severalAccounts">
     >,
-    Pick<ConnectionAccountFields, "agent"> {
+    Pick<ConnectionAccountFields, "agent" | "accountUnknown"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  connection kind the guardian has never connected (nothing to address or tear down
    *  yet; the connect setup mints the row). */
@@ -152,7 +152,7 @@ function buildConnectionView(
   conn: Connection,
   record: GrantValue | null,
   manager: SetupManager | null,
-  channel: string | null,
+  channel: { id: string; platformAccountId: string | null } | null,
   agent: string | null,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
@@ -185,9 +185,10 @@ function buildConnectionView(
     capabilities: wireCapabilities(conn.status()),
     connect: connectHint(conn.connectionKind),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
-    channel,
+    channel: channel?.id ?? null,
     platform: account?.platform ?? null,
     account,
+    ...(channel ? { accountUnknown: channel.platformAccountId === null } : {}),
     // Null means silent, so a connection kind that takes no link reports none.
     agent: link === null ? undefined : agent,
     link,
@@ -226,7 +227,7 @@ async function serializeConnection(
     conn,
     await loadGrant(registry, conn),
     manager,
-    channels.byConnection(conn.id)?.id ?? null,
+    channels.byConnection(conn.id) ?? null,
     accounts.agentOf(conn.id),
   );
 }
@@ -295,6 +296,45 @@ function placeholderViews(
     .filter((view): view is ConnectionView => view !== null);
 }
 
+/**
+ * Every connection and every offerable placeholder, as `GET /connections`
+ * serves them: the one projection of Rome's connections. Other surfaces (the
+ * Concierge's connectors) build on this rather than reading connection state
+ * on their own. `?platform=&accountId=` finds the connection that reaches an
+ * account, so it lists no placeholders.
+ */
+export async function listConnectionViews(
+  deps: Pick<ApiDeps, "connectionRegistry" | "setupManager" | "db">,
+  filter: { platform?: string; accountId?: string } = {},
+): Promise<ConnectionView[]> {
+  const registry = requireConnectionRegistry(deps as ApiDeps);
+  const manager = deps.setupManager ?? null;
+  const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
+  const accounts = new ConnectedAccountsRepository(deps.db);
+  const { platform, accountId } = filter;
+  const connected = (
+    await Promise.all(
+      registry
+        .all()
+        .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+    )
+  ).filter(
+    (view) =>
+      (platform === undefined || view.account?.platform === platform) &&
+      (accountId === undefined || view.account?.id === accountId),
+  );
+  const placeholders = platform === undefined ? placeholderViews(registry, manager) : [];
+  // Stable ordering for the UI: by connection kind, then label, then id — the
+  // registry's own iteration order is insertion-dependent. Placeholders sort
+  // like a connection whose label is its connection kind and whose id is empty.
+  return [...connected, ...placeholders].sort(
+    (a, b) =>
+      a.connectionKind.localeCompare(b.connectionKind) ||
+      a.label.localeCompare(b.label) ||
+      (a.id ?? "").localeCompare(b.id ?? ""),
+  );
+}
+
 export function connectionsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
@@ -306,34 +346,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   // `?platform=&accountId=` finds the connection that reaches an account, so
   // it lists no placeholders. An account id means nothing without its platform.
   app.get("/connections", async (c) => {
-    const registry = requireConnectionRegistry(deps);
-    const manager = deps.setupManager ?? null;
     const platform = c.req.query("platform");
     const accountId = c.req.query("accountId");
     if (accountId !== undefined && platform === undefined) {
       return c.json({ error: "Name the platform an account id is on." }, 400);
     }
-    const connected = (
-      await Promise.all(
-        registry
-          .all()
-          .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
-      )
-    ).filter(
-      (view) =>
-        (platform === undefined || view.account?.platform === platform) &&
-        (accountId === undefined || view.account?.id === accountId),
-    );
-    const placeholders = platform === undefined ? placeholderViews(registry, manager) : [];
-    // Stable ordering for the UI: by connection kind, then label, then id — the
-    // registry's own iteration order is insertion-dependent. Placeholders sort
-    // like a connection whose label is its connection kind and whose id is empty.
-    const connections = [...connected, ...placeholders].sort(
-      (a, b) =>
-        a.connectionKind.localeCompare(b.connectionKind) ||
-        a.label.localeCompare(b.label) ||
-        (a.id ?? "").localeCompare(b.id ?? ""),
-    );
+    const connections = await listConnectionViews(deps, { platform, accountId });
     c.header("Cache-Control", "no-store");
     return c.json({ connections });
   });
@@ -351,7 +369,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
           conn,
           record,
           deps.setupManager ?? null,
-          channels.byConnection(conn.id)?.id ?? null,
+          channels.byConnection(conn.id) ?? null,
           accounts.agentOf(conn.id),
         ),
         grantDetails: buildGrantDetails(conn, record),
@@ -374,8 +392,16 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // guardian-link unwinds with no write; one already committing runs to
     // `done` first, then the disconnect wins as the final state). The
     // disconnect itself runs inside that section.
-    await deps.setupManager?.cancelActive(conn.id, name);
-    await registry.disconnect(conn.id);
+    const settled = await deps.setupManager?.cancelActive(conn.id, name);
+    // A fix that was committing when the cancel landed may have reached
+    // another account: it ended this connection and started one to that
+    // account. The guardian asked to take away the access they were fixing,
+    // so the disconnect ends the connection the fix started.
+    const target =
+      settled?.status === "done" && settled.grant.ended === conn.id
+        ? settled.grant.connectionId
+        : conn.id;
+    if (target && findConnection(registry, target)) await registry.disconnect(target);
     c.header("Cache-Control", "no-store");
     return c.json({ ok: true, connection: null });
   });

@@ -49,7 +49,7 @@ export function createBundleFetcher(opts: CreateBundleFetcherOptions = {}): Bund
     let response: Response;
     try {
       response = await fetchImpl(url, {
-        headers: withRomeCloudReadAuth(url, {
+        headers: await withRomeCloudReadAuth(url, {
           accept: "application/gzip, application/octet-stream",
         }),
         signal: controller.signal,

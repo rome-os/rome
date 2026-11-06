@@ -12,12 +12,10 @@ import type {
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import { createLogger, type Logger } from "../logger.js";
+import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
 import type { SessionConversation } from "./session-conversation.js";
-
-const log = createLogger("agent-trace-recorder");
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -147,6 +145,22 @@ export class AgentTraceRecorder {
 
   async record(msg: AgentEvent & { agent?: string }): Promise<void> {
     await this.recordBatch([msg], this.seq);
+  }
+
+  /** Keeps what a system turn was handed, under its label, as one trace block. */
+  async recordSystemInput(label: string, content: string): Promise<void> {
+    await this.ensureSession();
+    const sessionId = this.romeSessionId();
+    await this.input.webchatRepo.appendTraceBlocks({
+      messageId: this.traceMessageId(sessionId),
+      sessionId,
+      turnId: this.input.turnId,
+      startSeq: this.seq,
+      blocks: [{ type: "system_input", label, content }],
+      trigger: this.triggerMetadata(),
+      transcriptMessages: [],
+    });
+    this.seq += 1;
   }
 
   async recordBatch(
@@ -296,12 +310,12 @@ export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean 
   return threadContext?.channel !== "webchat";
 }
 
-function textMessageContent(content: string): string {
+export function textMessageContent(content: string): string {
   const parts: MessagePart[] = [{ type: "text", content }];
   return JSON.stringify(parts);
 }
 
-function transcriptMessageId(
+export function transcriptMessageId(
   sessionId: string,
   turnId: string,
   role: RomeAgentTranscriptMessageInput["role"],

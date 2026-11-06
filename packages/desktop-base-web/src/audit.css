@@ -1,0 +1,14 @@
+/* The audit window uses the dashboard's kit and device pages, not the desktop settings palette,
+   so it looks like Settings → Devices. The theme values come from the dashboard's own theme
+   module (injected in entries/audit.tsx). Webfonts are not loaded: local pages allow only
+   bundled fonts, so the kit's stacks fall back to the system fonts. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@rome-os/ui/styles.css";
+@import "@rome-os/node-ui/styles.css";
+
+html {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+}

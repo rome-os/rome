@@ -43,7 +43,6 @@ import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "
 // separate concern rendered by the details page.
 
 interface PublicAccessConfigPayload {
-  enableAccessControl: boolean;
   allowedApps: string[];
   cloudEmailAccess: Record<string, string[]>;
 }
@@ -284,7 +283,6 @@ export function useAppLifecycle(
       await fetchJson<unknown>("/api/public-access", {
         method: "PUT",
         json: {
-          enableAccessControl: config.enableAccessControl,
           allowedApps: Array.from(allowedApps).sort(),
           cloudEmailAccess,
         } satisfies PublicAccessConfigPayload,
@@ -568,8 +566,7 @@ export function useAppLifecycle(
     : null;
   const accessLinkUnsaved = accessModeDraft !== accessSavedMode;
   // Nothing left to save: the dismiss button reads "Done" rather than "Cancel".
-  // Save stays enabled, since re-saving is how a guardian retries a save whose
-  // policy was stored but whose proxy reload failed.
+  // Save stays enabled, since re-saving is how a guardian retries a failed save.
   const accessSavedEmails = accessTarget?.cloudAllowedEmails ?? [];
   const accessDraftUnsaved =
     accessLinkUnsaved ||

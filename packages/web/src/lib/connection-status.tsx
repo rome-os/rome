@@ -21,6 +21,7 @@
  *
  * Mapping over the card's slot states:
  *   any slot broken                        → amber dot, "Broken"
+ *   working, but no account known          → amber dot, "Broken"
  *   transient runtime degradation          → amber dot, "Working" (reason tooltip)
  *   any slot working                       → green dot, "Working"
  *   none connected + connect unavailable   → muted dot, "Unavailable" (reason tooltip)
@@ -50,6 +51,16 @@ export function connectionStatus(card: ConnectionCard): ConnectionStatus {
       label: "Broken",
       tone: "attention",
       title: "The platform stopped accepting Rome's access. Give access again.",
+    };
+  }
+  // Access works, but the channel never learned which account it is, so it
+  // is not active: nothing reaches it and nothing goes out.
+  if (card.accountUnknown) {
+    return {
+      label: "Broken",
+      tone: "attention",
+      title:
+        "Rome doesn't know which account this is, so it hears and sends nothing. Give access again.",
     };
   }
   if (card.degradation) {
@@ -85,6 +96,12 @@ const DOT_TONE: Record<DotTone, string> = {
   muted: "border border-muted-foreground/40",
 };
 
+export function StatusDot({ tone }: { tone: DotTone }) {
+  return (
+    <span className={cn("inline-block size-2 shrink-0 rounded-full", DOT_TONE[tone])} aria-hidden />
+  );
+}
+
 /**
  * A status dot + label. Pass a `ConnectionCard` (resolves the vocabulary via
  * `connectionStatus`) or a pre-resolved `ConnectionStatus`.
@@ -106,10 +123,7 @@ export function StatusIndicator({
       className={cn("inline-flex items-center gap-2 text-ui text-muted-foreground", className)}
       title={resolved.title}
     >
-      <span
-        className={cn("inline-block size-2 shrink-0 rounded-full", DOT_TONE[resolved.tone])}
-        aria-hidden
-      />
+      <StatusDot tone={resolved.tone} />
       {resolved.tone === "attention" ? (
         <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
       ) : null}

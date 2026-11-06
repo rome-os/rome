@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { DiagnosticBundle } from "./diagnostics.js";
 import { FEEDBACK_BODY_MAX, FEEDBACK_SCHEMA_VERSION, type FeedbackReport } from "./feedback.js";
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 export const AGENT_REPORTS_ENABLED_KEY = "feedback.agentReportsEnabled";
@@ -70,7 +70,7 @@ export interface FeedbackRelay extends FeedbackService {
 export interface FeedbackClientDeps {
   diagnostics: () => Promise<DiagnosticBundle>;
   agentReportsEnabled: () => Promise<boolean>;
-  getToken?: () => string | null;
+  getToken?: () => string | null | Promise<string | null>;
   getOrigin?: () => string | null;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -123,7 +123,7 @@ export class FeedbackClient implements FeedbackRelay {
     reporter: AgentReporter | { kind: "guardian" };
     fingerprint?: string;
   }): Promise<FeedbackOutcome> {
-    const token = (this.deps.getToken ?? getInstanceToken)();
+    const token = await (this.deps.getToken ?? cloudBearer)();
     if (!token) return { kind: "no_token" };
     const origin = (this.deps.getOrigin ?? getRomeCloudOrigin)();
     if (!origin) return { kind: "unconfigured" };

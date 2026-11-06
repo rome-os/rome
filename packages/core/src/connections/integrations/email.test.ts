@@ -25,7 +25,7 @@ import type {
 } from "../../lib/rome-cloud-mail.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { EmailInboundResult } from "../../channels/email-control.js";
+import type { EmailInboundResult } from "../kinds/email/email-control.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
@@ -128,7 +128,7 @@ function makeSettingsRepo(
   } as SettingsRepository & { store: Record<string, unknown> };
 }
 
-/** A person-mapping fake: no guardian person exists, so mapGuardianToChannel is a
+/** A person-mapping fake: no guardian person exists, so linkGuardianToAccount is a
  *  no-op — keeps start() off any write path in the descriptor tests. */
 function makePersonMappingRepo(): PeopleRepository {
   return {
@@ -328,46 +328,11 @@ describe("email Talker fault mapping", () => {
     expect(receipt).toStrictEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
-  it("marks the lines this inbox sent as outbound, however its address is written", async () => {
-    const provider = makeProvider({
-      listMessages: async () => ({
-        messages: [
-          {
-            providerMessageId: "mine",
-            threadId: "t1",
-            from: ADDRESS,
-            subject: "",
-            preview: "",
-            receivedAt: new Date().toISOString(),
-            labels: ["sent"],
-          },
-        ],
-      }),
-    });
-    const h = buildTalker(provider, { address: `Rome <${ADDRESS.toUpperCase()}>` });
+  it("forwards saveIncomingAttachments", () => {
+    const h = buildTalker(makeProvider());
     h.start();
 
-    const history = await h.talker.history?.query({});
-    expect(history?.map((line) => [line.messageId, line.direction])).toEqual([
-      ["mine", "outbound"],
-    ]);
-  });
-
-  // The flag is what gives the channel a \`messages\` port; the feature is what
-  // answers it. A Talk offering one without the other is unreachable or broken.
-  it("declares the history its Talk offers", () => {
-    expect(makeEmailDescriptor(makeDeps(makeProvider())).capabilities.talker?.history).toBe(true);
-  });
-
-  it("forwards fetchHistory and saveIncomingAttachments", async () => {
-    const provider = makeProvider();
-    const h = buildTalker(provider);
-    h.start();
-
-    expect(h.talker.history).toBeDefined();
     expect(h.talker.inboundMedia).toBeDefined();
-    const history = await h.talker.history?.query({ limit: 20 });
-    expect(Array.isArray(history)).toBe(true);
   });
 });
 

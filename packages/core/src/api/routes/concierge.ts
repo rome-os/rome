@@ -1,4 +1,11 @@
-import { CONCIERGE_DONE_DAYS, type ConciergeTasksResponse } from "@rome/api-types/concierge";
+import {
+  type ConciergeChatsResponse,
+  type ConciergeChatStartRequest,
+  CONCIERGE_DONE_DAYS,
+  type ConciergeConnectorsResponse,
+  type ConciergeTasksResponse,
+} from "@rome/api-types/concierge";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
@@ -13,7 +20,7 @@ const MAX_DONE_DAYS = 3650;
 export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webchatRepo">): Hono {
   const app = new Hono();
 
-  // The single Concierge chat, created on first use, and how many agent
+  // The main Concierge chat, created on first use, and how many agent
   // messages it got since the guardian last read it. 404 while the setting is off.
   app.get("/concierge/session", async (c) => {
     const concierge = deps.concierge;
@@ -23,6 +30,45 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     const id = await concierge.ensureChatId();
     const unread = await deps.webchatRepo.countUnreadAgentMessages(id, CONCIERGE_UNREAD_CAP);
     return c.json({ id, unread });
+  });
+
+  // The Concierge chats: the main chat, created on first use, then the topic
+  // chats, each with its unread count. Guardian-only; 404 while the setting is off.
+  app.get("/concierge/chats", async (c) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return c.json({ error: "Not authenticated" }, 401);
+    }
+    const concierge = deps.concierge;
+    if (!concierge || !(await concierge.isEnabled())) {
+      return c.json({ error: "Concierge is off" }, 404);
+    }
+    const chats = await Promise.all(
+      (await concierge.listChats()).map(async (chat) => ({
+        ...chat,
+        unread: await deps.webchatRepo.countUnreadAgentMessages(chat.id, CONCIERGE_UNREAD_CAP),
+      })),
+    );
+    return c.json({ chats } satisfies ConciergeChatsResponse);
+  });
+
+  // Starts a topic chat on the main chat's model. Guardian-only; 404 while off.
+  app.post("/concierge/chats", async (c) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return c.json({ error: "Not authenticated" }, 401);
+    }
+    const concierge = deps.concierge;
+    if (!concierge || !(await concierge.isEnabled())) {
+      return c.json({ error: "Concierge is off" }, 404);
+    }
+    const body = await c.req
+      .json<Partial<ConciergeChatStartRequest>>()
+      .catch(() => ({}) as Partial<ConciergeChatStartRequest>);
+    // No name starts an untitled chat, which its first message names.
+    if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim())) {
+      return c.json({ error: "name must not be empty" }, 400);
+    }
+    const chat = await concierge.startTopicChat(body.name);
+    return c.json({ ...chat, unread: 0 }, 201);
   });
 
   // The Concierge's todo list: every open row whatever its age, and the
@@ -77,6 +123,32 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
       sse.onAbort(finish);
       await closed;
     });
+  });
+
+  // The Concierge's connectors: every tool it can act through or watch, with
+  // what it follows there, and the rules. The same structure its following
+  // list returns, read by native clients.
+  // Guardian-only; 404 while off.
+  const followingOf = async (c: Context) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return { error: c.json({ error: "Not authenticated" }, 401) };
+    }
+    const concierge = deps.concierge;
+    if (!concierge || !(await concierge.isEnabled())) {
+      return { error: c.json({ error: "Concierge is off" }, 404) };
+    }
+    return { following: concierge.following };
+  };
+  const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  app.get("/concierge/connectors", async (c) => {
+    const { following, error } = await followingOf(c);
+    if (error) return error;
+    try {
+      return c.json((await following.list()) satisfies ConciergeConnectorsResponse);
+    } catch (err) {
+      return c.json({ error: messageOf(err) }, 502);
+    }
   });
 
   return app;

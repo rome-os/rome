@@ -4,7 +4,7 @@
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
 // the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
-// `FeishuAdapter` (packages/core/src/channels/feishu.ts), wrapped here so the
+// `FeishuAdapter` (packages/core/src/connections/kinds/feishu/feishu.ts), wrapped here so the
 // runtime's grant-epoch lifecycle and fault→grant-state mapping drive it. The
 // transport already speaks the channel's record, so inbound and send pass
 // through without a projection.
@@ -29,13 +29,12 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
-import type { FeishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
   type FeishuConfig,
   isFeishuAuthError,
-} from "../../channels/feishu.js";
+} from "../kinds/feishu/feishu.js";
 import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
@@ -140,8 +139,6 @@ export interface FeishuDescriptorDeps {
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
-  /** How a streamed reply shows, read for each message it creates. */
-  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
@@ -257,8 +254,9 @@ function settledBefore<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
 
 export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
   return async (interact, ctx) => {
-    // Agent-ready always registers a new app, which a renewal must refuse, so
-    // renewing goes straight to the existing app's credentials.
+    // Agent-ready always registers a new app, which would end the connection
+    // a renewal fixes, so renewing goes straight to the existing app's
+    // credentials.
     const { mode, domain: domainChoice } = ctx.renewing
       ? { ...(await interact.prompt(FEISHU_RENEW_FORM)), mode: "manual" }
       : await interact.prompt(FEISHU_MODE_FORM);
@@ -562,7 +560,6 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
-            replyStreamingStyle: deps.replyStreamingStyle,
             onFault: routeFault,
           };
           const adapter = new FeishuAdapter(config, createChannel);
@@ -615,7 +612,6 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,
-            replyDelivery: adapter.replyDelivery(),
           };
           return {
             start(deliver, fault): void {

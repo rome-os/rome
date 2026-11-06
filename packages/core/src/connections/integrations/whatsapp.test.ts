@@ -4,14 +4,14 @@
 // threading — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { sendThrough } from "../../channels/connection-ports.js";
+import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import type { ChatId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
 import {
   WhatsAppAdapter,
   type WhatsAppAuthProvider,
   type WhatsAppSocketFactory,
-} from "../../channels/whatsapp.js";
-import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
+} from "../kinds/whatsapp/whatsapp.js";
+import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
@@ -164,19 +164,6 @@ describe("whatsapp descriptor shape", () => {
     await expect(talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
     await talker.stop();
     expect(fake.stopped).toBe(true);
-  });
-
-  // What was said is the channel's `messages`, read from the mirror
-  // (whatsapp-messages.ts). The Talk no longer reads history of its own.
-  it("leaves history to the channel", async () => {
-    const fake = new FakeWhatsAppAdapter();
-    const { deps } = makeDeps(fake);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      sessionCred(),
-      runtimeKit(),
-    );
-    expect(talker.history).toBeUndefined();
-    expect(createWhatsAppDescriptor(deps).capabilities.talker?.history).toBeUndefined();
   });
 });
 

@@ -3,7 +3,6 @@ import type { ChatMessage } from "@/lib/chat-types";
 import {
   buildChatView,
   buildRows,
-  canPickChatModel,
   currentReplyMessages,
   interactionResultKey,
   isAwaitingGuardian,
@@ -35,72 +34,40 @@ function mk(
   };
 }
 
-const handoffBlock = {
-  type: "handoff",
-  toolUseId: "h1",
-  appId: "workflow-studio",
-  agentName: "workflow-planner",
-  childSessionId: CHILD,
-  payload: { summary: "brief", agentLabel: "Workflow Planner" },
-};
-
-// Main: user → [handoff + narration in ONE turn]. Child: seed "brief" → reply.
-function tree(resolved = false): Map<string, ChatMessage[]> {
-  const main: ChatMessage[] = [
-    mk(MAIN, "user", "t1", [{ type: "text", content: "do X" }]),
-    mk(MAIN, "assistant", "t2", [handoffBlock]),
-    mk(MAIN, "assistant", "t2", [{ type: "text", content: "narration" }]),
-  ];
-  if (resolved) {
-    main.push(
-      mk(MAIN, "user", "t3", [{ type: "interaction_result", toolUseId: "h1", output: { ok: 1 } }]),
-    );
-  }
-  const child: ChatMessage[] = [
-    mk(CHILD, "user", "c1", [{ type: "text", content: "brief" }]),
-    mk(CHILD, "assistant", "c2", [{ type: "text", content: "specialist reply" }]),
-  ];
-  return new Map([
-    [MAIN, main],
-    [CHILD, child],
-  ]);
-}
-
 describe("buildChatView", () => {
-  it("merges the child after the handoff's whole turn and suppresses the seed", () => {
-    const v = buildChatView(tree(), MAIN, MAIN_IDENTITY);
-    // do X, handoff(turn t2), narration(turn t2), then child reply — seed gone.
-    expect(v.displayMessages.map((m) => m.sessionId)).toEqual([MAIN, MAIN, MAIN, CHILD]);
-    // The child's seed (its only user message) is suppressed — no CHILD user row.
-    expect(v.displayMessages.filter((m) => m.role === "user" && m.sessionId === CHILD)).toEqual([]);
-    expect(v.displayMessages.at(-1)?.content).toContain("specialist reply");
-  });
-
-  it("indexes the handoff and points the floor at its open child", () => {
-    const v = buildChatView(tree(), MAIN, MAIN_IDENTITY);
-    expect(v.handoffList).toHaveLength(1);
-    expect(v.handoffList[0]).toMatchObject({
-      toolUseId: "h1",
-      parentSessionId: MAIN,
-      childSessionId: CHILD,
-      status: "open",
-      agentLabel: "Workflow Planner",
-    });
-    expect(v.floorSessionId).toBe(CHILD);
-    expect(v.identityBySession.get(CHILD)).toEqual({
-      name: "Workflow Planner",
-      iconUrl: "/api/apps/workflow-studio/icon",
-    });
+  it("shows the main session's transcript and its identity", () => {
+    const messages = new Map<string, ChatMessage[]>([
+      [
+        MAIN,
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "do X" }]),
+          mk(MAIN, "assistant", "t1", [{ type: "text", content: "done" }]),
+        ],
+      ],
+      [CHILD, [mk(CHILD, "assistant", "c1", [{ type: "text", content: "elsewhere" }])]],
+    ]);
+    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
+    expect(v.displayMessages.map((m) => m.sessionId)).toEqual([MAIN, MAIN]);
     expect(v.identityBySession.get(MAIN)).toBe(MAIN_IDENTITY);
   });
 
-  it("returns the floor to main once the handoff resolves", () => {
-    const v = buildChatView(tree(true), MAIN, MAIN_IDENTITY);
-    expect(v.handoffList[0].status).toBe("done");
-    expect(v.floorSessionId).toBe(MAIN);
-    // Resolution is posted to the handoff's parent (main) session, namespaced.
+  it("keys a resolved interaction by session and toolUseId", () => {
+    const messages = new Map<string, ChatMessage[]>([
+      [
+        MAIN,
+        [
+          mk(MAIN, "assistant", "t1", [
+            { type: "pending_interaction", toolUseId: "h1", appId: "x", render: {} },
+          ]),
+          mk(MAIN, "user", "t2", [
+            { type: "interaction_result", toolUseId: "h1", output: { ok: 1 } },
+          ]),
+        ],
+      ],
+    ]);
+    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
     expect(v.interactionResults.get(interactionResultKey(MAIN, "h1"))).toEqual({ ok: 1 });
-    expect(v.interactionResults.get("h1")).toBeUndefined(); // bare id no longer collides
+    expect(v.interactionResults.get("h1")).toBeUndefined();
   });
 
   const questionCard = (toolUseId: string) => ({
@@ -188,57 +155,30 @@ describe("buildChatView", () => {
     });
     expect(v.interactionResults.get(interactionResultKey(MAIN, "q_1"))).toBeUndefined();
   });
-
-  it("does not collide a recycled toolUseId across merged sessions", () => {
-    // Both sessions have an `item_0` interaction: main's is resolved, the
-    // child's is still open. Bare-id keying would have let one mark the other.
-    const messages = new Map<string, ChatMessage[]>([
-      [
-        MAIN,
-        [
-          mk(MAIN, "user", "t1", [{ type: "text", content: "go" }]),
-          mk(MAIN, "assistant", "t2", [handoffBlock]),
-          mk(MAIN, "assistant", "t2", [
-            { type: "pending_interaction", toolUseId: "item_0", appId: "x", render: {} },
-          ]),
-          mk(MAIN, "user", "t3", [
-            { type: "interaction_result", toolUseId: "item_0", output: { picked: "main" } },
-          ]),
-        ],
-      ],
-      [
-        CHILD,
-        [
-          mk(CHILD, "user", "c1", [{ type: "text", content: "brief" }]),
-          mk(CHILD, "assistant", "c2", [
-            { type: "pending_interaction", toolUseId: "item_0", appId: "x", render: {} },
-          ]),
-        ],
-      ],
-    ]);
-    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
-    expect(v.interactionResults.get(interactionResultKey(MAIN, "item_0"))).toEqual({
-      picked: "main",
-    });
-    // The child's same-id card is untouched — still open.
-    expect(v.interactionResults.get(interactionResultKey(CHILD, "item_0"))).toBeUndefined();
-  });
 });
 
 describe("buildRows", () => {
   it("groups same-turn assistant messages under one speaker row", () => {
-    const v = buildChatView(tree(), MAIN, MAIN_IDENTITY);
+    const messages = new Map<string, ChatMessage[]>([
+      [
+        MAIN,
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "do X" }]),
+          mk(MAIN, "assistant", "t2", [{ type: "text", content: "working" }]),
+          mk(MAIN, "assistant", "t2", [{ type: "text", content: "narration" }]),
+        ],
+      ],
+    ]);
+    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
     const rows = buildRows(v.displayMessages, v.identityBySession, MAIN_IDENTITY, {
       runningTurnId: null,
       isStreaming: false,
     });
-    expect(rows.map((r) => r.kind)).toEqual(["user", "agent", "agent"]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "agent"]);
     const mainTurn = rows[1];
-    // handoff + narration (same turn t2) collapse into one row of two messages.
+    // Both messages of turn t2 collapse into one row.
     expect(mainTurn.kind === "agent" && mainTurn.messages).toHaveLength(2);
     expect(mainTurn.kind === "agent" && mainTurn.identity.name).toBe("Main");
-    const childTurn = rows[2];
-    expect(childTurn.kind === "agent" && childTurn.identity.name).toBe("Workflow Planner");
   });
 
   it("keeps a multi-assistant turn as one row regardless of where its trace sits", () => {
@@ -319,23 +259,6 @@ describe("buildRows model switch notice", () => {
   });
 });
 
-describe("canPickChatModel", () => {
-  it("shows the picker in an open chat with no handoff", () => {
-    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: false })).toBe(
-      true,
-    );
-  });
-
-  it("hides it during an open handoff and in a promoted side chat", () => {
-    expect(
-      canPickChatModel({ mainSessionId: MAIN, floorSessionId: CHILD, isSideChat: false }),
-    ).toBe(false);
-    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: true })).toBe(
-      false,
-    );
-  });
-});
-
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {
@@ -344,7 +267,7 @@ describe("isLastTurnFailed", () => {
   const failed = (main: ChatMessage[]) =>
     isLastTurnFailed(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY));
 
-  it("reads the floor's latest turn end", () => {
+  it("reads the latest turn end", () => {
     expect(failed([trace(MAIN, "t1", "error")])).toBe(true);
     expect(failed([trace(MAIN, "t1", "error"), trace(MAIN, "t2", "completed")])).toBe(false);
     expect(failed([trace(MAIN, "t1", "completed"), trace(MAIN, "t2", "error")])).toBe(true);
@@ -365,11 +288,8 @@ describe("isAwaitingGuardian", () => {
     appId: "survey",
     render: { kind: "inline", componentId: "form", props: {} },
   });
-  const awaiting = (main: ChatMessage[], child?: ChatMessage[], runningTurnId?: string) => {
-    const messages = new Map<string, ChatMessage[]>([[MAIN, main]]);
-    if (child) messages.set(CHILD, child);
-    return isAwaitingGuardian(buildChatView(messages, MAIN, MAIN_IDENTITY), runningTurnId);
-  };
+  const awaiting = (main: ChatMessage[], runningTurnId?: string) =>
+    isAwaitingGuardian(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
 
   it("is true while the last message is an unanswered card", () => {
     expect(
@@ -409,7 +329,6 @@ describe("isAwaitingGuardian", () => {
           mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
           mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
         ],
-        undefined,
         "backend:b1",
       ),
     ).toBe(false);
@@ -422,7 +341,6 @@ describe("isAwaitingGuardian", () => {
           mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
           mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
         ],
-        undefined,
         "t1",
       ),
     ).toBe(true);
@@ -466,15 +384,6 @@ describe("isAwaitingGuardian", () => {
         mk(MAIN, "assistant", "t2", [{ type: "text", content: "Okay." }]),
       ]),
     ).toBe(false);
-  });
-
-  it("reads the floor session while a handoff is open", () => {
-    expect(
-      awaiting(
-        [mk(MAIN, "assistant", "t1", [handoffBlock])],
-        [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
-      ),
-    ).toBe(true);
   });
 });
 
@@ -546,7 +455,7 @@ describe("currentReplyMessages", () => {
         { type: "text", content: "Routine" },
       ]);
       const app = mk(MAIN, "assistant", "proposal-turn", []);
-      const view = { displayMessages: [routine, app], floorSessionId: MAIN };
+      const view = { displayMessages: [routine, app] };
       expect(currentReplyMessages(view)).toEqual([routine, app]);
       expect(currentReplyMessages(view, "resolution-turn")).toEqual([]);
       const resolution = mk(MAIN, "user", "resolution-turn", [
@@ -562,15 +471,13 @@ describe("currentReplyMessages", () => {
     });
   }
 
-  it("keeps every assistant message in the current floor reply, not older or other-session cards", () => {
+  it("keeps every assistant message in the current reply, not older cards", () => {
     const old = mk(MAIN, "assistant", "old", []);
     const input = mk(MAIN, "user", "current", []);
     const card = mk(MAIN, "assistant", "current", []);
     const text = mk(MAIN, "assistant", "current", []);
-    const child = mk(CHILD, "assistant", "child", []);
-    const view = { displayMessages: [old, input, card, child, text], floorSessionId: MAIN };
+    const view = { displayMessages: [old, input, card, text] };
     expect(currentReplyMessages(view)).toEqual([card, text]);
-    expect(currentReplyMessages({ ...view, floorSessionId: CHILD })).toEqual([child]);
     expect(currentReplyMessages(view, "unpersisted-backend-turn")).toEqual([]);
   });
 
@@ -578,9 +485,7 @@ describe("currentReplyMessages", () => {
     for (const turnId of ["turn", undefined]) {
       const card = mk(MAIN, "assistant", "turn", [], { turnId });
       const input = mk(MAIN, "user", "turn", [], { turnId });
-      expect(
-        currentReplyMessages({ displayMessages: [card, input], floorSessionId: MAIN }),
-      ).toEqual([]);
+      expect(currentReplyMessages({ displayMessages: [card, input] })).toEqual([]);
     }
   });
 });

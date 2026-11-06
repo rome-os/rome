@@ -20,12 +20,14 @@ describe("appPersonMapping", () => {
   });
 
   it("answers apps with the SDK's channelMappings field, and accounts beside it", async () => {
-    const id = await app.create({
+    const id = await people.create({
       displayName: "Alice",
       bondLevel: "inner-circle",
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-alice" }],
+      links: [
+        { platform: "telegram", id: "tg-alice" },
+        { platform: "whatsapp", id: "wa-alice" },
+      ],
     });
-    await app.addChannelMapping(id, "whatsapp", "wa-alice");
 
     const found = await app.findByChannelUser("whatsapp", "wa-alice");
 
@@ -52,14 +54,14 @@ describe("appPersonMapping", () => {
     app = appPersonMapping(people, (channel) =>
       channel === "telegram_user" || channel === "tg-second" ? "telegram" : channel,
     );
-    const id = await app.create({
+    const id = await people.create({
       displayName: "Alice",
       bondLevel: "inner-circle",
-      channelMappings: [{ channel: "telegram_user", channelUserId: "1001" }],
+      links: [{ platform: "telegram", id: "1001" }],
     });
 
     // The bot and a second bot hear the same Telegram account.
-    expect((await app.findByChannelUser("telegram", "1001"))?.id).toBe(id);
+    expect((await app.findByChannelUser("telegram_user", "1001"))?.id).toBe(id);
     expect((await app.findByChannelUser("tg-second", "1001"))?.id).toBe(id);
     expect((await app.findByChannelUser("telegram", "1001"))?.channelMappings).toEqual([
       { channel: "telegram", channelUserId: "1001" },
@@ -71,23 +73,51 @@ describe("appPersonMapping", () => {
     expect(await app.findByAccount!({ platform: "telegram", id: "tg-nobody" })).toBeNull();
   });
 
-  it("links and finds a person by the account an app names", async () => {
+  it("finds a person by the account an app names, as it is", async () => {
     // A channel name that would read as another platform, to show the account
     // is taken as it is.
     app = appPersonMapping(people, () => "elsewhere");
-    const id = await app.create({
+    const id = await people.create({
       displayName: "Alice",
       bondLevel: "inner-circle",
-      accounts: [{ platform: "lark", id: "ou_alice" }],
+      links: [{ platform: "lark", id: "ou_alice" }],
     });
-    await app.addAccount!(id, { platform: "telegram", id: "1001" });
 
     expect((await app.findByAccount!({ platform: "lark", id: "ou_alice" }))?.id).toBe(id);
-    expect((await app.findByAccount!({ platform: "telegram", id: "1001" }))?.accounts).toEqual(
-      expect.arrayContaining([
-        { platform: "lark", id: "ou_alice" },
-        { platform: "telegram", id: "1001" },
-      ]),
+  });
+
+  it("refuses every link an app asks for, so only the guardian links an account", async () => {
+    const id = await app.create({ displayName: "Bob", bondLevel: "acquaintance" });
+    const other = await people.create({
+      displayName: "Carol",
+      bondLevel: "acquaintance",
+      links: [{ platform: "telegram", id: "tg-carol" }],
+    });
+
+    await expect(
+      app.create({
+        displayName: "Dana",
+        bondLevel: "acquaintance",
+        channelMappings: [{ channel: "telegram", channelUserId: "tg-dana" }],
+      }),
+    ).rejects.toThrow(/only the guardian/i);
+    await expect(
+      app.create({
+        displayName: "Dana",
+        bondLevel: "acquaintance",
+        accounts: [{ platform: "telegram", id: "tg-dana" }],
+      }),
+    ).rejects.toThrow(/only the guardian/i);
+    await expect(app.addChannelMapping(id, "telegram", "tg-carol")).rejects.toThrow(
+      /only the guardian/i,
     );
+    await expect(app.addAccount!(id, { platform: "telegram", id: "tg-carol" })).rejects.toThrow(
+      /only the guardian/i,
+    );
+
+    // Nothing moved, and the refused create made no person.
+    expect((await app.findByChannelUser("telegram", "tg-carol"))?.id).toBe(other);
+    expect(await app.findByName("Dana")).toEqual([]);
+    expect((await app.findByName("Bob")).map((person) => person.id)).toEqual([id]);
   });
 });

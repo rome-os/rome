@@ -9,11 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
@@ -46,7 +45,8 @@ import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
 import { PendingUploadsList } from "./composer/PendingUploadsList";
 import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
-import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
+import { SlashSkillMenu } from "./composer/SlashSkillMenu";
+import { useSlashSkill } from "./composer/use-slash-skill";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -165,18 +165,6 @@ export interface ChatComposerProps {
   onStop?: () => void;
   // Error banner above the input.
   streamError?: string | ChatErrorNotice | null;
-  // When a suspendable action has handed off to a sub-agent, the composer shows
-  // a banner naming who the guardian is now collaborating with. Turns route to
-  // that sub-agent server-side. When that sub-agent has a pending submission
-  // awaiting the guardian, `onApprove` is set and the banner gains an Approve
-  // button — the approval gate lives here, at the bottom of the surface, rather
-  // than as a widget interrupting the conversation flow. Replying instead asks
-  // the sub-agent for changes; abandoning is the "Cancel design" header control.
-  designingInteraction?: {
-    agentLabel: string;
-    onApprove?: () => void;
-    onCancel?: () => void;
-  } | null;
   // Why typing is off right now: a card in the transcript is the only way to
   // answer. While set, a locked strip with this text stands where the box
   // was, so the state reads at a glance. Null or undefined keeps the composer
@@ -236,7 +224,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     isStreaming = false,
     onStop,
     streamError,
-    designingInteraction = null,
     lockedReason = null,
     boxClassName,
     textOnly = false,
@@ -304,12 +291,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     setHint((current) => (hints.includes(current) ? current : pickComposerHint(hints, current)));
   }, [hints]);
 
-  // Open while the message starts with `/` and the cursor is still inside the
-  // first token. Selecting pins the skill as a structured chip (mirroring the
-  // `@` mention) — the turn carries it as a `skillName` field, so no
-  // name-shape constraint applies. Expansion stays server-side.
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashQuery, setSlashQuery] = useState("");
   const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(
     () => storedDraft?.skill ?? null,
   );
@@ -411,6 +392,23 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // State drives the UI, while the ref closes the same-event gap before React
   // commits that state (for example, two rapid Enter keydown events).
   const uploadInFlightRef = useRef(false);
+  const {
+    slashMenuOpen,
+    setSlashMenuOpen,
+    slashQuery,
+    setSlashQuery,
+    slashMenuRef,
+    reevaluateSlashContext,
+    acceptSlashSkill,
+    handleSlashKeyDown,
+  } = useSlashSkill({
+    inputText,
+    setInputText,
+    setDraftSkill,
+    textareaRef,
+    uploadInFlightRef,
+    enabled: !textOnly,
+  });
   // Live for exactly one upload; `cancelUpload` aborts through it.
   const uploadAbortRef = useRef<AbortController | null>(null);
   // The last failed send, kept until a send succeeds.
@@ -856,35 +854,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     [agentMentionLocked, mentionMenuOpen],
   );
 
-  // The slash menu is active only while the cursor sits inside a leading
-  // `/<token>` (slash at index 0, no whitespace before the cursor). A single
-  // internal slash is allowed only for scoped app ids (`@publisher/app`), so
-  // canonical scoped skills remain pickable without treating paths such as
-  // `/etc/hosts` as skill queries.
-  const reevaluateSlashContext = useCallback(
-    (value: string, cursor: number) => {
-      const token = value.slice(1, cursor);
-      const slashCount = token.split("/").length - 1;
-      const slashShapeAllowed = slashCount === 0 || (token.startsWith("@") && slashCount === 1);
-      if (
-        !textOnly &&
-        value.startsWith("/") &&
-        cursor >= 1 &&
-        !/\s/.test(token) &&
-        slashShapeAllowed
-      ) {
-        setSlashQuery(token);
-        setSlashMenuOpen(true);
-        return;
-      }
-      if (slashMenuOpen) {
-        setSlashMenuOpen(false);
-        setSlashQuery("");
-      }
-    },
-    [slashMenuOpen, textOnly],
-  );
-
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
@@ -934,36 +903,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     [inputText, mentionAnchorIndex],
   );
 
-  const acceptSlashSkill = useCallback(
-    (skill: SkillSelection) => {
-      if (uploadInFlightRef.current) return;
-      // Mirror acceptMention: splice out the leading `/<query>` token so the
-      // chip becomes the single source of truth for "which skill" — whatever
-      // the user already typed after the cursor stays as the task text.
-      const el = textareaRef.current;
-      const cursor = el?.selectionEnd ?? inputText.length;
-      const after = inputText.slice(cursor).replace(/^\s+/, "");
-      setInputText(after);
-      requestAnimationFrame(() => {
-        const t = textareaRef.current;
-        if (!t) return;
-        t.focus();
-        t.setSelectionRange(0, 0);
-      });
-      setDraftSkill({
-        name: skill.name,
-        localName: skill.localName,
-        description: skill.description,
-        iconUrl: skill.iconUrl,
-      });
-      setSlashMenuOpen(false);
-      setSlashQuery("");
-    },
-    [inputText],
-  );
-
   const mentionMenuRef = useRef<AgentMentionMenuHandle>(null);
-  const slashMenuRef = useRef<SlashSkillMenuHandle>(null);
 
   // On desktop, Enter submits (Shift+Enter for a newline); Stop button is
   // intentionally not bound to Enter so it doesn't race a finishing stream.
@@ -972,47 +912,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // While the slash menu is open, hijack arrow/enter/escape the same way the
-    // mention menu does. The two are mutually exclusive in practice: slash
-    // requires the message to start with `/`, mentions require an `@` token.
-    if (slashMenuOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        slashMenuRef.current?.move(1);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        slashMenuRef.current?.move(-1);
-        return;
-      }
-      // Horizontal navigation mirrors the mention menu: the slash menu is the
-      // same two-panel app → item picker, so ArrowRight drills into the
-      // skills panel and ArrowLeft returns to apps instead of moving the
-      // textarea cursor.
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        slashMenuRef.current?.moveHorizontal(1);
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        slashMenuRef.current?.moveHorizontal(-1);
-        return;
-      }
-      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
-        if (slashMenuRef.current?.acceptSelected()) {
-          e.preventDefault();
-          return;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSlashMenuOpen(false);
-        setSlashQuery("");
-        return;
-      }
-    }
+    if (handleSlashKeyDown(e)) return;
     // While the mention menu is open, hijack arrow/enter/escape so the user
     // can navigate without leaving the textarea. Falls through to normal
     // typing otherwise.
@@ -1090,11 +990,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     ? (draftProject.displayName ?? getProjectDisplayName(draftProject.name))
     : getProjectDisplayName(draftProjectName);
 
-  // Live handoff (not the approve moment, which keeps its own banner). When set,
-  // it's the active chip in the row and supersedes the @agent chip — both would
-  // name the same specialist.
-  const collaborating =
-    designingInteraction && !designingInteraction.onApprove ? designingInteraction : null;
   // An in-flight upload renders the cancel control in this slot instead, so the
   // send label never has to describe one.
   const sendActionLabel = isStreaming
@@ -1105,28 +1000,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
 
   return (
     <>
-      {/* Approve moment: one segmented button group above the tray — a plain text
-          segment (the message) joined to a neutral outline Cancel and a primary
-          Approve. Neutral throughout except the single Approve CTA. */}
-      {designingInteraction?.onApprove && (
-        <ButtonGroup className="mb-2 w-full rounded-12 shadow-card-hover">
-          <ButtonGroupText className="min-w-0 flex-1 gap-2 border-border bg-surface px-3">
-            <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              <span>{designingInteraction.agentLabel}</span> submitted a result — approve it, or
-              reply to request changes
-            </span>
-          </ButtonGroupText>
-          {designingInteraction.onCancel && (
-            <Button variant="outline" size="sm" onClick={designingInteraction.onCancel}>
-              Cancel
-            </Button>
-          )}
-          <Button size="sm" onClick={designingInteraction.onApprove}>
-            Approve
-          </Button>
-        </ButtonGroup>
-      )}
       {streamError && (
         <ErrorEventView
           presentation="status"
@@ -1144,21 +1017,13 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           on overflow. */}
       <div className="relative z-0 -mb-8 flex items-center gap-2 overflow-x-auto rounded-t-16 border border-border bg-surface-muted/65 px-4 pb-10 pt-2 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden supports-[backdrop-filter]:bg-surface-muted/45 empty:hidden">
         {effectiveMention && (
-          // Its × cancels the live handoff while collaborating, otherwise clears
-          // a removable draft mention.
+          // Its × clears a removable draft mention.
           <AgentMentionChip
             mention={effectiveMention}
             pinned={pinnedAgentMention !== null}
             onRemove={
-              uploadInFlight
-                ? undefined
-                : collaborating
-                  ? collaborating.onCancel
-                  : pinnedAgentMention
-                    ? undefined
-                    : () => setDraftAgentMention(null)
+              uploadInFlight || pinnedAgentMention ? undefined : () => setDraftAgentMention(null)
             }
-            removeLabel={collaborating ? "Cancel collaboration" : undefined}
           />
         )}
         {draftSkill && (

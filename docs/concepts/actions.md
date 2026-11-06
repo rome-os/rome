@@ -31,10 +31,10 @@ Every action reports its outcome through one result envelope carrying exactly on
 
 **Contracts:**
 
-- A result is exactly one of ok, error, pending approval, pending interaction, handoff, or widget placement — a single status, never a combination of flags.
+- A result is exactly one of ok, error, pending approval, pending interaction, or widget placement — a single status, never a combination of flags.
 - An action that wraps an external call collapses the provider's own success flag into the status. A failure never travels as an ok result carrying a failure payload.
 - The error status is a domain rejection the caller can act on. An infrastructure failure — a crashed handler, a dead worker — surfaces as a thrown invocation error, never as a result.
-- Pending approval parks the calling agent on the guardian's [approval](messaging.md#approvals). Pending interaction and handoff park it on a [suspension](#suspensions). A widget placement completes on the same turn without parking anything.
+- Pending approval parks the calling agent on the guardian's [approval](messaging.md#approvals). Pending interaction parks it on a [suspension](#suspensions). A widget placement completes on the same turn without parking anything.
 
 **Not to be confused with:**
 
@@ -42,23 +42,21 @@ Every action reports its outcome through one result envelope carrying exactly on
 
 ## Suspensions
 
-A suspension is an action result that parks the calling agent until the guardian resolves it in webchat. Two kinds exist: an **inline interaction** mounts a component owned by the app inside the caller's own chat, and a **handoff** transfers the floor to a child session where the guardian collaborates with a summoned agent.
+A suspension is an action result that parks the calling agent until the guardian resolves it in webchat. It is an **inline interaction**: a component owned by the app, mounted inside the caller's own chat.
 
 **Contracts:**
 
 - The parked caller is told to wait and receives no artifact. The resolution arrives as a new turn carrying the outcome, and the action body does not run again.
 - Every resolution is either the produced artifact or a dismissal. A dismissal is a first-class outcome the caller acknowledges and continues from, not an error.
 - The artifact schema belongs to the owning app. Rome carries the artifact to the caller without interpreting it, so a new suspending action ships without a platform change.
-- An inline interaction does not lock the chat, and several can be open at once. A handoff locks the parent chat until control returns.
-- A handoff's child session is bound to the summoned agent for its whole life. It never appears in the chat sidebar — the guardian reaches it through the card in the parent chat.
-- A handoff that declares a handback contract hands control back only through it: the candidate artifact must satisfy the contract, and the guardian approves the candidate before it resumes the caller. A validation failure bounces to the summoned agent, never to the caller.
+- An inline interaction does not lock the chat, and several can be open at once.
 - Only webchat renders suspensions. On a messaging channel, inside a subagent, or on a forked turn, the calling agent relays the prompt text as prose and the guardian's reply arrives as the next turn.
 
 **Not to be confused with:**
 
 - **[Approval](messaging.md#approvals)** — an approval parks an action before it executes, and the guardian authorizes it. A suspension is returned by an action that already ran, and the guardian produces its result.
 - **Widget placement** — mounts an app widget on the workspace as a side effect of a completed result. Nothing is parked and nothing resolves.
-- **Subagent** — delegated work that runs without the guardian and reports back to its parent turn. A handoff summons an agent specifically to work with the guardian.
+- **Subagent** — delegated work that runs without the guardian and reports back to its parent turn.
 
 ## Actor
 
@@ -70,6 +68,8 @@ The actor is the authenticated session identity accountable for an action execut
 - Capture is ambient, not per-route. Identity is established once where a request enters and flows to every action run during it, so a newly added route is attributed without doing anything.
 - The whole execution chain inherits the root's actor — sub-actions, detached runs, and worker-process hops — no matter how many apps or agents sit in between.
 - The trust boundary resolves the actor from primary session material, never from forwarded headers or app-supplied input ([access control](../architecture/access-control.md)).
+- An automated dashboard message keeps its accountable actor separate from its source. With a guardian chain actor, the main agent, Concierge, and apps speak for the guardian: their messages use the guardian's avatar and viewer-relative side, with the source named below the bubble.
+- Other sources, absent or anonymous chain actors, and visitor chains speak for themselves on the left with an Automated label. Each automated turn tells the receiving agent the guardian did not type it. Permissions and approvals stay unchanged.
 - A guardian actor records the guardian seat, plus the bound cloud account id and email when known. A password-only seat has no email to record.
 - Session-lifecycle audit telemetry stamps the same actor with the same absent-versus-anonymous semantics, so lifecycle changes are attributable from exported telemetry alone.
 

@@ -1,4 +1,7 @@
 {
+  "senderOnBehalf": "Sent by {{name}}",
+  "senderAutomated": "Automated",
+  "senderAutomation": "Automation",
   "markdown": {
     "code": "Code",
     "mermaid": "Mermaid diagram"
@@ -65,6 +68,8 @@
       "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
     },
     "messageDetails": "Message details",
+    "chooseFolder": "Choose folder…",
+    "removeFolder": "Remove folder",
     "composerMenu": "Add files or change the model",
     "placeholder": "Message",
     "empty": {
@@ -75,6 +80,17 @@
         "email": "Summarize my unread email",
         "task": "Build me a simple habit tracker app"
       }
+    },
+    "topicEmpty": {
+      "title": "Start an ongoing topic",
+      "description": "Give something that keeps coming up a place of its own, like your calendar, a project or a trip. Alerts and tasks here show up only in this chat.",
+      "starters": {
+        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
+        "work": "Keep track of work here: project progress, PRs and meetings",
+        "trip": "Help me plan next month's trip, and keep everything about it here"
+      },
+      "justAsk": "Just asking a question?",
+      "backToMain": "Ask in the main chat →"
     }
   },
   "reply": {
@@ -94,6 +110,7 @@
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
     "newChat": "New Chat",
+    "loading": "Loading…",
     "noSessions": "No sessions yet",
     "openSidebar": "Open sidebar"
   },
@@ -143,7 +160,7 @@
   "waitingCard": "Needs you",
   "jumpToLatest": "Jump to the latest message",
   "roles": {
-    "agent": "Assistant"
+    "agent": "Rome"
   },
   "message": {
     "copy": "Copy message",
@@ -371,6 +388,10 @@
     }
   },
   "modelSwitch": {
+    "quota": "{{from}} quota ran out, switched to {{to}}",
+    "login": "{{from}} sign-in failed, switched to {{to}}",
+    "temporary": "{{from}} is temporarily unavailable, switched to {{to}}",
+    "model_limit": "{{fromModel}} limit reached, switched to {{toModel}}",
     "notice": "Switched to {{model}}"
   },
   "modelSelector": {
