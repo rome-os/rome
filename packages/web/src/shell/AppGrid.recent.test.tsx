@@ -94,6 +94,7 @@ describe("Recent apps on the rail", () => {
     "inbox",
     "showcases",
     "skills",
+    "welcome-to-rome",
   ])("renders %s like a page in pins, recents and overflow", async (id) => {
     const app = fixture(id, id, { origin: "builtin" });
     seed([app], { [id]: minutesAgo(1) });
@@ -110,7 +111,12 @@ describe("Recent apps on the rail", () => {
       .getByRole("link", { name: "Memory" })
       .querySelector(".rome-sidebar-icon");
     expect(link.querySelector(".rome-sidebar-icon")?.className).toBe(pageIcon?.className);
-    expect(link.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+    if (id === "welcome-to-rome") {
+      expect(link.querySelector("mask")).toBeTruthy();
+      expect(link.querySelector("svg")?.getAttribute("class")).toContain("scale-80");
+    } else {
+      expect(link.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+    }
     expect(link.querySelector("img")).toBeNull();
     pinned.unmount();
 
@@ -138,16 +144,16 @@ describe("Recent apps on the rail", () => {
     ).toBeTruthy();
   });
 
-  it("keeps Welcome to Rome and user-created app images on the rail", async () => {
+  it("keeps other built-in and user-created app images on the rail", async () => {
     seed(
       [
-        fixture("welcome-to-rome", "Welcome to Rome", { origin: "builtin" }),
+        fixture("other-builtin", "Other built-in app", { origin: "builtin" }),
         fixture("my-briefing", "Briefing"),
       ],
-      { "welcome-to-rome": minutesAgo(1), "my-briefing": minutesAgo(2) },
+      { "other-builtin": minutesAgo(1), "my-briefing": minutesAgo(2) },
     );
     renderSidebar();
-    for (const name of ["Welcome to Rome", "Briefing"]) {
+    for (const name of ["Other built-in app", "Briefing"]) {
       expect(
         (await screen.findByRole("link", { name, exact: true })).querySelector("img"),
       ).toBeTruthy();
