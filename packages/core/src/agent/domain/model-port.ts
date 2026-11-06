@@ -80,12 +80,6 @@ export interface ModelPrefix {
   externalMcpServers?: Record<string, ExternalMcpServer>;
   /** Set on the shell the builtin tools run in. The adapter reads none of it. */
   env?: Record<string, string>;
-  /**
-   * The agent's text stays in its trace and reaches the guardian only
-   * through its tools. The adapter turns off its model's nudges toward
-   * visible text; the run cannot spell those without knowing the provider.
-   */
-  textPrivate?: boolean;
 }
 
 /**
