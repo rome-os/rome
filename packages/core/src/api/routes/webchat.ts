@@ -3640,6 +3640,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
           return { success: false, ...modelError };
         });
+        // No agent turn ran, so no turn end tells the Concierge its task failed.
+        void deps.concierge
+          ?.taskTurnFailedBeforeStart(sessionId, saidBy, modelError.error)
+          .catch((error: unknown) =>
+            log.warn("failed to tell the Concierge of a failed task turn", {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
 
         return answer({ turnId, sessionId, startedAt: stream.startedAt });
       }

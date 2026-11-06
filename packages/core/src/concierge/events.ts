@@ -278,13 +278,18 @@ export function startConciergeEvents(
       });
       return;
     }
+    // A failed turn says why, so the Concierge can tell the guardian.
+    const { failure, error } = event.output;
+    const cause = event.status === "error" ? (failure?.message ?? error) : undefined;
+    const why = cause ? `error: ${excerpt(cause, DETAIL_EXCERPT_CHARS)}` : null;
+    const detail = [said, why].filter(Boolean);
     coalescer.mark({
       taskId,
       kind: `turn_end:${event.status} by=${by}`,
       // A result the Concierge asked for, or an error, is worth telling now.
       // The guardian's own turns, scheduled ones and a stop wait.
       urgent: event.status === "error" || (event.status === "completed" && started),
-      ...(said ? { detail: said } : {}),
+      ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
   };
 

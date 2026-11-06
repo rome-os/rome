@@ -1159,13 +1159,20 @@ describe("Concierge events", () => {
     expect(s.quietFlags).toEqual([true]);
   });
 
-  it("tells the Concierge of a failed turn at once, and holds a stopped one", async () => {
+  it("tells the Concierge of a failed turn at once, with its cause, and holds a stopped one", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
-    await finishTask(s, chatId, { status: "error" });
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "error",
+      failure: { message: "Claude is out of quota", provider: "anthropic" },
+    });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns[0].prompt).toContain('changes="turn_end:error by=concierge"');
+    expect(s.backendTurns[0].prompt).toContain("error: Claude is out of quota");
 
     const stopped = setup();
     const task = await startTask(stopped);
@@ -1257,6 +1264,22 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns[0].prompt).toContain('changes="approval"');
     expect(s.backendTurns[0].prompt).toContain("approval: Send the booking email");
+    expect(s.quietFlags).toEqual([false]);
+  });
+
+  it("tells the Concierge at once of a task turn that failed before its agent ran", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    const error = "Selected model provider is unavailable: Claude is not signed in";
+    await s.service.taskTurnFailedBeforeStart(chatId, CONCIERGE_ACCOUNT, error);
+    await s.service.taskTurnFailedBeforeStart("not-a-task-chat", CONCIERGE_ACCOUNT, error);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(
+      `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:error by=concierge">`,
+    );
+    expect(s.backendTurns[0].prompt).toContain(`error: ${error}`);
     expect(s.quietFlags).toEqual([false]);
   });
 

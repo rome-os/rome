@@ -2326,6 +2326,34 @@ describe("Webchat API", () => {
     });
   });
 
+  it("tells the Concierge when its task chat's turn fails before the agent runs", async () => {
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => {
+        throw new ModelResolutionError("Selected model provider is unavailable: Claude", {
+          code: "model_provider_unavailable",
+          provider: "anthropic",
+          reason: "not_logged_in",
+        });
+      }),
+      peek: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    const taskTurnFailedBeforeStart = rs.fn(async () => {});
+    deps.concierge = { taskTurnFailedBeforeStart } as never;
+    rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
+    const { runtime } = createWebchatRuntime(deps);
+    const concierge = { platform: "webchat", id: "core:concierge" };
+    const id = await runtime.startChat({});
+
+    expect(await runtime.post(id, { text: "Find flights" }, concierge)).toMatchObject({ ok: true });
+    expect(taskTurnFailedBeforeStart).toHaveBeenCalledTimes(1);
+    expect(taskTurnFailedBeforeStart).toHaveBeenCalledWith(
+      id,
+      concierge,
+      "Selected model provider is unavailable: Claude",
+    );
+  });
+
   it("accepts a logged-out provider as a persisted failed turn", async () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {

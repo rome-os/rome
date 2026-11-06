@@ -318,4 +318,17 @@ export class ConciergeService {
   chatDeleted(taskId: string): void {
     this.taskEvents?.mark({ taskId, kind: "chat_deleted", urgent: false });
   }
+
+  /** A task chat's turn failed before its agent ran, so no turn end will say so. */
+  async taskTurnFailedBeforeStart(chatId: string, saidBy: Account | undefined, error: string) {
+    const taskId = await this.taskOfChat(chatId);
+    if (!taskId) return;
+    const by = saidBy?.id === CONCIERGE_ACCOUNT.id ? "concierge" : "guardian";
+    this.taskEvents?.mark({
+      taskId,
+      kind: `turn_end:error by=${by}`,
+      urgent: true,
+      detail: `error: ${error}`,
+    });
+  }
 }
