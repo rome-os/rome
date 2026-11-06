@@ -19,6 +19,7 @@ import {
   type SubmitInputOptions,
 } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
+import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import type {
@@ -32,7 +33,7 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { guardianAuth, webchatProjects } from "../../db/schema.js";
+import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -145,6 +146,332 @@ describe("Webchat API", () => {
     const all = [guardianId, visitorId, otherId, "legacy"].sort();
     expect(await list(visitor)).toEqual(all);
     expect(await list(visitor, "all")).toEqual(all);
+  });
+
+  it("keeps each person's Concierge and task chats from everyone else", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:a");
+    await deps.webchatRepo.createSession(
+      "guardian-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("guardian-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    // A branch of the guardian's task chat, promoted to an ordinary chat: it
+    // was made private to the guardian when it was forked.
+    await deps.webchatRepo.createSession(
+      "task-branch",
+      "Branch",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("task-branch", {
+      triggerKind: "concierge_fork",
+      triggerName: "branch",
+    });
+    await deps.webchatRepo.createSession(
+      "shared",
+      "Shared",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    const status = async (
+      actor: typeof guardian | typeof visitor,
+      path: string,
+      init?: RequestInit,
+    ) => (await runWithSessionActor(actor, () => app.request(path, init))).status;
+    const post = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    };
+
+    // The visitor can neither read nor post to the guardian's Concierge or task chat.
+    for (const id of ["concierge", "guardian-task"]) {
+      expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
+    }
+    // Nor the guardian the visitor's.
+    expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
+    expect(await status(guardian, "/chat/sessions/visitor-main/turns", post)).toBe(404);
+    // Each opens their own, and both open an ordinary chat.
+    expect(await status(visitor, "/chat/sessions/visitor-main")).toBe(200);
+    expect(await status(guardian, "/chat/sessions/concierge")).toBe(200);
+    expect(await status(visitor, "/chat/sessions/shared")).toBe(200);
+
+    const listed = async (actor: typeof guardian | typeof visitor) =>
+      (
+        (await (
+          await runWithSessionActor(actor, () => app.request("/chat/sessions?status=all"))
+        ).json()) as { id: string }[]
+      )
+        .map((chat) => chat.id)
+        .sort();
+    expect(await listed(visitor)).toEqual(["shared", "visitor-main"]);
+    expect(await listed(guardian)).toEqual(["concierge", "guardian-task", "shared", "task-branch"]);
+    expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
+  });
+
+  it("finds no chat, turn or message it cannot place in a chat that exists", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const status = async (path: string) =>
+      (await runWithSessionActor(guardian, () => app.request(path))).status;
+    // A chat that does not exist, and a turn and a message that name none.
+    expect(await status("/chat/sessions/missing-chat/messages")).toBe(404);
+    expect(await status("/chat/turns/unknown-turn/stream")).toBe(404);
+    expect(await status("/chat/messages/unknown-message/content")).toBe(404);
+    // A registered turn whose chat is gone.
+    const turn = deps.agentTurnStreamRegistry.register({
+      sessionId: "runtime",
+      chatId: "deleted-chat",
+      turnId: "orphan-turn",
+      agentName: "main",
+    });
+    turn.finish();
+    const orphan = await runWithSessionActor(guardian, () =>
+      app.request("/chat/turns/orphan-turn/stream"),
+    );
+    expect(orphan.status).toBe(404);
+    expect(await orphan.json()).toEqual({ error: "Not found" });
+    // Search and message content share the gated patterns, and still answer.
+    expect(await status("/chat/sessions/search?q=x")).toBe(200);
+  });
+
+  it("refuses another person's live private turn before any of its messages is stored", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    await deps.webchatRepo.createSession(
+      "guardian-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("guardian-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    // A subagent of the guardian's task chat, running, with nothing stored yet.
+    await deps.webchatRepo.ensureRomeSession({
+      id: "helper",
+      type: "subagent",
+      name: "helper",
+      agentName: "researcher",
+      parentSessionId: "guardian-task",
+    });
+    const turn = deps.agentTurnStreamRegistry.register({
+      sessionId: "helper",
+      chatId: "helper",
+      turnId: "helper-turn",
+      agentName: "researcher",
+    });
+    try {
+      for (const [path, method] of [
+        ["/chat/turns/helper-turn/stream", "GET"],
+        ["/chat/turns/helper-turn/interrupt", "POST"],
+      ] as const) {
+        const res = await runWithSessionActor(visitor, () => app.request(path, { method }));
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "Not found" });
+      }
+    } finally {
+      turn.finish?.();
+    }
+  });
+
+  it("searches only chats the caller may open, before taking the 20 best", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const chat = async (id: string, agentName: string | null, ownerKey: string | null) => {
+      await deps.webchatRepo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        agentName,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+      await deps.webchatRepo.addBackendMessage(id, `turn-${id}`, [
+        { type: "text", content: "the launch plan" },
+      ]);
+    };
+    // Three older ordinary chats, then 25 newer ones only the guardian may open.
+    for (let index = 0; index < 3; index++) await chat(`shared-${index}`, null, "guardian");
+    for (let index = 0; index < 25; index++)
+      await chat(`concierge-${index}`, "core:concierge", "guardian");
+    const found = (await (
+      await runWithSessionActor(visitor, () => app.request("/chat/sessions/search?q=launch"))
+    ).json()) as { session: { id: string } }[];
+    expect(found.map((match) => match.session.id).sort()).toEqual([
+      "shared-0",
+      "shared-1",
+      "shared-2",
+    ]);
+  });
+
+  it("keeps a Concierge chat's turns, messages and history private when reached by their own ids", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:a");
+    // Each turn keeps a trace, which the message routes read by its id, and a line said.
+    const said = async (chatId: string, turnId: string) => {
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${chatId}-trace`,
+        sessionId: chatId,
+        turnId,
+        startSeq: 0,
+        blocks: [{ type: "result", content: `said in ${chatId}` }],
+      });
+      await deps.webchatRepo.addBackendMessage(chatId, turnId, [
+        { type: "text", content: `said in ${chatId}` },
+      ]);
+      return `${chatId}-trace`;
+    };
+    const guardianMessage = await said("concierge", "turn-g");
+    const visitorMessage = await said("visitor-main", "turn-v");
+    const status = async (actor: typeof guardian | typeof visitor, path: string, method = "GET") =>
+      (await runWithSessionActor(actor, () => app.request(path, { method }))).status;
+
+    for (const [actor, turn, message] of [
+      [visitor, "turn-g", guardianMessage],
+      [guardian, "turn-v", visitorMessage],
+    ] as const) {
+      const stream = await runWithSessionActor(actor, () =>
+        app.request(`/chat/turns/${turn}/stream`),
+      );
+      // Refused as another person's, not merely a turn with no stream.
+      expect(stream.status).toBe(404);
+      expect(await stream.json()).toEqual({ error: "Not found" });
+      expect(await status(actor, `/chat/turns/${turn}/interrupt`, "POST")).toBe(404);
+      expect(await status(actor, `/chat/messages/${message}/content`)).toBe(404);
+      expect(await status(actor, `/sessions/messages/${message}/content`)).toBe(404);
+    }
+    // The owner still reaches their own.
+    expect(await status(visitor, `/chat/messages/${visitorMessage}/content`)).toBe(200);
+    expect(await status(guardian, `/chat/messages/${guardianMessage}/content`)).toBe(200);
+
+    // A history read made from the visitor's chat leaves the guardian's out.
+    const channel = webchatChannel(deps.webchatRepo);
+    const read = (from: string) =>
+      webchatCaller.run({ chatId: from }, () => channel.messages!.query({ since: new Date(0) }));
+    const chatsOf = async (from: string) =>
+      [...new Set((await read(from)).map((m) => m.chatId))].sort();
+    expect(await chatsOf("visitor-main")).toEqual(["visitor-main"]);
+    expect(await chatsOf("concierge")).toEqual(["concierge"]);
+
+    // In an ordinary chat anyone may write in, a read is the sending person's,
+    // whoever owns the chat, and a turn no person sent sees no Concierge chat.
+    for (const [id, ownerKey] of [
+      ["guardian-plain", "guardian"],
+      ["visitor-plain", "visitor:a"],
+    ] as const) {
+      await deps.webchatRepo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+      await deps.webchatRepo.addBackendMessage(id, `turn-${id}`, [
+        { type: "text", content: `said in ${id}` },
+      ]);
+    }
+    const readAs = async (actor: typeof guardian | typeof visitor | undefined, from: string) =>
+      [
+        ...new Set(
+          (
+            await webchatCaller.run({ actor, chatId: from }, () =>
+              channel.messages!.query({ since: new Date(0) }),
+            )
+          ).map((m) => m.chatId),
+        ),
+      ].sort();
+    const plain = ["guardian-plain", "visitor-plain"];
+    expect(await readAs(visitor, "guardian-plain")).toEqual([...plain, "visitor-main"].sort());
+    expect(await readAs(guardian, "visitor-plain")).toEqual(["concierge", ...plain].sort());
+    expect(await readAs(undefined, "guardian-plain")).toEqual(plain);
+    // A send goes only where its caller may write: a visitor's action cannot
+    // put a line into the guardian's Concierge chat, nor the guardian's into
+    // the visitor's, and Rome's own sends go through.
+    const send = (actor: typeof guardian | typeof visitor | undefined, from: string, to: string) =>
+      webchatCaller.run({ actor, chatId: from }, () =>
+        channel.send!.send(to as never, { text: "hi" }),
+      );
+    await expect(send(visitor, "guardian-plain", "concierge")).rejects.toThrow("No dashboard chat");
+    await expect(send(guardian, "visitor-plain", "visitor-main")).rejects.toThrow(
+      "No dashboard chat",
+    );
+    await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
+    await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
@@ -494,7 +821,7 @@ describe("Webchat API", () => {
     rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
-    const id = await runtime.startChat({});
+    const id = await runtime.startChat({}, "guardian");
     try {
       const posted = await runtime.post(id, { text: "Find flights" }, concierge);
 
@@ -2348,7 +2675,7 @@ describe("Webchat API", () => {
     rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
-    const id = await runtime.startChat({});
+    const id = await runtime.startChat({}, "guardian");
 
     expect(await runtime.post(id, { text: "Find flights" }, concierge)).toMatchObject({ ok: true });
     const turnId = (await deps.webchatRepo.getMessages(id)).find((m) => m.role === "user")?.turnId;
@@ -3725,7 +4052,7 @@ describe("Webchat API", () => {
       getRegistryLoadFailures: () => [],
     };
     const { runtime } = createWebchatRuntime(deps);
-    const chatId = await runtime.startChat({});
+    const chatId = await runtime.startChat({}, "guardian");
     const result = await runtime.post(
       chatId,
       {
@@ -3846,6 +4173,106 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("keeps a deleted private chat's buffered turn from everyone but its owner", async () => {
+      mockScriptedManager();
+      await deps.webchatRepo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sent = await app.request("/chat/sessions/guardian-task/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(sent.status).toBe(200);
+      const { turnId } = (await sent.clone().json()) as { turnId: string };
+      await drainTurn(app, sent);
+      // The chat goes while its finished turn is still buffered for replay.
+      await deps.webchatRepo.deleteSession("guardian-task");
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      const asVisitor = await runWithSessionActor(visitor, () =>
+        app.request(`/chat/turns/${turnId}/stream`),
+      );
+      expect(asVisitor.status).toBe(404);
+      expect(await asVisitor.json()).toEqual({ error: "Not found" });
+      // A turn whose chat is gone is not found to anyone, its owner included.
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const asGuardian = await runWithSessionActor(guardian, () =>
+        app.request(`/chat/turns/${turnId}/stream`),
+      );
+      expect(asGuardian.status).toBe(404);
+    });
+
+    it("keeps a deleted private chat's registered fork turn from everyone, and an ordinary chat's turn open", async () => {
+      await deps.webchatRepo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      await deps.webchatRepo.ensureRomeSession({
+        id: "branch",
+        type: "fork",
+        name: "Branch",
+        agentName: null,
+        parentSessionId: "guardian-task",
+        trigger: { triggerKind: "fork", triggerName: "branch" },
+      });
+      const fork = deps.agentTurnStreamRegistry.register({
+        sessionId: "branch",
+        chatId: "branch",
+        turnId: "fork-turn",
+        agentName: "main",
+      });
+      // A channel turn's stream names its runtime session and the ordinary
+      // chat it is recorded in, which everyone may open.
+      await deps.webchatRepo.createSession("channel-chat", "Channel chat");
+      const channelTurn = deps.agentTurnStreamRegistry.register({
+        sessionId: "runtime-session",
+        chatId: "channel-chat",
+        turnId: "channel-turn",
+        agentName: "main",
+      });
+      fork.finish();
+      channelTurn.finish();
+      const app = createWebchatRuntime(deps).routes;
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const status = async (actor: typeof visitor | typeof guardian, turnId: string) =>
+        (await runWithSessionActor(actor, () => app.request(`/chat/turns/${turnId}/stream`)))
+          .status;
+      expect(await status(visitor, "fork-turn")).toBe(404);
+      expect(await status(guardian, "fork-turn")).toBe(200);
+      // The fork goes while its finished turn is still buffered for replay.
+      await deps.webchatRepo.deleteSession("branch");
+      expect(await status(visitor, "fork-turn")).toBe(404);
+      expect(await status(guardian, "fork-turn")).toBe(404);
+      expect(await status(visitor, "channel-turn")).toBe(200);
+    });
+
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
@@ -3853,6 +4280,8 @@ describe("Webchat API", () => {
         switchIfExhausted: async () => null,
         conciergeChat: async (id: string) =>
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
+        turnHeader: async (chat: { id: string; name: string; main: boolean }) =>
+          `<concierge_chat id="${chat.id}" name="${chat.name}" main="${chat.main}"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
       } as never;
       await deps.webchatRepo.createSession(
         "topic-1",
@@ -3875,7 +4304,7 @@ describe("Webchat API", () => {
         await drainTurn(app, sent);
       }
       expect(sentTurns[0]?.prompt).toBe(
-        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n\nhello',
+        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n\nhello',
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
     });
@@ -5513,6 +5942,8 @@ describe("Webchat API", () => {
       }) as unknown as Session;
 
     beforeEach(async () => {
+      // A fork is a child of the chat it came from, which must exist.
+      await deps.webchatRepo.createSession("parent-chat", "Parent chat");
       for (const id of [FORK_ID, LEGACY_FORK_ID]) {
         await deps.webchatRepo.ensureRomeSession({
           id,
@@ -5953,7 +6384,12 @@ describe("Webchat API", () => {
       const running = `event: session_running\ndata: {"sessionId":"${sessionId}","running":true}`;
       const stopped = `event: session_running\ndata: {"sessionId":"${sessionId}","running":false}`;
       const register = (turnId: string, id = sessionId) =>
-        deps.agentTurnStreamRegistry.register({ sessionId: id, turnId, agentName: "main" });
+        deps.agentTurnStreamRegistry.register({
+          sessionId: id,
+          chatId: id,
+          turnId,
+          agentName: "main",
+        });
 
       const first = register("turn-1");
       let streamed = await readSseUntil(reader, running);
@@ -5992,6 +6428,7 @@ describe("Webchat API", () => {
 
       const turn = deps.agentTurnStreamRegistry.register({
         sessionId,
+        chatId: sessionId,
         turnId: "branch-turn",
         agentName: "main",
       });
@@ -6016,6 +6453,7 @@ describe("Webchat API", () => {
       // session without the detached surface, so the refusal is deliberate and
       // keeps the failure loud.
       const forkId = "sess-fork-backend-continuation";
+      await deps.webchatRepo.createSession("parent-chat", "Parent chat");
       await deps.webchatRepo.ensureRomeSession({
         id: forkId,
         type: "fork",

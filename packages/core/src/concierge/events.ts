@@ -108,13 +108,18 @@ export async function renderTaskEvents(
   tasks: DirtyTask[],
 ): Promise<TaskEventDelivery[]> {
   const { tasks: store, messages } = service.deps;
-  const byChat = new Map<string, { taskIds: string[]; blocks: string[]; quiet: boolean }>();
+  const byChat = new Map<
+    string,
+    { taskIds: string[]; blocks: string[]; quiet: boolean; owner: string }
+  >();
   for (const task of tasks) {
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
     const { row } = found;
-    const group = byChat.get(row.chatId ?? "") ?? { taskIds: [], blocks: [], quiet: true };
-    byChat.set(row.chatId ?? "", group);
+    // The chat the row reports to now: its own while live, else its owner's main chat.
+    const key = found.conciergeChat.id;
+    const group = byChat.get(key) ?? { taskIds: [], blocks: [], quiet: true, owner: found.owner };
+    byChat.set(key, group);
     group.taskIds.push(task.taskId);
     group.quiet &&= task.quiet;
     const blocks = group.blocks;
@@ -153,8 +158,9 @@ export async function renderTaskEvents(
       .join(" ");
     blocks.push(`<task ${attrs}>\n${lines.join("\n")}\n</task>`);
   }
-  return [...byChat.entries()].map(([chatId, { taskIds, blocks, quiet }]) => ({
-    chatId: chatId || null,
+  return [...byChat.entries()].map(([chatId, { taskIds, blocks, quiet, owner }]) => ({
+    chatId,
+    owner,
     taskIds,
     prompt: `<task_events>\n${blocks.join("\n")}\n</task_events>`,
     quiet,
@@ -175,10 +181,14 @@ export function startConciergeEvents(
     now: () => Date.now(),
     isEnabled: () => service.isEnabled(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async ({ chatId: from, prompt, quiet }) => {
+    deliver: async ({ chatId: from, owner, prompt, quiet }) => {
       // A row whose chat is gone or archived reports to the main chat.
-      const chatId = await service.deliveryChat(from);
-      return chatId !== null && (await service.runSystemTurn(chatId, prompt, { quiet }));
+      const chatId = await service.deliveryChat(from, owner);
+      if (!chatId) return false;
+      // A visitor dropped from the dashboard allow-list is told nothing; their
+      // rows wait, and reach them once they are back.
+      if (!(await service.isServed(owner))) return false;
+      return await service.runSystemTurn(chatId, prompt, { quiet });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });

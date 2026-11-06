@@ -1,3 +1,4 @@
+import { currentChatOwner } from "../../lib/session-actor.js";
 import { Hono } from "hono";
 import type {
   ProjectDashboardChat,
@@ -631,6 +632,9 @@ async function buildAllProjectsChatPage(
   const sessionPage = await webchatRepo.listSessionsPage({
     cursor: options.cursor,
     limit: options.limit,
+    // Another person's Concierge and task chats are left out before any
+    // message is read or any chat counted.
+    visibleTo: await currentChatOwner(),
   });
   const chats = await buildProjectDashboardChats(webchatRepo, sessionPage.sessions);
 
@@ -799,6 +803,9 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     const sessionPage = await webchatRepo.listSessionsByProjectPath(projectPath.relativePath, {
       cursor,
       limit,
+      // Another person's Concierge and task chats are left out before any
+      // message is read or any chat counted.
+      visibleTo: await currentChatOwner(),
     });
 
     const [chats, usageStats] = await Promise.all([
@@ -894,6 +901,9 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     const sessionPage = await webchatRepo.listSessionsByProjectPath(projectPath.relativePath, {
       cursor,
       limit,
+      // Another person's Concierge and task chats are left out before any
+      // message is read or any chat counted.
+      visibleTo: await currentChatOwner(),
     });
 
     const chats = await buildProjectDashboardChats(webchatRepo, sessionPage.sessions);

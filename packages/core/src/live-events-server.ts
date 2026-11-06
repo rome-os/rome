@@ -4,8 +4,9 @@
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
-// guardian gets every topic, and a visitor on the dashboard allow-list gets the
-// chat topics but not `apps.catalog` or `concierge.tasks`.
+// guardian gets every topic, and a visitor on the dashboard allow-list gets
+// every topic but `apps.catalog`. `concierge.tasks` carries the caller's own
+// Concierge rows, and another owner's Concierge or task chat is not found.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too.
@@ -36,12 +37,12 @@ type Unsubscribe = () => void;
 /** The event sources behind each topic. Subscribing replays any snapshot synchronously. */
 export interface LiveEventSources {
   subscribeChatStatus(emit: LiveEventEmit): Unsubscribe;
-  /** Resolves false when the id names no stored webchat session. */
-  hasChatSession(sessionId: string): Promise<boolean>;
+  /** Resolves false when the id names no stored webchat session, or one private to another owner. */
+  hasChatSession(sessionId: string, owner: string): Promise<boolean>;
   subscribeChatSession(sessionId: string, emit: LiveEventEmit): Unsubscribe;
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
-  /** Emits `task_upsert` for every write to the Concierge's todo list. */
-  subscribeConciergeTasks(emit: LiveEventEmit): Unsubscribe;
+  /** Emits `task_upsert` for every write to one owner's Concierge todo list. */
+  subscribeConciergeTasks(owner: string, emit: LiveEventEmit): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -124,13 +125,13 @@ export function attachLiveEventsServer(
     // the socket at the next ping, as the edge probe would refuse a new stream.
     const visitorAllowed = () =>
       caller.kind === "guardian" || dashboardAccess.isCloudEmailAllowed(caller.email);
-    // App existence and change timing stay guardian-only, as on `/api/apps/events`,
-    // and so does the Concierge's todo list.
+    // App existence and change timing stay guardian-only, as on `/api/apps/events`.
     const permitted = (topic: Topic) =>
-      caller.kind === "guardian" ||
-      (topic.kind !== "apps.catalog" && topic.kind !== "concierge.tasks" && visitorAllowed());
+      caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
+    // Whose Concierge todo list and private chats this socket may read.
+    const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
     const exists = async (topic: Topic): Promise<boolean> =>
-      topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId) : true;
+      topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId, owner) : true;
 
     const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
       switch (topic.kind) {
@@ -139,7 +140,7 @@ export function attachLiveEventsServer(
         case "apps.catalog":
           return sources.subscribeAppCatalog(emit);
         case "concierge.tasks":
-          return sources.subscribeConciergeTasks(emit);
+          return sources.subscribeConciergeTasks(owner, emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
       }
