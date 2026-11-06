@@ -1992,7 +1992,7 @@ class AgentSessionImpl implements AgentSession {
   private _childManager?: AgentSessionManager;
   private modelSession: ModelSession;
   private modelProvider?: ModelProvider;
-  /** Where the latest completed turn left the thread. A fork with no checkpoint branches here. */
+  /** Where the latest turn left the thread, if it did. A fork with no checkpoint branches here. */
   private lastPosition?: ModelPosition;
   private deps: ManagerDeps;
   private config: ReturnType<AgentLoader["get"]>;
@@ -2368,10 +2368,11 @@ class AgentSessionImpl implements AgentSession {
           // The branch action becomes available when turn_end is published.
           // Persist the provider-native anchor first so an immediate click can
           // never fall back to (or race with) a later model-thread head.
+          this.lastPosition = undefined;
           if (outbound.type === "result") {
             const interrupted =
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
-            if (position && !interrupted) this.lastPosition = position;
+            if (!interrupted) this.lastPosition = position;
             await this.persistTurn(
               session,
               sink.turnId,

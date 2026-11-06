@@ -57,6 +57,8 @@ function createProvider(id: ProviderId) {
   const failing = { next: 0 };
   /** Claude names a new thread only after its first assistant message. */
   const naming = { atOpen: true };
+  /** A completed turn can leave no position to branch at. */
+  const positions = { reported: true };
   const openSession = rs.fn(async (params: ModelSessionParams) => {
     opened.push(params);
     const session = createSessionFromRun(
@@ -71,7 +73,15 @@ function createProvider(id: ProviderId) {
         yield {
           type: "result",
           content: "done",
-          position: { provider: id, modelThreadId: `${id}-thread`, checkpointId: "turn" },
+          ...(positions.reported
+            ? {
+                position: {
+                  provider: id,
+                  modelThreadId: `${id}-thread-1`,
+                  checkpointId: `turn-${calls.length}`,
+                },
+              }
+            : {}),
         };
       },
       params,
@@ -88,7 +98,7 @@ function createProvider(id: ProviderId) {
     builtinTools: new Set<string>(),
     openSession,
   };
-  return { provider, openSession, calls, opened, failing, naming };
+  return { provider, openSession, calls, opened, failing, naming, positions };
 }
 
 function healthyState() {
@@ -265,6 +275,29 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "first");
     openai.naming.atOpen = false;
     await acquire(manager, "gpt-6-luna");
+
+    const events: AgentEvent[] = [];
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Cannot fork before a turn has left a checkpoint",
+      }),
+    );
+  });
+
+  it.each([
+    ["failed", () => (anthropic.failing.next = 1)],
+    ["left no position", () => (anthropic.positions.reported = false)],
+  ])("never branches at an earlier turn when the latest one %s", async (_label, arrange) => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    arrange();
+    await chatTurn(session, "second");
 
     const events: AgentEvent[] = [];
     for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
