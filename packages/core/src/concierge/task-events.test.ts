@@ -267,6 +267,43 @@ describe("TaskEventCoalescer", () => {
     expect(s.gaveUp).toEqual(["a"]);
   });
 
+  it("gives a change that arrives during the wait its own attempts", async () => {
+    const s = setup();
+    s.coalescer.mark(urgent("a"));
+    // The first turn runs without writing the row; its retry then does not run.
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.turnsRun(false);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    s.coalescer.mark(urgent("a", "approval"));
+
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.flushes).toHaveLength(3);
+    expect(s.gaveUp).toEqual([]);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(4);
+    expect(s.gaveUp).toEqual(["a"]);
+  });
+
+  it("does not hand back changes a write settled while a failing turn ran", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.holdTurns();
+    s.coalescer.mark(urgent("a", "turn_end:completed question by=concierge"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // The Concierge wrote the row from the turn's input; then a new change came.
+    s.coalescer.settle("a");
+    await rs.advanceTimersByTimeAsync(1_000);
+    s.coalescer.mark(urgent("a", "approval"));
+    await s.endTurn();
+
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    await s.endTurn();
+    expect(s.rendered.at(-1)).toEqual(["approval"]);
+  });
+
   it("waits to retry only the rows of a chat whose turn did not run", async () => {
     const delivered: string[] = [];
     const coalescer = new TaskEventCoalescer({

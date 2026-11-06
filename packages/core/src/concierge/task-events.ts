@@ -117,8 +117,12 @@ export class TaskEventCoalescer {
     } else {
       entry.changes.push(change);
       entry.urgent ||= change.urgent;
-      // A write must not settle a change that no turn has carried yet.
-      if (entry.undelivered) entry.builtAt = undefined;
+      // A write must not settle a change that no turn has carried yet, and
+      // the new change gets its own attempts.
+      if (entry.undelivered) {
+        entry.builtAt = undefined;
+        entry.flushes = 0;
+      }
     }
     this.arm();
   }
@@ -178,7 +182,10 @@ export class TaskEventCoalescer {
     const notRun = new Set(taken.map(([taskId]) => taskId));
     // What each row's turn carries, kept in case the turn does not run.
     const carried = new Map(
-      taken.map(([taskId, entry]) => [taskId, { changes: entry.changes, urgent: entry.urgent }]),
+      taken.map(([taskId, entry]) => [
+        taskId,
+        { entry, changes: entry.changes, urgent: entry.urgent },
+      ]),
     );
     for (const [, entry] of taken) {
       entry.builtAt = builtAt;
@@ -229,7 +236,7 @@ export class TaskEventCoalescer {
   private afterFlush(
     taskIds: string[],
     notRun: Set<string>,
-    carried: Map<string, { changes: TaskChange[]; urgent: boolean }>,
+    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean }>,
   ): void {
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
@@ -238,6 +245,9 @@ export class TaskEventCoalescer {
         // The turn did not run to its end: the changes stay, later ones join
         // them, a write still settles them, and the attempt does not count.
         const before = carried.get(taskId);
+        // A write settled the row while the turn ran and a later change
+        // started afresh: the failed turn carried none of it.
+        if (before && entry !== before.entry) continue;
         if (before && entry.changes !== before.changes) {
           // A change while the turn ran started a new round: the carried
           // changes go back in front of it, and no write has settled them.
