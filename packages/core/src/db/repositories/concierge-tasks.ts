@@ -42,8 +42,8 @@ export interface ConciergeTaskWrite {
   archived?: boolean;
 }
 
-/** `write`: the Concierge wrote the row. `refresh`: the row is the same, but state
- *  kept beside it changed, so its readers should look again. */
+/** `write`: settles the task events owed for the row. `refresh`: tells readers
+ *  without settling those events. */
 type ChangeKind = "write" | "refresh";
 type ChangeListener = (task: ConciergeTaskWithChat, change: ChangeKind) => void;
 
@@ -111,6 +111,21 @@ export class ConciergeTasksRepository {
       .from(conciergeTasks)
       .where(eq(conciergeTasks.sessionId, sessionId));
     return row ?? null;
+  }
+
+  /**
+   * Moves the source message and its Concierge chat without settling task events.
+   * The caller has checked that the message belongs to `chatId`.
+   */
+  async setSourceMessage(id: string, chatId: string, messageId: string): Promise<void> {
+    await this.db
+      .update(conciergeTasks)
+      .set({
+        chatId: chatId === CONCIERGE_CHAT_ID ? null : chatId,
+        sourceMessageId: this.sources.idOf(chatId, messageId),
+      })
+      .where(eq(conciergeTasks.id, id));
+    await this.announce(id, "refresh");
   }
 
   /**
