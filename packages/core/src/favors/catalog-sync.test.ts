@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Action } from "../actions/types.js";
 import type { ArtifactMetadata } from "../apps/types.js";
-import type { ResolvedApp } from "../apps/state.js";
-import { favorActionRequirementsForApp } from "./catalog-sync.js";
+import type { AppView, ResolvedApp } from "../apps/state.js";
+import type { Logger } from "../logger.js";
+import { FavorRequirementSync, favorActionRequirementsForApp } from "./catalog-sync.js";
+import type { FavorService } from "./types.js";
 
 function action(
   name: string,
@@ -116,5 +118,114 @@ describe("favorActionRequirementsForApp", () => {
     expect(() => favorActionRequirementsForApp(app, catalog([paid]))).toThrow(
       'Favor-required action "summarize_report" must expose inputSchema',
     );
+  });
+});
+
+type SyncInput = Parameters<FavorService["syncActionRequirements"]>[0];
+
+function resolvedApp(appId: string, version = "1.0.0"): ResolvedApp {
+  return { appId, state: "installed", manifest: { id: appId, version } } as unknown as ResolvedApp;
+}
+
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+function harness(opts: { apps: ResolvedApp[]; concurrency?: number }) {
+  const apps = new Map<string, AppView | ResolvedApp>(opts.apps.map((app) => [app.appId, app]));
+  const calls: SyncInput[] = [];
+  const gates: Array<{ input: SyncInput; release: () => void; fail: (err: Error) => void }> = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const favorService = {
+    syncActionRequirements: async (input: SyncInput) => {
+      calls.push(input);
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          gates.push({ input, release: resolve, fail: reject });
+        });
+      } finally {
+        inFlight--;
+      }
+      return { synced: input.definitions.length };
+    },
+  } as unknown as FavorService;
+  const sync = new FavorRequirementSync({
+    favorService,
+    appCatalog: {
+      get: (appId: string) => apps.get(appId) ?? null,
+      listResolved: () => [...apps.values()] as ResolvedApp[],
+    },
+    actionCatalog: catalog([]),
+    log: { debug: () => {} } as unknown as Logger,
+    concurrency: opts.concurrency,
+  });
+  const releaseAll = async () => {
+    while (gates.length > 0) {
+      gates.shift()?.release();
+      await flush();
+    }
+  };
+  return { apps, calls, gates, sync, releaseAll, maxInFlight: () => maxInFlight };
+}
+
+describe("FavorRequirementSync", () => {
+  it("syncs apps in parallel up to the concurrency limit", async () => {
+    const h = harness({
+      apps: ["a", "b", "c", "d", "e", "f"].map((id) => resolvedApp(id)),
+      concurrency: 4,
+    });
+
+    const all = h.sync.syncAll();
+    await flush();
+    expect(h.calls.map((call) => call.appId)).toEqual(["a", "b", "c", "d"]);
+
+    await h.releaseAll();
+    await all;
+    expect(h.calls.map((call) => call.appId).sort()).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(h.maxInFlight()).toBe(4);
+  });
+
+  it("sends an app's state as of when its sync starts, after the sync in flight", async () => {
+    const h = harness({ apps: [resolvedApp("shop", "1.0.0")] });
+
+    const first = h.sync.sync("shop");
+    await flush();
+    h.apps.set("shop", resolvedApp("shop", "2.0.0"));
+    const second = h.sync.sync("shop");
+    const third = h.sync.sync("shop");
+    await flush();
+    // The second sync waits for the first, and the third shares the second.
+    expect(h.calls).toHaveLength(1);
+    expect(third).toBe(second);
+
+    await h.releaseAll();
+    await Promise.all([first, second, third]);
+    expect(h.calls.map((call) => call.requesterAppIdentity.version)).toEqual(["1.0.0", "2.0.0"]);
+  });
+
+  it("sends no definitions for an app that left the catalog", async () => {
+    const h = harness({ apps: [resolvedApp("shop")] });
+    h.apps.delete("shop");
+
+    const done = h.sync.sync("shop");
+    await flush();
+    await h.releaseAll();
+    await done;
+    expect(h.calls).toEqual([
+      { appId: "shop", requesterAppIdentity: { appId: "shop", state: "removed" }, definitions: [] },
+    ]);
+  });
+
+  it("drops a failed sync without rejecting and keeps syncing", async () => {
+    const h = harness({ apps: [resolvedApp("a"), resolvedApp("b")], concurrency: 1 });
+
+    const all = h.sync.syncAll();
+    await flush();
+    h.gates.shift()?.fail(new Error("Rome Cloud unavailable"));
+    await flush();
+    await h.releaseAll();
+    await expect(all).resolves.toBeUndefined();
+    expect(h.calls.map((call) => call.appId)).toEqual(["a", "b"]);
   });
 });

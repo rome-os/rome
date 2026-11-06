@@ -300,10 +300,7 @@ import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import {
-  syncFavorActionRequirementsForCatalogEvent,
-  syncFavorActionRequirementsFromCatalog,
-} from "./favors/catalog-sync.js";
+import { FavorRequirementSync } from "./favors/catalog-sync.js";
 
 async function main() {
   const config = loadConfig();
@@ -1353,10 +1350,18 @@ async function main() {
       agentNames: agentNameResolver,
     }),
   );
-  appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
-    await syncFavorActionRequirementsForCatalogEvent(favorService, event, actionRegistry, appsLog);
+  const favorRequirementSync = new FavorRequirementSync({
+    favorService,
+    appCatalog,
+    actionCatalog: actionRegistry,
+    log: appsLog,
   });
-  await syncFavorActionRequirementsFromCatalog(favorService, appCatalog, actionRegistry, appsLog);
+  appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
+    await favorRequirementSync.sync(event.appId);
+  });
+  // Boot does not wait: each app costs a Rome Cloud round trip, and Rome Cloud
+  // still holds the requirements the previous boot sent.
+  void favorRequirementSync.syncAll();
 
   // Webhook relay drainer: hold a persistent WS to the Cloudflare relay,
   // replaying buffered webhooks into a local app handler in-process via the
