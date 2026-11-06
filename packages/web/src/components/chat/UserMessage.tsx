@@ -33,7 +33,10 @@ export const UserMessage = memo(
       onBehalfOf && msg.sender ? (
         <span
           data-automated-badge
-          className="mt-1 block max-w-full truncate text-aux text-muted-foreground"
+          className={cn(
+            "block max-w-full truncate text-aux text-muted-foreground",
+            own ? "min-w-0" : "mt-1",
+          )}
         >
           {t("senderOnBehalf", { name: msg.sender.name ?? t("senderAutomation") })}
         </span>
@@ -43,7 +46,7 @@ export const UserMessage = memo(
         msg={msg}
         text={text}
         own={own}
-        className={cn("max-w-[70%]", !own && "self-start")}
+        className={cn(own && sourceBadge ? "w-full" : "max-w-[70%]", !own && "self-start")}
       />
     );
     // Timestamp + copy under the bubble. Hover-revealed on pointer devices,
@@ -52,13 +55,19 @@ export const UserMessage = memo(
     const actions = (
       <div
         className={cn(
-          "mt-1 flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100",
+          "flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100",
+          // Reserve badge space even when an older timestamp includes a full date.
+          own && sourceBadge ? "ml-auto max-w-[70%] shrink-0" : "mt-1",
           own
             ? "-mr-[var(--control-action-offset-sm)]"
             : "-ml-[var(--control-action-offset-sm)] flex-row-reverse justify-end",
         )}
       >
-        {timestamp ? <span className="text-aux text-muted-foreground">{timestamp}</span> : null}
+        {timestamp ? (
+          <span className={cn("text-aux text-muted-foreground", own && sourceBadge && "truncate")}>
+            {timestamp}
+          </span>
+        ) : null}
         <CopyMessageButton text={text} />
         {isSettledUserMessage(msg) ? (
           <ReplyButton
@@ -108,9 +117,20 @@ export const UserMessage = memo(
     return (
       <div className="group mb-4 flex items-start justify-end gap-2">
         <div className="flex min-w-0 flex-1 flex-col items-end">
-          {bubble}
-          {sourceBadge}
-          {actions}
+          {sourceBadge ? (
+            <div className="flex min-w-0 max-w-[70%] flex-col">
+              {bubble}
+              <div className="mt-1 flex min-w-0 items-center gap-2">
+                {sourceBadge}
+                {actions}
+              </div>
+            </div>
+          ) : (
+            <>
+              {bubble}
+              {actions}
+            </>
+          )}
         </div>
         {msg.sender ? <SenderAvatar sender={msg.sender} /> : null}
       </div>

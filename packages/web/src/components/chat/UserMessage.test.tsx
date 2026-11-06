@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
+import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { UserMessage } from "./UserMessage";
 import enChat from "@/i18n/locales/en/chat.json";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
@@ -233,6 +234,59 @@ describe("UserMessage sender", () => {
       withSender({ ...sender, onBehalfOf: { kind: "guardian", name: "Renamed", avatarUrl: null } }),
     );
     expect(screen.getByTitle("Renamed")).toBeTruthy();
+  });
+
+  it.each([
+    [message.content, "Concierge"],
+    ["ok", "Concierge"],
+    ["ok", "An automation with a very long name that must truncate"],
+  ])("keeps the own-message badge before the actions in one footer: %s / %s", (content, name) => {
+    render(
+      <ThemeProvider>
+        <UserMessage
+          msg={{
+            ...message,
+            content,
+            sender: {
+              kind: "automated",
+              sourceType: "agent",
+              name,
+              iconUrl: null,
+              onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+            },
+          }}
+        />
+      </ThemeProvider>,
+    );
+
+    const badge = screen.getByText(`Sent by ${name}`);
+    const timestamp = screen.getByText(formatMessageTimestamp(message.createdAt)!);
+    const actions = timestamp.parentElement!;
+    const footer = badge.parentElement!;
+    expect(badge.hasAttribute("data-automated-badge")).toBe(true);
+    expect(footer.classList.contains("flex")).toBe(true);
+    expect(footer.children[0]).toBe(badge);
+    expect(footer.children[1]).toBe(actions);
+    expect(actions.contains(screen.getByRole("button", { name: "message.copy" }))).toBe(true);
+    expect(badge.closest('[class*="opacity-0"]')).toBeNull();
+    expect(badge.classList.contains("min-w-0")).toBe(true);
+    expect(badge.classList.contains("truncate")).toBe(true);
+    expect(actions.classList.contains("ml-auto")).toBe(true);
+    expect(actions.classList.contains("max-w-[70%]")).toBe(true);
+    expect(actions.classList.contains("shrink-0")).toBe(true);
+    expect(timestamp.classList.contains("truncate")).toBe(true);
+    expect(actions.classList.contains("md:opacity-0")).toBe(true);
+  });
+
+  it("keeps the bubble and actions as right-aligned siblings when there is no badge", () => {
+    const { container } = render(withSender({ kind: "guardian", name: "Ray", avatarUrl: null }));
+
+    const bubble = container.querySelector(".bg-primary")!;
+    const timestamp = screen.getByText(formatMessageTimestamp(message.createdAt)!);
+    expect(container.querySelector("[data-automated-badge]")).toBeNull();
+    expect(timestamp.parentElement?.parentElement).toBe(bubble.parentElement);
+    expect(bubble.parentElement?.classList.contains("items-end")).toBe(true);
+    expect(bubble.classList.contains("max-w-[70%]")).toBe(true);
   });
 
   it.each([
