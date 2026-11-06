@@ -34,3 +34,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 **Two `onGeometryChange` readings of the same type on one view do not both fire.** The second never ran in `TranscriptList`. Read both values in one closure.
 
 **Mac Catalyst runs the app but cannot capture a system sheet.** Snapshot runs draw the Tasks sheet in a stand-in frame; the sheet on a phone is the system one.
+
+**The async forms of `UNUserNotificationCenterDelegate` crash the app when a notification is tapped.** Under Swift 6 the generated thunk returns UIKit's completion off the main thread, and UIKit aborts in `_performBlockAfterCATransactionCommitSynchronizes`. A banner in the foreground still works, so the crash shows only on a tap. `AppDelegate` implements the completion-handler forms on the main actor.
+
+**A simulated push is opened from Notification Center with a swipe to the right, not a tap.** On the simulator a tap on the lock-style list only expands the stack. Pull Notification Center down from the top edge, then swipe the notification right.
