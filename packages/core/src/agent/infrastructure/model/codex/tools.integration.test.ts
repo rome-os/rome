@@ -3,9 +3,14 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import type { ModelSession, ModelSessionParams } from "../../../domain/model-port.js";
+import type {
+  ModelPosition,
+  ModelSession,
+  ModelSessionParams,
+} from "../../../domain/model-port.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
+import { NO_ROME_TOOLS } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
@@ -202,11 +207,16 @@ describe("bundled Codex app-server", () => {
   });
 
   /** Runs one turn and returns the tools of the last request that carried `text`. */
+  let lastPosition: ModelPosition | undefined;
+
   async function runTurn(session: ModelSession, text: string): Promise<string[]> {
     await session.sendUserInput({ text });
     for await (const event of session.events) {
       if (event.type === "error") throw new Error(`Codex turn failed: ${event.error}`);
-      if (event.type === "result") break;
+      if (event.type === "result") {
+        lastPosition = event.position;
+        break;
+      }
     }
     const request = requests.filter((entry) => entry.input.includes(text)).at(-1);
     expect(request, `no request carried ${text}`).toBeDefined();
@@ -279,9 +289,11 @@ describe("bundled Codex app-server", () => {
     const source = await provider.openSession(sessionParams(model, fullBuiltins()));
     try {
       await runTurn(source, "Reply with ok. (fork source)");
-      const fork = await source.fork({ mode: "thread" });
-      const { thread: _thread, ...openParams } = sessionParams(model, fullBuiltins());
-      const child = await fork.open(openParams);
+      const child = await provider.openSession({
+        ...sessionParams(model, []),
+        tools: NO_ROME_TOOLS,
+        thread: { kind: "branch", at: lastPosition!, lifetime: "kept" },
+      });
       try {
         const tools = await runTurn(child, "Reply with ok. (isolated fork)");
         expect(child.modelThreadId).not.toBe(source.modelThreadId);

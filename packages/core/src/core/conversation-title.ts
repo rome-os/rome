@@ -98,7 +98,6 @@ export function createConversationTitleGenerator(
             outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
             maxTurns: 1,
           },
-          agentName: "conversation-title",
           tools: createRomeTools({
             getActionCatalog: () => [],
             getSkillCatalog: () => [],

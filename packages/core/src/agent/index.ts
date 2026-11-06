@@ -24,11 +24,6 @@ export type {
   ModelReasoningEffort,
   ModelSession,
   ModelSessionEvent,
-  ModelSessionFork,
-  ModelSessionForkMode,
-  ModelSessionForkOpenParams,
-  ModelSessionForkParams,
-  ModelSessionForkSource,
   ModelSessionParams,
   ModelTurnStartedEvent,
   ModelUserInput,
@@ -45,6 +40,7 @@ export type {
   RomeTools,
   ModelToolCallId,
 } from "./domain/rome-tools.js";
+export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 
 // The model port's adapters, as the composition root wires them. The Codex

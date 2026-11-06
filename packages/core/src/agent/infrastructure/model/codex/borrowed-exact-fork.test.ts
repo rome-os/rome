@@ -1,24 +1,22 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type {
-  ModelSessionConfig,
-  ModelSessionForkOpenParams,
-  ModelSessionForkParams,
-} from "../../../domain/model-port.js";
+import type { ModelSessionConfig, ModelSessionParams } from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
   evaluateBorrowedExactFork,
 } from "./borrowed-exact-fork.js";
-import type { RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
+import { createRomeDynamicTools, type RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { FacadeParams } from "../../../../core/mcp-facade.js";
 
-type OpenOverrides = Partial<Omit<ModelSessionForkOpenParams, "config" | "tools">> & {
+type OpenOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
   /** What the session's Rome tools are built from. */
   tools?: Partial<FacadeParams>;
 };
 
-function openParams(overrides: OpenOverrides = {}): ModelSessionForkOpenParams {
+type McpServers = ModelSessionConfig["externalMcpServers"];
+
+function openParams(overrides: OpenOverrides = {}): ModelSessionParams {
   const { config, tools, ...rest } = overrides;
   return {
     config: {
@@ -36,42 +34,28 @@ function openParams(overrides: OpenOverrides = {}): ModelSessionForkOpenParams {
       executeSubagent: async () => "delegated",
       ...tools,
     }),
+    thread: { kind: "new" },
     ...rest,
   };
 }
 
-function evaluate(
-  forkOverrides: Partial<ModelSessionForkParams> = {},
-  openOverrides: OpenOverrides = {},
-) {
+function evaluate(openOverrides: OpenOverrides = {}, sourceExternalMcpServers?: McpServers) {
   return evaluateBorrowedExactFork({
-    forkParams: {
-      configurationMode: "exact",
-      ...forkOverrides,
-    },
     openParams: openParams(openOverrides),
-    sourceModelName: "gpt-5.6-terra",
-    sourceSystemPrompt: "system",
-    sourceWorkingDir: "/workspace",
+    sourceConfig: { ...openParams().config, externalMcpServers: sourceExternalMcpServers },
+    sourceDynamicTools: createRomeDynamicTools(openParams().tools).definitions,
   });
 }
 
 describe("evaluateBorrowedExactFork", () => {
-  it("accepts an explicitly exact fork with identical provider configuration", () => {
+  it("accepts a branch with the source's whole configuration and catalog", () => {
     expect(evaluate()).toEqual({
       eligible: true,
       sameModel: true,
       sameSystemPrompt: true,
       sameWorkingDir: true,
-    });
-  });
-
-  it("never borrows an isolated fork even when model, prompt, and cwd match", () => {
-    expect(evaluate({ configurationMode: "isolated" })).toMatchObject({
-      eligible: false,
-      sameModel: true,
-      sameSystemPrompt: true,
-      sameWorkingDir: true,
+      sameTools: true,
+      sameTurnSettings: true,
     });
   });
 
@@ -79,10 +63,33 @@ describe("evaluateBorrowedExactFork", () => {
     ["model", { config: { model: "gpt-5.6-sol" } }, "sameModel"],
     ["system prompt", { config: { systemPrompt: "different" } }, "sameSystemPrompt"],
     ["working directory", { config: { workingDir: "/other" } }, "sameWorkingDir"],
-  ] as const)("rejects an exact fork with a different %s", (_label, overrides, mismatch) => {
-    const result = evaluate({}, overrides);
+    ["builtin tool set", { config: { builtinTools: ["Bash"] } }, "sameTools"],
+    ["output schema", { config: { outputSchema: { type: "object" } } }, "sameTurnSettings"],
+    ["reasoning effort", { config: { reasoningEffort: "high" } }, "sameTurnSettings"],
+    ["shell environment", { config: { env: { ROME_CHANNEL: "webchat" } } }, "sameTurnSettings"],
+    [
+      "tools catalog",
+      {
+        tools: {
+          subagentTools: [
+            { name: "reviewer", description: "Review", inputSchema: { type: "object" } },
+          ],
+        },
+      },
+      "sameTools",
+    ],
+  ] as const)("rejects a branch with a different %s", (_label, overrides, mismatch) => {
+    const result = evaluate(overrides as OpenOverrides);
     expect(result.eligible).toBe(false);
     expect(result[mismatch]).toBe(false);
+  });
+});
+
+describe("evaluateBorrowedExactFork with external MCP servers", () => {
+  it("rejects a branch that leaves out the source's servers", () => {
+    const servers: McpServers = { docs: { command: "docs-mcp", args: [] } };
+    expect(evaluate({}, servers)).toMatchObject({ eligible: false, sameTools: false });
+    expect(evaluate({ config: { externalMcpServers: servers } }, servers).eligible).toBe(true);
   });
 });
 
