@@ -1656,7 +1656,6 @@ async function openSession(
         {
           modelProvider: {
             id: "mock",
-            displayName: "Code-backed",
             builtinTools: new Set(),
             openSession: async () => {
               throw new Error("Code-backed agents do not open model sessions");

@@ -593,7 +593,6 @@ function classifyCodexFailure(
 export class CodexAppServerProvider implements ModelProvider {
   readonly id: ProviderId = "openai";
   private readonly liveThreads = new Set<LiveCodexThread>();
-  readonly displayName = "Codex (ChatGPT)";
   // Anthropic's set, so agent yamls stay provider-agnostic, plus ImageGeneration,
   // which only Codex provides.
   readonly builtinTools: ReadonlySet<string> = new Set([

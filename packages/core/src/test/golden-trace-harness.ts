@@ -213,7 +213,6 @@ export function makeSingleActionProvider(
   };
   return {
     id: "mock",
-    displayName: "mock-single-action",
     builtinTools: new Set<string>(),
     openSession: async (params) => createSessionFromRun("mock", runImpl, params),
   };
