@@ -176,6 +176,10 @@ export class TaskEventCoalescer {
     );
     // Rows whose turn did not run to its end; all of them until delivery starts.
     const notRun = new Set(taken.map(([taskId]) => taskId));
+    // What each row's turn carries, kept in case the turn does not run.
+    const carried = new Map(
+      taken.map(([taskId, entry]) => [taskId, { changes: entry.changes, urgent: entry.urgent }]),
+    );
     for (const [, entry] of taken) {
       entry.builtAt = builtAt;
       entry.undelivered = false;
@@ -216,20 +220,35 @@ export class TaskEventCoalescer {
       this.afterFlush(
         taken.map(([taskId]) => taskId),
         notRun,
+        carried,
       );
       this.arm();
     }
   }
 
-  private afterFlush(taskIds: string[], notRun: Set<string>): void {
+  private afterFlush(
+    taskIds: string[],
+    notRun: Set<string>,
+    carried: Map<string, { changes: TaskChange[]; urgent: boolean }>,
+  ): void {
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
       if (!entry) continue;
       if (notRun.has(taskId)) {
         // The turn did not run to its end: the changes stay, later ones join
         // them, a write still settles them, and the attempt does not count.
+        const before = carried.get(taskId);
+        if (before && entry.changes !== before.changes) {
+          // A change while the turn ran started a new round: the carried
+          // changes go back in front of it, and no write has settled them.
+          entry.changes = [...before.changes, ...entry.changes];
+          entry.urgent ||= before.urgent;
+          entry.builtAt = undefined;
+          entry.flushes = 0;
+        } else {
+          entry.flushes -= 1;
+        }
         entry.undelivered = true;
-        entry.flushes -= 1;
         entry.notBefore = this.deps.now() + RETRY_MS;
       } else if (entry.builtAt !== undefined && entry.since > entry.builtAt) {
         // A change came after the build: it waits for its own flush.

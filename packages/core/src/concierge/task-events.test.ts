@@ -243,6 +243,30 @@ describe("TaskEventCoalescer", () => {
     ]);
   });
 
+  it("keeps the changes a failing turn carried when another arrives while it runs", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.holdTurns();
+    s.coalescer.mark(urgent("a", "turn_end:completed question by=concierge"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // The change lands while the turn runs; the turn then does not run to its end.
+    await rs.advanceTimersByTimeAsync(1_000);
+    s.coalescer.mark(urgent("a", "approval"));
+    s.coalescer.settle("a");
+    await s.endTurn();
+    expect(s.coalescer.pending).toEqual(["a"]);
+
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    await s.endTurn();
+    expect(s.rendered[1]).toEqual(["turn_end:completed question by=concierge", "approval"]);
+    // The attempt did not count: the row still gets its retry before it is given up.
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    await s.endTurn();
+    expect(s.flushes).toHaveLength(3);
+    expect(s.gaveUp).toEqual(["a"]);
+  });
+
   it("waits to retry only the rows of a chat whose turn did not run", async () => {
     const delivered: string[] = [];
     const coalescer = new TaskEventCoalescer({
