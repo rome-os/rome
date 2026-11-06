@@ -12,12 +12,12 @@
 // from core/ are the shapes it still shares with the run; they go when the
 // port is reshaped.
 
-import type { ActionConfig } from "../actions/types.js";
-import type { DeferInput } from "../core/defer.js";
-import type { FacadeToolDef, RoutineActivationGate } from "../core/mcp-facade.js";
-import type { SkillMcpDefinition } from "../core/skill-catalog.js";
-import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
-import type { UsageFunding } from "../usage/events.js";
+import type { ActionConfig } from "../../actions/types.js";
+import type { DeferInput } from "../../core/defer.js";
+import type { FacadeToolDef, RoutineActivationGate } from "../../core/mcp-facade.js";
+import type { SkillMcpDefinition } from "../../core/skill-catalog.js";
+import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../../types.js";
+import type { UsageFunding } from "../../usage/events.js";
 
 export type ProviderId = "anthropic" | "openai" | "mock";
 export type ModelTier = "large" | "medium" | "small";

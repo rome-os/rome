@@ -11,7 +11,7 @@ import type {
   ModelUserInput,
   ProviderId,
   SkillMcpDefinition,
-} from "../agent/domain/model-port.js";
+} from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
@@ -51,7 +51,7 @@ export type {
   ModelSessionForkOpenParams,
   ModelSessionFork,
   ModelSession,
-} from "../agent/domain/model-port.js";
+} from "../agent/index.js";
 
 /**
  * Legacy one-turn invocation parameters retained for tests and the
