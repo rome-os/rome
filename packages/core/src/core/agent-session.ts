@@ -1353,13 +1353,6 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
-  // `isNewSession` tells the provider that `sessionId` was never handed to it.
-  // An existing row may already own a transcript under that id even with no
-  // recorded provider (a first turn cut off by a restart), and so does a
-  // session that already opened once (a switch away and back), so only a new
-  // row's first open is new.
-  let sessionIdUnused = isNewSession;
-
   const buildSessionParams = (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1380,9 +1373,12 @@ async function openSession(
     channel: sessionKeyChannel(key.channelThreadKey),
     textPrivate: resolveSessionPolicy(config).finalText === "private",
     externalMcpServers,
-    sessionId,
-    isNewSession: sessionIdUnused,
-    providerThreadId: resumeProviderId === resolution.modelProvider.id ? resumeThreadId : undefined,
+    // A thread resumes only on the provider that named it; another provider
+    // starts a new one.
+    thread:
+      resumeThreadId !== undefined && resumeProviderId === resolution.modelProvider.id
+        ? { kind: "resume", providerThreadId: resumeThreadId }
+        : { kind: "new" },
     executeAction,
     executeSubagent,
     executeDefer,
@@ -1412,8 +1408,7 @@ async function openSession(
       getThreadContext: sessionExecRefs.getThreadContext,
     });
     if (sessionTools?.length) params.sessionTools = sessionTools;
-    sessionIdUnused = false;
-    const resumed = params.providerThreadId !== undefined;
+    const resumed = params.thread.kind === "resume";
     const openStartMs = Date.now();
     const session = await withRomeSpan(
       "model.session.open",
@@ -1552,13 +1547,7 @@ async function openSession(
       // OTel context instead of re-binding into a source turn's span.
       bindTurnCtx: (fn) => fn(),
     };
-    const {
-      sessionId: _sessionId,
-      isNewSession: _isNewSession,
-      providerThreadId: _providerThreadId,
-      fork: _forkSource,
-      ...liveOpenParams
-    } = lastOpenParams;
+    const { thread: _thread, fork: _forkSource, ...liveOpenParams } = lastOpenParams;
     return {
       params: {
         ...liveOpenParams,
@@ -1644,7 +1633,6 @@ async function openSession(
         },
         model: "code-backed",
       }),
-      isNewSession: true,
     });
   } else {
     initialResolution = await deps.modelResolver.getModelProvider(
@@ -2916,7 +2904,6 @@ class AgentSessionImpl implements AgentSession {
               })
             : undefined;
           const fork = await sourceModelSession.fork({
-            sessionId: forkSessionId,
             // Two different "mode"s meet here — do not confuse them.
             // `mode` is ModelSessionForkMode (ephemeral | thread): whether the
             // provider branch is disposable or a thread that may be persisted.

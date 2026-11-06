@@ -72,6 +72,13 @@ export interface ModelProvider {
   openSession(params: ModelSessionParams): Promise<ModelSession>;
 }
 
+/**
+ * How a session gets its thread. `new` opens a thread the provider names;
+ * `resume` continues one it named before. The branch of a thread at a
+ * checkpoint joins here when `ModelSession.fork` goes.
+ */
+export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: string };
+
 export interface ModelSessionParams {
   model: string;
   systemPrompt: string;
@@ -106,24 +113,8 @@ export interface ModelSessionParams {
    */
   textPrivate?: boolean;
   externalMcpServers?: Record<string, McpServerConfig>;
-  /**
-   * The session identifier, a bare UUID. The Anthropic provider passes a new
-   * session's id to Claude Code as `--session-id`, which rejects anything
-   * else.
-   */
-  sessionId: string;
-  /**
-   * When true, the provider has never seen `sessionId`, so it may use it as
-   * the new conversation's id. When false, the id may already be taken, and
-   * the provider resumes only through `providerThreadId`.
-   */
-  isNewSession?: boolean;
-  /**
-   * Provider-specific thread/session id from a previous session, used for
-   * resume. Codex generates its own opaque thread id that must be passed
-   * back to `resumeThread()`; Anthropic captures the SDK transcript's id.
-   */
-  providerThreadId?: string;
+  /** The thread the session runs on. The provider names the thread. */
+  thread: ThreadStart;
   /** Provider-owned fork source. Normal application code should not set this. */
   fork?: ModelSessionForkSource;
   /** Execute callbacks; the provider invokes these as MCP tools. */
@@ -175,8 +166,6 @@ export interface ModelUserInput {
 export type ModelSessionForkMode = "ephemeral" | "thread";
 
 export interface ModelSessionForkParams {
-  /** Rome session id to assign to the forked provider session. */
-  sessionId: string;
   /** Ephemeral forks are closed after one use; thread forks may be persisted. */
   mode?: ModelSessionForkMode;
   /**
@@ -190,22 +179,16 @@ export interface ModelSessionForkParams {
 }
 
 export interface ModelSessionForkSource {
-  sourceSessionId: string;
-  sourceProviderThreadId?: string;
+  sourceProviderThreadId: string;
   mode: ModelSessionForkMode;
   sourceCheckpoint?: string;
 }
 
-export type ModelSessionForkOpenParams = Omit<
-  ModelSessionParams,
-  "sessionId" | "isNewSession" | "providerThreadId" | "fork"
->;
+export type ModelSessionForkOpenParams = Omit<ModelSessionParams, "thread" | "fork">;
 
 export interface ModelSessionFork {
   readonly providerId: ProviderId;
-  readonly sessionId: string;
-  readonly sourceSessionId: string;
-  readonly sourceProviderThreadId?: string;
+  readonly sourceProviderThreadId: string;
   readonly mode: ModelSessionForkMode;
   readonly providerThreadId?: string;
 

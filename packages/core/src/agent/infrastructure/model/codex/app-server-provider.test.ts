@@ -6,7 +6,7 @@ import type {
   ModelSession,
   ModelSessionForkOpenParams,
   ModelSessionParams,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import type { AgentEvent } from "../../../../types.js";
 
 // Capture the transport so tests can drive server→client notifications and
@@ -93,8 +93,7 @@ function buildParams(overrides: Partial<ModelSessionParams> = {}): ModelSessionP
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
-    sessionId: "test-session",
-    isNewSession: true,
+    thread: { kind: "new" },
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "delegated",
     ...overrides,
@@ -107,9 +106,7 @@ function buildForkOpenParams(
   const params = buildParams(
     overrides as Partial<ModelSessionParams>,
   ) as Partial<ModelSessionParams>;
-  delete params.sessionId;
-  delete params.isNewSession;
-  delete params.providerThreadId;
+  delete params.thread;
   delete params.fork;
   return params as ModelSessionForkOpenParams;
 }
@@ -344,7 +341,7 @@ describe("CodexAppServerProvider", () => {
 
   it("applies the agent's builtins when it resumes a thread opened with more", async () => {
     await new CodexAppServerProvider().openSession(
-      buildParams({ builtinTools: [], isNewSession: false, providerThreadId: "old-thread" }),
+      buildParams({ builtinTools: [], thread: { kind: "resume", providerThreadId: "old-thread" } }),
     );
 
     const resume = threadRequest("thread/resume")!;
@@ -458,7 +455,6 @@ describe("CodexAppServerProvider", () => {
     const [alpha, beta] = await Promise.all([
       provider.openSession(
         buildParams({
-          sessionId: "alpha",
           systemPrompt: "alpha",
           subagentTools: [tool("alpha_researcher")],
           executeSubagent: alphaExecute,
@@ -466,7 +462,6 @@ describe("CodexAppServerProvider", () => {
       ),
       provider.openSession(
         buildParams({
-          sessionId: "beta",
           systemPrompt: "beta",
           subagentTools: [tool("beta_researcher")],
           executeSubagent: betaExecute,
@@ -584,10 +579,8 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
-    const fork = await source.fork({ sessionId: "fork-session", mode });
+    const source = await provider.openSession(buildParams());
+    const fork = await source.fork({ mode });
     const forkSession = await fork.open(buildForkOpenParams());
 
     expect(requestMock).toHaveBeenCalledWith(
@@ -608,8 +601,6 @@ describe("CodexAppServerProvider", () => {
     expect(forkCall?.[1]).not.toHaveProperty("historyMode");
     expect(source.providerThreadId).toBe("source-thread");
     expect(fork).toMatchObject({
-      sessionId: "fork-session",
-      sourceSessionId: "source-session",
       sourceProviderThreadId: "source-thread",
       providerThreadId: "fork-thread",
       mode,
@@ -632,9 +623,9 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const source = await new CodexAppServerProvider().openSession(
-      buildParams({ sessionId: "source-session", builtinTools: ["ImageGeneration"] }),
+      buildParams({ builtinTools: ["ImageGeneration"] }),
     );
-    const fork = await source.fork({ sessionId: "fork-session", mode: "ephemeral" });
+    const fork = await source.fork({ mode: "ephemeral" });
     const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["ImageGeneration"] }));
 
     expect(threadRequest("thread/fork")?.config).toMatchObject({
@@ -682,7 +673,6 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        sessionId: "source-session",
         subagentTools: [
           {
             name: "source_researcher",
@@ -693,7 +683,7 @@ describe("CodexAppServerProvider", () => {
         executeSubagent: sourceExecuteSubagent,
       }),
     );
-    const fork = await source.fork({ sessionId: "isolated-session", mode: "ephemeral" });
+    const fork = await source.fork({ mode: "ephemeral" });
     const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["Bash", "Write"] }));
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "try the inherited tool" });
@@ -755,7 +745,6 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        sessionId: "source-session",
         subagentTools: [
           {
             name: "source_researcher",
@@ -766,7 +755,6 @@ describe("CodexAppServerProvider", () => {
       }),
     );
     const fork = await source.fork({
-      sessionId: "exact-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -814,11 +802,8 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
       sourceCheckpoint: "provider-turn-t2",
@@ -860,15 +845,12 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     // Same model, prompt and cwd, branching at the current head: exactly the
     // shape that borrows today. A "thread" fork has to decline that, because a
     // borrowed turn is reverted out of the source and leaves nothing to
     // resume — and reports the source's own thread id.
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "thread",
       configurationMode: "exact",
     });
@@ -905,13 +887,10 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        sessionId: "source-session",
-        isNewSession: false,
-        providerThreadId: "legacy-source",
+        thread: { kind: "resume", providerThreadId: "legacy-source" },
       }),
     );
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -960,11 +939,8 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -1020,11 +996,8 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -1036,7 +1009,7 @@ describe("CodexAppServerProvider", () => {
       content: "fork answer",
     });
     expect(requestMock.mock.calls.filter((call) => call[0] === "thread/revert")).toHaveLength(1);
-    await expect(source.fork({ sessionId: "next-fork", mode: "ephemeral" })).resolves.toBeDefined();
+    await expect(source.fork({ mode: "ephemeral" })).resolves.toBeDefined();
 
     await forkSession.close();
     await source.close();
@@ -1108,14 +1081,12 @@ describe("CodexAppServerProvider", () => {
     const provider = new CodexAppServerProvider();
     const source = await provider.openSession(
       buildParams({
-        sessionId: "source-session",
-        isNewSession: true,
+        thread: { kind: "new" },
         subagentTools,
         executeSubagent: sourceExecuteSubagent,
       }),
     );
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -1396,11 +1367,8 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -1447,12 +1415,9 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const sourceEvents = source.events[Symbol.asyncIterator]();
     const fork = await source.fork({
-      sessionId: "fork-session",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -1480,9 +1445,7 @@ describe("CodexAppServerProvider", () => {
     });
     // …and nothing may resume from the contaminated thread.
     await expect(source.sendUserInput({ text: "next real turn" })).rejects.toThrow(/revert failed/);
-    await expect(source.fork({ sessionId: "fork-2", mode: "ephemeral" })).rejects.toThrow(
-      /revert failed/,
-    );
+    await expect(source.fork({ mode: "ephemeral" })).rejects.toThrow(/revert failed/);
     expect(requestMock.mock.calls.filter((c) => c[0] === "turn/start")).toHaveLength(1);
 
     await forkSession.close();
@@ -1515,11 +1478,8 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     const exactFork = await source.fork({
-      sessionId: "exact-fork",
       mode: "ephemeral",
       configurationMode: "exact",
     });
@@ -1538,7 +1498,7 @@ describe("CodexAppServerProvider", () => {
 
     // A model-changing fork (e.g. a recap turn on a smaller tier) arrives
     // while the borrowed turn holds the thread.
-    const nativeFork = await source.fork({ sessionId: "native-fork", mode: "ephemeral" });
+    const nativeFork = await source.fork({ mode: "ephemeral" });
     const nativeOpen = nativeFork.open(buildForkOpenParams({ model: "gpt-5.4-mini" }));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(requestMock).not.toHaveBeenCalledWith("thread/fork", expect.anything());
@@ -1575,15 +1535,12 @@ describe("CodexAppServerProvider", () => {
     });
 
     const provider = new CodexAppServerProvider();
-    const source = await provider.openSession(
-      buildParams({ sessionId: "source-session", isNewSession: true }),
-    );
+    const source = await provider.openSession(buildParams());
     // The native fork handle is created while the source is still clean, so
     // the fork() contamination gate passes…
-    const nativeFork = await source.fork({ sessionId: "native-fork", mode: "ephemeral" });
+    const nativeFork = await source.fork({ mode: "ephemeral" });
 
     const exactFork = await source.fork({
-      sessionId: "exact-fork",
       mode: "ephemeral",
       configurationMode: "exact",
     });

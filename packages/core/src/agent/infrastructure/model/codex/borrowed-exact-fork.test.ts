@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type {
   ModelSessionForkOpenParams,
   ModelSessionForkParams,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
   evaluateBorrowedExactFork,
@@ -31,7 +31,6 @@ function evaluate(
 ) {
   return evaluateBorrowedExactFork({
     forkParams: {
-      sessionId: "fork-session",
       configurationMode: "exact",
       ...forkOverrides,
     },
@@ -78,7 +77,7 @@ describe("createBorrowedExactForkSession", () => {
     let hasForkActionTool = false;
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
-      forkSessionId: "fork-session",
+      forkOwnerId: "fork-owner",
       sourceThreadId: "source-thread",
       openParams: openParams(),
       runExclusive: async (work) => await work(),
@@ -115,7 +114,7 @@ describe("createBorrowedExactForkSession", () => {
     let askRes: RomeDynamicToolCallResult | undefined;
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
-      forkSessionId: "fork-session",
+      forkOwnerId: "fork-owner",
       sourceThreadId: "source-thread",
       openParams: openParams({
         supportsInteractiveSurface: true,
@@ -157,7 +156,7 @@ describe("createBorrowedExactForkSession", () => {
     });
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
-      forkSessionId: "fork-session",
+      forkOwnerId: "fork-owner",
       sourceThreadId: "source-thread",
       openParams: openParams(),
       runExclusive: async (work) => {

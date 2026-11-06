@@ -11,6 +11,7 @@ import type {
   ModelUserInput,
   ProviderId,
   SkillMcpDefinition,
+  ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
@@ -51,6 +52,7 @@ export type {
   ModelSessionForkOpenParams,
   ModelSessionFork,
   ModelSession,
+  ThreadStart,
 } from "../agent/index.js";
 
 /**
@@ -70,8 +72,7 @@ export interface ModelRunParams {
   builtinTools?: string[];
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
-  sessionId?: string;
-  isNewSession?: boolean;
+  thread: ThreadStart;
   workingDir?: string;
   externalMcpServers?: Record<string, McpServerConfig>;
   executeAction: (name: string, input: unknown) => Promise<unknown>;
@@ -150,8 +151,7 @@ export function createSessionFromRun(
         builtinTools: params.builtinTools,
         maxTurns: params.maxTurns,
         reasoningEffort: input.reasoningEffort ?? params.reasoningEffort,
-        sessionId: params.sessionId,
-        isNewSession: params.isNewSession,
+        thread: params.thread,
         workingDir: params.workingDir,
         externalMcpServers: params.externalMcpServers,
         executeAction: params.executeAction,

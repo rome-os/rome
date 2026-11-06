@@ -152,13 +152,12 @@ describe("AgentRunner", () => {
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
       subagentTools: [],
-      sessionId: "mock-session",
-      isNewSession: true,
+      thread: { kind: "new" },
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
 
-    await expect(session.fork({ sessionId: "fork-session" })).rejects.toThrow(
+    await expect(session.fork({})).rejects.toThrow(
       "ModelSession fork is not supported by this provider",
     );
     await session.close();
@@ -171,8 +170,7 @@ describe("AgentRunner", () => {
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
       subagentTools: [],
-      sessionId: "null-session",
-      isNewSession: false, // the reuse case that broke a real provider resume
+      thread: { kind: "new" },
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
@@ -202,8 +200,7 @@ describe("AgentRunner", () => {
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
       subagentTools: [],
-      sessionId: "null-session-2",
-      isNewSession: true,
+      thread: { kind: "new" },
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
@@ -392,13 +389,13 @@ describe("AgentRunner", () => {
       name: "Shared record",
       agentName: "test-main",
     });
-    const opened: { sessionId: string; isNewSession: boolean }[] = [];
+    const opened: ModelSessionParams["thread"][] = [];
     const provider: ModelProvider = {
       id: "anthropic",
       displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
-        opened.push({ sessionId: params.sessionId, isNewSession: params.isNewSession === true });
+        opened.push(params.thread);
         return createSessionFromRun(
           "anthropic",
           async function* () {
@@ -419,8 +416,7 @@ describe("AgentRunner", () => {
     }
     // No history carried: each run opened a session of its own, new to the provider.
     expect(opened).toHaveLength(2);
-    expect(opened.every((o) => o.isNewSession)).toBe(true);
-    expect(opened[0]?.sessionId).not.toBe(opened[1]?.sessionId);
+    expect(opened).toEqual([{ kind: "new" }, { kind: "new" }]);
     // Both runs are in the one session: a trace and an answer each.
     const roles = (await webchatRepo.getMessages("shared-record")).map((m) => m.role);
     expect(roles.filter((role) => role === "trace")).toHaveLength(2);
@@ -1049,9 +1045,7 @@ describe("AgentRunner", () => {
           options.onFork?.(forkParams);
           return {
             providerId: "mock" as const,
-            sessionId: forkParams.sessionId,
-            sourceSessionId: params.sessionId,
-            sourceProviderThreadId: options.providerThreadId,
+            sourceProviderThreadId: options.providerThreadId ?? "mock-source-thread",
             mode: "ephemeral" as const,
             open: async (openParams: ModelSessionForkOpenParams) => makeForkSession(openParams),
           };
@@ -2037,8 +2031,7 @@ describe("AgentRunner", () => {
       // The fork's subagent is always a fresh session owned by the fork.
       const childOpens = provider.sessions.filter((s) => s.agentName === "core:test-explore");
       expect(childOpens).toHaveLength(1);
-      expect(childOpens[0].sessionId).not.toBe(start.sessionId);
-      expect(childOpens[0].isNewSession).toBe(true);
+      expect(childOpens[0].thread).toEqual({ kind: "new" });
       const terminal = messages.find((m) => m.type === "result");
       expect(terminal).toMatchObject({ content: "fork child answer" });
     });
@@ -2572,8 +2565,7 @@ describe("AgentRunner", () => {
       );
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "persisted-claude-thread",
+        thread: { kind: "resume", providerThreadId: "persisted-claude-thread" },
       });
       expect(session.status).toBe("idle");
       await manager.shutdown();
@@ -2628,11 +2620,9 @@ describe("AgentRunner", () => {
               providerFork = forkParams;
               return {
                 providerId: "anthropic" as const,
-                sessionId: forkParams.sessionId,
-                sourceSessionId: params.sessionId,
                 sourceProviderThreadId: "persisted-claude-thread",
                 mode: forkParams.mode ?? "ephemeral",
-                providerThreadId: forkParams.sessionId,
+                providerThreadId: "forked-claude-thread",
                 open: async () =>
                   forkSessionStub({
                     providerId: "anthropic",
@@ -2690,8 +2680,7 @@ describe("AgentRunner", () => {
       expect(forkMessages[1]).toMatchObject({ type: "result", content: "Fork complete" });
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "persisted-claude-thread",
+        thread: { kind: "resume", providerThreadId: "persisted-claude-thread" },
       });
       expect(providerFork).toMatchObject({
         configurationMode: "exact",
@@ -2898,11 +2887,7 @@ describe("AgentRunner", () => {
       };
 
       expect(secondSession.sessionId).toBe(firstSession.sessionId);
-      expect(provider.calls[1]).toMatchObject({
-        prompt: "Follow up",
-        sessionId: firstSession.sessionId,
-        isNewSession: false,
-      });
+      expect(provider.calls[1]).toMatchObject({ prompt: "Follow up" });
     });
 
     it("reopens the exact requested session instead of reusing a different cached session", async () => {
@@ -2935,15 +2920,9 @@ describe("AgentRunner", () => {
       expect(resumed.sessionId).toBe("sess-old");
       expect(resumed).not.toBe(cached);
       expect(provider.sessions).toHaveLength(2);
-      expect(provider.sessions[1]).toMatchObject({
-        sessionId: "sess-old",
-        // The row has no stored provider identity, so its native thread is not
-        // resumed into whichever provider happens to resolve now. The id is not
-        // new either: a first turn cut off by a restart leaves a transcript
-        // under it with no provider recorded (#1045).
-        isNewSession: false,
-      });
-      expect(provider.sessions[1].providerThreadId).toBeUndefined();
+      // The row has no stored provider identity, so its native thread is not
+      // resumed into whichever provider happens to resolve now (#1045).
+      expect(provider.sessions[1].thread).toEqual({ kind: "new" });
 
       await manager.shutdown();
     });
@@ -4754,12 +4733,11 @@ describe("AgentRunner", () => {
       expect(openAiSessions).toHaveLength(2);
       expect(openAiSessions[0]).toMatchObject({
         model: "gpt-5.6-terra",
-        isNewSession: true,
+        thread: { kind: "new" },
       });
       expect(openAiSessions[1]).toMatchObject({
         model: "gpt-5.6-terra",
-        isNewSession: false,
-        providerThreadId: "codex-thread-1",
+        thread: { kind: "resume", providerThreadId: "codex-thread-1" },
       });
       expect(resumedMessages.find((message) => message.type === "session_init")).toMatchObject({
         sessionId: firstSession.sessionId,
@@ -4838,8 +4816,7 @@ describe("AgentRunner", () => {
       });
       expect(codexTurns).toBe(1);
       expect(claudeTurns).toBe(1);
-      expect(claudeOpens[0]).toMatchObject({ isNewSession: false });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
+      expect(claudeOpens[0].thread).toEqual({ kind: "new" });
       await manager.shutdown();
     });
 
@@ -4904,8 +4881,7 @@ describe("AgentRunner", () => {
       });
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
@@ -4959,8 +4935,7 @@ describe("AgentRunner", () => {
 
       expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
@@ -5238,8 +5213,7 @@ describe("AgentRunner", () => {
       expect(opens).toHaveLength(1);
       expect(opens[0]).toMatchObject({
         model: "gpt-6.1-sol",
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
       expect(await sessionRepository.session(legacyId)).toMatchObject({
         provider: "openai",
@@ -5280,8 +5254,7 @@ describe("AgentRunner", () => {
 
       expect(session.sessionId).not.toBe(mainId);
       expect(opens).toHaveLength(1);
-      expect(opens[0]).toMatchObject({ model: "gpt-5.6-terra", isNewSession: true });
-      expect(opens[0].providerThreadId).toBeUndefined();
+      expect(opens[0]).toMatchObject({ model: "gpt-5.6-terra", thread: { kind: "new" } });
       await manager.shutdown();
     });
 
@@ -5316,8 +5289,7 @@ describe("AgentRunner", () => {
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
         model: "gpt-5.6-terra",
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
       await resumedManager.shutdown();
     });
@@ -5475,9 +5447,8 @@ describe("AgentRunner", () => {
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
         model: "claude-opus-4-8[1m]",
-        isNewSession: false,
+        thread: { kind: "new" },
       });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
       await manager.shutdown();
     });
@@ -5528,9 +5499,8 @@ describe("AgentRunner", () => {
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
         model: "claude-opus-4-8[1m]",
-        isNewSession: false,
+        thread: { kind: "new" },
       });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
       await manager.shutdown();
     });

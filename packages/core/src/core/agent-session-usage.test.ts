@@ -91,8 +91,7 @@ describe("AgentSession turn usage", () => {
         if (forkable) {
           session.fork = async (fork) => ({
             providerId: "openai",
-            sessionId: fork.sessionId,
-            sourceSessionId: "source-session",
+            sourceProviderThreadId: "source-thread",
             mode: fork.mode ?? "ephemeral",
             providerThreadId: "fork-thread",
             open: async () => createSessionFromRun("openai", () => nextRun(), params),

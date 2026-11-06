@@ -15,6 +15,7 @@
 // needed. The agent's declared builtins pick Codex's own tools and the sandbox
 // (codexToolOverrides).
 
+import { randomUUID } from "node:crypto";
 import type { AgentErrorCode, TurnErrorEvent } from "@rome-os/app-runtime";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
@@ -27,7 +28,7 @@ import type {
   ModelSessionParams,
   ModelUserInput,
   ProviderId,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
   evaluateBorrowedExactFork,
@@ -676,6 +677,9 @@ export class CodexAppServerProvider implements ModelProvider {
     });
     let closed = false;
     let closing = false;
+    // Names this session as the owner of its turns on the thread. A borrowed
+    // exact fork runs its turn on the same thread under an owner of its own.
+    const ownerSessionId = randomUUID();
     // Set when a borrowed exact-fork turn could not be rolled back off the
     // source thread: from then on the thread history permanently contains the
     // fork's turn, so letting any further turn or fork run from it would
@@ -700,7 +704,8 @@ export class CodexAppServerProvider implements ModelProvider {
       providerId: this.id,
       model: params.model,
       events: sink.iter(),
-      providerThreadId: params.providerThreadId,
+      providerThreadId:
+        params.thread.kind === "resume" ? params.thread.providerThreadId : undefined,
       get lastCompletedTurnCheckpoint(): string | undefined {
         return lastCompletedTurnCheckpoint;
       },
@@ -721,7 +726,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const clientId = (item as { clientId?: unknown }).clientId;
         if (typeof clientId === "string") {
           if (
-            activeTurn?.ownerSessionId === params.sessionId &&
+            activeTurn?.ownerSessionId === ownerSessionId &&
             clientId === activeTurn.initialInputId
           )
             resolveSourceStarted?.();
@@ -1046,13 +1051,13 @@ export class CodexAppServerProvider implements ModelProvider {
     const openedThread = await this.appServerManager.openThread(
       threadConfig,
       binding,
-      params.isNewSession === false ? params.providerThreadId : undefined,
+      params.thread.kind === "resume" ? params.thread.providerThreadId : undefined,
     );
     threadId = openedThread.threadId;
     session.providerThreadId = threadId;
 
     const sourceRuntime: CodexTurnRuntime = {
-      ownerSessionId: params.sessionId,
+      ownerSessionId,
       sink,
       imageTraceCtx,
       imageTracker,
@@ -1288,7 +1293,7 @@ export class CodexAppServerProvider implements ModelProvider {
     session.steerUserInput = async (input) => {
       await sourceStarted;
       const turn = activeTurn;
-      if (!turn || turn.completed || turn.ownerSessionId !== params.sessionId || !turn.turnId)
+      if (!turn || turn.completed || turn.ownerSessionId !== ownerSessionId || !turn.turnId)
         return "deferred";
       if (closed || closing) throw new Error("ModelSession is closed");
       if (input.injectedToolResult) return "deferred";
@@ -1360,12 +1365,13 @@ export class CodexAppServerProvider implements ModelProvider {
       if (!source)
         throw new Error("Cannot fork Codex session before providerThreadId is available");
       const mode = forkParams.mode ?? "ephemeral";
+      // The fork's turn runs under an owner of its own, whether on a borrowed
+      // source thread or a native child.
+      const forkOwnerId = randomUUID();
       let opened = false;
       let forkedId: string | undefined;
       return {
         providerId: this.id,
-        sessionId: forkParams.sessionId,
-        sourceSessionId: params.sessionId,
         sourceProviderThreadId: source,
         mode,
         get providerThreadId() {
@@ -1411,7 +1417,7 @@ export class CodexAppServerProvider implements ModelProvider {
             forkedId = source;
             return await createBorrowedExactForkSession({
               providerId: this.id,
-              forkSessionId: forkParams.sessionId,
+              forkOwnerId,
               sourceThreadId: source,
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
@@ -1465,7 +1471,7 @@ export class CodexAppServerProvider implements ModelProvider {
                 if (!closed) sink.push({ type: "error", error: contaminatedReason });
                 throw new Error(contaminatedReason);
               },
-              interrupt: async (reason) => await interruptOwnerTurn(forkParams.sessionId, reason),
+              interrupt: async (reason) => await interruptOwnerTurn(forkOwnerId, reason),
               funding,
             });
           }
@@ -1507,11 +1513,8 @@ export class CodexAppServerProvider implements ModelProvider {
           return await this.openSessionWithInheritedDynamicTools(
             {
               ...openParams,
-              sessionId: forkParams.sessionId,
-              isNewSession: false,
-              providerThreadId: forkedId,
+              thread: { kind: "resume", providerThreadId: forkedId },
               fork: {
-                sourceSessionId: params.sessionId,
                 sourceProviderThreadId: source,
                 mode,
                 sourceCheckpoint: forkParams.sourceCheckpoint,
@@ -1525,8 +1528,7 @@ export class CodexAppServerProvider implements ModelProvider {
         },
       };
     };
-    session.interrupt = async (reason?: string) =>
-      await interruptOwnerTurn(params.sessionId, reason);
+    session.interrupt = async (reason?: string) => await interruptOwnerTurn(ownerSessionId, reason);
     session.close = async () => {
       if (closed || closing) return;
       closing = true;

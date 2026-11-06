@@ -22,7 +22,7 @@ import type {
   ModelSessionParams,
   ModelUserInput,
   ModelReasoningEffort,
-} from "../../../../core/agent-runner.js";
+} from "../../../domain/model-port.js";
 import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
 import { createLogger } from "../../../../logger.js";
@@ -591,7 +591,6 @@ export class AnthropicProvider implements ModelProvider {
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const queryProcess = createClaudeQueryProcess();
     const { abortController } = queryProcess;
-    const { sessionId } = params;
     const pendingSteers = new Set<string>();
     const deferredInputs = new Set<string>();
     // Every send carries a uuid and origin {kind:"human"}. The SDK echoes a
@@ -618,10 +617,11 @@ export class AnthropicProvider implements ModelProvider {
       resumeReading?.();
       resumeReading = undefined;
     };
-    // A cancelled first turn can leave a user-only transcript that is not
-    // resumable. Its id is still reserved by the CLI, so don't reuse it.
+    // The CLI's id for this session: the thread being resumed, or a fresh one
+    // the CLI has never seen. A cancelled first turn can leave a user-only
+    // transcript that is not resumable, so an id is never reused.
     const sdkSessionId =
-      params.isNewSession === false && !params.providerThreadId ? randomUUID() : sessionId;
+      params.thread.kind === "resume" ? params.thread.providerThreadId : randomUUID();
 
     const q = query({
       prompt: inputQueue.iter(),
@@ -653,22 +653,19 @@ export class AnthropicProvider implements ModelProvider {
         ...(params.workingDir ? { cwd: params.workingDir } : {}),
         ...(params.fork
           ? {
-              resume: params.fork.sourceProviderThreadId ?? params.fork.sourceSessionId,
+              resume: params.fork.sourceProviderThreadId,
               forkSession: true,
-              sessionId,
+              sessionId: sdkSessionId,
               ...(params.fork.sourceCheckpoint
                 ? { resumeSessionAt: params.fork.sourceCheckpoint }
                 : {}),
             }
-          : // Resume only once a real turn has actually written a transcript for
-            // this id. `providerThreadId` is captured from the SDK's own
-            // `session_id` (below) and persisted after the first turn that
-            // produced content; absent it, a stored session row may have come
-            // from a short-circuited turn (e.g. the not-logged-in notice) that
-            // never opened an SDK conversation, and `{ resume }` would fail with
-            // "No conversation found with session ID". Start fresh in that case.
-            !params.isNewSession && params.providerThreadId
-            ? { resume: params.providerThreadId }
+          : // `{ resume }` fails with "No conversation found with session ID"
+            // for a thread that never wrote a transcript, so the run asks to
+            // resume only a thread id this provider reported after a turn with
+            // content (`session.providerThreadId`, captured below).
+            params.thread.kind === "resume"
+            ? { resume: params.thread.providerThreadId }
             : { sessionId: sdkSessionId }),
       },
     });
@@ -688,7 +685,7 @@ export class AnthropicProvider implements ModelProvider {
     // transcript with real content exists. Exposed via `session.providerThreadId`
     // so the host persists it and gates `{ resume }` on it (see options above).
     let establishedThreadId: string | undefined =
-      params.isNewSession === false ? params.providerThreadId : undefined;
+      params.thread.kind === "resume" ? params.thread.providerThreadId : undefined;
     let activeTurnLastAssistantMessageId: string | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
 
@@ -1215,15 +1212,16 @@ export class AnthropicProvider implements ModelProvider {
         }
         if (running) throw new Error("Cannot fork while source session is running");
         const mode = forkParams.mode ?? "ephemeral";
-        const sourceSessionId = params.sessionId;
-        const sourceProviderThreadId = establishedThreadId ?? params.providerThreadId;
-        const forkSessionId = forkParams.sessionId;
+        // Before a turn with content reports the SDK's own id, the id this
+        // session was opened under names its transcript.
+        const sourceProviderThreadId = establishedThreadId ?? sdkSessionId;
+        // The CLI id of the forked session, so the handle names its thread
+        // before it opens.
+        const forkSessionId = randomUUID();
         let opened = false;
 
         return {
           providerId,
-          sessionId: forkSessionId,
-          sourceSessionId,
           sourceProviderThreadId,
           mode,
           providerThreadId: forkSessionId,
@@ -1234,11 +1232,8 @@ export class AnthropicProvider implements ModelProvider {
             opened = true;
             return await openProviderSession({
               ...openParams,
-              sessionId: forkSessionId,
-              isNewSession: false,
-              providerThreadId: forkSessionId,
+              thread: { kind: "resume", providerThreadId: forkSessionId },
               fork: {
-                sourceSessionId,
                 sourceProviderThreadId,
                 mode,
                 sourceCheckpoint: forkParams.sourceCheckpoint,
