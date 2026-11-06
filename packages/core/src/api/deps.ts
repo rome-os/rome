@@ -41,7 +41,7 @@ import type { AppKeysRepository } from "../db/repositories/app-keys.js";
 import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import type { SessionRepository } from "../sessions/session-repository.js";
+import type { SessionRepository } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";

@@ -14,7 +14,7 @@ import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { createRomeMcpServer, type RomeMcpGroup, type RomeMcpServer } from "../core/mcp/server.js";
 import { createModelResolver } from "../core/model-resolver.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import {
   createAppLifecycleHarness,
   MockModelProvider,
@@ -483,7 +483,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   await agentLoader.loadAll(FIXTURES_AGENTS_DIR);
   const agentName = "test-all-actions";
 
-  const sessionRepository = new SessionRepository(harness.db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(harness.db, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({

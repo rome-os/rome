@@ -37,7 +37,7 @@ import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
-import { SessionRepository } from "../../sessions/session-repository.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
@@ -213,7 +213,7 @@ async function buildHarness(
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new SessionRepository(db, artifactIdentity),
+    sessions: new DrizzleSessionRepository(db, artifactIdentity),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),

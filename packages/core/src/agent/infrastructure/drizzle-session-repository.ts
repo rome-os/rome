@@ -1,10 +1,11 @@
-// The Sessions repository over `sessions` and `session_turn_checkpoints`.
-// Aggregate: sessions/session.ts. Vocabulary: docs/concepts/sessions.md.
+// The Drizzle adapter of the Sessions repository port, over `sessions` and
+// `session_turn_checkpoints`. Port: agent/domain/session-repository.ts.
+// Aggregate: agent/domain/session.ts.
 
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
-import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { sessions, sessionTurnCheckpoints } from "../db/schema.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
+import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
+import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import {
   Session,
   type AgentName,
@@ -13,28 +14,17 @@ import {
   type SessionId,
   type SessionState,
   type TurnCheckpoint,
-} from "./session.js";
+} from "../domain/session.js";
+import { ActiveSessionExistsError, type SessionRepository } from "../domain/session-repository.js";
 
 type SessionRow = typeof sessions.$inferSelect;
 
-/** Thrown by `add` when the continuity key and agent already have an active session. */
-export class ActiveSessionExistsError extends Error {
-  constructor(
-    readonly continuityKey: ContinuityKey,
-    readonly agentName: AgentName,
-    readonly activeSessionId: SessionId,
-  ) {
-    super(`Session "${activeSessionId}" is already active for this continuity key and agent`);
-    this.name = "ActiveSessionExistsError";
-  }
-}
-
 /**
- * The collection of sessions. Finds them by id or by continuity key, adds new
- * ones, and writes their changes. It is the only code that touches `sessions`
- * and `session_turn_checkpoints`.
+ * The Sessions repository over SQLite through Drizzle. It is the only code
+ * that touches `sessions` and `session_turn_checkpoints`. The agent also
+ * matches under its legacy names in `current`, through {@link deprecatedSameAgent}.
  */
-export class SessionRepository {
+export class DrizzleSessionRepository implements SessionRepository {
   constructor(
     private readonly db: DrizzleDb,
     private readonly identity: ArtifactIdentityContext,
@@ -46,9 +36,6 @@ export class SessionRepository {
     return rows[0] ? restore(rows[0]) : null;
   }
 
-  /** The active session for this continuity key and agent, or null. Idle time
-   *  never retires a session. The agent also matches under its legacy names,
-   *  through {@link deprecatedSameAgent}. */
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {
     const rows = await this.db
       .select()

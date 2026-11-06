@@ -12,7 +12,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
-import { Session } from "../../sessions/session.js";
+import { Session } from "../../agent/index.js";
 import {
   AgentInputQueue,
   type AgentInputReceipt,

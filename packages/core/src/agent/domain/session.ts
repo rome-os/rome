@@ -1,5 +1,5 @@
 // The Session aggregate: one agent's conversation from one reset to the next.
-// Vocabulary: docs/concepts/sessions.md. Storage: sessions/session-repository.ts.
+// Vocabulary: docs/concepts/sessions.md. Repository port: ./session-repository.ts.
 
 import { v7 as uuidv7 } from "uuid";
 

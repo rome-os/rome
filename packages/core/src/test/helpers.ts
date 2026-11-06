@@ -32,7 +32,7 @@ import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registr
 import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
@@ -685,7 +685,7 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionRepository = new SessionRepository(db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: CodexAccountService = {

@@ -4,11 +4,12 @@ import {
   claimLegacyArtifactName,
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
-} from "../apps/artifact-id.js";
-import { sessions, sessionTurnCheckpoints } from "../db/schema.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
-import { ActiveSessionExistsError, SessionRepository } from "./session-repository.js";
-import { Session } from "./session.js";
+} from "../../apps/artifact-id.js";
+import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
+import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { ActiveSessionExistsError } from "../domain/session-repository.js";
+import { Session } from "../domain/session.js";
+import { DrizzleSessionRepository } from "./drizzle-session-repository.js";
 
 const seconds = (date: Date) => Math.floor(date.getTime() / 1000);
 /** A snapshot as the database keeps it: timestamps to the second. */
@@ -18,13 +19,13 @@ const stored = (state: ReturnType<Session["snapshot"]>) => ({
   lastActiveAt: seconds(state.lastActiveAt),
 });
 
-describe("SessionRepository", () => {
+describe("DrizzleSessionRepository", () => {
   let testDb: TestDb;
-  let repo: SessionRepository;
+  let repo: DrizzleSessionRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new SessionRepository(testDb.db, {
+    repo = new DrizzleSessionRepository(testDb.db, {
       legacyBindings: createEmptyLegacyArtifactBindings(),
     });
   });
@@ -116,7 +117,7 @@ describe("SessionRepository", () => {
       "reviewer",
       formatArtifactId("code-review", "reviewer"),
     );
-    repo = new SessionRepository(testDb.db, { legacyBindings: bindings });
+    repo = new DrizzleSessionRepository(testDb.db, { legacyBindings: bindings });
     const legacy = Session.create("reviewer", { continuityKey: "webchat:review" });
     await repo.add(legacy);
 

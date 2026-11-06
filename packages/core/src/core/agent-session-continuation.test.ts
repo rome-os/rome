@@ -33,7 +33,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "./model-selector.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -189,7 +189,7 @@ describe("continuation notice through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");

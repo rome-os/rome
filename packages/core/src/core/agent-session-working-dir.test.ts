@@ -13,8 +13,7 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { Session } from "../sessions/session.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
@@ -49,7 +48,7 @@ describe("AgentSessionManager working dirs", () => {
     const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
-    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",

@@ -13,8 +13,7 @@ import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
-import { Session } from "../sessions/session.js";
-import type { SessionRepository } from "../sessions/session-repository.js";
+import { Session, type SessionRepository } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildContinuationBlock,

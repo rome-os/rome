@@ -13,7 +13,7 @@ import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
@@ -79,7 +79,7 @@ export interface GoldenTraceOptions {
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {

@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
-import { Session } from "../sessions/session.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
 import {
@@ -135,7 +134,7 @@ describe("AgentRunner", () => {
     agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     promptBuilder = new PromptBuilder();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
@@ -265,7 +264,7 @@ describe("AgentRunner", () => {
     const manager = createAgentSessionManager({
       ...managerDeps(modelResolver),
       agentLoader: namespacedLoader,
-      sessionRepository: new SessionRepository(testDb.db, { legacyBindings }),
+      sessionRepository: new DrizzleSessionRepository(testDb.db, { legacyBindings }),
     });
 
     const session = await manager.acquire({

@@ -6,7 +6,7 @@ import { result } from "../test/kit/fake-model.js";
 import { createTestRome, buildAction, recordingAction, type TestRome } from "../test/kit/index.js";
 import type { ActionResult } from "./types.js";
 import type { ThreadContext } from "../core/types.js";
-import { Session } from "../sessions/session.js";
+import { Session } from "../agent/index.js";
 
 // ApprovalHandler tests through the real wiring (testkit): real repos on an
 // in-memory DB, the real ActionEngine executing registered actions

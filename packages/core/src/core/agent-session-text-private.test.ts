@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -78,7 +78,7 @@ describe("AgentSessionManager textPrivate", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionRepository: new SessionRepository(testDb.db, artifactIdentity),
+        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         webchatRepo: new ChatsWebChatRepository(testDb.db),
         promptBuilder,
         actionRegistry,
