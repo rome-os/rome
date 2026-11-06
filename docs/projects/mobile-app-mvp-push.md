@@ -3,7 +3,7 @@
 Worker result for "Push notifications" in [`mobile-app-mvp.md`](mobile-app-mvp.md). Agreed design: the instance decides when to push and sends `{body, level, chatId}` to Rome Cloud. Rome Cloud adds the instance id and delivers through APNs with Amantru's team key. The app asks for permission at a good moment, registers its token with Rome Cloud, and routes a tap to the right instance and its Concierge. The instance and Rome Cloud parts are separate workers.
 
 - Branch: `feat/ios-app` (local only, not pushed)
-- Commits: `e0f99310` (signing and capability), `592fd834` (push code, strings, README), `2edf23e7` (tests), `924b9349` (snapshot)
+- Commits: `e0f99310` (signing and capability), `592fd834` (push code, strings, README), `2edf23e7` (tests), `924b9349` (snapshot), `676cef5e` (this file), `84e5661b` (tap crash fix), `a599033b` (`ios/CLAUDE.md` traps)
 
 ## What changed
 
@@ -19,7 +19,7 @@ Worker result for "Push notifications" in [`mobile-app-mvp.md`](mobile-app-mvp.m
   - Unlike the other Cloud calls, a 401 here keeps the credential, because today's Rome Cloud has no such route yet.
   - The token is never logged. The last accepted token is kept in the Keychain, so sign-out can remove it even before the launch's APNs callback.
 - **Sign-out.** `DELETE /api/devices {token}` goes first, with a 10 second timeout, and only then does `CloudAuth.signOut` revoke the session and clear the Keychain.
-- **Foreground.** `willPresent` returns no options, so a push that arrives while the app is open shows no banner and plays no sound. The live events already update the chat.
+- **Foreground.** `willPresent` passes no options, so a push that arrives while the app is open shows no banner and plays no sound. The live events already update the chat.
 - **Tap.** The payload's `rome: {instanceId, chatId?}` is parsed into `PushTarget`.
   - For another running instance the app switches to it through `AppModel.switchInstance`, the path the Instances page uses. The new shell opens on Chat.
   - For the open instance, the shell closes the Tasks and Settings sheets and the drawer, and shows Chat.
@@ -27,6 +27,7 @@ Worker result for "Push notifications" in [`mobile-app-mvp.md`](mobile-app-mvp.m
   - `chatId` is parsed and kept for later: the app has no Concierge topic chats yet.
   - A tap that launches the app cold waits in `AppModel` until an instance opens, and launch prefers the tapped instance. A tap while signed out waits through sign-in.
 - **Settings.** Under "Other", a Notifications row shows On, Off or Not set. Not set starts the permission flow. On and Off open the app's notification page in the Settings app.
+- **Delegate.** `AppDelegate` implements the completion-handler forms of `UNUserNotificationCenterDelegate` on the main actor. The async forms crashed the app on every tap: under Swift 6 they hand UIKit its completion off the main thread, and UIKit aborts (`84e5661b`; the trap is in `ios/CLAUDE.md`).
 - **Code.** `Rome/Notifications/PushModels.swift` holds the pure rules: payload, route, environment, body and the 7-day rule. `Rome/Notifications/PushCenter.swift` holds the state behind two protocols, `DeviceRegistry` (`CloudAuth` conforms) and `NotificationSystem`. `AppDelegate` in `RomeApp.swift` owns `AppModel` and receives the token and taps.
 - **Strings.** 7 new English keys, each with zh-Hans.
 
@@ -44,10 +45,25 @@ Worker result for "Push notifications" in [`mobile-app-mvp.md`](mobile-app-mvp.m
 
 ## Simulator checks
 
-- The card shows on first open of Chat with the real, undecided permission.
+iPhone 17 simulator (iOS 26.5), Debug build, demo data (`ROME_DEMO=1`, set in the simulator's launchd so a launch from a notification gets it too). Pushes sent with `xcrun simctl push`.
+
+- **Card.** It shows on first open of Chat with the real, undecided permission, in light and dark.
+- **System prompt.** Turn on shows the system prompt, and Allow hides the card.
+- **Not now.** The card goes away. `pushPromptDismissedAt` is saved, and the card stays away after a relaunch.
+- **Foreground.** With permission on, a push while Chat is open shows no banner and plays no sound. The same push with the app in the background shows its banner.
+- **Tap, same instance.** With the Tasks sheet open, the app went to the background, a push for `demo-1` arrived, and opening it brought the app back with the sheet closed and Chat in front.
+- **Tap, other instance.** A push for `demo-2` switches through `AppModel.switchInstance`. Demo data has no Rome Cloud credential, so it ends on sign-in ("Sign-in did not finish"), exactly as switching from the Instances page does in demo mode.
+- **Cold launch.** With the app terminated, opening a push launched it. SpringBoard delivered the tap, and the app opened on Chat.
+- **Crash found and fixed.** Before `84e5661b` every opened push aborted the app 0.3 seconds after the tap arrived (crash report: `AppDelegate.userNotificationCenter(_:didReceive:)` → UIKit assertion). After the fix there were no new crash reports across the same-instance, other-instance and cold-launch taps.
+- **Settings row.** It shows Not set (dark). A tap shows the system prompt, and after Don't Allow the row shows Off. Tapping Off opened the Settings app, but at its root, not at Rome Dev's notification page; worth a look on the phone.
+- **Tests after the fix.** 72 pass on Mac Catalyst.
+
+Screenshots are in the shared notes folder, `push-simulator/`.
 
 ## Open
 
 - Rome Cloud's side (`amantru/rome-cloud`: Bearer registration, `bundle_id`, `DELETE /api/devices`, the `rome` payload data) is not merged. Until it ships, registration is refused and retried quietly on each launch. No real registration was sent; the tests use a stub registry.
 - On the first device build, Xcode registers `cc.romeos.mobile.dev` with the Push Notifications capability in the Amantru team (`-allowProvisioningUpdates`) and needs the phone registered there. The phone build in `/tmp/rome-device` was signed with the old team. It is replaced on the next install, and Keychain items do not carry over, so the guardian signs in again.
 - Concierge topic chats: `chatId` is parsed but not used until the app has them.
+- Switching instances from a tap is checked only through demo data, which cannot open a second instance. The first real check needs Rome Cloud and two running instances.
+- On the phone: check that Off in Settings opens Rome's notification page, not the Settings root.
