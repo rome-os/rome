@@ -86,8 +86,10 @@ export interface ModelPrefix {
  * Value object. Which provider thread a model session opens on. `new` starts
  * a thread that has seen nothing; `resume` continues one the provider named;
  * `branch` starts from a position on one. An `ephemeral` branch is closed
- * after one use and the provider may run it inside the source thread and
- * roll it back; a `kept` branch gets a thread of its own that the session
+ * after one use; the provider may run it inside the source thread and roll
+ * it back, but only when the branch opens with the source's whole `prefix`
+ * and the same `tools` catalog, since the source thread keeps its sandbox
+ * and tools. A `kept` branch gets a thread of its own that the session
  * records. A branch of a thread with a running turn opens after that turn
  * ends; the run holds no lock through `open`.
  */
