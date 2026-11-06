@@ -71,9 +71,12 @@ export type BackendSessionTask = (helpers: {
  * timers) and exposes the lower-level `runBackendSessionTask` for callers that
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
-/** Whether a backend turn ran to its end: `failed` when it errored, was
- *  interrupted, or never ran. */
-export type BackendTurnOutcome = "completed" | "failed";
+/** How a backend turn ended: `interrupted` when a Stop or a newer input cut
+ *  it short, `failed` when it errored or never ran. */
+export type BackendTurnOutcome = "completed" | "interrupted" | "failed";
+
+const endOutcome = (status: string): BackendTurnOutcome =>
+  status === "completed" ? "completed" : status === "interrupted" ? "interrupted" : "failed";
 
 export interface MainBackendTurnRunner extends BackendTurnRunner {
   runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void>;
@@ -305,7 +308,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;
             if (msg.type === "result") reply = msg.content;
-            if (msg.type === "turn_end" && msg.status === "completed") outcome = "completed";
+            if (msg.type === "turn_end") outcome = endOutcome(msg.status);
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
           if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
@@ -335,7 +338,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
       if (msg.type === "turn_start") turnId = msg.turnId;
       if (msg.type === "result") reply = msg.content;
-      if (msg.type === "turn_end" && msg.status === "completed") outcome = "completed";
+      if (msg.type === "turn_end") outcome = endOutcome(msg.status);
     }
     await deliverMessagingReply(params, reply, turnId);
     return outcome;

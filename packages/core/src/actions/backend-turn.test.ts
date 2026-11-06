@@ -65,7 +65,7 @@ describe("backend turn delivery", () => {
   it.each([
     ["completed", "completed"],
     ["error", "failed"],
-    ["interrupted", "failed"],
+    ["interrupted", "interrupted"],
   ] as const)("reports a turn that ended %s as %s", async (status, outcome) => {
     const agentRunner = createMockAgentRunner([
       [

@@ -277,7 +277,7 @@ function setup(
     },
   } as unknown as ConciergeDeps;
   /** A system turn's outcome: it ran to its end unless the hook says it failed. */
-  type BackendOutcome = "completed" | "failed" | undefined;
+  type BackendOutcome = "completed" | "interrupted" | "failed" | undefined;
   let onBackendTurn: (
     params: BackendTurnParams,
   ) => Promise<BackendOutcome | void> | BackendOutcome | void = () => {};
@@ -1492,6 +1492,18 @@ describe("Concierge events", () => {
     expect(s.backendTurns[4].prompt).toContain(
       `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:completed by=concierge">`,
     );
+  });
+
+  it("does not hand a task's result over again after the guardian stops the Concierge's turn", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "interrupted");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
+    expect(s.backendTurns).toHaveLength(1);
   });
 
   it("tells the Concierge of a failed turn at once, with its cause, and holds a stopped one", async () => {
