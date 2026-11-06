@@ -95,12 +95,36 @@ describe("ConciergeTopicEmptyState", () => {
     );
   });
 
+  it("shows no starters until the guardian's connectors are known, then the final set, wrapping a long one", async () => {
+    let answer!: (response: Response) => void;
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      (() => new Promise<Response>((resolve) => (answer = resolve))) as typeof fetch,
+    );
+    renderTopic();
+    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(
+      document.querySelector("[data-concierge-topic-starters]")?.getAttribute("aria-busy"),
+    ).toBe("true");
+    answer(
+      Response.json({
+        connectors: [connector("github", "working", ["acme/widgets"])],
+        rules: { digestTimes: [], quietHours: null },
+      }),
+    );
+    const repo = await screen.findByRole("button", { name: "Follow acme/widgets PRs and CI here" });
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    // A long starter wraps inside its border and grows taller, at the column's width.
+    expect(repo.className).toContain("whitespace-normal");
+    expect(repo.className).toContain("h-auto");
+    expect(repo.className).toContain("w-full");
+  });
+
   it("offers generic topics when nothing is connected, in the guardian's language", async () => {
     await i18n.changeLanguage("zh-CN");
     serve([connector("googlecalendar", null), connector("github", "working")]);
     renderTopic();
     expect(screen.getByRole("region", { name: "开一个长期话题" })).toBeTruthy();
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+    expect((await screen.findAllByRole("button")).map((button) => button.textContent)).toEqual([
       "帮我规划下个月的旅行，相关的事都放这里",
       "这里专门管我的健身计划，每周问问我进度",
     ]);
