@@ -12,9 +12,9 @@ import {
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { SessionManager } from "./session-manager.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
-import type { SessionsRepository } from "../db/repositories/sessions.js";
+import { Session } from "../sessions/session.js";
+import type { SessionRepository } from "../sessions/session-repository.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildContinuationBlock,
@@ -31,7 +31,7 @@ import type { RoutineActivationGate } from "./mcp-facade.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
-import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
+import type { AgentEvent, McpServerConfig } from "../types.js";
 import type {
   AgentStop,
   AgentTurnOutput,
@@ -376,8 +376,7 @@ export interface AgentSessionManager {
 interface ManagerDeps {
   agentLoader: AgentLoader;
   appCatalog?: Pick<AppCatalog, "get">;
-  sessionManager: SessionManager;
-  sessionsRepo: SessionsRepository;
+  sessionRepository: SessionRepository;
   promptBuilder: PromptBuilder;
   actionRegistry: ActionRegistry;
   modelResolver: ModelResolver;
@@ -518,7 +517,7 @@ export function createAgentSessionManager(
     span: Span,
     init?: AgentSessionInit,
     /** Set when the reset policy already ran for this acquire. */
-    resetChecked?: { preparedSessionId?: string; preparedChatId?: string },
+    resetChecked?: { prepared?: Session },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
@@ -535,10 +534,7 @@ export function createAgentSessionManager(
       const reset = await deps.resolveProviderSessionReset!(resetRef);
       const chatId = init.romeSessionId ?? init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
-        const active = await deps.sessionManager.findReusableSession(
-          key.channelThreadKey,
-          key.agentName,
-        );
+        const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
         const decision = active
           ? evaluateProviderSessionReset(reset, active, interactionAt)
           : { due: false as const };
@@ -558,33 +554,23 @@ export function createAgentSessionManager(
             await cached.close("idle");
           }
         }
-        let preparedSessionId: string | undefined;
-        let preparedChatId: string | undefined;
-        if (decision.due) {
-          warnOnConversationMismatch(key, active?.id, active?.chatId, init.romeSessionId);
-          const replacement = await deps.sessionsRepo.rotateProviderGeneration({
-            agentName: key.agentName,
-            channelThreadKey: key.channelThreadKey,
-            newSessionId: uuidv7(),
-            chatId: init.romeSessionId,
-          });
-          preparedSessionId = replacement.id;
-          preparedChatId = replacement.chatId ?? undefined;
+        let prepared: Session | undefined;
+        if (decision.due && active) {
+          warnOnConversationMismatch(key, active.id, active.deprecatedChatId, init.romeSessionId);
+          prepared = active.replace({ deprecatedChatId: init.romeSessionId });
+          await deps.sessionRepository.replace(active, prepared);
           log.info("provider_session.rotated", {
             chatId,
             agentName: key.agentName,
-            provider: active?.provider ?? undefined,
-            oldSessionId: active?.id,
-            newSessionId: replacement.id,
+            provider: active.provider ?? undefined,
+            oldSessionId: active.id,
+            newSessionId: prepared.id,
             resetReason: decision.reason,
             policyMode: reset.mode,
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, init, {
-          preparedSessionId,
-          preparedChatId,
-        });
+        return await acquireInner(key, span, init, { prepared });
       });
     }
     // `reopen` distinguishes a cold open (no live session for this key — the
@@ -658,8 +644,7 @@ export function createAgentSessionManager(
     recordAcquire(reopen ? "reopen" : "cold");
     const promise = (async () => {
       const sess = await openSession(deps, key, init ?? {}, {
-        preparedSessionId: resetChecked?.preparedSessionId,
-        preparedChatId: resetChecked?.preparedChatId,
+        prepared: resetChecked?.prepared,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -694,12 +679,12 @@ export function createAgentSessionManager(
     agentName: string,
     init?: AgentSessionInit,
   ): Promise<AgentSession> => {
-    const row = await deps.sessionManager.findResumableSessionById(sessionId, agentName);
-    if (!row) {
+    const session = await resumableSession(deps, sessionId, agentName);
+    if (!session?.continuityKey) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
     return acquire(
-      { agentName, channelThreadKey: row.channelThreadKey },
+      { agentName, channelThreadKey: session.continuityKey },
       { ...(init ?? {}), resumeSessionId: sessionId },
     );
   };
@@ -729,8 +714,9 @@ export function createAgentSessionManager(
       return undefined;
     },
     async recordConversation(sessionId, chatId) {
-      const filled = await deps.sessionsRepo.fillChatId(sessionId, chatId);
-      if (!filled) return;
+      const stored = await deps.sessionRepository.session(sessionId);
+      if (!stored?.deprecatedRecordChat(chatId)) return;
+      await deps.sessionRepository.save(stored);
       // A cached session reads the same value a cold reopen would. A session
       // still opening is not cached yet and misses this, so callers record
       // only after their acquire has returned.
@@ -750,10 +736,8 @@ export function createAgentSessionManager(
 }
 
 interface OpenOptions {
-  /** Id of a generation the reset path already created transactionally. */
-  preparedSessionId?: string;
-  /** The conversation that prepared generation recorded, if any. */
-  preparedChatId?: string;
+  /** The successor the reset path already wrote, which this open serves. */
+  prepared?: Session;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -872,6 +856,23 @@ function warnOnConversationMismatch(
   });
 }
 
+/**
+ * The session an explicit id names, when this agent can resume it: it is
+ * active, has a continuity key, and is the agent's current session for that
+ * key. The last check also matches the agent under its legacy names, as the
+ * repository's `current` does.
+ */
+async function resumableSession(
+  deps: ManagerDeps,
+  sessionId: string,
+  agentName: string,
+): Promise<Session | undefined> {
+  const session = await deps.sessionRepository.session(sessionId);
+  if (!session || session.status !== "active" || session.continuityKey === null) return undefined;
+  const current = await deps.sessionRepository.current(session.continuityKey, agentName);
+  return current?.id === session.id ? session : undefined;
+}
+
 async function openSession(
   deps: ManagerDeps,
   key: AgentSessionKey,
@@ -889,92 +890,80 @@ async function openSession(
   // without the agent filter a subagent could inherit its parent's provider
   // thread and system prompt/history.
   const requestedRomeSessionId = init.romeSessionId;
-  let resumeResult:
-    | {
-        id: string;
-        channelThreadKey?: string;
-        provider: string | null;
-        providerThreadId: string | null;
-        model: string | null;
-        workingDir?: string | null;
-        chatId?: string | null;
-      }
-    | undefined;
-  if (opts.preparedSessionId) {
-    // The lifecycle transaction already inserted this fresh generation. Keep
-    // resumeResult empty so provider open and prompt framing use new-session
-    // semantics while retaining the transactionally allocated runtime id.
+  // The session the reset path already wrote, or the one this open resumes.
+  // Neither set, this open creates one.
+  let prepared = opts.prepared;
+  let resumed: Session | undefined;
+  if (prepared) {
+    // The reset already wrote this fresh session. Keep `resumed` empty so
+    // provider open and prompt framing use new-session semantics while
+    // retaining the id the reset allocated.
   } else if (init.resumeSessionId) {
-    resumeResult = await deps.sessionManager.findResumableSessionById(
-      init.resumeSessionId,
-      key.agentName,
-    );
-    if (!resumeResult) {
+    resumed = await resumableSession(deps, init.resumeSessionId, key.agentName);
+    if (!resumed) {
       throw new Error(`Agent session "${init.resumeSessionId}" was not found or cannot be resumed`);
     }
-    if (resumeResult.channelThreadKey !== key.channelThreadKey) {
+    if (resumed.continuityKey !== key.channelThreadKey) {
       throw new Error(`Agent session "${init.resumeSessionId}" does not match this session key`);
     }
   } else if (key.channelThreadKey) {
-    resumeResult = await deps.sessionManager.findReusableSession(
-      key.channelThreadKey,
-      key.agentName,
-    );
+    resumed =
+      (await deps.sessionRepository.current(key.channelThreadKey, key.agentName)) ?? undefined;
   }
 
-  // The provider keeps a transcript per cwd, so a resumed row reopens where it
-  // was written unless the caller names a dir. Legacy rows record none.
-  let preparedSessionId = opts.preparedSessionId;
-  let preparedChatId = opts.preparedChatId;
+  // The provider keeps a transcript per cwd, so a resumed session reopens
+  // where it was written unless the caller names a dir. Legacy rows record none.
   let recordedWorkingDir: string | undefined;
-  if (init.workingDir === undefined && resumeResult?.workingDir) {
-    recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);
+  if (init.workingDir === undefined && resumed?.workingDir) {
+    recordedWorkingDir = await reachableRecordedWorkingDir(resumed.workingDir);
     if (!recordedWorkingDir) {
       // The transcript is unreachable. An explicit resume names that exact
       // conversation, so it fails. An implicit reuse by channel-thread key
       // retires the row and starts a fresh generation, so the thread keeps working.
       if (init.resumeSessionId) {
         throw new Error(
-          `Agent session "${resumeResult.id}" ran in "${resumeResult.workingDir}", which no ` +
+          `Agent session "${resumed.id}" ran in "${resumed.workingDir}", which no ` +
             "longer exists; it cannot be resumed there",
         );
       }
       log.warn("agent session working dir is gone; starting a fresh generation", {
-        sessionId: resumeResult.id,
+        sessionId: resumed.id,
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
-        workingDir: resumeResult.workingDir,
+        workingDir: resumed.workingDir,
       });
-      warnOnConversationMismatch(key, resumeResult.id, resumeResult.chatId, requestedRomeSessionId);
-      const replacement = await deps.sessionsRepo.rotateProviderGeneration({
-        agentName: key.agentName,
-        channelThreadKey: key.channelThreadKey,
-        newSessionId: uuidv7(),
-        chatId: requestedRomeSessionId,
-      });
-      preparedSessionId = replacement.id;
-      preparedChatId = replacement.chatId ?? undefined;
-      resumeResult = undefined;
+      warnOnConversationMismatch(key, resumed.id, resumed.deprecatedChatId, requestedRomeSessionId);
+      prepared = resumed.replace({ deprecatedChatId: requestedRomeSessionId });
+      await deps.sessionRepository.replace(resumed, prepared);
+      resumed = undefined;
     }
   }
 
-  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv7();
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
-  // A caller that names no conversation still serves the one the row recorded.
+  const session =
+    prepared ??
+    resumed ??
+    Session.create(key.agentName, {
+      continuityKey: key.channelThreadKey || undefined,
+      workingDir,
+      deprecatedChatId: requestedRomeSessionId,
+    });
+  const sessionId = session.id;
+  // A caller that names no conversation still serves the one the session recorded.
   const recordedConversation = requestedRomeSessionId
     ? undefined
-    : await findRecordedConversation(deps.webchatRepo, resumeResult?.chatId ?? preparedChatId);
+    : await findRecordedConversation(deps.webchatRepo, session.deprecatedChatId ?? undefined);
   const conversation: SessionConversation | undefined = requestedRomeSessionId
     ? { origin: "named", id: requestedRomeSessionId }
     : recordedConversation && { origin: "recorded", ...recordedConversation };
-  const isNewSession = !resumeResult;
-  const providerThreadId = resumeResult?.providerThreadId ?? undefined;
+  const isNewSession = !resumed;
+  const providerThreadId = resumed?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
   // Precedence: docs/concepts/sessions.md#model-pin.
   const sessionPin =
-    resumeResult?.provider && resumeResult.model
-      ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
+    resumed?.provider && resumed.model
+      ? { providerId: resumed.provider as ProviderId, model: resumed.model }
       : undefined;
   // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. Only a Concierge chat also restores it over a pin, so its
@@ -993,24 +982,15 @@ async function openSession(
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
-  if (isNewSession && !preparedSessionId) {
-    const dbSession: DbAgentSession = {
-      id: sessionId,
-      agentName: key.agentName,
-      channelThreadKey: key.channelThreadKey,
-      chatId: requestedRomeSessionId,
-      workingDir,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
-      status: "active",
-    };
-    await deps.sessionManager.createSession(dbSession);
-  } else if (preparedSessionId) {
-    await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
-  } else if (requestedRomeSessionId && !resumeResult?.chatId) {
-    await deps.sessionsRepo.fillChatId(sessionId, requestedRomeSessionId);
+  if (prepared) {
+    prepared.moveTo(workingDir);
+    await deps.sessionRepository.save(prepared);
+  } else if (!resumed) {
+    await deps.sessionRepository.add(session);
+  } else if (requestedRomeSessionId && session.deprecatedRecordChat(requestedRomeSessionId)) {
+    await deps.sessionRepository.save(session);
   } else {
-    warnOnConversationMismatch(key, sessionId, resumeResult?.chatId, requestedRomeSessionId);
+    warnOnConversationMismatch(key, sessionId, session.deprecatedChatId, requestedRomeSessionId);
   }
 
   let structuredOutputValidator: CompiledOutputSchema | undefined;
@@ -1652,24 +1632,20 @@ async function openSession(
     initialResolution = await deps.modelResolver.getModelProvider(
       resolveAgentModelRequest(config, selectionId, sessionPin),
     );
-    modelSession = await openModelSession(
-      initialResolution,
-      resumeResult?.provider,
-      providerThreadId,
-    );
+    modelSession = await openModelSession(initialResolution, resumed?.provider, providerThreadId);
     threadResumed =
-      providerThreadId !== undefined &&
-      resumeResult?.provider === initialResolution.modelProvider.id;
+      providerThreadId !== undefined && resumed?.provider === initialResolution.modelProvider.id;
   }
   // A resume the caller moved to another dir now writes its transcript there,
   // so the row follows it once the provider has opened.
-  if (resumeResult && resumeResult.workingDir !== workingDir) {
-    await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
+  if (resumed && resumed.workingDir !== workingDir) {
+    resumed.moveTo(workingDir);
+    await deps.sessionRepository.save(resumed);
   }
 
   impl = new AgentSessionImpl({
     key,
-    sessionId,
+    session,
     conversation,
     modelSession,
     deps,
@@ -1687,8 +1663,8 @@ async function openSession(
     threadResumed,
     // The row recorded a thread this open does not resume: another provider
     // now runs the chat, and its new thread has seen none of it.
-    replacedThread: !threadResumed && !!resumeResult?.providerThreadId,
-    previousModel: resumeResult?.model ?? undefined,
+    replacedThread: !threadResumed && !!resumed?.providerThreadId,
+    previousModel: resumed?.model ?? undefined,
     openModelSession,
     toolCount:
       (initialResolution
@@ -1714,7 +1690,7 @@ async function openSession(
 
 interface ImplArgs {
   key: AgentSessionKey;
-  sessionId: string;
+  session: Session;
   conversation?: SessionConversation;
   modelSession: ModelSession;
   deps: ManagerDeps;
@@ -1937,6 +1913,8 @@ class ForkStreamQueue implements AsyncIterable<StreamAgentEvent> {
 class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
+  /** The stored session this one runs, which each turn and touch is recorded on. */
+  private readonly session: Session;
   conversation?: SessionConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
@@ -2003,8 +1981,6 @@ class AgentSessionImpl implements AgentSession {
    * this model (never a tier re-map) once a pin exists.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
-  /** Last effort written to the session row, so an unchanged effort skips the write. */
-  private storedReasoningEffort?: string;
   private openModelSession: ImplArgs["openModelSession"];
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
@@ -2027,7 +2003,8 @@ class AgentSessionImpl implements AgentSession {
 
   constructor(args: ImplArgs) {
     this.key = args.key;
-    this.sessionId = args.sessionId;
+    this.session = args.session;
+    this.sessionId = args.session.id;
     this.conversation = args.conversation;
     this.modelSession = args.modelSession;
     this.deps = args.deps;
@@ -2165,7 +2142,6 @@ class AgentSessionImpl implements AgentSession {
       );
       this.modelSession = next;
       this.modelSessionAvailable = true;
-      this.providerInfoStored = false;
       if (resumeThreadId === undefined) {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
@@ -2254,7 +2230,7 @@ class AgentSessionImpl implements AgentSession {
           sink.outputSchemaSuspended = true;
         }
         this.trackTurnMetrics(msg);
-        await this.deps.sessionsRepo.touch(this.sessionId);
+        await this.touchSession();
 
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
           sink.pendingSubagentToolUses.set(msg.id, msg);
@@ -2312,10 +2288,8 @@ class AgentSessionImpl implements AgentSession {
           if (outbound.type === "result") {
             const interrupted =
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
-            if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
-            await this.maybePersistProviderInfo();
+            await this.persistTurn(session, sink.turnId, interrupted);
             if (sink.carriesContinuation) this.continuationPending = false;
-            await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2551,8 +2525,6 @@ class AgentSessionImpl implements AgentSession {
     this.finalizeTurn(sink, terminal);
   }
 
-  private providerInfoStored = false;
-
   private mayCall(actionName: string): boolean {
     const canonical = this.deps.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
     return this.deps.actionRegistry
@@ -2560,33 +2532,39 @@ class AgentSessionImpl implements AgentSession {
       .some((action) => action.config.name === canonical);
   }
 
-  private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
-    if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
-    try {
-      await this.deps.sessionsRepo.setReasoningEffort(this.sessionId, reasoningEffort);
-      this.storedReasoningEffort = reasoningEffort;
-    } catch (err) {
-      log.warn("failed to persist session reasoning effort", {
-        sessionId: this.sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  private async touchSession(): Promise<void> {
+    this.session.touch();
+    await this.deps.sessionRepository.save(this.session);
   }
 
-  private async maybePersistTurnCheckpoint(session: ModelSession, turnId: string): Promise<void> {
+  /**
+   * Records what the turn ran on: the provider, its native thread, the
+   * concrete model (the session model pin), the applied effort, and the
+   * turn's checkpoint, so a fork can branch at it. An interrupted turn has no
+   * checkpoint to branch at. The checkpoint is written before `turn_end` is
+   * published, so an immediate branch never falls back to a later thread head.
+   */
+  private async persistTurn(
+    session: ModelSession,
+    turnId: string,
+    interrupted: boolean,
+  ): Promise<void> {
     const checkpointId = session.lastCompletedTurnCheckpoint;
-    const providerThreadId = session.providerThreadId;
-    if (!checkpointId || !providerThreadId) return;
     try {
-      await this.deps.sessionsRepo.setTurnCheckpoint({
-        sessionId: this.sessionId,
-        turnId,
+      this.session.recordTurn({
         provider: session.providerId,
-        providerThreadId,
-        checkpointId,
+        providerThreadId: session.providerThreadId,
+        model: session.model,
+        reasoningEffort: session.appliedReasoningEffort,
+        checkpoint: !interrupted && checkpointId ? { turnId, checkpointId } : undefined,
       });
+      await this.deps.sessionRepository.save(this.session);
+      // The pin becomes readable only once recorded: later turns of this live
+      // session now resolve exactly this model, matching what a cold resume
+      // of the row would do.
+      this.sessionPin = { providerId: session.providerId, model: session.model };
     } catch (err) {
-      log.warn("failed to persist provider turn checkpoint", {
+      log.warn("failed to persist session turn", {
         sessionId: this.sessionId,
         turnId,
         provider: session.providerId,
@@ -2620,72 +2598,27 @@ class AgentSessionImpl implements AgentSession {
       return;
     }
     try {
-      await this.deps.sessionManager.createSession({
-        id: forkSessionId,
-        agentName: this.key.agentName,
-        channelThreadKey,
-        // A persisted fork's conversation is minted under the fork's own id.
-        chatId: forkSessionId,
+      const fork = Session.create(this.key.agentName, {
+        // The fork's chat and its turn's events already carry the id the
+        // fork minted when its turn started.
+        deprecatedId: forkSessionId,
+        continuityKey: channelThreadKey,
         workingDir: this.workingDir,
-        createdAt: new Date(),
-        lastActiveAt: new Date(),
-        status: "active",
+        // A persisted fork's conversation is minted under the fork's own id.
+        deprecatedChatId: forkSessionId,
       });
-      await this.deps.sessionsRepo.setProviderInfo(
-        forkSessionId,
-        forkSession.providerId,
+      fork.recordTurn({
+        provider: forkSession.providerId,
         providerThreadId,
-        forkSession.model,
-      );
+        model: forkSession.model,
+        reasoningEffort: forkSession.appliedReasoningEffort,
+      });
+      await this.deps.sessionRepository.add(fork);
     } catch (err) {
       log.warn("failed to persist fork thread; the branch stays one-shot", {
         sessionId: this.sessionId,
         forkSessionId,
         channelThreadKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-    const reasoningEffort = forkSession.appliedReasoningEffort;
-    if (!reasoningEffort) return;
-    try {
-      await this.deps.sessionsRepo.setReasoningEffort(forkSessionId, reasoningEffort);
-    } catch (err) {
-      log.warn("failed to persist fork reasoning effort", {
-        sessionId: this.sessionId,
-        forkSessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  /**
-   * Persist which provider produced the successful turn, its native thread id,
-   * and the concrete model that ran (the session model pin).
-   */
-  private async maybePersistProviderInfo(): Promise<void> {
-    if (this.providerInfoStored) return;
-    const identity = {
-      providerId: this.modelSession.providerId,
-      providerThreadId: this.modelSession.providerThreadId,
-      model: this.modelSession.model,
-    };
-    try {
-      await this.deps.sessionsRepo.setProviderInfo(
-        this.sessionId,
-        identity.providerId,
-        identity.providerThreadId,
-        identity.model,
-      );
-      this.providerInfoStored = true;
-      // The pin becomes readable only once recorded: later turns of
-      // this live session now resolve exactly this model, matching what a
-      // cold resume of the row would do.
-      this.sessionPin = { providerId: identity.providerId, model: identity.model };
-    } catch (err) {
-      log.warn("failed to persist session provider info", {
-        sessionId: this.sessionId,
-        provider: identity.providerId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -3143,7 +3076,7 @@ class AgentSessionImpl implements AgentSession {
       this.lastActiveAt = Date.now();
       this.emitStatus();
       try {
-        await this.deps.sessionsRepo.touch(this.sessionId);
+        await this.touchSession();
       } catch (err) {
         log.warn("failed to touch source session after fork", {
           sessionId: this.sessionId,

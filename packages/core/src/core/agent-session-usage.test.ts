@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
+import { SessionRepository } from "../sessions/session-repository.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import type { UsageFunding } from "../usage/events.js";
@@ -16,7 +16,6 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
@@ -108,7 +107,6 @@ describe("AgentSession turn usage", () => {
     };
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
-    const sessionsRepo = new SessionsRepository(testDb.db);
     rs.spyOn(promptBuilder, "build").mockReturnValue("Usage test prompt");
     const turnMiddleware: TurnMiddlewareChain = {
       loadFromCatalog: async () => [],
@@ -121,8 +119,7 @@ describe("AgentSession turn usage", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
-        sessionsRepo,
+        sessionRepository: new SessionRepository(testDb.db, artifactIdentity),
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),

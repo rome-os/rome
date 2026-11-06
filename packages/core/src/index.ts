@@ -143,6 +143,7 @@ import { AppConnectionAccessRepository } from "./db/repositories/app-connection-
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { AgentLoader } from "./core/agent-loader.js";
 import { SessionManager } from "./core/session-manager.js";
+import { SessionRepository } from "./sessions/session-repository.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
@@ -771,6 +772,7 @@ async function main() {
   artifactLoadFailuresBooted = true;
   artifactLoadFailureReporter.report("boot");
   const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new SessionRepository(db, artifactIdentity);
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
@@ -1099,8 +1101,7 @@ async function main() {
     {
       agentLoader,
       appCatalog,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       promptBuilder,
       actionRegistry,
       modelResolver,

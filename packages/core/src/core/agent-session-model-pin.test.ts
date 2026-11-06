@@ -24,6 +24,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
+import { SessionRepository } from "../sessions/session-repository.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import {
   createEmptyLegacyArtifactBindings,
@@ -86,6 +87,7 @@ describe("agent model pins through AgentSessionManager", () => {
   let loader: AgentLoader;
   let sessionManager: SessionManager;
   let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
@@ -110,8 +112,7 @@ describe("agent model pins through AgentSessionManager", () => {
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager,
-        sessionsRepo,
+        sessionRepository,
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
@@ -141,6 +142,7 @@ describe("agent model pins through AgentSessionManager", () => {
     loader = new AgentLoader(artifactIdentity);
     sessionsRepo = new SessionsRepository(testDb.db);
     sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
     state = healthyState();
