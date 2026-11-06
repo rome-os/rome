@@ -5,7 +5,8 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { actionExecutionContext } from "../../actions/context.js";
-import { canOpenChat } from "../../concierge/privacy.js";
+import { chatAccess, chatAccessOver } from "../../concierge/privacy.js";
+import { type SessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import type { ChannelSurface } from "../../core/agent-session.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { Channel } from "../connected-accounts/connected-account.js";
@@ -19,19 +20,44 @@ export const WEBCHAT_CHANNEL = "webchat";
  *  own reply, so prompts carry no unseen messages. */
 export const WEBCHAT_SURFACE: ChannelSurface = { interactiveCards: true, promptContext: false };
 
-/**
- * The dashboard chat a history read is made from, when an app's action reads
- * through the worker boundary. An action run in this process carries it in
- * its own context instead.
- */
-export const webchatHistoryReader = new AsyncLocalStorage<{ chatId: string | null }>();
+/** Who reads dashboard history: the person accountable for the turn, and the chat it runs in. */
+interface HistoryReader {
+  actor?: SessionActor;
+  chatId: string | null;
+}
 
-/** The chat whose turn reads history, or null for a read no chat's turn made. */
-function readingChat(): string | null {
+/**
+ * The reader of a history read made through the worker boundary by an app's
+ * action. An action run in this process carries it in its own context instead.
+ */
+export const webchatHistoryReader = new AsyncLocalStorage<HistoryReader>();
+
+function historyReader(): HistoryReader {
   const given = webchatHistoryReader.getStore();
-  if (given) return given.chatId;
-  const context = actionExecutionContext.getStore()?.channelContext;
-  return context?.channel === WEBCHAT_CHANNEL && context.threadId ? context.threadId : null;
+  if (given) return given;
+  const store = actionExecutionContext.getStore();
+  const context = store?.channelContext;
+  return {
+    actor: store?.actor,
+    chatId: context?.channel === WEBCHAT_CHANNEL && context.threadId ? context.threadId : null,
+  };
+}
+
+/**
+ * Whose chats a history read may show. A person's turn reads as that person,
+ * whoever owns the chat it runs in, since ordinary chats are open to every
+ * dashboard user. A turn no person sent (a routine, a system turn) reads as
+ * the owner of the Concierge or task chat it runs in, and as nobody elsewhere,
+ * so it sees no one's Concierge or task chats.
+ */
+async function readerOwner(
+  webchatRepo: WebChatRepository,
+  reader: HistoryReader,
+): Promise<string | null> {
+  const person = reader.actor && reader.actor.kind !== "anonymous" ? reader.actor : undefined;
+  if (person) return sessionOwnerKey(person);
+  if (!reader.chatId) return null;
+  return chatAccess((id) => webchatRepo.getSession(id), null).privateOwner(reader.chatId);
 }
 
 /** A query naming no `since` reads the last day, as a live read does. */
@@ -61,15 +87,15 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
         const lines = await readWebchatMessages(webchatRepo, chatId ?? null, from);
         // Reversed before the sort, so lines sharing a timestamp come newest
         // first too.
-        // A Concierge chat and its task chats are their owner's alone, so a
-        // read made from someone else's chat leaves them out. A read no chat's
-        // turn made is in-process work, and reads as the guardian.
-        const reader = readingChat();
-        const readerChat = reader ? await webchatRepo.getSession(reader) : null;
-        const owner = readerChat?.ownerKey || "guardian";
+        // A Concierge chat and its task chats are their owner's alone, by the
+        // same policy the chat routes use.
+        const access = chatAccessOver(
+          await webchatRepo.listChatLineage(),
+          await readerOwner(webchatRepo, historyReader()),
+        );
         const allowed = new Map<string, boolean>();
         for (const id of new Set(lines.map((message) => message.chatId))) {
-          allowed.set(id, await canOpenChat((chatId) => webchatRepo.getSession(chatId), id, owner));
+          allowed.set(id, await access.canOpen(id));
         }
         const newestFirst = lines
           .filter((message) => allowed.get(message.chatId) === true)

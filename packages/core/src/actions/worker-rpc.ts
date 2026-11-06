@@ -546,11 +546,13 @@ export class WorkerRpcServer {
       ChannelsQueryParams,
       params,
     );
-    // The dashboard chat reads as the chat the calling action's turn runs in.
-    const caller = context?.callerActionContext?.channelContext;
+    // The dashboard chat reads as the person accountable for the calling
+    // action's turn, in the chat it runs in.
+    const caller = context?.callerActionContext;
+    const thread = caller?.channelContext;
     const readingChat =
-      caller?.channel === WEBCHAT_CHANNEL && caller.threadId ? caller.threadId : null;
-    return await webchatHistoryReader.run({ chatId: readingChat }, () =>
+      thread?.channel === WEBCHAT_CHANNEL && thread.threadId ? thread.threadId : null;
+    return await webchatHistoryReader.run({ actor: caller?.actor, chatId: readingChat }, () =>
       this.services.channelsService.query(channel, {
         ...(chatId ? { chatId: chatId as ChatId } : {}),
         ...(since ? { since: new Date(since) } : {}),

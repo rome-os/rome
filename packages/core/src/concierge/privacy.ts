@@ -88,6 +88,8 @@ export function chatAccess(
     return found;
   };
   return {
+    /** The person a chat is private to along its line of forks, or null when it is open to all. */
+    privateOwner: (chatId: string) => lineOwner(chatId, 0),
     /** Whether the owner may open the chat. One that does not exist is open, and its caller answers as it does today. */
     async canOpen(chatId: string): Promise<boolean> {
       const to = await lineOwner(chatId, 0);

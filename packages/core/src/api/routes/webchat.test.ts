@@ -317,6 +317,43 @@ describe("Webchat API", () => {
       [...new Set((await read(from)).map((m) => m.chatId))].sort();
     expect(await chatsOf("visitor-main")).toEqual(["visitor-main"]);
     expect(await chatsOf("concierge")).toEqual(["concierge"]);
+
+    // In an ordinary chat anyone may write in, a read is the sending person's,
+    // whoever owns the chat, and a turn no person sent sees no Concierge chat.
+    for (const [id, ownerKey] of [
+      ["guardian-plain", "guardian"],
+      ["visitor-plain", "visitor:a"],
+    ] as const) {
+      await deps.webchatRepo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+      await deps.webchatRepo.addBackendMessage(id, `turn-${id}`, [
+        { type: "text", content: `said in ${id}` },
+      ]);
+    }
+    const readAs = async (actor: typeof guardian | typeof visitor | undefined, from: string) =>
+      [
+        ...new Set(
+          (
+            await webchatHistoryReader.run({ actor, chatId: from }, () =>
+              channel.messages!.query({ since: new Date(0) }),
+            )
+          ).map((m) => m.chatId),
+        ),
+      ].sort();
+    const plain = ["guardian-plain", "visitor-plain"];
+    expect(await readAs(visitor, "guardian-plain")).toEqual([...plain, "visitor-main"].sort());
+    expect(await readAs(guardian, "visitor-plain")).toEqual(["concierge", ...plain].sort());
+    expect(await readAs(undefined, "guardian-plain")).toEqual(plain);
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
