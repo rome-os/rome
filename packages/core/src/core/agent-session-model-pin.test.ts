@@ -8,7 +8,10 @@ import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import {
+  type AgentTurnFailedBeforeStart,
+  createAgentLifecycleDispatcher,
+} from "./agent-lifecycle.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -99,6 +102,7 @@ describe("agent model pins through AgentSessionManager", () => {
   function createManager(
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
+    lifecycleDispatcher = createAgentLifecycleDispatcher(),
   ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -121,7 +125,7 @@ describe("agent model pins through AgentSessionManager", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        lifecycleDispatcher,
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },
@@ -280,6 +284,30 @@ describe("agent model pins through AgentSessionManager", () => {
     state.codex.quotaExhausted = false;
     await collect(session.sendTurn({ prompt: "retry" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
+  });
+
+  it("tells in-process listeners once of a later turn that fails before it starts", async () => {
+    const lifecycle = createAgentLifecycleDispatcher();
+    const finished: string[] = [];
+    const failedBeforeStart: AgentTurnFailedBeforeStart[] = [];
+    lifecycle.onFinished((event) => finished.push(event.turn.turnId));
+    lifecycle.onFailedBeforeStart((event) => failedBeforeStart.push(event));
+    const session = await createManager(false, false, lifecycle).acquire(key, {
+      workingDir: directory,
+    });
+    const first = session.sendTurn({ prompt: "first" });
+    await collect(first.events);
+    state.codex.quotaExhausted = true;
+    const blocked = session.sendTurn({ prompt: "blocked" });
+    await collect(blocked.events);
+
+    expect(finished).toEqual([first.turnId]);
+    expect(failedBeforeStart).toEqual([
+      {
+        turn: expect.objectContaining({ turnId: blocked.turnId }),
+        error: expect.stringContaining("Selected model provider is unavailable"),
+      },
+    ]);
   });
 
   it("enforces known model entitlements instead of substituting a tier model", async () => {

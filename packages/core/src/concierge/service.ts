@@ -17,6 +17,7 @@ import {
   WEBCHAT_LARGE_MODEL_SELECTIONS,
   type ModelSelectionId,
 } from "../core/model-selector.js";
+import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import {
   quotaSwitchTarget,
@@ -106,6 +107,7 @@ export class ConciergeService {
   private creating: Promise<string> | null = null;
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
@@ -317,5 +319,15 @@ export class ConciergeService {
   /** A task chat was deleted. Its row stays, unlinked; the Concierge hears of it quietly. */
   chatDeleted(taskId: string): void {
     this.taskEvents?.mark({ taskId, kind: "chat_deleted", urgent: false });
+  }
+
+  /** Where a turn that failed before it started is told, once {@link startConciergeEvents} runs. */
+  attachFailedBeforeStart(handler: ((event: AgentTurnFailedBeforeStart) => void) | null): void {
+    this.failedBeforeStart = handler;
+  }
+
+  /** A dashboard turn failed before any agent session opened, so nothing else tells of it. */
+  turnFailedBeforeStart(event: AgentTurnFailedBeforeStart): void {
+    this.failedBeforeStart?.(event);
   }
 }
