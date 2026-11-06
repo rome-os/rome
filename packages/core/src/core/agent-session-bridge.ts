@@ -257,6 +257,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 try {
                   liveStream = this.turnStreams.register({
                     sessionId: msg.sessionId,
+                    // A dashboard turn's chat is its thread; the session id is
+                    // the agent's runtime session, not a chat.
+                    ...(thread?.channel === "webchat" && thread.threadId
+                      ? { chatId: thread.threadId }
+                      : {}),
                     turnId: msg.turnId,
                     agentName: session.key.agentName,
                     ...(thread?.connectionId

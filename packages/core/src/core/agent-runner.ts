@@ -477,6 +477,8 @@ export class AgentRunner {
               // without risking the source session that owns it.
               liveStream = this.turnStreams.register({
                 sessionId: message.sessionId,
+                // The fork is a chat of its own once its row is saved.
+                ...(recorder ? { chatId: message.sessionId } : {}),
                 turnId: message.turnId,
                 agentName: params.agentName,
               });

@@ -1,9 +1,5 @@
-import {
-  canOpenChat,
-  isConciergeChat,
-  isMainConciergeChat,
-  privateOwnerOf,
-} from "../../concierge/service.js";
+import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
+import { canOpen } from "../../concierge/privacy.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -921,22 +917,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return { response: c.json({ error: "Session not found" }, 404) as Response };
   };
 
-  /**
-   * Whose private chat each live stream's turn is, read when the stream opens.
-   * It holds until the stream is evicted, so a chat deleted mid-turn keeps its
-   * buffered turn from everyone but its owner.
-   */
-  const streamPrivateTo = new WeakMap<ActiveWebchatStream, Promise<string | null>>();
-
   /** Append a stream to the per-session FIFO queue and the turnId index. */
   const enqueueStream = (sessionId: string, stream: ActiveWebchatStream): void => {
-    streamPrivateTo.set(
-      stream,
-      deps.webchatRepo
-        .getSession(sessionId)
-        .then(privateOwnerOf)
-        .catch(() => null),
-    );
     const list = activeStreams.get(sessionId);
     if (list) {
       list.push(stream);
@@ -2124,22 +2106,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     return true;
   };
+  // A turn answers for the chat it runs in: a dashboard turn's, a fork's or a
+  // subagent's, as its stream records it from its start, else the stored
+  // turn's. A turn whose chat is gone is not found to anyone, so a buffered
+  // turn of a deleted private chat cannot be replayed.
   const turnOpenTo = async (turnId: string, owner: string | null) => {
-    // A live dashboard turn answers for the chat it opened in, even once that
-    // chat is deleted.
-    const stream = streamsByTurnId.get(turnId);
-    const privateTo = stream ? await streamPrivateTo.get(stream) : null;
-    if (privateTo && privateTo !== owner) return false;
-    // A fork's, subagent's or backend turn is in the stream registry from its
-    // start, before any of its messages is stored.
-    return chatsOpenTo(
-      [
-        stream?.sessionId,
-        deps.agentTurnStreamRegistry.get(turnId)?.sessionId,
-        await deps.webchatRepo.sessionIdOfTurn(turnId),
-      ],
-      owner,
-    );
+    const chatIds = [
+      streamsByTurnId.get(turnId)?.sessionId,
+      deps.agentTurnStreamRegistry.get(turnId)?.chatId,
+      await deps.webchatRepo.sessionIdOfTurn(turnId),
+    ];
+    for (const chatId of chatIds) {
+      if (!chatId) continue;
+      const chat = await deps.webchatRepo.getSession(chatId);
+      if (!chat || !canOpen(chat, owner)) return false;
+    }
+    return true;
   };
   const messageOpenTo = async (messageId: string, owner: string | null) =>
     chatsOpenTo([await deps.webchatRepo.sessionIdOfMessage(messageId)], owner);

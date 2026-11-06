@@ -280,6 +280,7 @@ describe("Webchat API", () => {
     });
     const turn = deps.agentTurnStreamRegistry.register({
       sessionId: "helper",
+      chatId: "helper",
       turnId: "helper-turn",
       agentName: "researcher",
     });
@@ -4178,12 +4179,67 @@ describe("Webchat API", () => {
       );
       expect(asVisitor.status).toBe(404);
       expect(await asVisitor.json()).toEqual({ error: "Not found" });
+      // A turn whose chat is gone is not found to anyone, its owner included.
       const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
       const asGuardian = await runWithSessionActor(guardian, () =>
         app.request(`/chat/turns/${turnId}/stream`),
       );
-      expect(asGuardian.status).toBe(200);
-      await asGuardian.text();
+      expect(asGuardian.status).toBe(404);
+    });
+
+    it("keeps a deleted private chat's registered fork turn from everyone, and an agent's runtime turn open", async () => {
+      await deps.webchatRepo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      await deps.webchatRepo.ensureRomeSession({
+        id: "branch",
+        type: "fork",
+        name: "Branch",
+        agentName: null,
+        parentSessionId: "guardian-task",
+        trigger: { triggerKind: "fork", triggerName: "branch" },
+      });
+      const fork = deps.agentTurnStreamRegistry.register({
+        sessionId: "branch",
+        chatId: "branch",
+        turnId: "fork-turn",
+        agentName: "main",
+      });
+      // A turn whose stream names only the agent's runtime session, as a
+      // channel turn's does, belongs to no chat and stays as before.
+      const channelTurn = deps.agentTurnStreamRegistry.register({
+        sessionId: "runtime-session",
+        turnId: "channel-turn",
+        agentName: "main",
+      });
+      fork.finish();
+      channelTurn.finish();
+      const app = createWebchatRuntime(deps).routes;
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const status = async (actor: typeof visitor | typeof guardian, turnId: string) =>
+        (await runWithSessionActor(actor, () => app.request(`/chat/turns/${turnId}/stream`)))
+          .status;
+      expect(await status(visitor, "fork-turn")).toBe(404);
+      expect(await status(guardian, "fork-turn")).toBe(200);
+      // The fork goes while its finished turn is still buffered for replay.
+      await deps.webchatRepo.deleteSession("branch");
+      expect(await status(visitor, "fork-turn")).toBe(404);
+      expect(await status(guardian, "fork-turn")).toBe(404);
+      expect(await status(visitor, "channel-turn")).toBe(200);
     });
 
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
