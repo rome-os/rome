@@ -28,7 +28,7 @@ struct RomeApp: App {
 
 /// Owns the model, because pushes arrive here: the APNs token, and a tap on a
 /// notification, also one that launches the app.
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate {
     let model = AppModel()
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -44,16 +44,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // No token this launch; the next launch asks again.
     }
+}
 
+// The completion-handler forms, called on the main thread: the async forms
+// return to UIKit off it, and UIKit aborts the app when a tap's handler does.
+extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
     /// While the app is open the live events already update the chat, so a
     /// push shows no banner and plays no sound.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        []
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([])
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let target = PushTarget(userInfo: response.notification.request.content.userInfo) else { return }
-        await model.openFromPush(target)
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let target = PushTarget(userInfo: response.notification.request.content.userInfo) {
+            Task { await model.openFromPush(target) }
+        }
+        completionHandler()
     }
 }
 
