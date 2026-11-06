@@ -1,13 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
-import {
-  applyTaskUpsert,
-  formatTaskTime,
-  groupTasks,
-  needsYouCount,
-  pillState,
-  taskTime,
-} from "./tasks";
+import { applyTaskUpsert, formatTaskTime, groupTasks, pillState, taskTime } from "./tasks";
 
 const NOW = Date.UTC(2026, 9, 29, 12);
 const DAY = 86_400_000;
@@ -131,7 +124,6 @@ describe("pillState", () => {
 
   it("does not count archived rows", () => {
     expect(pillState([task("needs_user", { archivedAt: NOW })])).toEqual({ kind: "idle" });
-    expect(needsYouCount([task("needs_user"), task("needs_user", { archivedAt: NOW })])).toBe(1);
   });
 });
 

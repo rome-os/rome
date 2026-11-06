@@ -46,8 +46,6 @@
     "conciergeUnread_other": "Concierge，{{label}} 条未读消息",
     "conciergeUnreadBadge_one": "{{label}} 条未读消息",
     "conciergeUnreadBadge_other": "{{label}} 条未读消息",
-    "conciergeNeedsYou_one": "{{count}} 个任务等你处理",
-    "conciergeNeedsYou_other": "{{count}} 个任务等你处理",
     "newTopicChat": "新建话题对话",
     "topicChatActions": "{{name}} 的操作",
     "topicChatUnread_one": "{{name}}，{{label}} 条未读消息",

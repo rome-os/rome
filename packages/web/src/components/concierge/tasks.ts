@@ -91,8 +91,6 @@ export function pillState(tasks: readonly ConciergeTaskDto[]): PillState {
 export const tasksOfChat = (tasks: readonly ConciergeTaskDto[], chatId: string | null) =>
   tasks.filter((task) => task.conciergeChat.id === chatId);
 
-export const needsYouCount = (tasks: readonly ConciergeTaskDto[]) => countOf(tasks, "needs_user");
-
 /**
  * The list with one row written. A row archived by the Concierge leaves the
  * list. An event older than the row held (a late one) is ignored.

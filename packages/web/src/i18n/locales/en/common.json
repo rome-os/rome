@@ -47,8 +47,6 @@
     "conciergeUnread_other": "Concierge, {{label}} unread messages",
     "conciergeUnreadBadge_one": "{{label}} unread message",
     "conciergeUnreadBadge_other": "{{label}} unread messages",
-    "conciergeNeedsYou_one": "{{count}} task needs you",
-    "conciergeNeedsYou_other": "{{count}} tasks need you",
     "newTopicChat": "New topic chat",
     "topicChatActions": "Actions for {{name}}",
     "topicChatUnread_one": "{{name}}, {{label}} unread message",

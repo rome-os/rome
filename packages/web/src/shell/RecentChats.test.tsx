@@ -335,84 +335,46 @@ describe("RecentChats", () => {
       expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
     });
 
-    it("counts the tasks that need the guardian beside the unread badge, each badge with its own label", async () => {
+    it("shows no tasks badge, even when tasks need the guardian", async () => {
       server.unread = 3;
-      server.tasks = [
-        taskRow("a", "needs_user"),
-        taskRow("b", "needs_user"),
-        taskRow("c", "doing"),
-        taskRow("d", "needs_user", { archivedAt: 5 }),
-      ];
+      server.tasks = [taskRow("a", "needs_user"), taskRow("b", "needs_user")];
       mockConcierge();
       renderRecentChats();
-      const entry = await screen.findByRole("link", {
-        name: "Concierge, 3 unread messages, 2 tasks need you",
-      });
-      const needsYou = within(entry).getByRole("img", { name: "2 tasks need you" });
-      const unread = within(entry).getByRole("img", { name: "3 unread messages" });
-      expect(needsYou.hasAttribute("data-concierge-needs-you")).toBe(true);
-      expect(needsYou.textContent).toBe("2");
-      expect(unread.hasAttribute("data-concierge-unread")).toBe(true);
-      // Apart by shape and colour, and the warning count comes first.
-      expect(needsYou.className).toContain("rounded-8");
-      expect(needsYou.className).toContain("bg-warning-bg");
-      expect(unread.className).toContain("rounded-full");
-      expect(unread.className).toContain("bg-destructive-bg");
+      // The link's label is the unread count alone: the tasks live in the chat's pill.
+      const entry = await screen.findByRole("link", { name: "Concierge, 3 unread messages" });
       expect(
-        needsYou.compareDocumentPosition(unread) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+        within(entry)
+          .getAllByRole("img")
+          .map((badge) => badge.getAttribute("aria-label")),
+      ).toEqual(["3 unread messages"]);
+      expect(screen.queryByText(/tasks? needs? you/)).toBeNull();
     });
 
-    it("counts a single task that needs the guardian, with no unread badge", async () => {
-      server.tasks = [taskRow("a", "needs_user")];
+    it("puts the plus in the unread badge's place on hover or focus, so they never overlap", async () => {
+      server.unread = 3;
       mockConcierge();
       renderRecentChats();
-      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
-      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
+      const entry = await screen.findByRole("link", { name: "Concierge, 3 unread messages" });
+      const badge = entry.querySelector("[data-concierge-unread]") as HTMLElement;
+      const plus = screen.getByRole("button", { name: "New topic chat" });
+      // The badge hides exactly when the plus shows: on the row's hover or focus.
+      for (const state of ["group-hover/concierge", "group-focus-within/concierge"]) {
+        expect(badge.className).toContain(`${state}:invisible`);
+        expect(plus.className).toContain(`${state}:opacity-100`);
+      }
+      expect(plus.className).toContain("opacity-0");
+      // With a badge to show, a touch screen keeps the badge, not the plus.
+      expect(plus.className).not.toContain("touch-show");
     });
 
-    it("keeps the Needs you count while the Concierge chat is open", async () => {
-      server.unread = 3;
-      server.tasks = [taskRow("a", "needs_user")];
-      const fetchSpy = mockConcierge();
-      renderRecentChats("/chat/concierge");
-      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
-      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
-      expect(entry.querySelector("[data-concierge-needs-you]")).not.toBeNull();
-      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
-    });
-
-    it("shows no Needs you count when no task needs the guardian, and follows the Concierge's writes", async () => {
-      server.tasks = [taskRow("a", "doing")];
+    it("keeps the plus within reach on a touch screen while nothing is unread", async () => {
       mockConcierge();
-      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      renderRecentChats();
       await screen.findByRole("link", { name: "Concierge" });
-      expect(document.querySelector("[data-concierge-needs-you]")).toBeNull();
-      let socket!: FakeWebSocket;
-      act(() => {
-        socket = acceptLatestSocket();
-      });
-      expect(socket.sent).toContainEqual({ type: "subscribe", topic: "concierge.tasks" });
-
-      act(() =>
-        socket.receive({
-          type: "event",
-          topic: "concierge.tasks",
-          event: "task_upsert",
-          data: { task: taskRow("a", "needs_user", { updatedAt: 2 }) },
-        }),
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+      expect(screen.getByRole("button", { name: "New topic chat" }).className).toContain(
+        "touch-show",
       );
-      expect(await screen.findByRole("link", { name: "Concierge, 1 task needs you" })).toBeTruthy();
-
-      act(() =>
-        socket.receive({
-          type: "event",
-          topic: "concierge.tasks",
-          event: "task_upsert",
-          data: { task: taskRow("a", "done", { updatedAt: 3 }) },
-        }),
-      );
-      await waitFor(() => expect(document.querySelector("[data-concierge-needs-you]")).toBeNull());
     });
 
     it("shows no badge on the Concierge page", async () => {

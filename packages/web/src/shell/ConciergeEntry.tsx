@@ -1,6 +1,6 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, Ellipsis, ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
+import { Archive, Ellipsis, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -15,8 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
-import { needsYouCount, tasksOfChat } from "@/components/concierge/tasks";
-import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
 import {
@@ -34,13 +32,22 @@ const anyEvent = z.unknown();
 
 /**
  * The sidebar's Concierge entry, with a badge counting the agent messages the
- * guardian has not read. A new message recounts, and so does a read in this
- * tab; another tab or device catches up on its next focus refetch. The open
- * chat reads what arrives, so the entry shows no badge while it is active.
- * Beside it, a warning badge counts the tasks that need the guardian, and
- * stays while the chat is open: only the guardian's answer clears it.
+ * guardian has not read, and the plus that opens a blank topic chat. A new
+ * message recounts, and so does a read in this tab; another tab or device
+ * catches up on its next focus refetch. The open chat reads what arrives, so
+ * the entry shows no badge while it is active. The plus takes the badge's
+ * place while the row is hovered or focused, so the two never overlap. On a
+ * touch screen, which has no hover, it shows while there is nothing unread.
  */
-export function ConciergeEntry({ chatId, active }: { chatId: string; active: boolean }) {
+export function ConciergeEntry({
+  chatId,
+  active,
+  onNewTopic,
+}: {
+  chatId: string;
+  active: boolean;
+  onNewTopic: () => void;
+}) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const unread = useConciergeUnread(chatId);
@@ -55,56 +62,43 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   useSessionsChanged(recount);
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
-  // The main chat's own tasks: a topic chat's are counted in that chat.
-  const needsYou = needsYouCount(tasksOfChat(useConciergeTasks().tasks, chatId));
-  const needsYouLabel = t("recentChats.conciergeNeedsYou", { count: needsYou });
-  const unreadLabel = t("recentChats.conciergeUnread", { count, label });
-  const linkLabel =
-    count > 0 && needsYou > 0
-      ? `${unreadLabel}, ${needsYouLabel}`
-      : count > 0
-        ? unreadLabel
-        : needsYou > 0
-          ? `${t("recentChats.concierge")}, ${needsYouLabel}`
-          : undefined;
   return (
-    <Link
-      to={`/chat/${chatId}`}
-      className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
-      aria-label={linkLabel}
-    >
-      <span
-        className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-        aria-hidden
+    <div className="group/concierge relative flex items-center">
+      <Link
+        to={`/chat/${chatId}`}
+        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-label={count > 0 ? t("recentChats.conciergeUnread", { count, label }) : undefined}
       >
-        <RomeLogo className="size-4 shrink-0" aria-hidden />
-      </span>
-      <span className="flex-1 truncate">{t("recentChats.concierge")}</span>
-      {needsYou > 0 ? (
-        <Badge
-          variant="warning"
-          shape="square"
-          className="shrink-0 tabular-nums"
-          data-concierge-needs-you
-          role="img"
-          aria-label={needsYouLabel}
+        <span
+          className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+          aria-hidden
         >
-          <ListChecks aria-hidden />
-          {needsYou}
-        </Badge>
-      ) : null}
-      {count > 0 ? (
-        <Badge
-          variant="destructive"
-          className="shrink-0 tabular-nums"
-          data-concierge-unread
-          role="img"
-          aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-        >
-          {label}
-        </Badge>
-      ) : null}
-    </Link>
+          <RomeLogo className="size-4 shrink-0" aria-hidden />
+        </span>
+        <span className="flex-1 truncate">{t("recentChats.concierge")}</span>
+        {count > 0 ? (
+          <Badge
+            variant="destructive"
+            className="shrink-0 tabular-nums group-focus-within/concierge:invisible group-hover/concierge:invisible"
+            data-concierge-unread
+            role="img"
+            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+          >
+            {label}
+          </Badge>
+        ) : null}
+      </Link>
+      <IconButton
+        size="sm"
+        label={t("recentChats.newTopicChat")}
+        icon={<Plus aria-hidden />}
+        className={`absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-focus-within/concierge:opacity-100 group-hover/concierge:opacity-100 ${
+          count > 0 ? "" : "touch-show"
+        }`}
+        onClick={onNewTopic}
+        data-concierge-new-topic
+      />
+    </div>
   );
 }
 
@@ -121,7 +115,6 @@ export function ConciergeChats({
   mainChatId: string;
   activeSessionId: string | null | undefined;
 }) {
-  const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const topics = useConciergeChats().filter((chat) => !chat.main);
@@ -131,20 +124,12 @@ export function ConciergeChats({
   useSessionsChanged(refresh);
   return (
     <>
-      <div className="group/concierge relative flex items-center">
-        <div className="min-w-0 flex-1">
-          <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
-        </div>
-        <IconButton
-          size="sm"
-          label={t("recentChats.newTopicChat")}
-          icon={<Plus aria-hidden />}
-          className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/concierge:opacity-100"
-          // A blank topic chat, as New chat opens a blank chat: its first send creates it.
-          onClick={() => navigate("/chat", { state: { conciergeTopic: true } })}
-          data-concierge-new-topic
-        />
-      </div>
+      <ConciergeEntry
+        chatId={mainChatId}
+        active={activeSessionId === mainChatId}
+        // A blank topic chat, as New chat opens a blank chat: its first send creates it.
+        onNewTopic={() => navigate("/chat", { state: { conciergeTopic: true } })}
+      />
       {topics.map((chat) => (
         <ConciergeTopicEntry
           key={chat.id}
