@@ -30,6 +30,12 @@ import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
+import { resolveInstanceSlug } from "./lib/runtime.js";
+import {
+  applyInstanceSlug,
+  INSTANCE_SLUG_SETTING_KEY,
+  isInstanceSlug,
+} from "./lib/instance-env.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
@@ -398,6 +404,12 @@ async function main() {
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
 
+  // A slug adopted at runtime (POST /api/instance/adopt) outlives a crash of
+  // this process: the daemon respawns it with the container's original env (the
+  // pool slug), so the stored slug wins. Before the API and apps start.
+  const adoptedSlug = await settingsRepo.get<string>(INSTANCE_SLUG_SETTING_KEY);
+  if (isInstanceSlug(adoptedSlug)) applyInstanceSlug(adoptedSlug);
+
   // Instance token: the DB is the single runtime read path. A cloud VM
   // gets ROME_INSTANCE_TOKEN injected into its env — seed it into the DB so the
   // runtime reads one place (upserts every boot, so a rotated env token follows).
@@ -724,7 +736,7 @@ async function main() {
   appCatalog.subscribe(
     createAppOgImageSubscriber({
       store: ogImageStore,
-      host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
+      host: () => getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
     }),
   );
   let appBootConverged = false;
@@ -790,7 +802,7 @@ async function main() {
     // The provisioned inbox address lives on the live adapter (built from the
     // `inbox` grant); no settings fallback — the row carries pure config only.
     () => emailAdapterRef?.getAddress() || undefined,
-    getConfiguredInstanceOrigin() ?? undefined,
+    () => getConfiguredInstanceOrigin() ?? undefined,
   );
 
   // The cached system-prompt prefix bakes in app-derived context — the
@@ -1017,7 +1029,7 @@ async function main() {
     countdownMs: config.systemUpgradeCountdownMinutes * 60_000,
     // Gated behind the `auto_upgrade` rollout (keyed on instance slug). Resolved
     // live on each nightly probe so a flip takes effect without a restart.
-    isEnabled: () => resolveAutoUpgradeEnabled(config),
+    isEnabled: () => resolveAutoUpgradeEnabled(),
   });
 
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
@@ -1971,9 +1983,9 @@ async function main() {
   }
   const { installEnvGateOverrides } = await import("@rome-os/libs/feature-flags/env-overrides");
   const gateOverrides = installEnvGateOverrides(process.env);
-  const isCloudAuthEnabled = () => resolveCloudAuthEnabled(config, db);
+  const isCloudAuthEnabled = () => resolveCloudAuthEnabled(db);
   log.info("Cloud-auth gating configured", {
-    slug: config.instanceSlug ?? null,
+    slug: resolveInstanceSlug() ?? null,
     gateConfigured: shutdownFeatureFlags !== undefined,
     gateOverrides,
   });

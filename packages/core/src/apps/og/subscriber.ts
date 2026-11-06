@@ -58,8 +58,9 @@ async function generateOgImage(app: ResolvedApp, link: string | null): Promise<B
 
 export interface AppOgImageSubscriberOptions {
   store: OgImageStore;
-  /** Public host without scheme (`jessie.romeos.cc`); null hides the link line. */
-  host: string | null;
+  /** Public host without scheme (`jessie.romeos.cc`); null hides the link line.
+   *  A getter, read per render, so an adopted instance origin applies at once. */
+  host: () => string | null;
   generate?: (app: ResolvedApp, link: string | null) => Promise<Buffer>;
 }
 
@@ -116,7 +117,8 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
     void (async () => {
       const existing = await opts.store.stat(app.appId);
       if (existing && existing.mtimeMs > Date.parse(app.updatedAt)) return;
-      const link = opts.host ? `${opts.host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
+      const host = opts.host();
+      const link = host ? `${host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
       const png = await generate(app, link);
       await enqueue(app.appId, async () => {
         if (epochs.get(app.appId) !== epoch) return;

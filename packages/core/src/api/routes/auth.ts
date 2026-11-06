@@ -40,6 +40,10 @@ const PUBLIC_API_PATHS = [
   "/api/bootstrap",
   "/api/onboard/*",
   "/api/instance/enroll/*",
+  // A blank warm-pool instance adopts its tenant identity here, before any
+  // guardian exists. Exact path; the route itself refuses anything but a blank,
+  // unlinked, hosted instance, which is the boundary.
+  "/api/instance/adopt",
   "/api/oauth/*",
   // The connect return leg. The desktop shell hands provider sign-in to the
   // system browser (the Electron window has no platform authenticator, so a

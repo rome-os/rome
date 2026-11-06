@@ -2,6 +2,7 @@ import { requestSignerToken, SignerError, signerHealth } from "@rome-os/node-cor
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 import { type CloudProfile, readCloudProfile } from "./cloud-profile.js";
+import { readEnvInstanceToken } from "./instance-env.js";
 
 const log = createLogger("instance-identity");
 
@@ -192,11 +193,7 @@ export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<v
 
 // The token a hosted `.env` injects. Dev can ignore it to boot un-enrolled.
 function envInstanceToken(): string | null {
-  // Dev only: force the box to boot un-enrolled even when a token is in the env,
-  // so the dev stack exercises the real browser consent → enroll round trip
-  // instead of short-circuiting to the seeded token. Prod never sets this.
-  if (process.env.ROME_DEV_SKIP_TOKEN_SEED === "1") return null;
-  const envToken = process.env.ROME_INSTANCE_TOKEN?.trim();
+  const envToken = readEnvInstanceToken();
   return isValidInstanceToken(envToken) ? envToken : null;
 }
 

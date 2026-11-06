@@ -47,7 +47,7 @@ describe("createAppOgImageSubscriber", () => {
     const calls: Array<string | null> = [];
     const handler = createAppOgImageSubscriber({
       store,
-      host: "jessie.romeos.cc",
+      host: () => "jessie.romeos.cc",
       generate: async (_app, link) => {
         calls.push(link);
         return Buffer.from("png");
@@ -64,7 +64,7 @@ describe("createAppOgImageSubscriber", () => {
     let calls = 0;
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         calls += 1;
         return Buffer.from("png");
@@ -87,7 +87,7 @@ describe("createAppOgImageSubscriber", () => {
     let calls = 0;
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         calls += 1;
         return Buffer.from("png");
@@ -112,7 +112,7 @@ describe("createAppOgImageSubscriber", () => {
     const store = createOgImageStore(root);
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: () => new Promise((_r, reject) => setTimeout(() => reject(new Error("boom")), 10)),
     });
     const started = Date.now();
@@ -130,7 +130,7 @@ describe("createAppOgImageSubscriber", () => {
     });
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         await gate;
         return Buffer.from("stale");
@@ -150,7 +150,7 @@ describe("createAppOgImageSubscriber", () => {
     const gates = new Map<string, () => void>();
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async (app) => {
         await new Promise<void>((r) => gates.set(app.updatedAt, r));
         return Buffer.from(app.updatedAt);
@@ -180,7 +180,7 @@ describe("createAppOgImageSubscriber", () => {
     });
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         await gate;
         return Buffer.from("late");

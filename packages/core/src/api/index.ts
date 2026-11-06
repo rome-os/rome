@@ -54,6 +54,7 @@ import { terminalRoutes } from "./routes/terminal.js";
 import { desktopRoutes } from "./routes/desktop.js";
 import { authRoutes } from "./routes/auth.js";
 import { onboardRoutes } from "./routes/onboard.js";
+import { instanceAdoptRoutes } from "./routes/instance-adopt.js";
 import { instanceEnrollRoutes } from "./routes/instance-enroll.js";
 import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
@@ -161,6 +162,7 @@ export function buildApp(
   api.route("/", authRoutes(deps));
   api.route("/", onboardRoutes(deps));
   api.route("/", instanceEnrollRoutes(deps));
+  api.route("/", instanceAdoptRoutes(deps));
   api.route("/", cloudLoginRoutes(deps));
   api.route("/", visitorAuthRoutes(deps));
   api.route("/", oauthRoutes(deps));

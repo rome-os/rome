@@ -307,14 +307,15 @@ export class PromptBuilder {
    * provisioned, and the main-agent prefix is cached lazily on the first turn
    * (after boot/provision), so reading it live at cache time is sufficient.
    *
-   * @param romePublicOrigin This instance's own public web origin
-   * (`https://<slug>.<domain>`), or undefined when it has no public domain
-   * (local self-hosted). Static from env, so a plain value rather than a getter.
+   * @param romePublicOrigin Synchronous accessor for this instance's own public
+   * web origin (`https://<slug>.<domain>`), or undefined when it has no public
+   * domain (local self-hosted). A getter because a blank hosted instance
+   * adopts its tenant identity at runtime, after the builder is constructed.
    */
   constructor(
     private appCatalog?: Pick<AppCatalog, "listResolved">,
     private romeEmailAddress?: () => string | undefined,
-    private romePublicOrigin?: string,
+    private romePublicOrigin?: () => string | undefined,
   ) {
     this.projectRoot = getProjectRoot();
     this.coreRoot = getCoreRoot();
@@ -506,7 +507,7 @@ export class PromptBuilder {
       );
     }
 
-    const publicOrigin = this.romePublicOrigin?.trim();
+    const publicOrigin = this.romePublicOrigin?.()?.trim();
     if (publicOrigin) {
       lines.push(
         "",
