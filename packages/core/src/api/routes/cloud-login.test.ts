@@ -47,15 +47,7 @@ rs.mock("../../profile-memory.js", () => ({
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
-import {
-  COOKIE_NAME,
-  JWT_SECRET,
-  VISITOR_COOKIE_NAME,
-  verifySession,
-  verifyVisitorSession,
-} from "../../lib/auth.js";
-import { sessionActorMiddleware } from "../../lib/session-actor.js";
-import { approvalsRoutes } from "./approvals.js";
+import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../lib/auth.js";
 import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
 import {
   INSTANCE_TOKEN_SETTING_KEY,
@@ -991,31 +983,24 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
   });
 });
 
-describe("/api/auth/cloud/native/complete — instance_role", () => {
+describe("/api/auth/cloud/native/complete — guardian seat", () => {
   interface NativeBody {
     cookie_name?: string;
     session_token?: string;
-    expires_at?: string;
-    origin?: string;
     role?: string;
     error?: string;
   }
 
-  function allowList(...emails: string[]): DashboardAccessState {
-    const state = new DashboardAccessState();
-    state.setCloudEmailAccess(emails);
-    return state;
-  }
-
   // One native round trip: start, have the fake Rome Cloud sign `token`, then
-  // complete with the code. Returns the response and the app for follow-ups.
-  async function nativeSignIn(
-    token: { sub: string; email?: string; claims?: Record<string, unknown> },
-    overrides: Partial<TestDeps> = {},
-  ): Promise<{ res: Response; body: NativeBody; app: Hono }> {
+  // complete with the code.
+  async function nativeSignIn(token: {
+    sub: string;
+    email?: string;
+    claims?: Record<string, unknown>;
+  }): Promise<{ res: Response; body: NativeBody }> {
     setInstanceTokenInMemory("romeinst_existing");
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ ...token, nonce }) }));
-    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, overrides);
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
     const { state, nonce } = await nativeStart(app);
     romeCloud.setNonce(nonce);
     const res = await app.request("/api/auth/cloud/native/complete", {
@@ -1023,7 +1008,7 @@ describe("/api/auth/cloud/native/complete — instance_role", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state, code: "one-time-code", iss: ISSUER }),
     });
-    return { res, body: (await res.json()) as NativeBody, app };
+    return { res, body: (await res.json()) as NativeBody };
   }
 
   function guardianRow() {
@@ -1033,196 +1018,46 @@ describe("/api/auth/cloud/native/complete — instance_role", () => {
   it("signs the owner in when the account matches the guardian seat", async () => {
     insertGuardian({ accountId: "A", email: "owner@example.com" });
 
-    const { res, body } = await nativeSignIn({ sub: "A", claims: { instance_role: "owner" } });
+    const { res, body } = await nativeSignIn({ sub: "A" });
 
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ cookie_name: COOKIE_NAME, role: "owner" });
     expect(verifySession(body.session_token as string)).toEqual({ userId: "A" });
   });
 
-  it("refuses an owner role for another account and leaves the seat bound as it was", async () => {
+  it("refuses another account and leaves the seat bound as it was", async () => {
     insertGuardian({ accountId: "A", email: "owner@example.com" });
 
-    const { res, body } = await nativeSignIn({
-      sub: "B",
-      email: "other@example.com",
-      claims: { instance_role: "owner" },
-    });
+    const { res, body } = await nativeSignIn({ sub: "B", email: "other@example.com" });
 
     expect(res.status).toBe(403);
     expect(body).toEqual({ error: "not_owner" });
     expect(guardianRow()).toMatchObject({ accountId: "A", email: "owner@example.com" });
   });
 
-  it("treats a token with no role as the owner, still bound to the seat's account", async () => {
+  it("never issues a visitor session, whatever the token claims", async () => {
     insertGuardian({ accountId: "A" });
 
-    const mismatch = await nativeSignIn({ sub: "B" });
-    expect(mismatch.res.status).toBe(403);
-    expect(mismatch.body).toEqual({ error: "not_owner" });
-    expect(guardianRow()?.accountId).toBe("A");
+    const { res, body } = await nativeSignIn({
+      sub: "B",
+      email: "guest@example.com",
+      claims: { instance_role: "visitor" },
+    });
 
-    const match = await nativeSignIn({ sub: "A" });
-    expect(match.res.status).toBe(200);
-    expect(match.body).toMatchObject({ cookie_name: COOKIE_NAME, role: "owner" });
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "not_owner" });
   });
 
-  it("binds an unbound seat and creates a missing one from an owner sign-in", async () => {
+  it("binds an unbound seat and creates a missing one", async () => {
     insertGuardian({ accountId: null });
-    const bound = await nativeSignIn({ sub: "A", claims: { instance_role: "owner" } });
+    const bound = await nativeSignIn({ sub: "A" });
     expect(bound.res.status).toBe(200);
     expect(guardianRow()?.accountId).toBe("A");
 
     testDb.db.delete(guardianAuth).run();
-    const created = await nativeSignIn({
-      sub: "C",
-      email: "new@example.com",
-      claims: { instance_role: "owner" },
-    });
+    const created = await nativeSignIn({ sub: "C", email: "new@example.com" });
     expect(created.res.status).toBe(200);
     const [seat] = testDb.db.select().from(guardianAuth).all();
     expect(seat.accountId).toBe("C");
-  });
-
-  it("issues a dashboard visitor session to an allow-listed visitor", async () => {
-    insertGuardian({ accountId: "A", email: "owner@example.com" });
-
-    const { res, body } = await nativeSignIn(
-      { sub: "V", email: "Guest@Example.com", claims: { instance_role: "visitor" } },
-      { dashboardAccessState: allowList("guest@example.com") },
-    );
-
-    expect(res.status).toBe(200);
-    expect(body).toMatchObject({ cookie_name: VISITOR_COOKIE_NAME, role: "visitor" });
-    expect(new Date(body.expires_at as string).getTime()).toBeGreaterThan(Date.now());
-    expect(body.origin).toBeTruthy();
-    const token = body.session_token as string;
-    expect(verifySession(token)).toBeNull();
-    expect(verifyVisitorSession(token)).toMatchObject({
-      accountId: "V",
-      email: "guest@example.com",
-    });
-    expect(guardianRow()).toMatchObject({ accountId: "A", email: "owner@example.com" });
-    const [profile] = testDb.db.select().from(visitorProfiles).all();
-    expect(profile).toMatchObject({ accountId: "V", email: "guest@example.com" });
-  });
-
-  it("refuses a visitor whose email the instance's own allow-list does not name", async () => {
-    insertGuardian({ accountId: "A" });
-
-    const { res, body } = await nativeSignIn(
-      { sub: "V", email: "stranger@example.com", claims: { instance_role: "visitor" } },
-      { dashboardAccessState: allowList("guest@example.com") },
-    );
-
-    expect(res.status).toBe(403);
-    expect(body).toEqual({ error: "not_allowed" });
-    expect(testDb.db.select().from(visitorProfiles).all()).toEqual([]);
-  });
-
-  it("refuses a visitor whose email Rome Cloud marks unverified", async () => {
-    const { res, body } = await nativeSignIn(
-      {
-        sub: "V",
-        email: "guest@example.com",
-        claims: { instance_role: "visitor", email_verified: false },
-      },
-      { dashboardAccessState: allowList("guest@example.com") },
-    );
-
-    expect(res.status).toBe(403);
-    expect(body).toEqual({ error: "not_allowed" });
-  });
-
-  it("never creates a guardian seat for a visitor on a fresh instance", async () => {
-    const { res } = await nativeSignIn(
-      { sub: "V", email: "guest@example.com", claims: { instance_role: "visitor" } },
-      { dashboardAccessState: allowList("guest@example.com") },
-    );
-
-    expect(res.status).toBe(200);
-    expect(testDb.db.select().from(guardianAuth).all()).toEqual([]);
-  });
-
-  it("fails closed on a role it does not know", async () => {
-    insertGuardian({ accountId: "A" });
-
-    const { res, body } = await nativeSignIn({ sub: "A", claims: { instance_role: "admin" } });
-
-    expect(res.status).toBe(401);
-    expect(body).toEqual({ error: "unverified_identity" });
-  });
-
-  it("ignores a role in the request body", async () => {
-    insertGuardian({ accountId: "A" });
-    setInstanceTokenInMemory("romeinst_existing");
-    const romeCloud = fakeRomeCloud((nonce) => ({
-      id_token: signIdToken({ sub: "B", nonce, claims: { instance_role: "visitor" } }),
-    }));
-    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
-    const { state, nonce } = await nativeStart(app);
-    romeCloud.setNonce(nonce);
-
-    const res = await app.request("/api/auth/cloud/native/complete", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        state,
-        code: "c",
-        iss: ISSUER,
-        instance_role: "owner",
-        role: "owner",
-      }),
-    });
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: "not_allowed" });
-  });
-
-  it("gives approvals a native visitor session that they refuse", async () => {
-    const { body } = await nativeSignIn(
-      { sub: "V", email: "guest@example.com", claims: { instance_role: "visitor" } },
-      { dashboardAccessState: allowList("guest@example.com") },
-    );
-    const deps = await buildTestDeps(testDb.db);
-    const api = new Hono();
-    api.use("*", sessionActorMiddleware(testDb.db));
-    api.route("/", approvalsRoutes(deps));
-
-    const cookie = `${VISITOR_COOKIE_NAME}=${body.session_token as string}`;
-    const list = await api.request("/approvals", { headers: { cookie } });
-    const approve = await api.request("/approvals/any/approve", {
-      method: "POST",
-      headers: { cookie },
-    });
-
-    expect(list.status).toBe(403);
-    expect(approve.status).toBe(403);
-  });
-});
-
-describe("/api/auth/cloud/callback — instance_role", () => {
-  it("refuses a visitor id_token on the browser callback without rebinding the seat", async () => {
-    insertGuardian({ accountId: "A", email: "owner@example.com" });
-    setInstanceTokenInMemory("romeinst_existing");
-    const romeCloud = fakeRomeCloud((nonce) => ({
-      id_token: signIdToken({
-        sub: "V",
-        email: "guest@example.com",
-        nonce,
-        claims: { instance_role: "visitor" },
-      }),
-    }));
-    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
-    const { state, nonce } = await start(app);
-    romeCloud.setNonce(nonce);
-
-    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=c&iss=${ISS}`);
-
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=not_owner");
-    expect(sessionUserId(res)).toBeNull();
-    const [seat] = testDb.db.select().from(guardianAuth).all();
-    expect(seat).toMatchObject({ accountId: "A", email: "owner@example.com" });
   });
 });

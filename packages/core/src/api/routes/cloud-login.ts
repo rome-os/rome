@@ -6,9 +6,7 @@ import { Hono, type Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
   COOKIE_NAME,
-  VISITOR_COOKIE_NAME,
   createGuardianSession,
-  createVisitorSessionEnvelope,
   issueGuardianSession,
   shouldSecureCookie,
 } from "../../lib/auth.js";
@@ -23,9 +21,7 @@ import {
   isValidInstanceToken,
   persistInstanceToken,
 } from "../../lib/instance-identity.js";
-import { normalizePublicAccessEmail } from "../../lib/public-access-config.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import { beginDashboardVisitorFlow } from "./visitor-auth.js";
@@ -44,12 +40,11 @@ const log = createLogger("api:cloud-login");
 //   - Bound (instance token present): request scope `openid`. The token leg
 //     returns just the `id_token`.
 //
-// For the browser leg, ownership is enforced *server-side at `/authorize`* —
-// Rome Cloud only ever issues that code to the account that owns this
-// instance — so a verified `id_token`'s `sub` IS the confirmed owner. The
-// native leg also accepts visitor codes, so it reads the signed
-// `instance_role` claim and checks the account against the guardian seat and
-// the dashboard allow-list itself. A token that fails verification
+// Ownership is enforced *server-side at `/authorize`* — Rome Cloud only ever
+// issues a code to the account that owns this instance — so a verified
+// `id_token`'s `sub` IS the confirmed owner. The native leg still checks it
+// against an existing guardian seat. Visitors never use these endpoints: the
+// phone signs them in through the visitor grant. A token that fails verification
 // (bad signature, wrong `iss`/`aud`, nonce mismatch, expiry) fails the
 // sign-in closed; the local password fallback covers a Rome Cloud outage, so
 // the owner is never locked out of their own box.
@@ -172,7 +167,6 @@ export interface CloudLoginSeams {
 export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Hono {
   const app = new Hono();
   const fetchImpl = seams.fetchImpl ?? globalThis.fetch;
-  const visitorProfiles = new VisitorProfilesRepository(deps.db);
 
   // The scope encodes intent: a box with no instance token is binding for the
   // first time (`instance:enroll` mints its token at the token leg); one
@@ -212,8 +206,8 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   });
 
   // Native does not open the instance callback in a WebView. It asks Core for
-  // the same PKCE-bound request, has Rome Cloud mint a code for the instance's
-  // owner or for a dashboard visitor, then returns that code to `/native/complete`.
+  // the same PKCE-bound request, has Rome Cloud mint a code for an owned hosted
+  // instance, then returns that code to `/native/complete`.
   app.post("/auth/cloud/native/start", async (c) => {
     c.header("Cache-Control", "no-store");
     if (!(await deps.isCloudAuthEnabled())) {
@@ -292,20 +286,15 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       if (!identity) {
         return c.json({ error: "unverified_identity" }, 401);
       }
-      if (identity.instanceRole === "visitor") {
-        return await completeNativeVisitor(c, identity);
-      }
 
-      // The owner role, or no role from a Rome Cloud that predates visitor
-      // codes and issues codes only to the owner. Either way the instance
-      // checks the account itself: an existing seat signs in only the account
-      // it is bound to, and a refusal never rebinds it.
+      // Rome Cloud issues this code only to the owner, but the instance checks
+      // the account itself: an existing seat signs in only the account it is
+      // bound to, and a refusal never rebinds it.
       const guardian = await getGuardianAuthState(deps.db);
       if (guardian.exists) {
         if (guardian.accountId !== null && guardian.accountId !== identity.accountId) {
           log.warn("native cloud login refused: account does not own this instance", {
             accountId: identity.accountId,
-            role: identity.instanceRole ?? "none",
           });
           return c.json({ error: "not_owner" }, 403);
         }
@@ -433,12 +422,6 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       if (!identity) {
         return c.redirect(errorRedirect("unverified"));
       }
-      // Rome Cloud issues visitor codes only to the native app. A visitor
-      // token here must never reach the guardian binding below.
-      if (identity.instanceRole === "visitor") {
-        log.warn("cloud login callback got a visitor id_token; refusing");
-        return c.redirect(errorRedirect("not_owner"));
-      }
       const { accountId, email: accountEmail, avatarUrl: accountAvatarUrl } = identity;
 
       // Vanilla: the token leg also minted the durable instance token. Persist it
@@ -510,13 +493,9 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   interface CloudIdentity {
     accountId: string;
     email?: string;
-    /** False only when Rome Cloud says the email is unverified. */
-    emailVerified: boolean;
     avatarUrl?: string;
     /** The `name` claim, when Rome Cloud sends one. */
     name?: string;
-    /** The signed `instance_role` claim. Absent from a Rome Cloud that predates visitor codes. */
-    instanceRole?: "owner" | "visitor";
   }
 
   async function verifyCloudIdentity(
@@ -534,21 +513,11 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         fetch: fetchImpl,
       });
       const name = verified.payload.name;
-      // The role is read only from the signed token, never from the request.
-      // A role this instance does not know fails closed rather than falling
-      // back to the owner.
-      const role: unknown = verified.payload.instance_role;
-      if (role !== undefined && role !== "owner" && role !== "visitor") {
-        log.warn("id_token carries an unknown instance_role; failing closed");
-        return null;
-      }
       return {
         accountId: verified.sub,
         email: verified.email,
-        emailVerified: verified.payload.email_verified !== false,
         avatarUrl: verified.picture,
         name: typeof name === "string" && name.trim() ? name.trim() : undefined,
-        instanceRole: role,
       };
     } catch (err) {
       log.warn("id_token verification failed; failing closed", {
@@ -573,36 +542,6 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     // Not awaited: the provision can take up to MAIL_REQUEST_TIMEOUT_MS, and
     // the guardian lands on the welcome conversation without waiting for it.
     void deps.autoConnectEmail?.();
-  }
-
-  // A visitor code gets the dashboard visitor session the web visitor flow
-  // issues, and only while the instance's own allow-list names the email.
-  // Rome Cloud's copy of the list may lag, so its word alone never grants reach.
-  async function completeNativeVisitor(c: Context, identity: CloudIdentity) {
-    const email = identity.emailVerified ? normalizePublicAccessEmail(identity.email) : null;
-    if (!email || !deps.dashboardAccessState.isCloudEmailAllowed(email)) {
-      log.info("native visitor sign-in refused: not on the dashboard allow-list", {
-        accountId: identity.accountId,
-      });
-      return c.json({ error: "not_allowed" }, 403);
-    }
-    const avatarUrl = identity.avatarUrl?.trim() || null;
-    // Chat shows the profile beside the visitor's messages. A failed write
-    // costs only that, so it never fails the sign-in.
-    await visitorProfiles.record(identity.accountId, { email, avatarUrl }).catch((err: unknown) => {
-      log.warn("visitor profile write failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-    const session = createVisitorSessionEnvelope(identity.accountId, email, avatarUrl);
-    log.info("native visitor signed in", { accountId: identity.accountId });
-    return c.json({
-      cookie_name: VISITOR_COOKIE_NAME,
-      session_token: session.token,
-      expires_at: session.expiresAt,
-      origin: getInstanceOrigin(),
-      role: "visitor",
-    });
   }
 
   // The row is created BEFORE the cookie so a session never outruns a backing
