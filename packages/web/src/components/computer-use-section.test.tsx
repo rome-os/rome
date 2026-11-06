@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import i18n from "@/i18n";
@@ -98,5 +98,12 @@ describe("ComputerUseSection", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
     await openDetails();
     expect(screen.queryByText(/No browser connections have been observed/)).toBeNull();
+  });
+
+  it("says inside the sheet when the request fails", async () => {
+    mount(status, 503);
+    await openDetails();
+    const sheet = await screen.findByRole("dialog");
+    expect(await within(sheet).findByText("Could not refresh browser connections")).toBeTruthy();
   });
 });

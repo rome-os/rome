@@ -10,7 +10,7 @@ import {
 import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CircleAlert, KeyRound, Plus, RefreshCw, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -48,6 +48,12 @@ type FormState = { mode: "add" } | { mode: "replace"; name: string; label: strin
 export function AppKeysSection() {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
+  // Closing unmounts the form, so it waits for a save: a .env batch keeps its
+  // failed entries in the form for a retry.
+  const [saving, setSaving] = useState(false);
+  const close = () => {
+    if (!saving) setOpen(false);
+  };
   const keysQuery = useQuery({ queryKey: APP_KEYS_QUERY_KEY, queryFn: fetchAppKeys });
   const count = keysQuery.data?.length;
 
@@ -82,18 +88,24 @@ export function AppKeysSection() {
       </FormRows>
       <Sheet
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={close}
         ariaLabel={t("appKeys.title")}
         widthClassName="w-full max-w-lg"
       >
         {/* Mounted only while open, so each opening starts on the list. */}
-        <AppKeysManager onClose={() => setOpen(false)} />
+        <AppKeysManager onClose={close} onSavingChange={setSaving} />
       </Sheet>
     </Section>
   );
 }
 
-function AppKeysManager({ onClose }: { onClose: () => void }) {
+function AppKeysManager({
+  onClose,
+  onSavingChange,
+}: {
+  onClose: () => void;
+  onSavingChange: (saving: boolean) => void;
+}) {
   const { t } = useTranslation("settings");
   const uid = useId();
   const queryClient = useQueryClient();
@@ -177,6 +189,10 @@ function AppKeysManager({ onClose }: { onClose: () => void }) {
   });
 
   const isSaving = saveMutation.isPending || batchMutation.isPending;
+  useEffect(() => {
+    onSavingChange(isSaving);
+    return () => onSavingChange(false);
+  }, [isSaving, onSavingChange]);
 
   const removeMutation = useMutation({
     mutationFn: deleteAppKey,

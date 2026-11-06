@@ -197,15 +197,11 @@ export default function App() {
                 `:tab` route: `/settings/connections` (no id) still falls through
                 to SettingsTabPage. */}
             {/* App keys moved from its own page into a sheet on the Advanced
-                tab; keep the old paths working. The static segment outranks
+                tab; keep the old path working. The static segment outranks
                 `:serviceId`, so it never reaches ConnectionDetailPage's
                 unknown-id redirect. */}
             <Route
               path="/settings/connections/app-keys"
-              element={<Navigate to="/settings/advanced" replace />}
-            />
-            <Route
-              path="/settings/advanced/app-keys"
               element={<Navigate to="/settings/advanced" replace />}
             />
             <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />

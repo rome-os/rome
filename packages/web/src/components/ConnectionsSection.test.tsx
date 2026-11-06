@@ -398,6 +398,16 @@ describe("ConnectionsSection — Composio account", () => {
     expect(within(addList()).getByRole("button", { name: "Sign in" })).toBeTruthy();
   });
 
+  it("keeps the signed-out Composio sign-in when a search names Composio", () => {
+    renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
+    const input = screen.getByLabelText("Search connections");
+    fireEvent.change(input, { target: { value: "composio" } });
+    expect(within(addList()).getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText(/No service matches/)).toBeNull();
+    fireEvent.change(input, { target: { value: "telegram" } });
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+  });
+
   it("lists the Composio account under Connected when signed in", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: true }));
     fireEvent.click(within(connectedList()).getByRole("button", { name: "Open Composio" }));

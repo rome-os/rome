@@ -121,9 +121,18 @@ export function ConnectionsSection({
   const shownAvailableServices = composioServices.rows.available.filter((row) =>
     matchesService(row, true),
   );
-  const showComposioSignIn = composioInstalled && !composioSignedIn;
+  // The sign-in shows with the Composio services it unlocks, and on its own
+  // for a search that names Composio.
+  const composioCard = cards.find((card) => card.kind === "composio");
+  const showComposioSignIn =
+    composioInstalled &&
+    !composioSignedIn &&
+    (!needle ||
+      shownAvailableServices.length > 0 ||
+      (composioCard !== undefined && matches(composioCard, false)));
   const nothingMatches =
     needle !== "" &&
+    !showComposioSignIn &&
     shownConnected.length === 0 &&
     shownAvailable.length === 0 &&
     shownAvailableServices.length === 0;
@@ -303,7 +312,7 @@ export function ConnectionsSection({
             ) : null}
             {shownAvailable.length > 0 ||
             shownAvailableServices.length > 0 ||
-            (showComposioSignIn && !needle) ? (
+            showComposioSignIn ? (
               <section className="flex flex-col gap-2" aria-labelledby="add-heading">
                 <h3 id="add-heading" className="text-aux text-muted-foreground">
                   {t("connections.sections.add")}

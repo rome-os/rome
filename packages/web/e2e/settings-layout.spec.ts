@@ -27,7 +27,7 @@ for (const width of [390, 1440]) {
       ).toBeVisible();
       if (tab === "channels") await expect(page.locator("main article").first()).toBeVisible();
       if (tab === "advanced") {
-        await page.getByText("Developer Settings", { exact: true }).click();
+        // Developer settings is always open, so its switches show without a click.
         await expect(
           page.getByRole("switch", { name: "Enable model selector in chat" }),
         ).toBeVisible();

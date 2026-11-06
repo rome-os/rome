@@ -106,6 +106,20 @@ export function ComputerUseSection() {
           />
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {/* The sheet covers the row, so it repeats the request's state. */}
+          {query.isPending ? (
+            <p role="status" className="mb-4 text-ui text-muted-foreground">
+              {t("advanced.computerUse.loading")}
+            </p>
+          ) : query.isError ? (
+            <p role="alert" className="mb-4 text-ui text-destructive-fg">
+              {t("advanced.computerUse.loadFailed")}
+            </p>
+          ) : !daemonUp ? (
+            <p className="mb-4 text-ui text-muted-foreground">
+              {t("advanced.computerUse.daemonUnavailable")}
+            </p>
+          ) : null}
           {data && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-ui">OpenCLI</span>

@@ -370,6 +370,9 @@ describe("App keys sheet", () => {
       true,
     );
     expect(screen.getByRole("button", { name: "Cancel" }).matches(":disabled")).toBe(true);
+    // Escape cannot close the sheet mid-save and drop the entries that fail.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByLabelText(".env content")).toBeTruthy();
     finish(ok({ ok: true, overridden: false }));
     await screen.findByRole("button", { name: "Add key" });
   });
