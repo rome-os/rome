@@ -1,9 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
-import {
-  ROME_CREDITS_PROXY_KEY,
-  ROME_CREDITS_PROXY_PATH,
-} from "../../core/codex/rome-credits-provider.js";
+import { ROME_CREDITS_PROXY_KEY, ROME_CREDITS_PROXY_PATH } from "../../agent/index.js";
 import { cloudBearer } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { isLoopbackInternalApiHost } from "./discord-cli.js";

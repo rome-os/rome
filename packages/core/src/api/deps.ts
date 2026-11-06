@@ -46,7 +46,7 @@ import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { AIToolState } from "../core/ai-tool-state.js";
-import type { CodexAccountService } from "../core/codex/account-service.js";
+import type { CodexAccountService } from "../agent/index.js";
 import type { PublicAccessState } from "../lib/public-access-state.js";
 import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
 import type { RelayDrainer } from "../relay/drainer.js";

@@ -141,7 +141,6 @@ import { ExecutionJournalRepository } from "./db/repositories/execution-journal.
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { AgentLoader } from "./core/agent-loader.js";
-import { DrizzleSessionRepository } from "./agent/index.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
@@ -155,10 +154,13 @@ import { endInterruptedRuns } from "./actions/restart-recovery.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
-import { AnthropicProvider } from "./core/anthropic-provider.js";
-import { CodexAppServerProvider } from "./core/codex-app-server-provider.js";
-import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
-import { SharedCodexAccountService } from "./core/codex/account-service.js";
+import {
+  AnthropicProvider,
+  CodexAppServerManager,
+  CodexAppServerProvider,
+  DrizzleSessionRepository,
+  SharedCodexAccountService,
+} from "./agent/index.js";
 import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";

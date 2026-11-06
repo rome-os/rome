@@ -35,3 +35,19 @@ export type {
   SkillMcpDefinition,
 } from "./domain/model-port.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
+
+// The model port's adapters, as the composition root wires them. The Codex
+// account and credits-proxy members below are what callers outside the
+// context reach for today; they narrow as the port is reshaped.
+export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js";
+export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
+export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
+export {
+  SharedCodexAccountService,
+  type CodexAccountService,
+} from "./infrastructure/model/codex/account-service.js";
+export {
+  ROME_CREDITS_PROXY_KEY,
+  ROME_CREDITS_PROXY_PATH,
+} from "./infrastructure/model/codex/rome-credits-provider.js";
+export { stripLegacyReasoningSuffix } from "./infrastructure/model/codex/common.js";

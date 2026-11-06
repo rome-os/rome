@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ROME_CREDITS_PROXY_KEY } from "../../core/codex/rome-credits-provider.js";
+import { ROME_CREDITS_PROXY_KEY } from "../../agent/index.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import { romeCreditsProxyRoutes } from "./rome-credits-proxy.js";
 
