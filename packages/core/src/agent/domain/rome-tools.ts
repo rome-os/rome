@@ -13,6 +13,13 @@ export interface ModelToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /**
+   * A call parks the turn on something the person answers in a later turn,
+   * so the model ends its response with no text after it. An adapter whose
+   * model guards against a turn with no visible text tells it such a result
+   * finishes the turn. Absent means the call returns and the turn goes on.
+   */
+  endsTurn?: boolean;
 }
 
 export interface ModelToolCallContext {
@@ -33,11 +40,4 @@ export interface RomeTools {
     input: Record<string, unknown> | undefined,
     context: ModelToolCallContext,
   ): Promise<RomeToolResult>;
-  /**
-   * Whether the ask-user tool parks the turn on a card someone will answer.
-   * An adapter whose model has a terminal question tool of its own turns
-   * that tool off when this is true. Not derivable from the catalog: a
-   * detached fork advertises the same tools and answers in prose.
-   */
-  readonly asksOnCard: boolean;
 }
