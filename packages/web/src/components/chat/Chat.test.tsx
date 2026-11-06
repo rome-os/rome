@@ -976,6 +976,33 @@ describe("Chat history paging", () => {
     await waitFor(() => expect(shownKeys()).toEqual(["user-6", "user-7", "user-8", "user-9"]));
     expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c9" });
   });
+
+  it("hands the first page's layout to the host once, not an older page's or a refetch's", async () => {
+    const layout = [{ id: "files", type: "projects", order: 0 }];
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({
+        messages: [userMessage(3), userMessage(4)],
+        nextCursor: "c1",
+        layout,
+      })
+      .mockResolvedValueOnce({ messages: [userMessage(1), userMessage(2)], nextCursor: null })
+      .mockResolvedValueOnce({
+        messages: [userMessage(3), userMessage(4)],
+        nextCursor: "c1",
+        layout: [],
+      });
+    const onSessionLayout = rs.fn();
+    renderChat(<Chat sessionId="session-1" onSessionLayout={onSessionLayout} />);
+    await waitFor(() => expect(shownKeys()).toEqual(["user-3", "user-4"]));
+    expect(onSessionLayout).toHaveBeenCalledWith("session-1", layout);
+
+    await reachTop();
+    await waitFor(() => expect(shownKeys()).toHaveLength(4));
+    act(() => MockEventSource.instances[0]!.emitLifecycle("error", MockEventSource.CLOSED));
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(3));
+
+    expect(onSessionLayout).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Chat session recovery", () => {

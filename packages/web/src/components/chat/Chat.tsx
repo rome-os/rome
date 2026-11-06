@@ -1,4 +1,5 @@
 import type { DraftDeviceFolder } from "@/lib/device-folder";
+import { flushSync } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -296,6 +297,11 @@ export interface ChatProps {
   recoverMissingSession?: (sessionId: string) => Promise<boolean>;
   onSessionMessage?: (message: SessionMessage) => void;
   /**
+   * Called with a session's saved workspace layout (`null` when none) when its
+   * first messages page arrives, in the same render as that page's messages.
+   */
+  onSessionLayout?: (sessionId: string, layout: unknown[] | null) => void;
+  /**
    * Called once with the id of the session a draft's first send created,
    * before that turn is posted. A host that navigates to the session must keep
    * this instance mounted for it.
@@ -352,6 +358,7 @@ export function Chat({
   onSessionNotFound,
   recoverMissingSession,
   onSessionMessage,
+  onSessionLayout,
   onSessionCreated,
   startSession,
   emptyState,
@@ -787,6 +794,7 @@ export function Chat({
   const onSessionsChangedRef = useRef(onSessionsChanged);
   const onSessionNotFoundRef = useRef(onSessionNotFound);
   const onSessionMessageRef = useRef(onSessionMessage);
+  const onSessionLayoutRef = useRef(onSessionLayout);
   const recoverMissingSessionRef = useRef(recoverMissingSession);
   recoverMissingSessionRef.current = recoverMissingSession;
   useEffect(() => {
@@ -802,6 +810,9 @@ export function Chat({
   useEffect(() => {
     onSessionMessageRef.current = onSessionMessage;
   }, [onSessionMessage]);
+  useEffect(() => {
+    onSessionLayoutRef.current = onSessionLayout;
+  }, [onSessionLayout]);
   const notifySessionsChanged = useCallback(() => {
     onSessionsChangedRef.current?.();
   }, []);
@@ -941,17 +952,30 @@ export function Chat({
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
-        setMessages((prev) => {
-          const next = new Map(prev);
-          next.set(
-            id,
-            mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
-              restart,
-              dropMessageIds,
-            }),
-          );
-          return next;
-        });
+        const commitMessages = () =>
+          setMessages((prev) => {
+            const next = new Map(prev);
+            next.set(
+              id,
+              mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
+                restart,
+                dropMessageIds,
+              }),
+            );
+            return next;
+          });
+        const handLayoutToHost = onSessionLayoutRef.current;
+        if (handLayoutToHost && !loadedSessionsRef.current.has(id)) {
+          // The host's layout store re-renders synchronously while this state
+          // update is not, so flush both together: the tool panel and the
+          // messages then appear in one frame instead of reflowing the chat.
+          flushSync(() => {
+            commitMessages();
+            handLayoutToHost(id, page.layout ?? null);
+          });
+        } else {
+          commitMessages();
+        }
         // A refetch of the newest page leaves older loaded pages, and the
         // cursor that reaches past them, as they are.
         if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
