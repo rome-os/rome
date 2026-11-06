@@ -566,8 +566,7 @@ export function useAppLifecycle(
     : null;
   const accessLinkUnsaved = accessModeDraft !== accessSavedMode;
   // Nothing left to save: the dismiss button reads "Done" rather than "Cancel".
-  // Save stays enabled, since re-saving is how a guardian retries a save whose
-  // policy was stored but whose proxy reload failed.
+  // Save stays enabled, since re-saving is how a guardian retries a failed save.
   const accessSavedEmails = accessTarget?.cloudAllowedEmails ?? [];
   const accessDraftUnsaved =
     accessLinkUnsaved ||

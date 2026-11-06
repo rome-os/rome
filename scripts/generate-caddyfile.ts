@@ -3,8 +3,7 @@
  * Container-boot Caddyfile generator. Runs from scripts/docker/rome-init.sh
  * before Caddy starts, when the daemon isn't up yet.
  *
- * Uses the canonical pure generator in `packages/core/src/lib/` so the
- * output is identical to what the runtime regenerator emits.
+ * Uses the canonical pure generator in `packages/core/src/lib/`.
  */
 
 import { join, dirname } from "node:path";

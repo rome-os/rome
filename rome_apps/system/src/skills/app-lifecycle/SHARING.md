@@ -49,7 +49,7 @@ printf '%s' "$updated" | curl -sf -X PUT "$API" -H 'content-type: application/js
 
 The filter leaves every other app's entry unchanged. Afterwards, read the policy again. Confirm that this app's entry changed as intended and that the other entries match `$policy`. The server drops invalid app ids and emails without an error, so a missing entry means the input was invalid.
 
-Use only this endpoint. A write to `publicAccess` through `/api/settings` is rejected, and it would not reload the proxy. A `500` from this endpoint means the policy is saved but the proxy did not reload. Retry the same request.
+Use only this endpoint. A write to `publicAccess` through `/api/settings` is rejected, and it would not refresh the policy the server enforces.
 
 ## Verify
 

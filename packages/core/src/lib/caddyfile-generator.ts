@@ -1,11 +1,9 @@
 // Caddyfile generation — pure string ops, no DB/fs/path deps.
 //
-// The Caddyfile is generated in two places: at container boot from
-// `scripts/generate-caddyfile.ts` (before the daemon comes up) and at
-// runtime from `lib/public-access.ts` (at startup and when the publicAccess
-// setting changes via API, then Caddy is hot-reloaded). Both call this
-// function so the output stays in lockstep. The output does not depend on the
-// access policy: per-app sharing is decided per request by `/api/auth/verify`.
+// The Caddyfile is generated at container boot from
+// `scripts/generate-caddyfile.ts` (before the daemon comes up). The output does
+// not depend on the access policy: per-app sharing is decided per request by
+// `/api/auth/verify`, so a policy change never needs a Caddy reload.
 
 import { RUNTIME_CONFIG_FILENAME } from "./runtime-config.js";
 
