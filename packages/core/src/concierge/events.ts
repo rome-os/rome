@@ -21,8 +21,6 @@ import { failoverReason } from "./failover-reason.js";
 
 const log = createLogger("concierge-events");
 
-/** How much of a task chat's reply a task event carries. */
-const REPLY_EXCERPT_CHARS = 600;
 const DETAIL_EXCERPT_CHARS = 300;
 const SETTLE_POLL_MS = 200;
 const SETTLE_TIMEOUT_MS = 10_000;
@@ -39,6 +37,32 @@ const excerpt = (text: string, max: number) => {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 };
+
+/** A task event carries a reply this long whole, and a longer one's start and end. */
+const REPLY_HEAD_CHARS = 400;
+const REPLY_TAIL_CHARS = 300;
+/** How far a cut moves to land on a space or line break. */
+const CUT_SLACK_CHARS = 30;
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** A long reply keeps its start and its end, where a closing question sits.
+ *  Characters are graphemes, so a cut never splits an emoji. */
+function replyExcerpt(text: string): string {
+  const chars = Array.from(graphemes.segment(text.trim()), (part) => part.segment);
+  if (chars.length <= REPLY_HEAD_CHARS + REPLY_TAIL_CHARS) return chars.join("");
+  const space = (from: number, step: number) => {
+    for (let i = from, n = 0; n < CUT_SLACK_CHARS; i += step, n++) {
+      if (/\s/u.test(chars[i])) return i;
+    }
+    return -1;
+  };
+  const headSpace = space(REPLY_HEAD_CHARS - 1, -1);
+  const end = headSpace < 0 ? REPLY_HEAD_CHARS : headSpace;
+  const tailSpace = space(chars.length - REPLY_TAIL_CHARS, 1);
+  const start = tailSpace < 0 ? chars.length - REPLY_TAIL_CHARS : tailSpace + 1;
+  const note = `[… ${start - end} characters left out; chat_read shows the full reply]`;
+  return `${chars.slice(0, end).join("")}\n${note}\n${chars.slice(start).join("")}`;
+}
 
 /** The text of a stored user message, for the guardian's words in a task event. */
 function userText(content: string): string {
@@ -103,7 +127,7 @@ async function renderTaskEvents(
         1,
         (message) => message.direction === "fromRome" && hasText(message),
       );
-      if (latest) lines.push(`reply: ${excerpt(latest.body.text, REPLY_EXCERPT_CHARS)}`);
+      if (latest) lines.push(`reply: ${replyExcerpt(latest.body.text)}`);
     }
     for (const change of task.changes) {
       if (change.detail) lines.push(change.detail);
