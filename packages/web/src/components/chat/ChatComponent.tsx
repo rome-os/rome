@@ -44,6 +44,7 @@ export interface ChatComponentProps {
   onSessionCreated: (id: string) => void;
   onSessionNotFound?: () => void;
   onSessionMessage?: (message: SessionMessage) => void;
+  onSessionLayout?: (sessionId: string, layout: unknown[] | null) => void;
   initialProjectName?: string;
   initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
@@ -62,6 +63,7 @@ export function ChatComponent({
   onSessionCreated,
   onSessionNotFound,
   onSessionMessage,
+  onSessionLayout,
   initialProjectName,
   initialDeviceFolder,
   initialAgentMention,
@@ -300,6 +302,7 @@ export function ChatComponent({
         onSessionsChanged={notifySessionsChanged}
         onSessionNotFound={handleSessionNotFound}
         onSessionMessage={onSessionMessage}
+        onSessionLayout={onSessionLayout}
         onSessionCreated={handleSessionCreated}
         initialProjectName={initialProjectName}
         initialDeviceFolder={initialDeviceFolder}

@@ -12,7 +12,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AgentMention } from "@/lib/chat-types";
@@ -50,8 +50,9 @@ import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
+  applyFirstPageLayout,
   collapseToolsOnMount,
-  loadLayoutForSession,
+  isLayoutLoaded,
   placeWidgetsIfSessionActive,
   setActiveSession,
   type PlacementLink,
@@ -260,11 +261,18 @@ export function FreeGrid() {
   }, []);
 
   const suppressProjectsRef = useRef(false);
-  useEffect(() => {
+  // A widget handoff waiting for the session's server layout, so it lands on top
+  // of that layout instead of making it lose the revision guard.
+  const pendingWidgetsRef = useRef<{ sessionId: string; apply: () => void } | null>(null);
+  // A layout effect, so the session's cached layout is in the store before the
+  // first paint. `flushLayout` still reads the outgoing session's iframes: the
+  // render that carries the new URL keeps showing them until the switch below.
+  useLayoutEffect(() => {
     flushLayout();
     suppressProjectsRef.current = false;
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
+    pendingWidgetsRef.current = null;
     const applyInitialWidgets = (targetSessionId: string | null) => {
       if (!initialWidgetsKey || !initialWidgets) {
         return;
@@ -275,15 +283,27 @@ export function FreeGrid() {
         chatFirst: window.innerWidth < COMPACT_WIDTH,
       });
     };
-    if (urlSessionId) {
-      const targetSessionId = urlSessionId;
-      void loadLayoutForSession(targetSessionId).finally(() =>
-        applyInitialWidgets(targetSessionId),
-      );
-    } else {
+    if (!urlSessionId) {
       applyInitialWidgets(null);
+    } else if (isLayoutLoaded(urlSessionId)) {
+      applyInitialWidgets(urlSessionId);
+    } else if (initialWidgetsKey) {
+      // The layout rides the session's first messages page; `handleSessionLayout`
+      // places the widgets once it has been applied.
+      pendingWidgetsRef.current = {
+        sessionId: urlSessionId,
+        apply: () => applyInitialWidgets(urlSessionId),
+      };
     }
   }, [urlSessionId, initialWidgets, initialWidgetsKey, flushLayout]);
+
+  const handleSessionLayout = useCallback((sessionId: string, layout: unknown[] | null) => {
+    applyFirstPageLayout(sessionId, layout);
+    const pending = pendingWidgetsRef.current;
+    if (pending?.sessionId !== sessionId) return;
+    pendingWidgetsRef.current = null;
+    pending.apply();
+  }, []);
 
   useEffect(() => {
     return eventBus.on<{ appId: string }>("app:installed", ({ appId }) => {
@@ -420,6 +440,7 @@ export function FreeGrid() {
             <ChatWidget
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}
+              onSessionLayout={handleSessionLayout}
               initialProjectName={initialProjectName}
               initialDeviceFolder={initialDeviceFolder}
               initialAgentMention={initialAgentMention}

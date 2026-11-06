@@ -1272,7 +1272,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
   };
-  const respondWithSessionMessages = async (c: Context, sessionId: string) => {
+  // `withLayout` (the /chat route for a top-level session) attaches the saved
+  // workspace layout to the first page, so the client paints the messages and
+  // the tool panel together instead of fetching the layout separately.
+  const respondWithSessionMessages = async (
+    c: Context,
+    sessionId: string,
+    { withLayout = false }: { withLayout?: boolean } = {},
+  ) => {
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
     if (limitParam === undefined && beforeParam === undefined) {
@@ -1291,6 +1298,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json({
       messages: await enrichStoredMessages(sessionId, page.rows),
       nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,
+      ...(withLayout && !before
+        ? { layout: (await deps.webchatRepo.getLayout(sessionId)) ?? null }
+        : {}),
     });
   };
 
@@ -2733,7 +2743,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    return respondWithSessionMessages(c, sessionId);
+    // Only a top-level session has a layout; GET /layout 404s for the rest.
+    return respondWithSessionMessages(c, sessionId, {
+      withLayout: lookup.session.type === "webchat",
+    });
   });
 
   app.get("/chat/sessions/:id/events", async (c) => {
