@@ -820,27 +820,6 @@
       "when": 1794000010000,
       "tag": "0117_concierge_chat_ids",
       "breakpoints": true
-    },
-    {
-      "idx": 118,
-      "version": "6",
-      "when": 1794000011000,
-      "tag": "0118_concierge_follow_items_owner",
-      "breakpoints": true
-    },
-    {
-      "idx": 119,
-      "version": "6",
-      "when": 1794000012000,
-      "tag": "0119_concierge_tasks_owner",
-      "breakpoints": true
-    },
-    {
-      "idx": 120,
-      "version": "6",
-      "when": 1794000013000,
-      "tag": "0120_concierge_private_forks",
-      "breakpoints": true
     }
   ]
 }

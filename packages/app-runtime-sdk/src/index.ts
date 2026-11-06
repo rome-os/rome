@@ -3150,6 +3150,9 @@ export interface BackendTurnParams {
   channelUserId?: string;
   /** The text fed to the continued turn as its prompt. */
   prompt: string;
+  /** Whose the thread was when the turn was scheduled, recorded by the host.
+   *  Lets the host route the turn to that owner when the thread is gone. */
+  ownerKey?: string;
 }
 
 /** Runs a backend turn in a session and delivers the reply to its channel.
