@@ -29,7 +29,7 @@ interface ImageGenerationPayload {
   /**
    * "codex_generated_images" marks a filesystem-backstop result: inferred from
    * a file appearing under ~/.codex/generated_images rather than correlated to
-   * an image-generation call in this stream. See core/codex/image-trace.ts.
+   * an image-generation call in this stream. See agent/infrastructure/model/codex/image-trace.ts.
    */
   source?: string;
 }

@@ -1,6 +1,6 @@
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import type { AIToolState } from "./ai-tool-state.js";
-import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js";
+import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../usage/funding.js";
 import { instanceCredentialId } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { fetchRomeCredits } from "../lib/rome-credits.js";

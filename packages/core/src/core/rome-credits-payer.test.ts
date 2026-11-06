@@ -2,8 +2,8 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { createRomeCreditsPayer } from "./rome-credits-payer.js";
 import { createAIToolState, type AIToolStateValue } from "./ai-tool-state.js";
-import { SharedCodexAccountService } from "./codex/account-service.js";
-import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js";
+import { SharedCodexAccountService } from "../agent/index.js";
+import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../usage/funding.js";
 
 function fakeManager(onSet: (provider: string | null) => void = () => {}, onRestart = () => {}) {
   let provider: string | null = null;
