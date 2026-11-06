@@ -21,7 +21,7 @@ export const WEBCHAT_CHANNEL = "webchat";
 export const WEBCHAT_SURFACE: ChannelSurface = { interactiveCards: true, promptContext: false };
 
 /** Who reads or writes dashboard chats from an action: the person accountable for the turn, and the chat it runs in. */
-interface DashboardCaller {
+export interface DashboardCaller {
   actor?: SessionActor;
   chatId: string | null;
 }
@@ -51,7 +51,7 @@ function dashboardCaller(): DashboardCaller {
  * the owner of the Concierge or task chat it runs in, and as nobody elsewhere,
  * so it sees no one's Concierge or task chats.
  */
-async function readerOwner(
+export async function readerOwner(
   webchatRepo: WebChatRepository,
   reader: DashboardCaller,
 ): Promise<string | null> {

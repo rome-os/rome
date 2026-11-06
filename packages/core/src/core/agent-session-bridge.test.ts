@@ -185,6 +185,81 @@ describe("AgentSessionBridge conversation", () => {
   });
 });
 
+describe("AgentSessionBridge resuming a session by its id", () => {
+  it("refuses a caller who may not open the session's chat, and lets its owner in", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "concierge",
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+      );
+      await repo.createSession("plain", "Plain");
+      const sent: unknown[] = [];
+      const session = {
+        key: { agentName: "core:concierge", channelThreadKey: "webchat:concierge" },
+        sessionId: "guardian-runtime",
+        sendTurn: (input: unknown) => {
+          sent.push(input);
+          return {
+            turnId: `turn-${sent.length}`,
+            events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+            interrupt: async () => undefined,
+          } as unknown as AgentTurnHandle;
+        },
+      } as unknown as AgentSession;
+      const manager = {
+        acquire: async () => session,
+        acquireBySessionId: async () => session,
+        peek: () => session,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      // A summon from an ordinary chat names the guardian's Concierge runtime.
+      const summon = (reqId: string, actor: Record<string, unknown>) =>
+        child.emit("message", {
+          type: "rpc_request",
+          reqId,
+          method: "agent.session.runTurn",
+          callerActionName: "system:summon",
+          callerActionContext: {
+            actor,
+            channelContext: { channel: "webchat", threadId: "plain" },
+          },
+          params: {
+            key: session.key,
+            sessionId: "guardian-runtime",
+            input: { prompt: "what did they say?" },
+          },
+        });
+      const responseTo = (reqId: string) =>
+        child.sent.find(
+          (m) =>
+            (m as { reqId?: string }).reqId === reqId &&
+            (m as { type?: string }).type === "rpc_response",
+        ) as { error?: unknown } | undefined;
+
+      summon("as-visitor", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      await rs.waitFor(() => expect(responseTo("as-visitor")).toBeDefined());
+      expect(responseTo("as-visitor")?.error).toBeDefined();
+      expect(sent).toEqual([]);
+
+      summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
+      await rs.waitFor(() => expect(sent).toHaveLength(1));
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
 describe("AgentSessionBridge working dir", () => {
   const summonCall = { actionName: "system:summon", agentName: "main" };
   const tempDirs: string[] = [];

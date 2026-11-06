@@ -250,6 +250,9 @@ export interface AddTurnRecapMessageInput {
 
 export interface EnsureRomeSessionInput {
   id: string;
+  /** Refuse to make the child when its parent no longer exists, so it never
+   *  loses the owner and privacy it would have taken from that parent. */
+  requireParent?: boolean;
   type: RomeSessionType;
   name: string;
   agentName: string | null;
@@ -1004,6 +1007,9 @@ export class WebChatRepository {
     // a private chat is private to that owner from the start, whatever it is,
     // and stays so after its parent is gone.
     const parent = input.parentSessionId ? await this.getSession(input.parentSessionId) : null;
+    if (input.requireParent && !parent) {
+      throw new Error(`Parent Rome session "${input.parentSessionId}" was not found`);
+    }
     const privateChild = privateOwnerOf(parent) !== null;
     // A chat is a channel row on the webchat channel, at its own address,
     // whichever of the two types the caller names it by.

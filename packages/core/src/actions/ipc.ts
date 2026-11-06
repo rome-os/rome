@@ -256,7 +256,8 @@ export class IpcRpc {
       if (
         method.startsWith("connections.app.") ||
         method === "channels.query" ||
-        method === "channels.send"
+        method === "channels.send" ||
+        method === "agent.session.runTurn"
       ) {
         request.callerActionContext = {
           actor: actionContext.actor,
