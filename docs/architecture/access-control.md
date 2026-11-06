@@ -52,3 +52,5 @@ A visitor gets their credential by signing in to their [Rome Cloud](../concepts/
 - The callback keeps the visitor's profile only after a sign-in succeeds. A refused sign-in leaves no record.
 - The instance normalizes the post-sign-in redirect: an app-scoped sign-in returns only into that app, and a dashboard sign-in never lands on an API path.
 - An account that does not own the instance can never leave the flow holding a guardian credential. The refusal downgrades to a visitor credential or an error, never upgrades.
+- The native app signs a visitor in through a Rome Cloud code whose signed assertion names the visitor role ([instance sign-in](../concepts/rome-cloud.md#instance-sign-in)). The instance re-checks its own allow-list and issues the same dashboard visitor credential the browser flow issues, so a native visitor reaches exactly what a browser visitor reaches.
+- Rome Cloud's copy of the dashboard allow-list decides only which instances a visitor sees listed. The instance's own allow-list decides every sign-in and every request ([decision](../adrs/instance-syncs-visitor-allow-list-to-rome-cloud.md)).

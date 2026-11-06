@@ -60,4 +60,27 @@ describe("Dashboard-access API", () => {
       "lin@example.com",
     ]);
   });
+
+  it("bumps the stored revision on every save and hands each list to the Rome Cloud sync", async () => {
+    const pushed: Array<{ emails: readonly string[]; revision: number }> = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+    const save = (emails: string[]) =>
+      app.request("/dashboard-access", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cloudEmailAccess: emails }),
+      });
+
+    await Promise.all([save(["Ada@Example.com"]), save(["lin@example.com"])]);
+    await save([]);
+
+    expect(pushed.map((list) => list.revision)).toEqual([1, 2, 3]);
+    expect(pushed[2]).toEqual({ emails: [], revision: 3 });
+    expect(await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
+      cloudEmailAccess: [],
+      revision: 3,
+    });
+    const getRes = await app.request("/dashboard-access");
+    expect(await getRes.json()).toEqual({ cloudEmailAccess: [] });
+  });
 });

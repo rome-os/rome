@@ -40,6 +40,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
 import { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
@@ -810,6 +811,8 @@ export async function buildTestDeps(
   await publicAccessState.load(db);
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
+  // No credential, so a test that saves the allow-list never reaches the network.
+  const visitorAllowListSync = new VisitorAllowListSync({ getToken: () => null });
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
   const channelsService = createChannelsService({
@@ -891,6 +894,7 @@ export async function buildTestDeps(
     codexAccountService,
     publicAccessState,
     dashboardAccessState,
+    visitorAllowListSync,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
       start: async () => {},
