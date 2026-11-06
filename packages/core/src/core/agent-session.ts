@@ -869,11 +869,17 @@ async function resumableSession(
 ): Promise<Session | undefined> {
   const session = await deps.sessionRepository.session(sessionId);
   if (!session || session.status !== "active" || session.continuityKey === null) return undefined;
-  return sameAgent(deps, session.agentName, agentName) ? session : undefined;
+  return deprecatedSameAgent(deps, session.agentName, agentName) ? session : undefined;
 }
 
-/** Whether two agent names, either possibly legacy, name one agent. */
-function sameAgent(deps: ManagerDeps, storedName: string, requestedName: string): boolean {
+/** @deprecated Matches an agent under its legacy names, which a stored
+ *  session can still carry. Goes when agent names are canonical before they
+ *  reach Sessions, and this compares them as strings. */
+function deprecatedSameAgent(
+  deps: ManagerDeps,
+  storedName: string,
+  requestedName: string,
+): boolean {
   if (storedName === requestedName) return true;
   try {
     return (
