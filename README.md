@@ -91,6 +91,8 @@ The dashboard comes up at `http://localhost:7663`, bound to loopback only.
 First-run onboarding is open to whoever reaches it first, so exposing it
 beyond the machine takes an explicit `--bind`. State lives in named Docker
 volumes, so re-running the script upgrades the container without losing data.
+The script also runs a `rome-signer` container, which Rome Cloud requires;
+re-running the script adds or updates it.
 Telemetry export stays off unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`. Run
 the script with `--help` for ports, profiles, and the other settings it
 forwards.
@@ -104,6 +106,11 @@ The quickstart script also accepts a shell override:
 ```bash
 PANTHEON_BASE_ORIGIN=https://cloud.example.com ./scripts/quickstart-docker.sh
 ```
+
+Rome Cloud accepts only signed requests from an instance, which the `signer`
+service in Compose provides. `docker-compose.yml` and `scripts/setup.sh` both
+include it. To add it to an existing install, pull the new `docker-compose.yml`,
+or re-run `scripts/setup.sh`, and then run `docker compose up -d`.
 
 ### Run the development environment
 
@@ -124,6 +131,7 @@ pnpm dev:all
 `pnpm dev:all` starts the production-shaped local stack: Rome, observability,
 routing, and the web development server. It connects to `https://romeos.cc` by
 default; set `ROME_DEV_PANTHEON_ORIGIN` to use another Rome Cloud deployment.
+It also starts the signer service; `ROME_DEV_SIGNER=0` leaves it out.
 The script prints the local URLs and development credentials when startup completes.
 
 This is the contributor development path, not the final production self-hosting
