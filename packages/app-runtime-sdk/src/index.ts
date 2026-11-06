@@ -2,7 +2,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
-import type { ChatReads, MessageRef, Place } from "./chats.js";
+import type { ChatReads, Chats, ConnectedAccounts, MessageRef, Place } from "./chats.js";
 
 export { z };
 export type { JSONSchema };
@@ -1747,6 +1747,9 @@ export interface ChannelSummary {
  * An action receives it as `deps.channelsService`. A hook's `channels`
  * ({@link ChannelMessageHookDeps.channels}) is the channel list itself, which
  * it subscribes through.
+ *
+ * @deprecated List and read through `ConnectedAccounts`, and send through
+ * `Chats.send` (`@rome-os/app-runtime/chats`).
  */
 export interface ChannelsService {
   /** Every channel this Rome has, the account each is, and whether a
@@ -1912,7 +1915,9 @@ export type ChannelSendRefused = SendRefused;
 /** @deprecated Use {@link isSendRefused}. */
 export const isChannelSendRefused = isSendRefused;
 
-/** Sending on a channel. */
+/** Sending on a channel.
+ *  @deprecated Send through `Chats.send` and show typing through
+ *  `Chats.typing` (`@rome-os/app-runtime/chats`). */
 export interface ChannelSend {
   /**
    * Sends `message` to `chatId`. Resolves only once the platform has taken
@@ -1978,6 +1983,9 @@ export type InboundEvent = {
  *   running keeps running.
  * - **R5 Durable subscription.** A subscription outlives a reconnect of
  *   whatever backs the channel.
+ *
+ * @deprecated Hear messages through `MessagesSaid`, once each is recorded in
+ * its chat.
  */
 export interface ChannelInbound {
   subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
@@ -1991,6 +1999,10 @@ export interface ChannelInbound {
  * and the ports that move messages. Either port is null where the channel
  * cannot send, or where nothing ever arrives on it. A present port is what the
  * channel can do, not a promise that it is doing it now.
+ *
+ * @deprecated A channel is not a concept of the model. Send through `Chats`,
+ * hear through `MessagesSaid`, and list Rome's accounts through
+ * `ConnectedAccounts`.
  */
 export interface Channel {
   readonly name: string;
@@ -2054,8 +2066,15 @@ export interface ChannelMessageHookDeps {
   /** @deprecated Use `chatSettings`, which is the same control. */
   conversationSettings: ChatSettingsControl;
   chatStop: ChatStopHandler;
+  /** Sending into chats and showing typing there. A host that predates it
+   *  passes none, and a hook answers through `channels`. */
+  chats?: Chats;
+  /** Rome's accounts, each with its agent. A host that predates it passes
+   *  none. */
+  connectedAccounts?: ConnectedAccounts;
   /** A live array: the host appends a channel added later, such as a second
-   *  bot, in place. Read it at each `register()` rather than keep a copy. */
+   *  bot, in place. Read it at each `register()` rather than keep a copy.
+   *  @deprecated Hear through `messagesSaid`, and answer through `chats`. */
   channels: readonly Channel[];
   /**
    * The agent of one of Rome's accounts, read when each message arrives, since switching the agent changes it on the

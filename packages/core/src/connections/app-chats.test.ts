@@ -59,6 +59,9 @@ describe("appChats", () => {
   /** Runs while the platform opens a direct message. */
   let duringOpen: () => void;
   let accounts: Record<string, Account>;
+  /** Where each channel showed typing, by address, for the channels that
+   *  can. */
+  let typedAt: Record<string, string[] | undefined>;
   let chats: ChatsPort;
 
   beforeEach(() => {
@@ -72,6 +75,7 @@ describe("appChats", () => {
     opens = [];
     duringOpen = () => {};
     accounts = { telegram: BOT, discord: DISCORD };
+    typedAt = { telegram: [] };
     let next = 0;
     const channel = (name: string): Channel =>
       ({
@@ -94,6 +98,15 @@ describe("appChats", () => {
               return (opened[id] ?? null) as ChatId | null;
             },
           },
+          activity: typedAt[name]
+            ? {
+                begin: async ({ chatId }: { chatId: ChatId }) => {
+                  if (refuse) throw new Error("typing failed on the platform");
+                  typedAt[name]?.push(chatId);
+                  return { update: async () => {}, finish: async () => {} };
+                },
+              }
+            : null,
         },
       }) as unknown as Channel;
     const live = ["telegram", "telegram-2", "discord"].map(channel);
@@ -445,6 +458,37 @@ describe("appChats", () => {
       expect(error).toBeInstanceOf(SendError);
       expect(error.code).toBe("failed");
       expect(lines()).toEqual([]);
+    });
+  });
+
+  describe("typing", () => {
+    it("shows typing in the place as the account a send there goes out as, and records nothing", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+
+      const session = await chats.typing!(group);
+
+      expect(session).not.toBeNull();
+      expect(typedAt.telegram).toEqual(["-100"]);
+      expect(lines()).toEqual([]);
+    });
+
+    it("answers null where the platform shows no typing", async () => {
+      const group = fixture.chat("discord", "g-1", "group");
+
+      expect(await chats.typing!(group)).toBeNull();
+    });
+
+    it("answers null when the platform fails to show it, since typing is cosmetic", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      refuse = true;
+
+      expect(await chats.typing!(group)).toBeNull();
+    });
+
+    it("refuses a sender that is not in the chat, as a send would", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+
+      expect(await refusal(chats.typing!(group, { as: DISCORD }))).toBe("sender_not_in_chat");
     });
   });
 

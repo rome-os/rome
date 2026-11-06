@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { context, propagation, ROOT_CONTEXT } from "@opentelemetry/api";
 import { SendRefused, type SendRefusedReason, isSendRefused } from "@rome-os/app-runtime";
+import { SendError, type SendErrorCode, isSendError } from "@rome-os/app-runtime/chats";
 import { createLogger } from "../logger.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 
@@ -55,6 +56,9 @@ export interface IpcResponseMessage {
   /** The reason a channel refused a send, when `error` is that refusal, so
    *  the caller gets a SendRefused back rather than a bare Error. */
   refusal?: SendRefusedReason;
+  /** The code of a Chats send's refusal, when `error` is that refusal, so
+   *  the caller gets a SendError back rather than a bare Error. */
+  sendError?: SendErrorCode;
 }
 
 export interface IpcStreamOpenMessage {
@@ -392,6 +396,7 @@ export class IpcRpc {
         reqId: message.reqId,
         error: err instanceof Error ? err.message : String(err),
         ...(isSendRefused(err) ? { refusal: err.reason } : {}),
+        ...(isSendError(err) ? { sendError: err.code } : {}),
       });
     }
   }
@@ -403,9 +408,11 @@ export class IpcRpc {
     this.pending.delete(message.reqId);
     if (message.error !== undefined) {
       pending.reject(
-        message.refusal === undefined
-          ? new Error(message.error)
-          : new SendRefused(message.refusal, message.error),
+        message.sendError !== undefined
+          ? new SendError(message.sendError, message.error)
+          : message.refusal === undefined
+            ? new Error(message.error)
+            : new SendRefused(message.refusal, message.error),
       );
     } else {
       pending.resolve(message.result);

@@ -13,6 +13,7 @@ import { noAccountLinks } from "../chats/connected-accounts/account-links.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { openChannelChat } from "../connections/open-chat.js";
 import type { ChannelsService } from "@rome-os/app-runtime";
+import { chatsOver } from "@rome-os/app-runtime/chats";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
@@ -43,6 +44,8 @@ import {
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
+  chatsPortProxy,
+  connectedAccountsProxy,
   AppConnectionsProxy,
 } from "./service-proxies.js";
 import { callMain } from "./worker-rpc-client.js";
@@ -213,6 +216,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       agentRunner,
       resolveArtifactReference,
       channelsService: legacyChatIdChannelsService(channelsService),
+      chats: chatsOver(chatsPortProxy),
+      connectedAccounts: connectedAccountsProxy(),
       chatSettings: appChatSettings,
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,

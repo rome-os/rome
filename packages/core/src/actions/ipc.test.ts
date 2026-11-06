@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { context, ROOT_CONTEXT, trace, type Context, type SpanContext } from "@opentelemetry/api";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { SendRefused, isSendRefused } from "@rome-os/app-runtime";
+import { SendError, isSendError } from "@rome-os/app-runtime/chats";
 import { installTestSpanHarness, type SpanHarness } from "../test/helpers.js";
 
 let harness: SpanHarness;
@@ -135,5 +136,16 @@ describe("IpcRpc errors", () => {
     const failed = await worker.call("fails", {}).catch((error: unknown) => error);
     expect(isSendRefused(failed)).toBe(false);
     expect(failed).toMatchObject({ message: "boom" });
+  });
+
+  it("answers a Chats send's refusal as a SendError with its code", async () => {
+    const { main, worker } = linkedPeers(ROOT_CONTEXT);
+    main.handle("chats.send", async () => {
+      throw new SendError("sender_ambiguous", "name one as `as`");
+    });
+
+    const refused = await worker.call("chats.send", {}).catch((error: unknown) => error);
+    expect(isSendError(refused)).toBe(true);
+    expect(refused).toMatchObject({ code: "sender_ambiguous", message: "name one as `as`" });
   });
 });

@@ -27,8 +27,9 @@ export interface ChatRef {
 }
 
 /**
- * A thread in a chat, named by the message it hangs off: `id` is that
- * message's {@link MessageRef.id}.
+ * A thread in a chat, named by a message in it: `id` is the
+ * {@link MessageRef.id} of the message it hangs off, or of any message said
+ * in it. A thread that does not exist yet is opened off that message.
  */
 export interface ThreadRef {
   readonly chat: ChatRef;
@@ -172,6 +173,20 @@ export interface Chats {
    * sent again by the caller.
    */
   send(place: Place, out: ChatMessage, opts?: SendOptions): Promise<Sent>;
+  /**
+   * Show that Rome is typing in `place`, as `as` under the same rule as
+   * {@link Chats.send}. Answers the session to update while the work goes on
+   * and to finish when it ends, or null where the platform shows no typing.
+   * Typing is a presence signal, not content: it is never recorded, and
+   * nothing waits on it.
+   */
+  typing(place: Place, opts?: SendOptions): Promise<TypingSession | null>;
+}
+
+/** Rome typing in a place, from {@link Chats.typing}. */
+export interface TypingSession {
+  update(state: "thinking" | "working"): Promise<void>;
+  finish(result: "done" | "error"): Promise<void>;
 }
 
 /** Whether `place` names a thread rather than a whole chat. */
@@ -194,6 +209,9 @@ export interface ChatsPort {
   dm(account: Account, opts?: SendOptions): Promise<ChatRef>;
   /** The refs of the groups that match, as {@link Chats.group} answers. */
   group(query: { platform: string; name: string; as?: Account }): Promise<ChatRef[]>;
+  /** Typing in `place`, as {@link Chats.typing} answers. A host that predates
+   *  it shows none. */
+  typing?(place: Place, opts?: SendOptions): Promise<TypingSession | null>;
 }
 
 /** {@link Chats} over a host's port, so every host hands out the same
@@ -222,7 +240,34 @@ export function chatsOver(port: ChatsPort): Chats {
     byRef,
     dm: async (account, opts) => byRef(await port.dm(account, opts)),
     group: async (query) => (await port.group(query)).map(byRef),
+    typing: async (place, opts) => (port.typing ? port.typing(place, opts) : null),
   };
+}
+
+/**
+ * One of Rome's accounts, as {@link ConnectedAccounts.list} answers it
+ * (docs/domains/chats.md#connected-account).
+ */
+export interface ConnectedAccount {
+  /** The account, by its platform and the platform's own id. */
+  readonly account: Account;
+  /** What the account is called, from its profile: its display name, else
+   *  its handle, or null where the profile holds neither. */
+  readonly name: string | null;
+  /** The agent that answers as the account, or null for none. */
+  readonly agent: string | null;
+  /** Whether a connection reaches the account now. A disconnected account
+   *  keeps its agent, and connecting it again finds the same one. */
+  readonly connected: boolean;
+}
+
+/**
+ * Rome's accounts, as an app acts through them. An action receives it as
+ * `deps.connectedAccounts`. Sending is {@link Chats.send}, not this.
+ */
+export interface ConnectedAccounts {
+  /** Every one of Rome's accounts, disconnected ones included. */
+  list(): Promise<ConnectedAccount[]>;
 }
 
 function sameChat(a: ChatRef, b: ChatRef): boolean {
