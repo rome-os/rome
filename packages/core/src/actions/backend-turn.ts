@@ -64,6 +64,8 @@ export interface BackendEmitOptions {
  * awaits it can deliver its reply after them. */
 export type BackendSessionTask = (helpers: {
   emit: (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => Promise<void>;
+  /** Whether a Stop request reached this task's turn. */
+  stopRequested?: () => boolean;
 }) => Promise<void>;
 
 /** The main-process runner. Beyond the worker-facing `runAndDeliver`, it owns
@@ -71,9 +73,10 @@ export type BackendSessionTask = (helpers: {
  * timers) and exposes the lower-level `runBackendSessionTask` for callers that
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
-/** How a backend turn ended: `interrupted` when a Stop or a newer input cut
- *  it short, `failed` when it errored or never ran. */
-export type BackendTurnOutcome = "completed" | "interrupted" | "failed";
+/** How a backend turn ended: `stopped` when a Stop request cut it short,
+ *  `interrupted` when something else did, such as a newer input, and
+ *  `failed` when it errored or never ran. */
+export type BackendTurnOutcome = "completed" | "stopped" | "interrupted" | "failed";
 
 const endOutcome = (status: string): BackendTurnOutcome =>
   status === "completed" ? "completed" : status === "interrupted" ? "interrupted" : "failed";
@@ -296,7 +299,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       await runBackendSessionTask(
         params.channel,
         params.threadId,
-        async ({ emit }) => {
+        async ({ emit, stopRequested }) => {
           await deps.beforeTurn?.(params);
           let reply = "";
           let turnId: string | undefined;
@@ -311,6 +314,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             if (msg.type === "turn_end") outcome = endOutcome(msg.status);
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
+          if (outcome === "interrupted" && stopRequested?.()) outcome = "stopped";
           if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
           await send.send(params.threadId as ChatId, {
             text: reply,

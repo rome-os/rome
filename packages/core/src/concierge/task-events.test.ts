@@ -20,7 +20,7 @@ function setup() {
   const rendered: string[][] = [];
   const gaveUp: string[] = [];
   /** How the next turns end. */
-  let outcome: "completed" | "interrupted" | "failed" = "completed";
+  let outcome: "completed" | "stopped" | "interrupted" | "failed" = "completed";
   /** Settles the running flush's turn. */
   let endTurn: (() => void) | null = null;
   let holdTurns = false;
@@ -55,8 +55,12 @@ function setup() {
     turnsRun: (value: boolean) => {
       outcome = value ? "completed" : "failed";
     },
-    /** Makes the next turns end the way a Stop or a newer message ends them. */
+    /** Makes the next turns end the way a Stop ends them. */
     turnsStopped: () => {
+      outcome = "stopped";
+    },
+    /** Makes the next turns end the way a newer message cuts them short. */
+    turnsInterrupted: () => {
       outcome = "interrupted";
     },
     holdTurns: () => {
@@ -317,7 +321,6 @@ describe("TaskEventCoalescer", () => {
     s.coalescer.mark(urgent("b"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     // The guardian presses Stop, and a change for "b" lands while the turn ends.
-    s.coalescer.guardianStopped();
     await rs.advanceTimersByTimeAsync(1_000);
     s.coalescer.mark(urgent("b", "approval"));
     await s.endTurn();
@@ -341,23 +344,13 @@ describe("TaskEventCoalescer", () => {
 
   it("tries a turn a newer message cut short again, since it may never have reached the model", async () => {
     const s = setup();
-    s.turnsStopped();
+    s.turnsInterrupted();
     s.coalescer.mark(urgent("a"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(s.flushes).toHaveLength(1);
     s.turnsRun(true);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
     expect(s.flushes).toHaveLength(2);
-    expect(s.gaveUp).toEqual([]);
-  });
-
-  it("ignores a Stop while no task-event turn is delivering", async () => {
-    const s = setup();
-    s.coalescer.guardianStopped();
-    s.turnsStopped();
-    s.coalescer.mark(urgent("a"));
-    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    expect(s.coalescer.pending).toEqual(["a"]);
     expect(s.gaveUp).toEqual([]);
   });
 

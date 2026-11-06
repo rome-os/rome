@@ -97,6 +97,38 @@ describe("backend turn delivery", () => {
     expect(await runner.runAndReport(params)).toBe(outcome);
   });
 
+  it("reports an interrupted turn a Stop request reached as stopped", async () => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+        { type: "result", content: "" },
+        { type: "turn_end", turnId: "turn-1", status: "interrupted", durationMs: 5 },
+      ],
+    ]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => undefined, stopRequested: () => true });
+      },
+    });
+    expect(
+      await runner.runAndReport({
+        agentName: "core:concierge",
+        sessionId: "s",
+        channel: "webchat",
+        threadId: "concierge",
+        prompt: "<external_events/>",
+      }),
+    ).toBe("stopped");
+  });
+
   it("reports a turn that never ran as failed", async () => {
     const agentRunner = createMockAgentRunner([[]]);
     const webchat = {

@@ -158,7 +158,7 @@ export interface ConciergeDeps {
   runBackendTurn: (
     params: BackendTurnParams,
     options?: { quiet?: boolean; inputLabel?: string },
-  ) => Promise<"completed" | "interrupted" | "failed" | void>;
+  ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
 }
 
 export class ConciergeService {
@@ -529,17 +529,12 @@ export class ConciergeService {
     return (await this.systemTurnOutcome(chatId, prompt, options)) === "completed";
   }
 
-  /** The guardian stopped a background turn in this chat. */
-  async guardianStopped(chatId: string): Promise<void> {
-    if (await this.conciergeChat(chatId)) this.taskEvents?.guardianStopped();
-  }
-
   /** {@link runSystemTurn}, telling a turn cut short by a Stop or a newer message from one that failed. */
   async systemTurnOutcome(
     chatId: string,
     prompt: string,
     options: { quiet?: boolean; inputLabel?: string } = {},
-  ): Promise<"completed" | "interrupted" | "failed"> {
+  ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,
       sessionId: "",

@@ -65,7 +65,7 @@ export interface TaskEventDeps {
   /** The payloads for these rows, read from the database now, one per Concierge chat; empty when none of them exist any more. */
   render(tasks: DirtyTask[]): Promise<TaskEventDelivery[]>;
   /** Runs one payload as a system turn in its chat and answers how the turn ended. */
-  deliver(delivery: TaskEventDelivery): Promise<"completed" | "interrupted" | "failed">;
+  deliver(delivery: TaskEventDelivery): Promise<"completed" | "stopped" | "interrupted" | "failed">;
   /** The row was flushed and still not settled after its retry. */
   giveUp(taskId: string): void;
 }
@@ -91,8 +91,6 @@ export class TaskEventCoalescer {
   private dirty = new Map<string, Dirty>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
-  /** The guardian stopped the turn now delivering; reset as each delivery starts. */
-  private stopRequested = false;
   private lastFlushStartedAt = Number.NEGATIVE_INFINITY;
 
   constructor(private deps: TaskEventDeps) {}
@@ -137,11 +135,6 @@ export class TaskEventCoalescer {
     if (entry && entry.builtAt !== undefined && entry.since <= entry.builtAt) {
       this.dirty.delete(taskId);
     }
-  }
-
-  /** The guardian stopped the turn now delivering. Its rows are not handed over again. */
-  guardianStopped(): void {
-    this.stopRequested = true;
   }
 
   /** Drops a row's mark, such as when its row is gone. */
@@ -221,7 +214,6 @@ export class TaskEventCoalescer {
       notRun.clear();
       // One chat's turn failing leaves the other chats' turns to run.
       for (const delivery of deliveries) {
-        this.stopRequested = false;
         const outcome = await this.deps.deliver(delivery).catch((error: unknown) => {
           log.warn("task event delivery to one chat failed", {
             error: error instanceof Error ? error.message : String(error),
@@ -229,9 +221,9 @@ export class TaskEventCoalescer {
           return "failed" as const;
         });
         if (outcome === "completed") continue;
-        // Only a guardian Stop drops what the turn carried. A turn a newer
-        // message cut short may never have sent it to the model.
-        const ended = outcome === "interrupted" && this.stopRequested ? stopped : notRun;
+        // Only a Stop drops what the turn carried. A turn a newer message cut
+        // short may never have sent it to the model.
+        const ended = outcome === "stopped" ? stopped : notRun;
         for (const taskId of delivery.taskIds) ended.add(taskId);
       }
     } catch (error) {

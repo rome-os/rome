@@ -757,8 +757,6 @@ describe("Webchat API", () => {
       recordConversation: async () => {},
       shutdown: async () => {},
     };
-    const guardianStopped = rs.fn(async () => {});
-    deps.concierge = { guardianStopped } as never;
     const app = createWebchatRuntime(deps).routes;
     const created = await app.request("/chat/sessions", {
       method: "POST",
@@ -781,8 +779,6 @@ describe("Webchat API", () => {
         200,
       );
       expect(interrupt).toHaveBeenCalledWith("user-stop", "stop-1");
-      // A guardian turn of their own is not a background turn.
-      expect(guardianStopped).not.toHaveBeenCalled();
     } finally {
       for (const finish of finishers) finish();
     }
@@ -6096,8 +6092,6 @@ describe("Webchat API", () => {
     it("retries backend continuation Stop without interrupting a later provider turn", async () => {
       const sessionId = "sess-backend-stop";
       await deps.webchatRepo.createSession(sessionId, "Backend stop");
-      const guardianStopped = rs.fn(async () => {});
-      deps.concierge = { guardianStopped } as never;
       const owner = { currentTurnId: "backend-provider-turn", interrupt: rs.fn(async () => {}) };
       rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
@@ -6105,7 +6099,10 @@ describe("Webchat API", () => {
       const gate = new Promise<void>((resolve) => {
         finish = resolve;
       });
-      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+      let stopRequested: (() => boolean) | undefined;
+      const task = runtime.enqueueSessionTask(sessionId, async (helpers) => {
+        const { emit } = helpers;
+        stopRequested = helpers.stopRequested;
         emit({
           type: "turn_start",
           turnId: "backend-provider-turn",
@@ -6128,8 +6125,25 @@ describe("Webchat API", () => {
         expect(turnId).toMatch(/^backend:/);
       });
       const stop = () => routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
+      // Another chat's background turn, which nobody stops.
+      await deps.webchatRepo.createSession("sess-other", "Other");
+      let otherStopRequested: (() => boolean) | undefined;
+      let finishOther!: () => void;
+      const otherGate = new Promise<void>((resolve) => {
+        finishOther = resolve;
+      });
+      const other = runtime.enqueueSessionTask("sess-other", async (helpers) => {
+        otherStopRequested = helpers.stopRequested;
+        await otherGate;
+      });
+      await rs.waitFor(() => expect(otherStopRequested).toBeDefined());
+      expect(stopRequested?.()).toBe(false);
       expect((await stop()).status).toBe(202);
-      expect(guardianStopped).toHaveBeenCalledWith(sessionId);
+      // The Stop reached this turn only.
+      expect(stopRequested?.()).toBe(true);
+      expect(otherStopRequested?.()).toBe(false);
+      finishOther();
+      await other;
       expect((await stop()).status).toBe(202);
       expect(owner.interrupt).toHaveBeenCalledTimes(2);
       owner.currentTurnId = "later-turn";

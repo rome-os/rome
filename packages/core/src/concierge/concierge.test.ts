@@ -277,7 +277,7 @@ function setup(
     },
   } as unknown as ConciergeDeps;
   /** A system turn's outcome: it ran to its end unless the hook says it failed. */
-  type BackendOutcome = "completed" | "interrupted" | "failed" | undefined;
+  type BackendOutcome = "completed" | "stopped" | "interrupted" | "failed" | undefined;
   let onBackendTurn: (
     params: BackendTurnParams,
   ) => Promise<BackendOutcome | void> | BackendOutcome | void = () => {};
@@ -1498,10 +1498,7 @@ describe("Concierge events", () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
-    s.onBackendTurn(async () => {
-      await s.service.guardianStopped(CONCIERGE_CHAT);
-      return "interrupted" as const;
-    });
+    s.onBackendTurn(() => "stopped");
     await finishTask(s, chatId);
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
