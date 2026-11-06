@@ -48,7 +48,8 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
     - [x] Rome's own Apple Developer organization account: Amantru, Inc, Team ID `4YWXB26F39`; the user is an Admin (2026-11-05). `cc.romeos.mobile` was already registered there as "Rome Mobile".
     - [x] App Store Connect app record: "Rome – Personal Agent OS" (App ID 6831429506), company name Amantru, Inc, English (U.S.), SKU `rome-ios`, Full Access. "Rome" and "Rome OS" were taken; the home-screen name stays "Rome".
     - [x] Release prep that needs no account: export compliance key, version and build number rule, icon check, Release build without demo and debug entries, archive and export steps in `ios/README.md` (`c3f8f893`, `3491a51c`, `f7dd2dee`: Release is `cc.romeos.mobile` "Rome", Debug `cc.romeos.mobile.dev` "Rome Dev"; build number is the UTC archive time; privacy manifest added; icon already fine. Result: [`mobile-app-mvp-release-prep.md`](mobile-app-mvp-release-prep.md))
-    - [ ] Switch signing to the new team, archive, upload (needs the user's go); team members join as internal testers
+    - [x] Switch signing to the new team, archive, upload (the user's go, 2026-11-05): version 1.0.0, build 202611060248, from `8454fb61`, team `4YWXB26F39`, `cc.romeos.mobile`. The upload was accepted and Xcode reported "Uploaded package is processing"; App Store Connect itself was not checked, because it needs the user's sign-in. No certificate needed setting up: Xcode made the team's development certificate and signed for distribution in the cloud.
+    - [ ] Team members join as internal testers
 
 ## Small changes (batched)
 
@@ -62,6 +63,6 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
 
 | Name | Session | Task | Status |
 | --- | --- | --- | --- |
-| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: reinstalled eab3914d (round 1 feel fixes and the always-latest instance update) from a clean export. Mac Catalyst unit tests passed on it (53 tests in 13 suites), `devicectl` install and launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
+| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: phone build eab3914d (53 tests passed, installed and launched; team B2U93L2LK4, `cc.romeos.mobile.dev`). First TestFlight upload: 1.0.0 (202611060248) from a clean export of `8454fb61`, 53 Mac Catalyst tests passed first, team `4YWXB26F39`, `cc.romeos.mobile`; accepted and processing per Xcode. Open: confirm in App Store Connect that processing finished |
 | ios-feel-fixes | local_a0f3f229-481e-440c-9bde-fb0f72bddd0a | Feel fixes, round 1; then instance forced update | round 1 done; forced update working |
 | make-english-the-ios-app | local_066dd861-f965-4eff-89db-ee9aa13d5d0c | English default, zh-Hans translation | done, merged, archived; worktree and branch removed |
