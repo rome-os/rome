@@ -31,9 +31,8 @@ export class ActiveSessionExistsError extends Error {
 
 /**
  * The collection of sessions. Finds them by id or by continuity key, adds new
- * ones, and writes their changes. Together with `db/repositories/sessions.ts`,
- * which it replaces, it is the only code that touches `sessions` and
- * `session_turn_checkpoints`.
+ * ones, and writes their changes. It is the only code that touches `sessions`
+ * and `session_turn_checkpoints`.
  */
 export class SessionRepository {
   constructor(

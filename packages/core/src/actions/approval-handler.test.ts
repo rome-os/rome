@@ -6,6 +6,7 @@ import { result } from "../test/kit/fake-model.js";
 import { createTestRome, buildAction, recordingAction, type TestRome } from "../test/kit/index.js";
 import type { ActionResult } from "./types.js";
 import type { ThreadContext } from "../core/types.js";
+import { Session } from "../sessions/session.js";
 
 // ApprovalHandler tests through the real wiring (testkit): real repos on an
 // in-memory DB, the real ActionEngine executing registered actions
@@ -41,12 +42,9 @@ describe("ApprovalHandler", () => {
     agentName = "main",
     channelThreadKey = `approval:${id}`,
   ) {
-    await rome.repos.sessions.create({
-      id,
-      agentName,
-      channelThreadKey,
-      status: "active",
-    });
+    await rome.repos.sessions.add(
+      Session.create(agentName, { deprecatedId: id, continuityKey: channelThreadKey }),
+    );
   }
 
   // onApproved — action-level replay

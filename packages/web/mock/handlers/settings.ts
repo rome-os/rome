@@ -93,7 +93,6 @@ const romeCredits: RomeCreditsView = {
 // ── Access control ─────────────────────────────────────
 
 interface PublicAccessConfig {
-  enableAccessControl: boolean;
   allowedApps: string[];
   cloudEmailAccess: Record<string, string[]>;
 }
@@ -106,9 +105,6 @@ interface PublicAccessConfig {
  */
 export const publicAccess: { config: PublicAccessConfig } = {
   config: {
-    // Off: turning it on requires a reachable tailnet, which this instance has
-    // no fixture for. The per-app allowances below are independent of it.
-    enableAccessControl: false,
     allowedApps: [],
     cloudEmailAccess: {},
   },
@@ -117,20 +113,6 @@ export const publicAccess: { config: PublicAccessConfig } = {
 /** Who may reach the dashboard itself over Rome Cloud, independent of any app. */
 const dashboardAccess: { cloudEmailAccess: string[] } = {
   cloudEmailAccess: ["partner@example.com", "sitter@example.com"],
-};
-
-// No tailnet, matching the `/api/tailscale/devices` fixture that already
-// reports Tailscale unconfigured. A seeded hostname is worse than useless here:
-// the page proves reachability by fetching `https://<dns>/api/health` on that
-// *other* origin, which no service worker can answer, so it would fail every
-// 5s forever — and enabling access control from a different host hands the
-// session off by navigating there, out of mock mode entirely. Unconfigured is
-// both self-consistent and the state a developer machine is actually in.
-const tailnet = {
-  tailnetDns: null,
-  httpsEnabled: false,
-  certReady: false,
-  certError: null,
 };
 
 // ── Favors ─────────────────────────────────────────────
@@ -460,7 +442,6 @@ export const settingsHandlers = [
     dashboardAccess.cloudEmailAccess = body.cloudEmailAccess;
     return HttpResponse.json(dashboardAccess);
   }),
-  http.get("/api/tailnet", () => HttpResponse.json(tailnet)),
   http.get("/api/favors/balance", () => HttpResponse.json(favorBalance)),
   // The envelopes carry the cursors the real routes return, even though the
   // Favors tab reads only `requests` and `entries` — a fixture that drops them

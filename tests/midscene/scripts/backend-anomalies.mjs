@@ -32,7 +32,7 @@ const readLines = (path) =>
 const ERROR_LEVELS = new Set(["error", "fatal", 50, 60]);
 
 // Container lines look like `rome-1  | <timestamp> <payload>`. Only JSON
-// payloads carry a level; plain-text lines (Tailscale, pnpm) are not graded.
+// payloads carry a level; plain-text lines (pnpm) are not graded.
 const romeLogEntries = readLines(args["rome-log"]).flatMap((line) => {
   const start = line.indexOf("{");
   if (start < 0) return [];

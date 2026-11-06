@@ -81,7 +81,6 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PeopleRepository } from "./db/repositories/people.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
@@ -142,7 +141,6 @@ import { ExecutionJournalRepository } from "./db/repositories/execution-journal.
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { AgentLoader } from "./core/agent-loader.js";
-import { SessionManager } from "./core/session-manager.js";
 import { SessionRepository } from "./sessions/session-repository.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
@@ -206,7 +204,6 @@ import { HostExecutionService } from "./host-execution/service.js";
 import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
-import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
@@ -340,7 +337,6 @@ async function main() {
     throw err;
   }
 
-  const sessionsRepo = new SessionsRepository(db);
   // Read on each call, so the registry built below answers it.
   const channelRecords = new ChannelRecordsRepository(db, (kind) =>
     accountLinkOf(connectionRegistry)(kind),
@@ -771,7 +767,6 @@ async function main() {
   });
   artifactLoadFailuresBooted = true;
   artifactLoadFailureReporter.report("boot");
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
   const sessionRepository = new SessionRepository(db, artifactIdentity);
 
   // Set once the email adapter is created (further down). Lets the main-agent
@@ -1088,7 +1083,7 @@ async function main() {
   const concierge = new ConciergeService({
     settingsRepo,
     webchatRepo,
-    sessionManager,
+    sessionRepository,
     aiToolState,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
@@ -1904,14 +1899,7 @@ async function main() {
   };
   const publicAccessState = new PublicAccessState();
   try {
-    const config = await publicAccessState.load(db);
-    try {
-      await reconcilePublicAccessAtStartup(db, config);
-    } catch (err) {
-      log.warn("Failed to reconcile publicAccess settings with Caddy at startup; continuing", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await publicAccessState.load(db);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
@@ -2036,8 +2024,7 @@ async function main() {
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       agentSessionManager,
       conversationTitleGenerator,
       agentRunner,

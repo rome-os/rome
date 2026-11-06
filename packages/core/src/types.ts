@@ -77,19 +77,6 @@ export interface AgentConfig {
   };
 }
 
-export interface AgentSession {
-  id: string;
-  agentName: string;
-  channelThreadKey: string;
-  /** The Rome conversation this session serves, when the caller named one. */
-  chatId?: string;
-  providerThreadId?: string;
-  workingDir?: string;
-  createdAt: Date;
-  lastActiveAt: Date;
-  status: "active" | "completed" | "error";
-}
-
 export interface Policy {
   id: string;
   scope: PolicyScope;

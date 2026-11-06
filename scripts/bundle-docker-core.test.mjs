@@ -60,15 +60,11 @@ test("the relocated Caddy generator runs without Core workspace dependencies", a
     [
       "-e",
       `const { generateCaddyfile } = require(${JSON.stringify(outfile)});
-       console.log(generateCaddyfile({
-         enableAccessControl: true,
-         allowedApps: ["@alice/calendar"],
-         cloudEmailAccess: {},
-       }));`,
+       console.log(generateCaddyfile());`,
     ],
     { cwd: directory, encoding: "utf8" },
   );
-  assert.ok(output.includes("/apps/%40alice%2Fcalendar"));
+  assert.ok(output.includes("forward_auth"));
 });
 
 test("compiled People contracts run in plain Node without TypeScript source resolution", async (t) => {

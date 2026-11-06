@@ -549,77 +549,9 @@
     "decliningApprovalRequest": "Declining approval request",
     "startingPackPurchase": "Starting favor pack purchase"
   },
-  "tailscale": {
-    "title": "Tailscale",
-    "daemonMode": "daemon mode",
-    "status": {
-      "connected": "Connected",
-      "notConnected": "Not connected",
-      "authenticating": "Authenticating",
-      "notConfigured": "Not configured"
-    },
-    "connectButton": "Connect to Tailscale",
-    "connectButtonOauth": "Connect Tailscale",
-    "authPrompt": "Complete authentication in your browser:",
-    "polling": "Polling for completion...",
-    "infoLabels": {
-      "ip": "Tailscale IP",
-      "hostname": "Hostname",
-      "fqdn": "FQDN"
-    },
-    "peersTable": {
-      "hostname": "Hostname",
-      "fqdn": "FQDN",
-      "ip": "IP",
-      "os": "OS",
-      "status": "Status",
-      "thisDevice": "THIS"
-    },
-    "noPeers": "No peers found in your tailnet.",
-    "exitNode": {
-      "title": "Exit Node",
-      "updating": "Updating exit node setting...",
-      "updateFailed": "Failed to update exit node setting.",
-      "termTooltip": "An exit node routes another device's internet traffic through this server."
-    },
-    "downloadBannerPrefix": "Running outside Docker. Download the",
-    "downloadBannerLink": "Tailscale desktop app",
-    "downloadBannerSuffix": "to connect this machine to your tailnet.",
-    "devicesTable": {
-      "name": "Name",
-      "os": "OS",
-      "ipAddresses": "IP Addresses",
-      "version": "Version",
-      "status": "Status",
-      "lastSeen": "Last Seen"
-    },
-    "noDevices": "No devices found in your tailnet.",
-    "modal": {
-      "title": "Connect Tailscale",
-      "introPrefix": "Enter your Tailscale OAuth client credentials. You can create them in the",
-      "introLink": "Tailscale admin console",
-      "introSuffix": ". The client needs at least <code>devices:read</code> scope.",
-      "clientIdLabel": "Client ID",
-      "clientIdPlaceholder": "k1234567890abcdef",
-      "clientSecretLabel": "Client Secret",
-      "clientSecretPlaceholder": "tskey-client-...",
-      "cancel": "Cancel"
-    }
-  },
   "publicAccess": {
     "title": "Access Control",
     "description": "Dashboard sign-in is still required under every setting here.",
-    "savedFlash": "Public access settings saved",
-    "saveFailedFallback": "Failed to save public access settings.",
-    "openFirst": "Open your Rome Tailscale URL from this device before turning on access control.",
-    "handoffFailed": "Could not transfer your session to the Tailscale URL.",
-    "toggleLabel": "Restrict to Tailscale host",
-    "restrictedNote": "Public internet access is restricted. Continue using the Tailscale hostname for the dashboard.",
-    "needTailscaleNote": "Connect this machine to Tailscale before restricting the dashboard to the Tailscale host.",
-    "needHttpsNote": "Finish the Tailscale HTTPS setup before turning on access control.",
-    "openTailnetNote": "Open your Rome Tailscale URL from this device first so Rome can verify the connection works.",
-    "checkingSuffix": " Checking...",
-    "publicEnabledNote": "Public host access is enabled. Dashboard sign-in is still required, except for apps with public or Rome Cloud email access.",
     "dashboardEmails": {
       "title": "Allowed emails",
       "description": "Grants the full dashboard, not just individual apps.",

@@ -83,8 +83,8 @@ On the economical setting, prefer the phrase. Drop the subject when the surface 
 
 State the reason before the action it justifies. This matches `WRITING.md`'s condition-before-command rule, and Microsoft, Material, and Apple publish the same order. The reader needs the reason more than the action. `[llm]`
 
-> Prefer: "To restrict the dashboard to your tailnet, connect this machine to Tailscale."
-> Over: "Connect this machine to Tailscale to restrict the dashboard to your tailnet."
+> Prefer: "To share this app, turn on public access."
+> Over: "Turn on public access to share this app."
 
 Flag any single sentence over 25 words for splitting. Three sentences is the ceiling for one string. `[mech]`
 

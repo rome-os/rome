@@ -52,12 +52,7 @@ import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
 import { terminalRoutes } from "./routes/terminal.js";
-import {
-  capabilityDiscoveryRoutes,
-  hostCapabilityDiscoverySource,
-} from "./routes/capability-discovery.js";
 import { desktopRoutes } from "./routes/desktop.js";
-import { tailscaleRoutes } from "./routes/tailscale.js";
 import { authRoutes } from "./routes/auth.js";
 import { onboardRoutes } from "./routes/onboard.js";
 import { instanceEnrollRoutes } from "./routes/instance-enroll.js";
@@ -175,7 +170,6 @@ export function buildApp(
   api.route("/", appConnectionAccessRoutes(deps));
   api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
-  api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());
   api.route("/", publicAccessRoutes(deps));
   api.route("/", dashboardAccessRoutes(deps));
@@ -207,7 +201,6 @@ export function buildApp(
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
-  api.route("/", tailscaleRoutes(deps));
   api.route("/", memoryFilesRoutes());
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));

@@ -55,9 +55,6 @@ function mockAppKeysFetch(
     const url = String(input);
     const method = init?.method ?? "GET";
     if (url === "/api/settings") return ok({});
-    if (url === "/api/tailscale/devices") {
-      return ok({ mode: "oauth", configured: false, devices: [] });
-    }
     if (url === "/api/integrations/composio/status") return ok({});
     if (url === "/api/connections") return ok({ connections: [] });
     if (url.startsWith("/api/app-keys")) {

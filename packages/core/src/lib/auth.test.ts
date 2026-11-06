@@ -8,8 +8,6 @@ import {
   createSession,
   issueGuardianSession,
   verifySession,
-  createSessionHandoffToken,
-  verifySessionHandoffToken,
   COOKIE_NAME,
 } from "./auth.js";
 
@@ -200,30 +198,5 @@ describe("configurable session lifetime", () => {
     delete process.env.ROME_SESSION_MAX_AGE_SECONDS;
     rs.resetModules();
     expect(await maxAgeOf()).toBe("Max-Age=2592000");
-  });
-});
-
-describe("session handoff tokens", () => {
-  it("round-trips a valid handoff token", () => {
-    const token = createSessionHandoffToken({
-      userId: "u1",
-      targetHost: "host.example",
-      nonce: "n1",
-    });
-    expect(verifySessionHandoffToken(token)).toEqual({
-      kind: "session_handoff",
-      userId: "u1",
-      targetHost: "host.example",
-      nonce: "n1",
-    });
-  });
-
-  it("rejects tokens with the wrong kind", () => {
-    const token = createSession("u1");
-    expect(verifySessionHandoffToken(token)).toBeNull();
-  });
-
-  it("rejects malformed tokens", () => {
-    expect(verifySessionHandoffToken("not-a-jwt")).toBeNull();
   });
 });

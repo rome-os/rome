@@ -39,13 +39,13 @@ describe("testkit", () => {
       const resultMsg = messages.find((m) => m.type === "result");
       expect(resultMsg).toMatchObject({ content: "It's sunny in Rome." });
 
-      // The REAL SessionManager persisted the session row.
+      // The real SessionRepository persisted the session.
       const init = messages.find((m) => m.type === "session_init");
       expect(init).toBeDefined();
-      const session = await rome.repos.sessions.findById((init as { sessionId: string }).sessionId);
+      const session = await rome.repos.sessions.session((init as { sessionId: string }).sessionId);
       expect(session).not.toBeNull();
       expect(session!.agentName).toBe("core:main");
-      expect(session!.channelThreadKey).toBe("telegram:thread-7");
+      expect(session!.continuityKey).toBe("telegram:thread-7");
 
       // The model saw the real PromptBuilder output for the "main" agent.
       expect(rome.model.lastSystemPrompt()).toContain("You are a test agent.");
