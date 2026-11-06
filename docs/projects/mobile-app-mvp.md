@@ -45,8 +45,9 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
 Agreed design: the instance decides when to push and sends `{body, level, chatId}` to Rome Cloud; Rome Cloud adds the instance id and delivers through APNs with Amantru's team key; the app asks permission at a good moment, registers its token, and routes a tap to the right instance and Concierge.
 
 - [x] App side (`e0f99310`, `592fd834`, `2edf23e7`, `924b9349`): Debug signs with team `4YWXB26F39` like Release; `aps-environment` development/production; a quiet "Turn on" card in Chat (Not now waits 7 days); token registered with Rome Cloud `POST /api/devices` on each launch, refusals retried quietly; `DELETE` before sign-out clears credentials; no banner in the foreground; a tap switches to its instance and opens Concierge, also from a cold launch; Settings row On / Off / Not set. 72 Mac Catalyst tests pass; card and Settings snapshots light and dark. Result: [`mobile-app-mvp-push.md`](mobile-app-mvp-push.md)
-- [ ] Simulator: system prompt, foreground suppression and tap routing with `xcrun simctl push` (waiting on Simulator access for taps)
+- [x] Simulator: card, system prompt, Not now, no banner in the foreground, tap routing (same instance, other instance, cold launch) with `xcrun simctl push`. It found a crash on every tap, now fixed (`84e5661b`); trap in `ios/CLAUDE.md` (`a599033b`)
 - [ ] Rome Cloud side (`amantru/rome-cloud`) and instance side merged; then a real push end to end on the phone
+- [ ] Local end-to-end test with a sandbox-only APNs key: "Rome Push Local Test", Key ID `GL5Q9DS43J`, team `4YWXB26F39` (created 2026-11-06 at the user's OK). The `.p8` is outside every repo, in `~/.config/rome-push/` (mode 600). Needs a local Pantheon (`.env` with `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_P8`), a local instance linked to it, and Rome Dev pointed at it. **Delete the key in Apple Developer › Keys and the local file after testing.**
 - [ ] Concierge topic chats: open the push's `chatId` (parsed, not used yet)
 
 ## Next
