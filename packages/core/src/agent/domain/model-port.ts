@@ -6,7 +6,9 @@
 // The port knows models, threads, positions and builtin tools. It knows
 // nothing of agents, sessions, chats or connected accounts: the resolver
 // picks the provider and model in front of it, the session stores what it
-// returns, and what a turn cost travels on the terminal event.
+// returns, and what a turn cost travels on the terminal event. A member that
+// mixed the run's logic with the provider's left: a fork is `open` on a
+// `branch` thread start, and reopening after an interrupt is the provider's.
 // Until the adapters implement this port they implement
 // ./deprecated-model-port.ts.
 
@@ -47,7 +49,7 @@ export type ModelReasoningEffort = ReasoningEffort;
 
 /**
  * Value object. Where a completed turn left a provider thread. Minted by the
- * provider, recorded with the turn, handed back to `fork`.
+ * provider, recorded with the turn, handed back as a `branch` thread start.
  */
 export interface ProviderPosition {
   provider: ProviderId;
@@ -88,9 +90,16 @@ export interface ModelPrefix {
 
 /**
  * Value object. Which provider thread a model session opens on. `new` starts
- * a thread that has seen nothing; `resume` continues one the provider named.
+ * a thread that has seen nothing; `resume` continues one the provider named;
+ * `branch` starts from a position on one. An `ephemeral` branch is closed
+ * after one use and the provider may run it inside the source thread and
+ * roll it back; a `kept` branch gets a thread of its own that the session
+ * records. The provider refuses a branch of a thread with a running turn.
  */
-export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: ProviderThreadId };
+export type ThreadStart =
+  | { kind: "new" }
+  | { kind: "resume"; providerThreadId: ProviderThreadId }
+  | { kind: "branch"; at: ProviderPosition; lifetime: "ephemeral" | "kept" };
 
 export interface OpenModelSessionParams {
   prefix: ModelPrefix;
@@ -160,15 +169,18 @@ export type ModelSessionEvent =
 
 /**
  * Live handle on one open provider thread. Owns the provider's client and
- * the input queue. One lifetime stream of events across all its turns.
+ * the input queue. One lifetime stream of events across all its turns. It
+ * stays usable after `interrupt`: the provider reopens what it disposed on
+ * the next input. Only `close()` ends it.
  */
 export interface ModelSession {
   /** The model that runs, after any substitution the provider made. */
   readonly model: ModelName;
-  /** The thread this session runs on, once the provider has named it. */
+  /**
+   * The thread this session runs on, once the provider has named it. An
+   * ephemeral branch run inside its source thread reports the source's.
+   */
   readonly providerThreadId?: ProviderThreadId;
-  /** Disposed by an interrupt or a close; a new turn needs a new session. */
-  readonly isClosed: boolean;
   readonly events: AsyncIterable<ModelSessionEvent>;
   /**
    * Who pays for this session's turns. Known when the session opens, from
@@ -191,43 +203,8 @@ export interface ModelSession {
    * without it takes the input as the next turn.
    */
   steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
-  /** A new thread branched from this one. Refuses while a turn is running. */
-  fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
-  /** Stop the running turn. The provider may dispose its client. */
+  /** Stop the running turn. */
   interrupt(): Promise<void>;
   /** End the session; `events` terminates. Idempotent. */
   close(): Promise<void>;
-}
-
-/** Value object. How to branch a thread. */
-export interface ModelSessionForkParams {
-  /**
-   * Where to branch. Absent branches at the head. The provider refuses a
-   * position on another provider or another thread.
-   */
-  at?: ProviderPosition;
-  /**
-   * `ephemeral` is closed after one use; `kept` gets a thread of its own
-   * that the session may record.
-   */
-  lifetime: "ephemeral" | "kept";
-}
-
-export interface ModelSessionForkOpenParams {
-  prefix: ModelPrefix;
-  tools: RomeTools;
-}
-
-/**
- * The branch before it is opened. Minted under the source's lock, opened
- * outside it, so the source's later turns are not held.
- */
-export interface ModelSessionFork {
-  /**
-   * The child's thread, once opened. Absent when the provider ran the turn
-   * inside the source thread and rolled it back; such a child has no thread
-   * of its own to record.
-   */
-  readonly providerThreadId?: ProviderThreadId;
-  open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
 }
