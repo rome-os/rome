@@ -73,6 +73,8 @@ To run Rome on your own machine, use Docker.
 
 ### Run with Docker
 
+Full guide: [`docs/self-hosting.md`](docs/self-hosting.md).
+
 One script checks for Docker, pulls the published image, and starts Rome:
 
 ```bash
