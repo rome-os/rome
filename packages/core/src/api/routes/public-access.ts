@@ -48,7 +48,7 @@ export function publicAccessRoutes(deps: ApiDeps): Hono {
     deps.publicAccessState.setConfig(config);
 
     try {
-      await writeCaddyfileAndReload(deps.db, config);
+      await writeCaddyfileAndReload();
     } catch (error) {
       log.error("failed to reload caddy", {
         error: error instanceof Error ? error.message : String(error),

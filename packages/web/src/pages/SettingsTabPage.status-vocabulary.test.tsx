@@ -37,7 +37,7 @@ function renderAdvanced(relay: Record<string, unknown> | null) {
     if (url === "/api/settings") return response({});
     if (url === "/api/integrations/relay") return response({ relay });
     if (url === "/api/public-access") {
-      return response({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+      return response({ allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") return response({ cloudEmailAccess: [] });
     return response({});

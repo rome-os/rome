@@ -109,7 +109,6 @@ async function stubDeps(
       .values({
         key: "publicAccess",
         value: {
-          enableAccessControl: true,
           allowedApps: options.allowedApps ?? [],
           cloudEmailAccess: options.cloudEmailAccess ?? {},
         },

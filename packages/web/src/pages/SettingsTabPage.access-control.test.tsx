@@ -29,7 +29,7 @@ function mockSettingsBackend(options?: { cloudEmailAccess?: string[]; failPut?: 
     const url = String(input);
     if (url === "/api/settings") return ok({});
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+      return ok({ allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       if (init?.method === "PUT") {

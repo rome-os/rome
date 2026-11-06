@@ -55,7 +55,6 @@ function defaultResponse(url: string): Response {
   }
   if (url === "/api/public-access") {
     return response(true, 200, {
-      enableAccessControl: false,
       allowedApps: [],
       cloudEmailAccess: {},
     });

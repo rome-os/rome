@@ -26,7 +26,7 @@ function renderAdvanced() {
     const url = String(input);
     const body =
       url === "/api/public-access"
-        ? { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} }
+        ? { allowedApps: [], cloudEmailAccess: {} }
         : url === "/api/dashboard-access"
           ? { cloudEmailAccess: [] }
           : {};

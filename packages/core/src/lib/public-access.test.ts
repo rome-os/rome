@@ -9,17 +9,8 @@ describe("generateCaddyfile", () => {
     else process.env.INTERNAL_API_PORT = originalPort;
   });
 
-  const config = (
-    input: Partial<Parameters<typeof generateCaddyfile>[0]>,
-  ): Parameters<typeof generateCaddyfile>[0] => ({
-    enableAccessControl: false,
-    allowedApps: [],
-    cloudEmailAccess: {},
-    ...input,
-  });
-
-  it("gates only dynamic surfaces through forward_auth in default mode", () => {
-    const out = generateCaddyfile(config({ enableAccessControl: false, allowedApps: [] }));
+  it("gates only dynamic surfaces through forward_auth", () => {
+    const out = generateCaddyfile();
     expect(out).toContain(":8080 {");
     expect(out).toContain("reverse_proxy 127.0.0.1:4141");
     // forward_auth lives in the @dynamic block, which only covers the
@@ -32,11 +23,11 @@ describe("generateCaddyfile", () => {
     expect(out).toContain(
       "copy_headers X-Rome-User-Id X-Rome-Visitor-Account-Id X-Rome-Visitor-Email",
     );
-    expect(out).not.toContain("gateway.html");
+    expect(out).not.toContain("gateway");
   });
 
-  it("serves the SPA from disk in default mode (no Hono round-trip)", () => {
-    const out = generateCaddyfile(config({ enableAccessControl: false, allowedApps: [] }));
+  it("serves the SPA from disk (no Hono round-trip)", () => {
+    const out = generateCaddyfile();
     // Rsbuild emits hashed JS/CSS beneath /static. Keep that path in its own
     // file-server handle so a missing chunk is a real 404 rather than the SPA
     // HTML fallback, and make successful immutable chunks cheap to revisit.
@@ -67,7 +58,7 @@ describe("generateCaddyfile", () => {
   });
 
   it("routes WebSocket paths around forward_auth (caddy#5430)", () => {
-    const out = generateCaddyfile(config({ enableAccessControl: false, allowedApps: [] }));
+    const out = generateCaddyfile();
     // forward_auth forwards Upgrade/Connection headers verbatim to the
     // auth probe and stalls on WS upgrades — the WS paths must bypass it.
     expect(out).toContain("@wsUpgrade path /ws/* /desktop-proxy /desktop-proxy/*");
@@ -78,7 +69,7 @@ describe("generateCaddyfile", () => {
   });
 
   it("lets app WebSocket upgrades through forward_auth via header_up -Connection", () => {
-    const out = generateCaddyfile(config({ enableAccessControl: false, allowedApps: [] }));
+    const out = generateCaddyfile();
     // App WS lives under /api/apps/* and /api/app-api/*, so it stays in the
     // @dynamic block to keep the cookie gate. Stripping Connection from the
     // forward_auth probe copy only is what lets the handshake reach the app.
@@ -88,74 +79,14 @@ describe("generateCaddyfile", () => {
 
   it("honours INTERNAL_API_PORT for the upstream", () => {
     process.env.INTERNAL_API_PORT = "9999";
-    const out = generateCaddyfile(config({ enableAccessControl: false, allowedApps: [] }));
+    const out = generateCaddyfile();
     expect(out).toContain("reverse_proxy 127.0.0.1:9999");
     expect(out).toContain("forward_auth 127.0.0.1:9999 {");
   });
 
-  it("never proxies the private Discord broker in either access mode", () => {
-    for (const enableAccessControl of [false, true]) {
-      const out = generateCaddyfile(config({ enableAccessControl, allowedApps: [] }));
-      expect(out).not.toContain("/_internal");
-      expect(out).not.toMatch(/path[^\n]*_internal/);
-    }
-  });
-
-  it("falls back to the gateway page in publicAccess mode and drops forward_auth", () => {
-    const out = generateCaddyfile(config({ enableAccessControl: true, allowedApps: [] }));
-    expect(out).toContain(
-      "@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/*",
-    );
-    expect(out).toContain("handle @publicApi {");
-    expect(out).toContain("rewrite * /gateway.html");
-    expect(out).toContain("path /static/* /assets/* /icon.svg /favicon.ico");
-    expect(out).toContain("@missingSpaAssets path /static/* /assets/* /icon.svg /favicon.ico");
-    expect(out).toContain("encode zstd gzip");
-    expect(out).toContain('"not_public"');
-    expect(out).not.toContain("forward_auth");
-  });
-
-  it("emits per-app routes for each allowed app", () => {
-    const out = generateCaddyfile(
-      config({ enableAccessControl: true, allowedApps: ["inbox", "news"] }),
-    );
-    for (const appId of ["inbox", "news"]) {
-      expect(out).toContain(`handle /apps/${appId} {`);
-      expect(out).toContain(`handle /apps/${appId}/* {`);
-      expect(out).toContain(`handle /full/apps/${appId} {`);
-      expect(out).toContain(`handle /full/apps/${appId}/* {`);
-      expect(out).toContain(`handle /api/apps/${appId} {`);
-      expect(out).toContain(`handle /api/apps/${appId}/* {`);
-      expect(out).toContain(`handle /api/app-api/${appId} {`);
-      expect(out).toContain(`handle /api/app-api/${appId}/* {`);
-      expect(out).toContain(`handle /app-assets/${appId}/* {`);
-    }
-
-    const inboxShellStart = out.indexOf("handle /apps/inbox {");
-    const inboxShellEnd = out.indexOf("\n\thandle /apps/inbox/* {", inboxShellStart);
-    expect(inboxShellStart).toBeGreaterThan(-1);
-    expect(inboxShellEnd).toBeGreaterThan(inboxShellStart);
-    const inboxShell = out.slice(inboxShellStart, inboxShellEnd);
-    expect(inboxShell).toContain("reverse_proxy 127.0.0.1:");
-    expect(inboxShell).not.toContain("rewrite * /index.html");
-  });
-
-  it("emits signed-in visitor routes for cloud-email apps", () => {
-    const out = generateCaddyfile(
-      config({
-        enableAccessControl: true,
-        cloudEmailAccess: { briefing: ["ada@example.com"] },
-      }),
-    );
-
-    expect(out).toContain("handle /api/apps/briefing/manifest {");
-    expect(out).toContain("handle /api/apps/briefing/* {");
-    expect(out).toContain("handle /api/app-api/briefing/* {");
-    expect(out).toContain("handle /app-assets/briefing/* {");
-    expect(out).toContain("forward_auth 127.0.0.1:4141 {");
-    expect(out).toContain(
-      "copy_headers X-Rome-User-Id X-Rome-Visitor-Account-Id X-Rome-Visitor-Email",
-    );
-    expect(out).toContain("handle /full/apps/briefing {");
+  it("never proxies the private Discord broker", () => {
+    const out = generateCaddyfile();
+    expect(out).not.toContain("/_internal");
+    expect(out).not.toMatch(/path[^\n]*_internal/);
   });
 });

@@ -48,7 +48,7 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
     }
     if (url === "/api/sentinel-log") return ok([]);
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+      return ok({ allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       return ok({ cloudEmailAccess: [] });

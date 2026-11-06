@@ -43,7 +43,6 @@ import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "
 // separate concern rendered by the details page.
 
 interface PublicAccessConfigPayload {
-  enableAccessControl: boolean;
   allowedApps: string[];
   cloudEmailAccess: Record<string, string[]>;
 }
@@ -284,7 +283,6 @@ export function useAppLifecycle(
       await fetchJson<unknown>("/api/public-access", {
         method: "PUT",
         json: {
-          enableAccessControl: config.enableAccessControl,
           allowedApps: Array.from(allowedApps).sort(),
           cloudEmailAccess,
         } satisfies PublicAccessConfigPayload,

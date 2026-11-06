@@ -1,10 +1,9 @@
-import { randomUUID } from "node:crypto";
 import type { DashboardIdentity } from "@rome/api-types";
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
 import { deleteCookie, getCookie } from "hono/cookie";
-import { and, eq, like, lt } from "drizzle-orm";
-import { guardianAuth, settings } from "../../db/schema.js";
+import { eq } from "drizzle-orm";
+import { guardianAuth } from "../../db/schema.js";
 import {
   COOKIE_NAME,
   VISITOR_COOKIE_NAME,
@@ -13,7 +12,6 @@ import {
   verifyPassword,
   verifySession,
 } from "../../lib/auth.js";
-import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../lib/guardian-auth-state.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";

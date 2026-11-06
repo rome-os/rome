@@ -16,7 +16,6 @@ import { reconcilePublicAccessAtStartup } from "../../lib/public-access.js";
 import { PublicAccessState } from "../../lib/public-access-state.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
-import * as gatewayPageModule from "../../lib/gateway-page.js" with { rstest: "importActual" };
 
 // Public-access routes over the real lib/public-access pipeline (edge-only
 // fakes, #763): PUT runs the production writeCaddyfileAndReload — the
@@ -25,24 +24,8 @@ import * as gatewayPageModule from "../../lib/gateway-page.js" with { rstest: "i
 // that records its argv (the outbound contract at the subprocess edge) and
 // can be told to fail.
 //
-// generateGatewayPage is the one internal stub: it writes to the hardcoded
-// privileged path /etc/caddy/static/gateway.html, which no env var or
-// parameter can redirect into the temp sandbox — on a root runner the write
-// would succeed and escape the test. Stubbed to a no-op until the output
-// path grows a seam (Track B note on #763). getInstanceName stays real.
 
-rs.mock("../../lib/gateway-page.js", () => ({
-  ...gatewayPageModule,
-  generateGatewayPage: rs.fn(async () => {}),
-}));
-
-const ENV_KEYS = [
-  "CADDY_CONFIG_PATH",
-  "PATH",
-  "PANTHEON_SLUG",
-  "CADDY_SPY_FILE",
-  "CADDY_FAKE_FAIL",
-] as const;
+const ENV_KEYS = ["CADDY_CONFIG_PATH", "PATH", "CADDY_SPY_FILE", "CADDY_FAKE_FAIL"] as const;
 
 describe("Public-access API", () => {
   let testDb: TestDb;
@@ -73,8 +56,6 @@ describe("Public-access API", () => {
     process.env.CADDY_CONFIG_PATH = caddyPath;
     process.env.CADDY_SPY_FILE = spyFile;
     process.env.PATH = `${binDir}:${process.env.PATH}`;
-    // Pin the slug so getInstanceName does not depend on the guardian person.
-    process.env.PANTHEON_SLUG = "test-instance";
     delete process.env.CADDY_FAKE_FAIL;
 
     testDb = createTestDb();
@@ -107,7 +88,6 @@ describe("Public-access API", () => {
       const res = await app.request("/public-access");
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
-        enableAccessControl: false,
         allowedApps: [],
         cloudEmailAccess: {},
       });
@@ -115,6 +95,7 @@ describe("Public-access API", () => {
 
     it("returns the normalized config when a row exists", async () => {
       await deps.settingsRepo!.set("publicAccess", {
+        // A flag retired with the tailnet-only mode: dropped on read.
         enableAccessControl: true,
         allowedApps: ["inbox", "inbox", "bad slug!", "news"],
         cloudEmailAccess: {
@@ -125,11 +106,10 @@ describe("Public-access API", () => {
       const res = await app.request("/public-access");
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        enableAccessControl: boolean;
         allowedApps: string[];
         cloudEmailAccess: Record<string, string[]>;
       };
-      expect(body.enableAccessControl).toBe(true);
+      expect(body).not.toHaveProperty("enableAccessControl");
       expect(body.allowedApps.sort()).toEqual(["inbox", "news"]);
       expect(body.cloudEmailAccess).toEqual({ inbox: ["a@example.com"] });
     });
@@ -144,13 +124,13 @@ describe("Public-access API", () => {
       });
       writeFileSync(caddyPath, "stale Caddyfile");
 
-      const config = await publicAccessState.load(testDb.db);
-      await reconcilePublicAccessAtStartup(testDb.db, config);
+      await publicAccessState.load(testDb.db);
+      await reconcilePublicAccessAtStartup();
 
       const caddyfile = readFileSync(caddyPath, "utf-8");
       expect(caddyfile).not.toContain("stale Caddyfile");
-      expect(caddyfile).toContain("handle /apps/inbox {");
-      expect(caddyfile).not.toContain("not a slug");
+      expect(caddyfile).toContain("forward_auth");
+      expect(caddyfile).not.toContain("gateway");
       expect(reloadArgs()).toEqual(["reload", "--config", caddyPath]);
       expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
       expect([...publicAccessState.cloudEmailsForApp("inbox")]).toEqual(["ada@example.com"]);
@@ -164,8 +144,8 @@ describe("Public-access API", () => {
         allowedApps: ["inbox"],
       });
 
-      const config = await publicAccessState.load(testDb.db);
-      await reconcilePublicAccessAtStartup(testDb.db, config);
+      await publicAccessState.load(testDb.db);
+      await reconcilePublicAccessAtStartup();
 
       expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
       expect(reloadArgs()).toBeNull();
@@ -188,18 +168,17 @@ describe("Public-access API", () => {
       // The config survives a round-trip through the DB, normalized.
       const getRes = await app.request("/public-access");
       expect(await getRes.json()).toEqual({
-        enableAccessControl: true,
         allowedApps: ["inbox"],
         cloudEmailAccess: { inbox: ["ada@example.com"] },
       });
 
-      // The Caddyfile on disk reflects the normalized config: per-app routes
-      // for the valid slug only, gateway fallback instead of forward_auth.
+      // The Caddyfile does not depend on the policy: sharing is decided per
+      // request by the verify probe, so even a policy carrying the retired
+      // flag gets the normal dashboard-reachable proxy.
       const caddyfile = readFileSync(caddyPath, "utf-8");
-      expect(caddyfile).toContain("handle /apps/inbox {");
-      expect(caddyfile).not.toContain("not a slug");
-      expect(caddyfile).toContain("rewrite * /gateway.html");
-      expect(caddyfile).not.toContain("forward_auth");
+      expect(caddyfile).toContain("forward_auth");
+      expect(caddyfile).not.toContain("not_public");
+      expect(caddyfile).not.toContain("gateway");
 
       expect(reloadArgs()).toEqual(["reload", "--config", caddyPath]);
       expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
@@ -212,7 +191,7 @@ describe("Public-access API", () => {
 
       const caddyfile = readFileSync(caddyPath, "utf-8");
       expect(caddyfile).toContain("forward_auth");
-      expect(caddyfile).not.toContain("gateway.html");
+      expect(caddyfile).not.toContain("gateway");
       expect(reloadArgs()).toEqual(["reload", "--config", caddyPath]);
     });
 
@@ -234,7 +213,6 @@ describe("Public-access API", () => {
       // what's persisted.
       const getRes = await app.request("/public-access");
       expect(await getRes.json()).toEqual({
-        enableAccessControl: true,
         allowedApps: ["inbox"],
         cloudEmailAccess: {},
       });

@@ -37,7 +37,7 @@ function mockSettingsBackend() {
     calls.push({ url, method: (init?.method ?? "GET").toUpperCase() });
     if (url === "/api/settings") return ok({});
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+      return ok({ allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") return ok({ cloudEmailAccess: [] });
     if (url === "/api/build-info") return ok({ sha: null, builtAt: null });

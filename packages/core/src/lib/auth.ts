@@ -97,7 +97,7 @@ export function createVisitorSession(
  * Mint a guardian session JWT and write it as the session cookie. The single
  * seam every login path goes through, so the cookie attributes (httpOnly,
  * secure, sameSite, path, maxAge) stay identical across `/auth/login`,
- * `/auth/handoff`, `/oauth/redeem`, and `/onboard/create-account`.
+ * `/oauth/redeem`, and `/onboard/create-account`.
  */
 export function issueGuardianSession(c: Context, userId: string): void {
   const session = createGuardianSession(userId);

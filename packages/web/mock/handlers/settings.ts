@@ -93,7 +93,6 @@ const romeCredits: RomeCreditsView = {
 // ── Access control ─────────────────────────────────────
 
 interface PublicAccessConfig {
-  enableAccessControl: boolean;
   allowedApps: string[];
   cloudEmailAccess: Record<string, string[]>;
 }
@@ -106,8 +105,6 @@ interface PublicAccessConfig {
  */
 export const publicAccess: { config: PublicAccessConfig } = {
   config: {
-    // The per-app allowances below are independent of it.
-    enableAccessControl: false,
     allowedApps: [],
     cloudEmailAccess: {},
   },

@@ -1903,9 +1903,9 @@ async function main() {
   };
   const publicAccessState = new PublicAccessState();
   try {
-    const config = await publicAccessState.load(db);
+    await publicAccessState.load(db);
     try {
-      await reconcilePublicAccessAtStartup(db, config);
+      await reconcilePublicAccessAtStartup();
     } catch (err) {
       log.warn("Failed to reconcile publicAccess settings with Caddy at startup; continuing", {
         error: err instanceof Error ? err.message : String(err),

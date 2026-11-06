@@ -442,7 +442,7 @@ ARG ROME_VERSION
 ARG ROME_BUILD_SHA
 ARG ROME_BUILD_TIME
 # GA4 measurement ID, consumed at container RUNTIME only: the boot
-# script writes it into the SPA's runtime-config.js and the gateway page. The
+# script writes it into the SPA's runtime-config.js. The
 # build-arg merely sets the image's default ENV (CI secret on published images,
 # empty everywhere else) — starting a container with ROME_GA_MEASUREMENT_ID
 # overridden or emptied changes/disables analytics without a rebuild (R7).
