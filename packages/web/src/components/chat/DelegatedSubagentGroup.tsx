@@ -63,7 +63,7 @@ function SubagentChip({
     startedAtMs: subagentStartMs(parentSegments, node.toolUseId),
   });
   return (
-    <li className="flex min-w-0 items-center">
+    <li className="flex shrink-0 items-center">
       <span
         data-subagent-separator
         aria-hidden="true"
@@ -84,10 +84,7 @@ function SubagentChip({
         aria-label={t("trace.subagents.openTrace", { agent: label })}
         title={progress.currentStep ?? undefined}
         onClick={() => void onOpenSubagentTrace(node)}
-        // `shrink` defeats the primitive's base `shrink-0`: the row is
-        // overflow-hidden, so without it a crowded list drops whole chips
-        // off the end instead of narrowing every chip.
-        className="group/subagent min-w-0 shrink max-w-48 justify-start text-left"
+        className="group/subagent max-w-48 justify-start text-left"
       >
         <AgentAvatar
           iconUrl={iconUrl}
@@ -125,7 +122,9 @@ export function DelegatedSubagentGroup({
   return (
     <ul
       aria-label={t("trace.subagents.ariaLabel")}
-      className="flex min-w-0 items-center overflow-hidden"
+      // Chips keep their width; a crowded row scrolls sideways instead of
+      // squeezing the chips until their labels overlap.
+      className="flex min-w-0 items-center overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {subagents.map((node) => (
         <SubagentChip
