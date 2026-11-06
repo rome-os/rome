@@ -18,6 +18,13 @@ One agent's run of work, made of [turns](#turn). A session is not a chat: a chat
 - The dashboard shows a session as its turns, oldest first, each with its prompt, its steps and its answer. A chat is shown as its messages. The two views read one record, and a turn links the two.
 - How a session runs, its model, its trace and its limits, is in [`concepts/sessions.md`](../concepts/sessions.md).
 
+## Continuity key
+
+What whoever opens a session, such as a chat, an app or Concierge, hands to Sessions so that it can find its current session again after a reset (Ouou, 2026-11-06). A reset is the opener starting a fresh session in its place, such as New Chat.
+
+- The opener mints it. Sessions never reads anything into it and only finds the current session by it.
+- A speaker's continuity key is derived by Participation from its place and its account.
+
 ## Turn
 
 One prompt to the agent and the work that follows, until the agent answers or stops. Its full contracts are in [`concepts/sessions.md`](../concepts/sessions.md#turn).
