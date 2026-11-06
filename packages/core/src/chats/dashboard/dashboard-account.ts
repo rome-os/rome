@@ -5,7 +5,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { actionExecutionContext } from "../../actions/context.js";
-import { chatAccess, chatAccessOver } from "../../concierge/privacy.js";
+import { canOpenChat, privateOwnerOf } from "../../concierge/privacy.js";
 import { type SessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import type { ChannelSurface } from "../../core/agent-session.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
@@ -57,7 +57,7 @@ async function readerOwner(
   const person = reader.actor && reader.actor.kind !== "anonymous" ? reader.actor : undefined;
   if (person) return sessionOwnerKey(person);
   if (!reader.chatId) return null;
-  return chatAccess((id) => webchatRepo.getSession(id), null).privateOwner(reader.chatId);
+  return privateOwnerOf(await webchatRepo.getSession(reader.chatId));
 }
 
 /** A query naming no `since` reads the last day, as a live read does. */
@@ -89,13 +89,10 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
         // first too.
         // A Concierge chat and its task chats are their owner's alone, by the
         // same policy the chat routes use.
-        const access = chatAccessOver(
-          await webchatRepo.listChatLineage(),
-          await readerOwner(webchatRepo, historyReader()),
-        );
+        const owner = await readerOwner(webchatRepo, historyReader());
         const allowed = new Map<string, boolean>();
         for (const id of new Set(lines.map((message) => message.chatId))) {
-          allowed.set(id, await access.canOpen(id));
+          allowed.set(id, await canOpenChat((chatId) => webchatRepo.getSession(chatId), id, owner));
         }
         const newestFirst = lines
           .filter((message) => allowed.get(message.chatId) === true)

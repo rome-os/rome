@@ -324,13 +324,13 @@ describe("Projects files API", () => {
         triggerKind: "concierge",
         triggerName: "Task",
       });
-      // A branch of the task chat, promoted to an ordinary chat, stays the guardian's.
-      await chat("task-branch", null, "visitor:a");
-      testDb.db
-        .update(romeSessions)
-        .set({ parentSessionId: "guardian-task" })
-        .where(eq(romeSessions.id, "task-branch"))
-        .run();
+      // A branch of the task chat, promoted to an ordinary chat, stays the
+      // guardian's: it was made private to them when it was forked.
+      await chat("task-branch", null, "guardian");
+      await webchatRepo.setSessionTrigger("task-branch", {
+        triggerKind: "concierge_fork",
+        triggerName: "branch",
+      });
       await chat("shared", null, "guardian");
 
       const app = buildApp({ webchatRepo });
@@ -623,7 +623,6 @@ describe("Projects files API", () => {
       // response must keep the day window computed at request start.
       const midQueryClockSkewRepo: RouteDeps["webchatRepo"] = {
         getMessagesBatch: (sessionIds) => webchatRepo.getMessagesBatch(sessionIds),
-        listChatLineage: () => webchatRepo.listChatLineage(),
         getProjectUsageTotals: (projectPath, options) =>
           webchatRepo.getProjectUsageTotals(projectPath, options),
         getUsageTotals: (options) => {
@@ -1559,28 +1558,6 @@ describe("Projects files API", () => {
       await expect(webchatRepo.listProjectPaths()).resolves.toEqual(["default", "demo-other"]);
     });
 
-    it("retires the Concierge chats in a deleted folder before deleting them", async () => {
-      mkdirSync(join(projectsRoot, "demo"), { recursive: true });
-      await webchatRepo.createProject("demo", "demo");
-      await webchatRepo.createSession("topic", "Trips", undefined, "demo", null, "demo");
-      const retired: string[][] = [];
-      const app = buildApp({
-        settingsRepo,
-        webchatRepo,
-        concierge: {
-          retireDeletedChats: async (ids) => {
-            // Asked while the chats still exist, so their owners can be read.
-            expect(await webchatRepo.getSession("topic")).not.toBeNull();
-            retired.push([...ids]);
-          },
-        },
-      });
-      const res = await app.request("/projects/file?path=projects/demo", { method: "DELETE" });
-      expect(res.status).toBe(200);
-      expect(retired).toEqual([["topic"]]);
-      await expect(webchatRepo.getSession("topic")).resolves.toBeNull();
-    });
-
     it("deletes chats under the deleted project folder", async () => {
       mkdirSync(join(projectsRoot, "demo", "nested"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo-other"), { recursive: true });
@@ -1686,7 +1663,6 @@ describe("Projects files API", () => {
       let failCleanup = true;
       const failingCleanupRepo: RouteDeps["webchatRepo"] = {
         getMessagesBatch: (sessionIds) => webchatRepo.getMessagesBatch(sessionIds),
-        listChatLineage: () => webchatRepo.listChatLineage(),
         getProjectUsageTotals: (projectPath, options) =>
           webchatRepo.getProjectUsageTotals(projectPath, options),
         getUsageTotals: (options) => webchatRepo.getUsageTotals(options),

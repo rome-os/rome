@@ -187,7 +187,7 @@ export function startConciergeEvents(
       if (!chatId) return false;
       // A visitor dropped from the dashboard allow-list is told nothing; their
       // rows wait, and reach them once they are back.
-      if (!(await service.isServed(owner ?? (await service.ownerOfChat(chatId))))) return false;
+      if (!(await service.isServed(owner))) return false;
       return await service.runSystemTurn(chatId, prompt, { quiet });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),

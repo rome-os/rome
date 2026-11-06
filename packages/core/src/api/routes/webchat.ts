@@ -1,5 +1,4 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
-import { callerChatOwner, chatAccessOver, stampForkOwner } from "../../concierge/privacy.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -87,7 +86,7 @@ import {
   conversationTitleLength,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
-import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import { currentChatOwner, currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import type { DashboardInbox } from "../../connections/send.js";
 import {
   resolveChatSenders,
@@ -1580,9 +1579,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         );
         void generateAndPersistConversationTitle(forkSessionId, fallbackTitle, input.prompt);
       }
-      // A fork of a private chat records that chat's owner on its own row, so
-      // it stays private to them after the chat it came from is gone.
-      await stampForkOwner(deps.webchatRepo, forkSessionId);
       await deps.webchatRepo.promoteForkToChat(forkSessionId);
     }
     void (async () => {
@@ -2078,7 +2074,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // A Concierge chat and the task chats it starts are their owner's alone:
   // to anyone else they do not exist (docs/domains/chats.md#concierge-chat).
-  const callerOwner = callerChatOwner;
+  const callerOwner = currentChatOwner;
   const privateChatGate: MiddlewareHandler = async (c, next) => {
     const sessionId = c.req.param("id") ?? c.req.param("sessionId");
     if (
@@ -2111,9 +2107,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.use("/chat/turns/:turnId/*", privateByIdGate(chatOfTurn));
   app.use("/chat/messages/:id/*", privateByIdGate(chatOfMessage));
   app.use("/sessions/messages/:id/*", privateByIdGate(chatOfMessage));
-  /** The chats the caller may open, by the policy every chat path shares. */
-  const callerAccess = async () =>
-    chatAccessOver(await deps.webchatRepo.listChatLineage(), await callerOwner());
 
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
@@ -2179,10 +2172,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const ownerKey =
       c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
-    const access = await callerAccess();
-    const listed = await deps.webchatRepo.listSessions(status, ownerKey);
-    const open = await Promise.all(listed.map((session) => access.canOpen(session.id)));
-    const sessions = listed.filter((_, index) => open[index]);
+    const sessions = await deps.webchatRepo.listSessions(status, ownerKey, await callerOwner());
     return c.json(
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
@@ -2235,14 +2225,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    const access = await callerAccess();
-    // Hidden chats are left out before the limit, so all 20 are ones the caller may open.
-    const found = await deps.webchatRepo.searchSessionMessages(query, {
+    // Chats the caller may not open are left out before the limit, so all 20
+    // are ones they may open.
+    const matches = await deps.webchatRepo.searchSessionMessages(query, {
       sessionLimit: 20,
-      excludeIds: await access.hiddenIds(),
+      visibleTo: await callerOwner(),
     });
-    const open = await Promise.all(found.map((match) => access.canOpen(match.session.id)));
-    const matches = found.filter((_, index) => open[index]);
     return c.json(
       matches.map((match) => ({
         session: toWebchatSessionResponse(match.session, match.session.messageCount),

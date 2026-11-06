@@ -72,19 +72,25 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Moves every row of Concierge chat `from`, finished or not, to its owner's
-   * main chat `to` (null for the guardian's), as when that chat is archived or
-   * deleted. A row's owner is its chat's, so no row is left behind to fall to
-   * another owner. Answers how many unfinished rows moved.
+   * Moves the unfinished rows of Concierge chat `from` to its owner's main
+   * chat `to` (null for the guardian's), as when that chat is archived or
+   * deleted. Finished rows keep their chat, and every row keeps its owner.
+   * Answers how many moved.
    */
   async moveToMainChat(from: string, to: string | null = null): Promise<number> {
     const moved = await this.db
       .update(conciergeTasks)
       .set({ chatId: to })
-      .where(eq(conciergeTasks.chatId, from))
-      .returning({ id: conciergeTasks.id, state: conciergeTasks.state });
+      .where(
+        and(
+          eq(conciergeTasks.chatId, from),
+          ne(conciergeTasks.state, "done"),
+          ne(conciergeTasks.state, "dropped"),
+        ),
+      )
+      .returning({ id: conciergeTasks.id });
     for (const { id } of moved) await this.announce(id, "refresh");
-    return moved.filter(({ state }) => state !== "done" && state !== "dropped").length;
+    return moved.length;
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -245,8 +251,8 @@ export class ConciergeTasksRepository {
                 .select({ ownerKey: romeSessions.ownerKey })
                 .from(romeSessions)
                 .where(eq(romeSessions.id, fields.chatId))
-                .get()?.ownerKey ?? null)
-            : null;
+                .get()?.ownerKey ?? GUARDIAN_OWNER)
+            : GUARDIAN_OWNER;
           const [row] = tx
             .insert(conciergeTasks)
             .values({ id: randomUUID(), createdAt: now, ownerKey, ...fields })

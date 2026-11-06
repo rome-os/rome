@@ -1,3 +1,4 @@
+import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
@@ -670,6 +671,11 @@ describe("AgentRunner", () => {
         triggerKind: "concierge_fork",
         triggerName: "feedback",
       });
+      await repo.deleteSession("task-chat");
+      const canOpen = (owner: string) =>
+        canOpenChat((id) => repo.getSession(id), "fork-session", owner);
+      expect(await canOpen("visitor:a")).toBe(true);
+      expect(await canOpen("guardian")).toBe(false);
     } finally {
       testDb.close();
     }

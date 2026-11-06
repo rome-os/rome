@@ -1,5 +1,6 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
+import { canOpenSql } from "../../concierge/privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -385,9 +386,9 @@ const sessionSelectFields = {
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
 
-/** Leaves out the chats a caller may not open; nothing when there are none. */
-const excludedIds = (ids: readonly string[] | undefined) =>
-  ids && ids.length > 0 ? notInArray(romeSessions.id, [...ids]) : undefined;
+/** The chats `owner` may open; no condition when the caller does not filter. */
+const visibleTo = (owner: string | null | undefined) =>
+  owner === undefined ? undefined : canOpenSql(romeSessions, owner);
 
 // Whether the session's latest turn ended in an error, read from the
 // `turn_end` block of its newest trace. A turn still running has no
@@ -1370,11 +1371,6 @@ export class WebChatRepository {
     tx.delete(romeSessions).where(inArray(romeSessions.id, ids)).run();
   }
 
-  /** Records whose a chat is. */
-  async setSessionOwnerKey(id: string, ownerKey: string): Promise<void> {
-    await this.db.update(romeSessions).set({ ownerKey }).where(eq(romeSessions.id, id));
-  }
-
   async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
     if (!sessionId) return null;
     const [row] = await this.db
@@ -1406,7 +1402,12 @@ export class WebChatRepository {
   }
 
   /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
-  async listSessions(status: "active" | "archived" | "all" = "active", ownerKey?: string | null) {
+  /** `visibleTo` keeps only the chats that owner may open. */
+  async listSessions(
+    status: "active" | "archived" | "all" = "active",
+    ownerKey?: string | null,
+    visibleToOwner?: string | null,
+  ) {
     // Only top-level guardian chats. Handoff child sessions are reached through
     // their parent's handoff card, not the sidebar. `status` filters on the
     // reversible archive flag: "active" (default, preserves prior behavior)
@@ -1426,6 +1427,7 @@ export class WebChatRepository {
       .from(romeSessions)
       .where(
         and(
+          visibleTo(visibleToOwner),
           isWebchatChat,
           archivePredicate,
           ownerKey === undefined
@@ -1447,10 +1449,10 @@ export class WebChatRepository {
    * text. Returns at most one match per session — its most recent matching
    * message — ordered by message recency, capped at `sessionLimit` sessions.
    */
-  /** `excludeIds` leaves those chats out before the limit, as a caller may not open them. */
+  /** `visibleTo` keeps only the chats that owner may open, before the limit. */
   async searchSessionMessages(
     query: string,
-    options: { sessionLimit?: number; excludeIds?: readonly string[] } = {},
+    options: { sessionLimit?: number; visibleTo?: string | null } = {},
   ) {
     return this.searchSessionRows(query, options, ["user", "assistant", "notification"]);
   }
@@ -1458,7 +1460,7 @@ export class WebChatRepository {
   /** {@link searchSessionMessages} over the sessions' own rows of `roles`. */
   protected async searchSessionRows(
     query: string,
-    options: { sessionLimit?: number; excludeIds?: readonly string[] },
+    options: { sessionLimit?: number; visibleTo?: string | null },
     roles: readonly ("user" | "assistant" | "notification")[],
   ) {
     const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
@@ -1478,7 +1480,7 @@ export class WebChatRepository {
       .where(
         and(
           isWebchatChat,
-          excludedIds(options.excludeIds),
+          visibleTo(options.visibleTo),
           inArray(romeAgentMessages.role, [...roles]),
           ...likePredicates,
         ),
@@ -1554,22 +1556,9 @@ export class WebChatRepository {
     return rows.map((row) => row.path);
   }
 
-  /** What the chat privacy policy reads of every chat: its owner, kind and parent. */
-  async listChatLineage() {
-    return this.db
-      .select({
-        id: romeSessions.id,
-        agentName: romeSessions.agentName,
-        ownerKey: romeSessions.ownerKey,
-        triggerKind: romeSessions.triggerKind,
-        parentSessionId: romeSessions.parentSessionId,
-      })
-      .from(romeSessions);
-  }
-
   async listSessionsByProjectPath(
     projectPath: string,
-    options: { cursor?: string; limit?: number; excludeIds?: readonly string[] } = {},
+    options: { cursor?: string; limit?: number; visibleTo?: string | null } = {},
   ) {
     const limit = Math.max(1, options.limit ?? 50);
     const cursor = decodeProjectSessionCursor(options.cursor);
@@ -1588,11 +1577,11 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const excluded = excludedIds(options.excludeIds);
+    const visible = visibleTo(options.visibleTo);
     const predicates = [
       eq(romeSessions.projectPath, projectPath),
       isWebchatChat,
-      excluded,
+      visible,
       cursorPredicate,
     ];
 
@@ -1611,7 +1600,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat, excluded));
+      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat, visible));
 
     return {
       nextCursor,
@@ -1621,7 +1610,7 @@ export class WebChatRepository {
   }
 
   async listSessionsPage(
-    options: { cursor?: string; limit?: number; excludeIds?: readonly string[] } = {},
+    options: { cursor?: string; limit?: number; visibleTo?: string | null } = {},
   ) {
     const limit = Math.max(1, options.limit ?? 50);
     const cursor = decodeProjectSessionCursor(options.cursor);
@@ -1640,8 +1629,8 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const excluded = excludedIds(options.excludeIds);
-    const predicates = [isWebchatChat, excluded, cursorPredicate];
+    const visible = visibleTo(options.visibleTo);
+    const predicates = [isWebchatChat, visible, cursorPredicate];
 
     const rows = await this.db
       .select(this.sessionFields())
@@ -1658,7 +1647,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(and(isWebchatChat, excluded));
+      .where(and(isWebchatChat, visible));
 
     return {
       nextCursor,

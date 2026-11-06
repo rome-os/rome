@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5151ea27-0d2b-438f-b233-9ce51181b4b5",
+  "id": "061768c7-f34a-418b-afb2-b8ca31142ec0",
   "prevId": "9d1dd17d-3b8d-4ebc-8141-7d51b31e6b2e",
   "tables": {
     "account_profiles": {
@@ -1272,6 +1272,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "owner_key": {
+          "name": "owner_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'guardian'"
         },
         "source_message_id": {
           "name": "source_message_id",

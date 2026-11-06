@@ -1919,69 +1919,6 @@ describe("Concierge chat", () => {
     expect(await service.isServed("guardian")).toBe(true);
   });
 
-  it("keeps whose both chats were when two of a visitor's topic chats are deleted at once", async () => {
-    const owner = "visitor:acct-ann";
-    const stored = new Map<string, unknown>();
-    // A slow settings store, so the two deletions' reads and writes interleave.
-    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
-    const service = new ConciergeService({
-      settingsRepo: {
-        get: async (key: string) => {
-          await tick();
-          return stored.get(key) ?? null;
-        },
-        set: async (key: string, value: unknown) => {
-          await tick();
-          stored.set(key, value);
-        },
-      },
-      webchatRepo: {
-        getSession: async (id: string) => ({
-          id,
-          agentName: CONCIERGE_AGENT_ID,
-          ownerKey: owner,
-          largeModelSelection: "claude-sonnet",
-        }),
-      },
-      tasks: { repo: { moveToMainChat: async () => 0 } },
-      aiToolState: { get: () => codexOnly },
-    } as unknown as ConciergeDeps);
-    await Promise.all([
-      service.retireChat("topic-a", "deleted"),
-      service.retireChat("topic-b", "deleted"),
-    ]);
-    expect(stored.get("conciergeRetiredChats")).toEqual({ "topic-a": owner, "topic-b": owner });
-  });
-
-  it("keeps the owner of each Concierge chat deleted with a project folder", async () => {
-    const owner = "visitor:acct-ann";
-    const main = mainChatIdOf(owner);
-    const stored = new Map<string, unknown>();
-    const rows = new Map<string, Record<string, unknown>>([
-      [
-        main,
-        { id: main, agentName: CONCIERGE_AGENT_ID, ownerKey: owner, largeModelSelection: "x" },
-      ],
-      ["topic", { id: "topic", agentName: CONCIERGE_AGENT_ID, ownerKey: owner }],
-      ["plain", { id: "plain", agentName: null, ownerKey: owner }],
-    ]);
-    const service = new ConciergeService({
-      settingsRepo: {
-        get: async (key: string) => stored.get(key) ?? null,
-        set: async (key: string, value: unknown) => void stored.set(key, value),
-      },
-      webchatRepo: { getSession: async (id: string) => rows.get(id) ?? null },
-      tasks: { repo: { moveToMainChat: async () => 0 } },
-      aiToolState: { get: () => codexOnly },
-    } as unknown as ConciergeDeps);
-    await service.retireDeletedChats([main, "topic", "plain"]);
-    expect(stored.get("conciergeRetiredChats")).toEqual({ [main]: owner, topic: owner });
-    for (const id of [main, "topic", "plain"]) rows.delete(id);
-    // A wake-up that names a deleted chat goes to its owner's chat, not the guardian's.
-    expect(await service.ownerOfChat("topic")).toBe(owner);
-    expect(await service.ownerOfChat(main)).toBe(owner);
-  });
-
   it("leaves an existing chat and its model alone", async () => {
     const { service, createSession, update } = serviceWith(codexOnly, true, "claude-sonnet");
     expect(await service.ensureChatId()).toBe("concierge");
@@ -2562,6 +2499,7 @@ describe("Concierge chats", () => {
       channel: "webchat",
       threadId: TOPIC_CHAT,
       prompt: "⏰ Time's up: watch task:abc",
+      ownerKey: "guardian",
     };
     expect(await s.service.resolveTurn(wakeUp)).toMatchObject({
       threadId: TOPIC_CHAT,
@@ -2578,6 +2516,30 @@ describe("Concierge chats", () => {
     // A task chat's own wake-up is not the Concierge's, and stays.
     const taskWakeUp = { ...wakeUp, agentName: "main" };
     expect(await s.service.resolveTurn(taskWakeUp)).toEqual(taskWakeUp);
+  });
+
+  it("sends a visitor's wake-up for a deleted topic chat to their main chat, and drops one that records no owner", async () => {
+    const s = setup({ startEvents: false });
+    const owner = "visitor:acct-ann";
+    const main = mainChatIdOf(owner);
+    s.sessions.set(main, {
+      ...s.sessions.get(CONCIERGE_CHAT),
+      id: main,
+      ownerKey: owner,
+    });
+    // Its topic chat is gone, as when its project folder was deleted with it.
+    const wakeUp = {
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: "runtime-topic",
+      channel: "webchat",
+      threadId: "ann-topic",
+      prompt: "⏰ Time's up",
+      ownerKey: owner,
+    };
+    expect(await s.service.resolveTurn(wakeUp)).toMatchObject({ threadId: main });
+    // Nothing says whose it was: it reaches nobody's chat, the guardian's included.
+    const { ownerKey: _ownerKey, ...unowned } = wakeUp;
+    await expect(s.service.resolveTurn(unowned)).rejects.toThrow("no owner");
   });
 
   it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
@@ -2613,14 +2575,14 @@ describe("Concierge chats", () => {
 
   it("delivers to a live Concierge chat, and to the main chat for one archived, gone, or not a Concierge chat", async () => {
     const s = setup({ startEvents: false });
-    expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(TOPIC_CHAT);
-    expect(await s.service.deliveryChat(null)).toBe(CONCIERGE_CHAT);
-    expect(await s.service.deliveryChat("gone")).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat(TOPIC_CHAT, "guardian")).toBe(TOPIC_CHAT);
+    expect(await s.service.deliveryChat(null, "guardian")).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat("gone", "guardian")).toBe(CONCIERGE_CHAT);
     s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
-    expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat(TOPIC_CHAT, "guardian")).toBe(CONCIERGE_CHAT);
   });
 
-  it("retiring a topic chat moves its tasks to the main chat and says so there; the main chat cannot be retired", async () => {
+  it("retiring a topic chat moves its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
     s.turnIn(TOPIC_CHAT);
@@ -2630,8 +2592,8 @@ describe("Concierge chats", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const rows = await s.tasks.listForPanel();
     expect(rows.find((row) => row.title === "Book dentist")?.conciergeChat.main).toBe(true);
-    // A finished row moves too, so none is left to fall to another owner.
-    expect(rows.find((row) => row.title === "Old")?.conciergeChat.main).toBe(true);
+    // A finished row keeps its chat, and its owner with it.
+    expect(rows.find((row) => row.title === "Old")?.conciergeChat.id).toBe(TOPIC_CHAT);
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: CONCIERGE_CHAT });
     expect(s.backendTurns.at(-1)?.prompt).toContain(
       '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',

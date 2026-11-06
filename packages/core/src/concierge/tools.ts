@@ -115,7 +115,12 @@ export async function buildConciergeTools(
 
   // Whose Concierge this turn is: the owner of the chat it runs in. Every
   // chat and row the tools reach is that owner's.
-  const ownerHere = async () => service.ownerOfChat(currentTurn().chatId);
+  const ownerHere = async () => {
+    const { chatId } = currentTurn();
+    const owner = await service.ownerOfChat(chatId);
+    if (owner === null) throw new Error(`No Concierge chat ${chatId}`);
+    return owner;
+  };
 
   const requireTaskChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);

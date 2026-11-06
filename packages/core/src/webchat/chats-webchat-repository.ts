@@ -79,15 +79,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
    *  Chats yet (#1672), so search, like the transcript, leaves it out. */
   override async searchSessionMessages(
     query: string,
-    options: { sessionLimit?: number; excludeIds?: readonly string[] } = {},
+    options: { sessionLimit?: number; visibleTo?: string | null } = {},
   ) {
-    return this.searchChats(query, Math.max(1, options.sessionLimit ?? 20), options.excludeIds);
+    return this.searchChats(query, Math.max(1, options.sessionLimit ?? 20), options.visibleTo);
   }
 
   /** The dashboard chats' messages in Chats that match `query`, at most one
    *  per chat, most recent first. */
-  private async searchChats(query: string, limit: number, excludeIds?: readonly string[]) {
-    const hits = await this.reads.search(query, limit, excludeIds);
+  private async searchChats(query: string, limit: number, visibleTo?: string | null) {
+    const hits = await this.reads.search(query, limit, visibleTo);
     if (hits.length === 0) return [];
     const sessions = new Map(
       (

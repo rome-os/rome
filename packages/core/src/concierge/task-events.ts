@@ -51,7 +51,7 @@ export interface TaskEventDelivery {
   /** The Concierge chat the rows came from. Null is the main chat. */
   chatId: string | null;
   /** Whose rows they are, so a chat that is gone sends them to that owner's main chat. */
-  owner?: string;
+  owner: string;
   /** The rows the payload carries. */
   taskIds: string[];
   prompt: string;

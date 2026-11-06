@@ -193,6 +193,7 @@ const SessionContinueParams = z.object({
   threadId: z.string().min(1),
   channelUserId: z.string().optional(),
   prompt: z.string(),
+  ownerKey: z.string().optional(),
 });
 
 const AppConnectionsListParams = z

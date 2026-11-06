@@ -15,7 +15,6 @@ import { parseTimeZone } from "../../lib/timezone.js";
 import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
-import { RETIRED_CHATS_SETTING_KEY } from "../../concierge/service.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
@@ -25,10 +24,10 @@ const DEDICATED_ROUTE_KEYS: Record<string, string> = {
   [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
 };
 
-// Each person's Concierge state: their follows, rules and time zone, and the
-// owners of their deleted chats. Only owner-scoped Concierge actions read or
-// write it, so no dashboard user reads another's here.
-const CONCIERGE_PRIVATE_KEYS = [CONCIERGE_FOLLOWING_SETTING_KEY, RETIRED_CHATS_SETTING_KEY];
+// Each person's Concierge state: their follows, rules and time zone. Only
+// owner-scoped Concierge actions read or write it, so no dashboard user reads
+// another's here.
+const CONCIERGE_PRIVATE_KEYS = [CONCIERGE_FOLLOWING_SETTING_KEY];
 
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };

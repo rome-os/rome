@@ -20,6 +20,7 @@
 // Nothing reads through it yet: the dashboard still reads its legacy tables
 // until the Chats switch moves it here.
 
+import { canOpenSql } from "../concierge/privacy.js";
 import { sql } from "drizzle-orm";
 import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
@@ -411,12 +412,8 @@ export class ChatReadModel {
    * `query`, case-insensitive, each with its most recent matching line and a
    * snippet around the first hit, most recent first, at most `limit` chats.
    */
-  /** `excludeIds` leaves those chats out before the limit, as a caller may not open them. */
-  async search(
-    query: string,
-    limit: number,
-    excludeIds: readonly string[] = [],
-  ): Promise<ChatSearchHit[]> {
+  /** `visibleTo` keeps only the chats that owner may open, before the limit. */
+  async search(query: string, limit: number, visibleTo?: string | null): Promise<ChatSearchHit[]> {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
     const matchesEveryTerm = sql.join(
@@ -444,12 +441,17 @@ export class ChatReadModel {
         AND m.said_at >= s.created_at
       WHERE ${matchesEveryTerm}
       ${
-        excludeIds.length > 0
-          ? sql`AND s.id NOT IN (${sql.join(
-              excludeIds.map((id) => sql`${id}`),
-              sql`, `,
-            )})`
-          : sql``
+        visibleTo === undefined
+          ? sql``
+          : sql`AND ${canOpenSql(
+              {
+                id: sql`s.id`,
+                agentName: sql`s.agent_name`,
+                ownerKey: sql`s.owner_key`,
+                triggerKind: sql`s.trigger_kind`,
+              },
+              visibleTo,
+            )}`
       }
       ORDER BY m.said_at DESC, m.id DESC
       LIMIT ${SEARCH_SCAN_LIMIT}

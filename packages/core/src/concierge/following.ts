@@ -157,6 +157,9 @@ export interface WatchSource extends ProviderWatchSectionWithTriggers {
 }
 
 /** One follow, as stored. */
+/** Whose a follow is: the owner it records. One from before owners were kept is the guardian's. */
+const ownerOfFollow = (follow: FollowRecord): ConciergeOwner => follow.owner ?? GUARDIAN_OWNER;
+
 interface FollowRecord {
   source: string;
   target: string;
@@ -450,20 +453,20 @@ export function startConciergeFollowing(
     return resolveGuardianTimezone(deps.settings);
   };
 
-  /** Whose a follow is: the owner it records, or for an older follow that records none, its chat's. */
-  const ownerOfFollow = async (follow: FollowRecord): Promise<ConciergeOwner> =>
-    follow.owner ?? (follow.chat ? service.ownerOfChat(follow.chat) : GUARDIAN_OWNER);
-
   /** The follows of one owner. */
-  const followsOf = async (stored: StoredFollowing, owner: ConciergeOwner) => {
-    const owners = await Promise.all(stored.follows.map(ownerOfFollow));
-    return stored.follows.filter((_, index) => owners[index] === owner);
-  };
+  const followsOf = (stored: StoredFollowing, owner: ConciergeOwner) =>
+    stored.follows.filter((follow) => ownerOfFollow(follow) === owner);
 
-  /** The owner of the chat whose turn called a follow action; the guardian for any other caller. */
+  /**
+   * The owner of the chat whose turn called a follow action; the guardian for
+   * any other caller. A chat that is gone has no owner to act for.
+   */
   const callingOwner = async (): Promise<ConciergeOwner> => {
     const calling = callingChat();
-    return calling ? service.ownerOfChat(calling) : GUARDIAN_OWNER;
+    if (!calling) return GUARDIAN_OWNER;
+    const owner = await service.ownerOfChat(calling);
+    if (owner === null) throw new Error(`No Concierge chat ${calling}`);
+    return owner;
   };
 
   let sourcesCache: {
@@ -524,11 +527,11 @@ export function startConciergeFollowing(
   /** A Concierge chat as a list shows it; one that is gone or archived reads as its owner's main chat. */
   const chatRefOf = async (
     chatId: string | null,
-    owner?: ConciergeOwner,
+    owner: ConciergeOwner,
   ): Promise<ConciergeChatRef> => {
     const live = chatId ? await service.conciergeChat(chatId) : null;
     if (live) return live;
-    const main = mainChatIdOf(owner ?? (await service.ownerOfChat(chatId)));
+    const main = mainChatIdOf(owner);
     return (await service.conciergeChat(main)) ?? { id: main, name: "Concierge", main: true };
   };
 
@@ -626,7 +629,7 @@ export function startConciergeFollowing(
     const fresh = events.filter((e) => !known.has(e.id));
     if (fresh.length === 0) return;
     const stored = await readStored();
-    const follows = await followsOf(stored, owner);
+    const follows = followsOf(stored, owner);
     const told = await deps.items.recentImportant(
       new Date(now() - RECENTLY_TOLD_MS),
       RECENTLY_TOLD_MAX,
@@ -775,9 +778,7 @@ export function startConciergeFollowing(
   const syncDigestRoutines = async () => {
     const stored = await readStored();
     const enabled = await service.isEnabled();
-    const owners = enabled
-      ? [...new Set(await Promise.all(stored.follows.map(ownerOfFollow)))]
-      : [];
+    const owners = enabled ? [...new Set(stored.follows.map(ownerOfFollow))] : [];
     const wanted = new Map<string, { owner: ConciergeOwner; localTime: string }>();
     for (const owner of owners) {
       for (const localTime of rulesOf(stored, owner).digestTimes) {
@@ -1011,23 +1012,22 @@ export function startConciergeFollowing(
   };
 
   /** The other owners' follows of one target, which share its routines. */
-  const othersOn = async (
+  const othersOn = (
     stored: StoredFollowing,
     source: string,
     target: string,
     owner: ConciergeOwner,
-  ) => {
-    const onTarget = stored.follows.filter((f) => f.source === source && f.target === target);
-    const owners = await Promise.all(onTarget.map(ownerOfFollow));
-    return onTarget.filter((_, index) => owners[index] !== owner);
-  };
+  ) =>
+    stored.follows.filter(
+      (f) => f.source === source && f.target === target && ownerOfFollow(f) !== owner,
+    );
 
   /** An owner's follow of one target, or undefined. */
-  const findFollow = async (
+  const findFollow = (
     stored: StoredFollowing,
     owner: ConciergeOwner,
     matches: (follow: FollowRecord) => boolean,
-  ) => (await followsOf(stored, owner)).find(matches);
+  ) => followsOf(stored, owner).find(matches);
 
   const unserialized: ConciergeFollowing = {
     async list(owner = GUARDIAN_OWNER) {
@@ -1036,7 +1036,7 @@ export function startConciergeFollowing(
         readStored(),
         deps.connections(),
       ]);
-      const mine = await followsOf(stored, owner);
+      const mine = followsOf(stored, owner);
       const chats = new Map<string, ConciergeChatRef>();
       for (const follow of mine) {
         const key = follow.chat ?? "";
@@ -1088,7 +1088,7 @@ export function startConciergeFollowing(
         target = account;
       }
       const stored = await readStored();
-      const existing = await findFollow(
+      const existing = findFollow(
         stored,
         owner,
         (f) => f.source === source.source && f.target === target,
@@ -1113,10 +1113,7 @@ export function startConciergeFollowing(
       // Check first, so a refusal (no admin rights for a webhook) leaves nothing behind.
       await ensure(source.provider, next, true);
       await ensure(source.provider, next, false);
-      await syncRoutines(source, next, [
-        ...(await othersOn(stored, source.source, target, owner)),
-        next,
-      ]);
+      await syncRoutines(source, next, [...othersOn(stored, source.source, target, owner), next]);
       await writeStored({
         ...stored,
         follows: [...stored.follows.filter((f) => f !== existing), next],
@@ -1129,7 +1126,7 @@ export function startConciergeFollowing(
       const source = await sourceOf(change.source);
       const stored = await readStored();
       const target = change.target?.trim() || (source.target ? "" : (source.account ?? ""));
-      const existing = await findFollow(
+      const existing = findFollow(
         stored,
         owner,
         (f) => f.source === source.source && f.target === target,
@@ -1144,10 +1141,7 @@ export function startConciergeFollowing(
       if (added.length > 0 && source.status === "ready") {
         await ensure(source.provider, { ...next, kinds: added }, false);
       }
-      await syncRoutines(source, next, [
-        ...(await othersOn(stored, source.source, target, owner)),
-        next,
-      ]);
+      await syncRoutines(source, next, [...othersOn(stored, source.source, target, owner), next]);
       await writeStored({
         ...stored,
         follows: stored.follows.map((f) => (f === existing ? next : f)),
@@ -1162,7 +1156,7 @@ export function startConciergeFollowing(
     async unfollow(sourceName, rawTarget, owner = GUARDIAN_OWNER) {
       const stored = await readStored();
       const target = rawTarget.trim();
-      const existing = await findFollow(
+      const existing = findFollow(
         stored,
         owner,
         (f) =>
@@ -1170,7 +1164,7 @@ export function startConciergeFollowing(
       );
       const followed = existing?.target ?? target;
       // Another person's follow of the same target keeps the routines it needs.
-      const others = await othersOn(stored, sourceName, followed, owner);
+      const others = othersOn(stored, sourceName, followed, owner);
       let removed = false;
       if (others.length > 0) {
         const source = (await readSources().catch(() => [])).find((s) => s.source === sourceName);
@@ -1311,7 +1305,7 @@ export function startConciergeFollowing(
       if (!provider) return { status: "ok", data: { ignored: "no provider watches it now" } };
       const results: Record<string, string>[] = [];
       for (const follow of follows) {
-        const owner = await ownerOfFollow(follow);
+        const owner = ownerOfFollow(follow);
         // The event itself (a whole mail, say) stays out of the execution record.
         const outcome = await run(
           provider,

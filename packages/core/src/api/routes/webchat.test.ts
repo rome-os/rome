@@ -183,7 +183,8 @@ describe("Webchat API", () => {
       triggerKind: "concierge",
       triggerName: "Task",
     });
-    // A branch of the guardian's task chat, promoted to an ordinary chat by the visitor.
+    // A branch of the guardian's task chat, promoted to an ordinary chat: it
+    // was made private to the guardian when it was forked.
     await deps.webchatRepo.createSession(
       "task-branch",
       "Branch",
@@ -194,13 +195,12 @@ describe("Webchat API", () => {
       null,
       "webchat",
       null,
-      { ownerKey: "visitor:a" },
+      { ownerKey: "guardian" },
     );
-    testDb.db
-      .update(romeSessions)
-      .set({ parentSessionId: "guardian-task" })
-      .where(eq(romeSessions.id, "task-branch"))
-      .run();
+    await deps.webchatRepo.setSessionTrigger("task-branch", {
+      triggerKind: "concierge_fork",
+      triggerName: "branch",
+    });
     await deps.webchatRepo.createSession(
       "shared",
       "Shared",

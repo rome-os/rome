@@ -237,7 +237,7 @@ describe("ConciergeTasksRepository", () => {
       expect((await repo.get(done.id))?.chatId).toBe("topic-1");
     });
 
-    it("moves every row of a chat, finished or not, to the main chat, and announces each", async () => {
+    it("moves only the unfinished rows of a chat to the main chat, and announces each", async () => {
       await chats.createSession(
         "topic-1",
         "Calendar",
@@ -253,11 +253,10 @@ describe("ConciergeTasksRepository", () => {
       ]);
       const announced: string[] = [];
       repo.onChange(({ row }) => announced.push(row.id));
-      // The count is of unfinished rows, which the Concierge tells its owner about.
       expect(await repo.moveToMainChat("topic-1")).toBe(1);
       expect((await repo.get(open.id))?.chatId).toBeNull();
-      expect((await repo.get(done.id))?.chatId).toBeNull();
-      expect(announced.sort()).toEqual([open.id, done.id].sort());
+      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
+      expect(announced).toEqual([open.id]);
     });
 
     it("keeps a row its owner's when its chat is deleted without moving it", async () => {
