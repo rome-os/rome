@@ -1,20 +1,21 @@
 import type {
-  ModelSessionForkOpenParams,
   ModelToolCallContext,
-} from "../../../domain/model-port.js";
-import type { FacadeToolResult } from "../../../../core/mcp-facade.js";
-import {
-  createRomeMcpServerForSession,
-  type RomeMcpGroup,
-  type RomeMcpServer,
-} from "../../../../core/mcp/server.js";
+  RomeToolGroup,
+  RomeToolResult,
+  RomeTools,
+} from "../../../domain/rome-tools.js";
 import type { DynamicToolCallResponse, DynamicToolSpec } from "./app-server-protocol.js";
 
-const DYNAMIC_TOOL_GROUPS: readonly RomeMcpGroup[] = ["actions", "subagents", "skills", "ask_user"];
+const DYNAMIC_TOOL_GROUPS: readonly RomeToolGroup[] = [
+  "actions",
+  "subagents",
+  "skills",
+  "ask_user",
+];
 
 export interface RomeDynamicToolCallResult {
   response: DynamicToolCallResponse;
-  traceOutput: FacadeToolResult;
+  traceOutput: RomeToolResult;
 }
 
 export interface RomeDynamicTools {
@@ -27,7 +28,7 @@ export interface RomeDynamicTools {
   ): Promise<RomeDynamicToolCallResult>;
 }
 
-function toDynamicResponse(result: FacadeToolResult): DynamicToolCallResponse {
+function toDynamicResponse(result: RomeToolResult): DynamicToolCallResponse {
   return {
     contentItems: result.content.map((item) => ({
       type: "inputText" as const,
@@ -38,7 +39,7 @@ function toDynamicResponse(result: FacadeToolResult): DynamicToolCallResponse {
 }
 
 function errorResult(message: string): RomeDynamicToolCallResult {
-  const traceOutput: FacadeToolResult = {
+  const traceOutput: RomeToolResult = {
     content: [{ type: "text", text: message }],
     isError: true,
   };
@@ -48,10 +49,6 @@ function errorResult(message: string): RomeDynamicToolCallResult {
 function recordInput(input: unknown): Record<string, unknown> | null {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
   return input as Record<string, unknown>;
-}
-
-export function createRomeDynamicTools(params: ModelSessionForkOpenParams): RomeDynamicTools {
-  return createRomeDynamicToolsFromServer(createRomeMcpServerForSession(params));
 }
 
 /**
@@ -83,12 +80,13 @@ export function alignRomeDynamicToolsToInheritedCatalog(
   };
 }
 
-export function createRomeDynamicToolsFromServer(server: RomeMcpServer): RomeDynamicTools {
-  const groupByName = new Map<string, RomeMcpGroup>();
+/** Flatten the Rome tools into one app-server dynamic-tool catalog. */
+export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
+  const groupByName = new Map<string, RomeToolGroup>();
   const definitions: DynamicToolSpec[] = [];
 
   for (const group of DYNAMIC_TOOL_GROUPS) {
-    for (const tool of server.listTools(group)) {
+    for (const tool of tools.listTools(group)) {
       const previousGroup = groupByName.get(tool.name);
       if (previousGroup) {
         throw new Error(
@@ -114,7 +112,7 @@ export function createRomeDynamicToolsFromServer(server: RomeMcpServer): RomeDyn
       const args = recordInput(input);
       if (!args) return errorResult(`Invalid arguments for dynamic tool: ${name}`);
       try {
-        const traceOutput = await server.callTool(group, name, args, context);
+        const traceOutput = await tools.callTool(group, name, args, context);
         return { response: toDynamicResponse(traceOutput), traceOutput };
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : String(err));

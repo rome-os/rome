@@ -97,7 +97,7 @@ export async function createBorrowedExactForkSession(
   // byte-identical to the source (prefix identity — the reason this module
   // exists). The shared mapping keeps that flag (and any future facade
   // capability) in lockstep with openSession's wiring.
-  const romeTools = createRomeDynamicTools(args.openParams);
+  const romeTools = createRomeDynamicTools(args.openParams.tools);
 
   let closed = false;
   let closing = false;

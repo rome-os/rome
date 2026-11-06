@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { ModelSession, ModelSessionParams } from "../../../domain/model-port.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
+import { createRomeTools } from "../../../../core/mcp/server.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
@@ -190,12 +191,14 @@ describe("bundled Codex app-server", () => {
       builtinTools,
       workingDir: home,
     },
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
+    tools: createRomeTools({
+      getActionCatalog: () => [],
+      getSkillCatalog: () => [],
+      subagentTools: [],
+      executeAction: async () => ({ ok: true }),
+      executeSubagent: async () => "unused",
+    }),
     thread: { kind: "new" },
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "unused",
   });
 
   /** Runs one turn and returns the tools of the last request that carried `text`. */
@@ -214,7 +217,7 @@ describe("bundled Codex app-server", () => {
 
   it.each(codexModels)("gives %s the tools Rome relies on", async (model) => {
     const params = sessionParams(model, fullBuiltins());
-    const romeTools = createRomeDynamicTools(params).definitions.map((tool) => tool.name);
+    const romeTools = createRomeDynamicTools(params.tools).definitions.map((tool) => tool.name);
     const session = await provider.openSession(params);
     let tools: string[];
     try {
@@ -229,7 +232,7 @@ describe("bundled Codex app-server", () => {
 
   it.each(codexModels)("gives %s no shell when the agent declares no builtins", async (model) => {
     const params = sessionParams(model, []);
-    const romeTools = createRomeDynamicTools(params).definitions.map((tool) => tool.name);
+    const romeTools = createRomeDynamicTools(params.tools).definitions.map((tool) => tool.name);
     const session = await provider.openSession(params);
     let tools: string[];
     try {

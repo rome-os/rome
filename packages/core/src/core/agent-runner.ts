@@ -11,6 +11,7 @@ import type {
   ModelToolDefinition,
   ModelUserInput,
   ProviderId,
+  RomeTools,
   SkillMcpDefinition,
   ThreadStart,
 } from "../agent/index.js";
@@ -68,9 +69,8 @@ export interface ModelRunParams {
   model: string;
   systemPrompt: string;
   prompt: string;
-  actionCatalog: ActionMcpDefinition[];
-  skillCatalog: SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
+  /** The Rome tools the session serves; a mock calls them as a provider would. */
+  tools: RomeTools;
   outputSchema?: Record<string, unknown>;
   builtinTools?: string[];
   maxTurns?: number;
@@ -78,12 +78,6 @@ export interface ModelRunParams {
   thread: ThreadStart;
   workingDir?: string;
   externalMcpServers?: Record<string, McpServerConfig>;
-  executeAction: (name: string, input: unknown) => Promise<unknown>;
-  executeSubagent: (
-    name: string,
-    input: unknown,
-    context: ModelToolCallContext,
-  ) => Promise<unknown>;
 }
 
 /**
@@ -143,9 +137,7 @@ export function createSessionFromRun(
         model: config.model,
         systemPrompt: config.systemPrompt,
         prompt: input.text,
-        actionCatalog: params.getActionCatalog(),
-        skillCatalog: params.getSkillCatalog(),
-        subagentTools: params.subagentTools,
+        tools: params.tools,
         outputSchema: config.outputSchema,
         builtinTools: config.builtinTools,
         maxTurns: config.maxTurns,
@@ -153,8 +145,6 @@ export function createSessionFromRun(
         thread: params.thread,
         workingDir: config.workingDir,
         externalMcpServers: config.externalMcpServers,
-        executeAction: params.executeAction,
-        executeSubagent: params.executeSubagent,
       };
       const { reasoningEffort } = runParams;
       for await (const msg of run(runParams)) {

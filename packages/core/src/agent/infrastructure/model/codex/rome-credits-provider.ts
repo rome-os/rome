@@ -15,6 +15,13 @@ import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 /** Env var the app-server reads its proxy key from on each request. */
 export const ROME_CREDITS_TOKEN_ENV = "ROME_CREDITS_TOKEN";
 
+/**
+ * The variables every Codex agent shell hides, server-wide. A thread that
+ * clears a variable of its own appends to this list rather than replacing it
+ * (app-server-provider.ts).
+ */
+export const CODEX_SHELL_ENV_EXCLUDE: readonly string[] = [ROME_CREDITS_TOKEN_ENV];
+
 /** Path prefix of core's loopback proxy to the inference gateway. */
 export const ROME_CREDITS_PROXY_PATH = "/_internal/rome-credits/v1";
 
@@ -52,7 +59,7 @@ export function codexAppServerConfigArgs(
 ): string[] {
   const args = [
     "-c",
-    `shell_environment_policy.exclude=[${tomlString(ROME_CREDITS_TOKEN_ENV)}]`,
+    `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE.map(tomlString).join(", ")}]`,
     "-c",
     "skills.bundled.enabled=false",
   ];

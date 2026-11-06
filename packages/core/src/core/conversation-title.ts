@@ -1,5 +1,6 @@
 import { recordModelTurnMetrics } from "../telemetry.js";
 import type { ModelSession } from "./agent-runner.js";
+import { createRomeTools } from "./mcp/server.js";
 import type { ModelResolver } from "./model-resolver.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -98,16 +99,18 @@ export function createConversationTitleGenerator(
             maxTurns: 1,
           },
           agentName: "conversation-title",
-          getActionCatalog: () => [],
-          getSkillCatalog: () => [],
-          subagentTools: [],
+          tools: createRomeTools({
+            getActionCatalog: () => [],
+            getSkillCatalog: () => [],
+            subagentTools: [],
+            executeAction: async () => {
+              throw new Error("Conversation title generation cannot execute actions");
+            },
+            executeSubagent: async () => {
+              throw new Error("Conversation title generation cannot execute subagents");
+            },
+          }),
           thread: { kind: "new" },
-          executeAction: async () => {
-            throw new Error("Conversation title generation cannot execute actions");
-          },
-          executeSubagent: async () => {
-            throw new Error("Conversation title generation cannot execute subagents");
-          },
         });
         session = openedSession;
         if (timedOut) {

@@ -1,8 +1,6 @@
 # Known agent-context boundary crossings, one `<file> → <specifier>` per line, paths relative to packages/core/src.
 # boundary.test.ts fails on a crossing not listed here and on a line that no longer occurs, so this list only shrinks.
 agent/domain/model-port.ts → ../../actions/types.js
-agent/domain/model-port.ts → ../../core/defer.js
-agent/domain/model-port.ts → ../../core/mcp-facade.js
 agent/domain/model-port.ts → ../../core/skill-catalog.js
 agent/domain/model-port.ts → ../../types.js
 agent/domain/model-port.ts → ../../usage/events.js

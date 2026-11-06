@@ -7,6 +7,9 @@ import * as anthropicLoginModule from "../../../../lib/anthropic-login.js" with 
   rstest: "importActual",
 };
 import { AnthropicProvider } from "./provider.js";
+import { createRomeTools } from "../../../../core/mcp/server.js";
+import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import type { RomeTools } from "../../../domain/rome-tools.js";
 import type { AgentEvent } from "../../../../types.js";
 import type {
   ModelSession,
@@ -109,20 +112,29 @@ async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-type ParamOverrides = Partial<Omit<ModelSessionParams, "config">> & {
+type ParamOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
+  /** What the session's Rome tools are built from. */
+  tools?: Partial<FacadeParams>;
 };
 
-function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
-  const { config, ...rest } = overrides;
-  return {
-    config: { model: "claude-test", systemPrompt: "system", builtinTools: [], ...config },
+function buildTools(overrides: Partial<FacadeParams> = {}): RomeTools {
+  return createRomeTools({
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
-    thread: { kind: "new" },
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "delegated",
+    ...overrides,
+  });
+}
+
+function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
+  const { config, tools, ...rest } = overrides;
+  return {
+    config: { model: "claude-test", systemPrompt: "system", builtinTools: [], ...config },
+    tools: buildTools(tools),
+    thread: { kind: "new" },
     ...rest,
   };
 }
@@ -1673,7 +1685,7 @@ describe("AnthropicProvider", () => {
 
     it("turns the silent-turn reminder off for every session", async () => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const session = await provider.openSession(buildParams({ textPrivate: false }));
+      const session = await provider.openSession(buildParams({ tools: { textPrivate: false } }));
       await collectEvents(session);
       await session.close();
       expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_SILENT_TURN_REMINDER).toBe("0");
@@ -1682,7 +1694,7 @@ describe("AnthropicProvider", () => {
     it("drops the defer confirmation line for a private-text agent", async () => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
       const session = await provider.openSession(
-        buildParams({ textPrivate: true, executeDefer: async () => ({ ok: true }) }),
+        buildParams({ tools: { textPrivate: true, executeDefer: async () => ({ ok: true }) } }),
       );
       await collectEvents(session);
       await session.close();
@@ -1709,7 +1721,7 @@ describe("AnthropicProvider", () => {
       ],
     ])("lists ask_question as terminal exactly when it parks on a card, on %s", async (_label, overrides, parksOnCard) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const session = await provider.openSession(buildParams(overrides));
+      const session = await provider.openSession(buildParams({ tools: overrides }));
       await collectEvents(session);
       await session.close();
 
@@ -1732,7 +1744,9 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: " mcp__x__y,,mcp__z__w " },
       });
-      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      const session = await provider.openSession(
+        buildParams({ tools: { supportsInteractiveSurface: true } }),
+      );
       await collectEvents(session);
       await session.close();
 
@@ -1746,7 +1760,9 @@ describe("AnthropicProvider", () => {
           CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__ask_user__ask_question,mcp__x__y",
         },
       });
-      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      const session = await provider.openSession(
+        buildParams({ tools: { supportsInteractiveSurface: true } }),
+      );
       await collectEvents(session);
       await session.close();
 

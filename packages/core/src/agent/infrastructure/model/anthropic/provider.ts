@@ -26,6 +26,7 @@ import type {
   ModelTurnActivityEvent,
   ModelPosition,
 } from "../../../domain/model-port.js";
+import type { RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
 import { createLogger } from "../../../../logger.js";
@@ -43,8 +44,7 @@ import {
   type AnthropicAuthRevokedSource,
 } from "../../../../lib/anthropic-login.js";
 import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth-revoked.js";
-import { buildAnthropicMcpServers } from "./mcp-servers.js";
-import { askQuestionParksOnCard } from "../../../../core/mcp-facade.js";
+import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
 import { anthropicFunding } from "../../../../usage/funding.js";
@@ -90,31 +90,40 @@ export const CLAUDE_AGENT_SDK_SETTINGS = {
   },
 } as const;
 
-// Tools that park the turn on a card the guardian answers next turn, so the
-// model correctly ends its response with no text after them. Claude Code
-// treats tools listed in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its
-// no-visible-output guard skips a response whose last non-error tool results
-// came from one, instead of re-running the model to force a reply. The
-// CLI also counts a transcript ending in such a result as a finished turn, not
-// an interrupted one, on resume. Both behaviors are undocumented CLI internals
-// checked against agent SDK 0.3.293, so re-check them when bumping the SDK.
-// Names are `mcp__<server key>__<tool>` as registered by buildAnthropicMcpServers.
-const CLAUDE_TERMINAL_PARK_TOOLS = ["mcp__ask_user__ask_question"] as const;
+// Tools whose call ends the turn (`ModelToolDefinition.endsTurn`): the turn
+// parks on something the guardian answers next turn, so the model correctly
+// ends its response with no text after them. Claude Code treats tools listed
+// in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its no-visible-output guard
+// skips a response whose last non-error tool results came from one, instead
+// of re-running the model to force a reply. The CLI also counts a transcript
+// ending in such a result as a finished turn, not an interrupted one, on
+// resume. Both behaviors are undocumented CLI internals checked against agent
+// SDK 0.3.293, so re-check them when bumping the SDK.
+const ROME_TOOL_GROUPS: readonly RomeToolGroup[] = ["actions", "subagents", "skills", "ask_user"];
 
-// Where ask_question asks in prose instead of parking on a card, the guard
-// stays on and still catches an empty reply.
+function endsTurnToolNames(tools: RomeTools): string[] {
+  return ROME_TOOL_GROUPS.flatMap((group) =>
+    tools
+      .listTools(group)
+      .filter((tool) => tool.endsTurn === true)
+      .map((tool) => anthropicToolName(group, tool)),
+  );
+}
+
+// With no tool ending the turn, the guard stays on and still catches an empty
+// reply.
 function terminalMcpToolsEnv(
   inherited: string | undefined,
-  parksOnCard: boolean,
+  endsTurnTools: readonly string[],
 ): string | undefined {
-  if (!parksOnCard) return inherited;
+  if (endsTurnTools.length === 0) return inherited;
   const tools = new Set(
     (inherited ?? "")
       .split(",")
       .map((tool) => tool.trim())
       .filter(Boolean),
   );
-  for (const tool of CLAUDE_TERMINAL_PARK_TOOLS) tools.add(tool);
+  for (const tool of endsTurnTools) tools.add(tool);
   return [...tools].join(",");
 }
 
@@ -501,8 +510,6 @@ export class AnthropicProvider implements ModelProvider {
   // its CLI subprocess down cleanly.
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
-    const { subagentTools, executeAction, executeSubagent, executeDefer, routineActivation } =
-      params;
     const { model, systemPrompt, maxTurns = 1000 } = params.config;
     const outputValidator = params.config.outputSchema
       ? compileOutputSchema(params.config.outputSchema)
@@ -511,18 +518,8 @@ export class AnthropicProvider implements ModelProvider {
     const toolUseNames = new Map<string, string>();
 
     const mcpServers = buildAnthropicMcpServers({
-      getActionCatalog: params.getActionCatalog,
-      getSkillCatalog: params.getSkillCatalog,
-      subagentTools,
+      tools: params.tools,
       externalMcpServers: params.config.externalMcpServers,
-      executeAction,
-      executeSubagent,
-      supportsInteractiveSurface: params.supportsInteractiveSurface,
-      interactiveSurfaceDetached: params.interactiveSurfaceDetached,
-      executeDefer,
-      sessionTools: params.sessionTools,
-      routineActivation,
-      textPrivate: params.textPrivate,
     });
 
     const queryContext = await this.buildQueryContext();
@@ -535,7 +532,7 @@ export class AnthropicProvider implements ModelProvider {
       CLAUDE_CODE_EFFORT_LEVEL: effort,
       CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpToolsEnv(
         queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
-        askQuestionParksOnCard(params),
+        endsTurnToolNames(params.tools),
       ),
       // Claude Code nudges a turn that has gone a few rounds without visible
       // text. Rome's agents speak through their tools as often as through

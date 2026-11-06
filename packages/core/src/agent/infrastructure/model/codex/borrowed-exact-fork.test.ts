@@ -9,13 +9,17 @@ import {
   evaluateBorrowedExactFork,
 } from "./borrowed-exact-fork.js";
 import type { RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
+import { createRomeTools } from "../../../../core/mcp/server.js";
+import type { FacadeParams } from "../../../../core/mcp-facade.js";
 
-type OpenOverrides = Partial<Omit<ModelSessionForkOpenParams, "config">> & {
+type OpenOverrides = Partial<Omit<ModelSessionForkOpenParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
+  /** What the session's Rome tools are built from. */
+  tools?: Partial<FacadeParams>;
 };
 
 function openParams(overrides: OpenOverrides = {}): ModelSessionForkOpenParams {
-  const { config, ...rest } = overrides;
+  const { config, tools, ...rest } = overrides;
   return {
     config: {
       model: "gpt-5.6-terra",
@@ -24,11 +28,14 @@ function openParams(overrides: OpenOverrides = {}): ModelSessionForkOpenParams {
       workingDir: "/workspace",
       ...config,
     },
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "delegated",
+    tools: createRomeTools({
+      getActionCatalog: () => [],
+      getSkillCatalog: () => [],
+      subagentTools: [],
+      executeAction: async () => ({ ok: true }),
+      executeSubagent: async () => "delegated",
+      ...tools,
+    }),
     ...rest,
   };
 }
@@ -125,8 +132,10 @@ describe("createBorrowedExactForkSession", () => {
       forkOwnerId: "fork-owner",
       sourceThreadId: "source-thread",
       openParams: openParams({
-        supportsInteractiveSurface: true,
-        interactiveSurfaceDetached: true,
+        tools: {
+          supportsInteractiveSurface: true,
+          interactiveSurfaceDetached: true,
+        },
       }),
       runExclusive: async (work) => await work(),
       runTurn: async (_input, runtime) => {

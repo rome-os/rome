@@ -32,7 +32,8 @@ import {
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
-import type { RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeParams, RoutineActivationGate } from "./mcp-facade.js";
+import { createRomeTools } from "./mcp/server.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
@@ -1361,8 +1362,26 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
+  // What the Rome tools are made of for this session. Captured on open so an
+  // exact fork rebuilds the same catalog with its own callbacks.
+  const liveToolParams: FacadeParams = {
+    getActionCatalog,
+    getSkillCatalog,
+    subagentTools,
+    executeAction,
+    executeSubagent,
+    executeDefer,
+    routineActivation,
+    supportsInteractiveSurface,
+    interactiveSurfaceDetached: init.interactiveSurfaceDetached,
+    // The agent's text stays in its trace, so it reaches the guardian only
+    // through its tools; `defer` then asks for no confirmation line.
+    textPrivate: resolveSessionPolicy(config).finalText === "private",
+  };
+
   const buildSessionParams = (
     resolution: ModelResolution,
+    toolParams: FacadeParams,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): ModelSessionParams => ({
@@ -1383,22 +1402,13 @@ async function openSession(
     },
     agentName: key.agentName,
     appStoreListingId,
-    getActionCatalog,
-    getSkillCatalog,
-    subagentTools,
-    textPrivate: resolveSessionPolicy(config).finalText === "private",
+    tools: createRomeTools(toolParams),
     // A thread resumes only on the provider that named it; another provider
     // starts a new one.
     thread:
       resumeThreadId !== undefined && resumeProviderId === resolution.modelProvider.id
         ? { kind: "resume", modelThreadId: resumeThreadId }
         : { kind: "new" },
-    executeAction,
-    executeSubagent,
-    executeDefer,
-    routineActivation,
-    supportsInteractiveSurface,
-    interactiveSurfaceDetached: init.interactiveSurfaceDetached,
   });
 
   // Captured on every successful open (including reopens) so exact-mode forks
@@ -1406,13 +1416,13 @@ async function openSession(
   // identity by construction: a field added to ModelSessionParams flows into
   // exact forks without a second hand-maintained list.
   let lastOpenParams: ModelSessionParams | undefined;
+  let lastToolParams: FacadeParams | undefined;
 
   const openModelSession = async (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
-    const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
     const sessionTools = await deps.sessionTools?.({
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
@@ -1421,7 +1431,10 @@ async function openSession(
       getTurnId: sessionExecRefs.getTurnId,
       getThreadContext: sessionExecRefs.getThreadContext,
     });
-    if (sessionTools?.length) params.sessionTools = sessionTools;
+    const toolParams: FacadeParams = sessionTools?.length
+      ? { ...liveToolParams, sessionTools }
+      : liveToolParams;
+    const params = buildSessionParams(resolution, toolParams, resumeProviderId, resumeThreadId);
     const resumed = params.thread.kind === "resume";
     const openStartMs = Date.now();
     const session = await withRomeSpan(
@@ -1439,6 +1452,7 @@ async function openSession(
       resumed,
     });
     lastOpenParams = params;
+    lastToolParams = toolParams;
     return session;
   };
 
@@ -1468,25 +1482,29 @@ async function openSession(
             reasoningEffort,
             outputSchema: config.outputSchema,
             workingDir,
+            // Same channel as the source session's config, for the same reason.
+            env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
           },
           agentName: key.agentName,
           appStoreListingId,
-          getActionCatalog: () => [],
-          getSkillCatalog: () => [],
-          subagentTools: [],
-          executeAction: async () => {
-            throw new Error("Actions are disabled in forked turns");
-          },
-          executeSubagent: async () => {
-            throw new Error("Subagents are disabled in forked turns");
-          },
-          supportsInteractiveSurface: false,
+          tools: createRomeTools({
+            getActionCatalog: () => [],
+            getSkillCatalog: () => [],
+            subagentTools: [],
+            executeAction: async () => {
+              throw new Error("Actions are disabled in forked turns");
+            },
+            executeSubagent: async () => {
+              throw new Error("Subagents are disabled in forked turns");
+            },
+            supportsInteractiveSurface: false,
+          }),
         },
         projectProviderMessage: async (msg) => [msg],
         dispose: async () => {},
       };
     }
-    if (!lastOpenParams) {
+    if (!lastOpenParams || !lastToolParams) {
       // Only reachable for sessions that never opened a provider query
       // (code-backed) — and those refuse fork() before this factory runs.
       throw new Error("Exact fork requires a live provider session");
@@ -1568,18 +1586,23 @@ async function openSession(
       params: {
         ...liveOpenParams,
         config: { ...liveOpenParams.config, model: fork.model },
-        executeAction: makeExecuteAction(refs),
-        executeSubagent: makeExecuteSubagent(refs),
-        executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
-        sessionTools: liveOpenParams.sessionTools
-          ? detachSessionTools(liveOpenParams.sessionTools)
-          : undefined,
-        // The spread keeps `supportsInteractiveSurface` (it shapes the
-        // advertised catalog + system prompt, which must stay byte-identical
-        // to the source); this flag makes the interactive *runtime* degrade
-        // to the non-interactive fallbacks instead — see
-        // FacadeParams.interactiveSurfaceDetached.
-        interactiveSurfaceDetached: true,
+        // The same catalog as the live session, run through fresh fork-bound
+        // callbacks, never the source's per-turn closures.
+        tools: createRomeTools({
+          ...lastToolParams,
+          executeAction: makeExecuteAction(refs),
+          executeSubagent: makeExecuteSubagent(refs),
+          executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+          sessionTools: lastToolParams.sessionTools
+            ? detachSessionTools(lastToolParams.sessionTools)
+            : undefined,
+          // `supportsInteractiveSurface` stays (it shapes the advertised
+          // catalog + system prompt, which must stay byte-identical to the
+          // source); this flag makes the interactive *runtime* degrade to the
+          // non-interactive fallbacks instead — see
+          // FacadeParams.interactiveSurfaceDetached.
+          interactiveSurfaceDetached: true,
+        }),
       },
       projectProviderMessage: async (msg) => {
         if (msg.type === "tool_input_delta" && subagentToolNames.has(msg.tool)) {
@@ -1638,17 +1661,20 @@ async function openSession(
   let threadResumed = false;
   if (config.codeBacked) {
     modelSession = createNullModelSession({
-      ...buildSessionParams({
-        modelProvider: {
-          id: "mock",
-          displayName: "Code-backed",
-          builtinTools: new Set(),
-          openSession: async () => {
-            throw new Error("Code-backed agents do not open model sessions");
+      ...buildSessionParams(
+        {
+          modelProvider: {
+            id: "mock",
+            displayName: "Code-backed",
+            builtinTools: new Set(),
+            openSession: async () => {
+              throw new Error("Code-backed agents do not open model sessions");
+            },
           },
+          model: "code-backed",
         },
-        model: "code-backed",
-      }),
+        liveToolParams,
+      ),
     });
   } else {
     initialResolution = await deps.modelResolver.getModelProvider(

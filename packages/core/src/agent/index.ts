@@ -31,14 +31,20 @@ export type {
   ModelSessionForkSource,
   ModelSessionParams,
   ModelTurnStartedEvent,
-  ModelToolCallContext,
-  ModelToolDefinition,
   ModelUserInput,
   ProviderId,
   ModelPosition,
   SkillMcpDefinition,
   ThreadStart,
 } from "./domain/model-port.js";
+export type {
+  ModelToolCallContext,
+  ModelToolDefinition,
+  RomeToolGroup,
+  RomeToolResult,
+  RomeTools,
+  ModelToolCallId,
+} from "./domain/rome-tools.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 
 // The model port's adapters, as the composition root wires them. The Codex

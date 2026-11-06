@@ -51,11 +51,8 @@ export type FacadeToolHandler = (
   context?: ModelToolCallContext,
 ) => Promise<FacadeToolResult>;
 
-export interface FacadeToolDef {
-  name: string;
-  description: string;
-  /** JSON Schema for the tool's arguments. Adapters translate as needed. */
-  inputSchema: Record<string, unknown>;
+/** A Rome tool with the handler that runs it. */
+export interface FacadeToolDef extends ModelToolDefinition {
   handler: FacadeToolHandler;
 }
 
@@ -1219,6 +1216,9 @@ function buildInteractiveTools(
   const tools: FacadeToolDef[] = [
     {
       name: "ask_question",
+      // On a card the turn parks until the guardian answers; the prose relay
+      // returns and the turn goes on.
+      endsTurn: askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached }),
       description:
         "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
       inputSchema: {
