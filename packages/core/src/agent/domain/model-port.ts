@@ -1,6 +1,8 @@
 // The model provider port: what the agent context needs from a model it can
 // run. Adapters live in agent/infrastructure/model/. Agent model:
-// docs/concepts/agents.md.
+// docs/concepts/agents.md. The port narrows one member group at a time, with
+// both adapters and every caller moving in the same PR; the target shape is
+// in the slice 2 reshape note.
 //
 // The interface only requires what every model needs: an id, a builtin-tool
 // catalog and `openSession`. ModelResolver owns provider priority and concrete
@@ -20,7 +22,6 @@ import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../../types.j
 import type { UsageFunding } from "../../usage/events.js";
 
 export type ProviderId = "anthropic" | "openai" | "mock";
-export type ModelTier = "large" | "medium" | "small";
 
 export interface ModelToolDefinition {
   name: string;

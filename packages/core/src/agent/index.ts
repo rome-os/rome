@@ -16,6 +16,7 @@ export {
   type TurnRun,
 } from "./domain/session.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
+export type { ModelTier } from "./domain/model-tier.js";
 export type {
   ActionMcpDefinition,
   ModelProvider,
@@ -27,7 +28,6 @@ export type {
   ModelSessionForkParams,
   ModelSessionForkSource,
   ModelSessionParams,
-  ModelTier,
   ModelToolCallContext,
   ModelToolDefinition,
   ModelUserInput,
