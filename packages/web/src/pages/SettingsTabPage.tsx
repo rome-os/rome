@@ -26,7 +26,7 @@ import type {
 } from "@rome/api-types/favors";
 import { isElectronShell } from "@/lib/electron-shell";
 import { artifactLocalName } from "@/lib/artifact-name";
-import { getApiErrorMessage } from "@/lib/api-error";
+import { apiErrorMessageFrom, getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
 import { setPresentationMode, usePresentationMode } from "@/lib/presentation-mode";
 import { relativeTime } from "@/lib/routine-language";
@@ -112,6 +112,10 @@ import { StatusIndicator } from "@/lib/connection-status";
 import type { ThemePreference } from "@/lib/theme";
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, type SupportedLanguage } from "@/i18n";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import {
+  DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
+  DASHBOARD_ACCESS_MAX_EMAILS,
+} from "@rome/api-types/dashboard-access";
 import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
@@ -1602,6 +1606,20 @@ function AllowedCloudEmailsSection() {
       .finally(() => setLoaded(true));
   }, []);
 
+  // A save past a limit names the limit. Anything else shows the server's message.
+  async function saveErrorMessage(response: Response): Promise<string> {
+    const data = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    if (data?.error === "too_many_emails") {
+      return t("publicAccess.dashboardEmails.tooMany", { limit: DASHBOARD_ACCESS_MAX_EMAILS });
+    }
+    if (data?.error === "email_too_long") {
+      return t("publicAccess.dashboardEmails.emailTooLong", {
+        limit: DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
+      });
+    }
+    return apiErrorMessageFrom(data, t("publicAccess.dashboardEmails.saveFailedFallback"));
+  }
+
   // Saves `next` right away; on failure rolls the list back to `previous` so
   // the UI never shows a state the server rejected. Mutations are disabled
   // while a save is in flight, so `previous` is always the server's state.
@@ -1614,11 +1632,7 @@ function AllowedCloudEmailsSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated),
       });
-      if (!response.ok) {
-        throw new Error(
-          await getApiErrorMessage(response, t("publicAccess.dashboardEmails.saveFailedFallback")),
-        );
-      }
+      if (!response.ok) throw new Error(await saveErrorMessage(response));
       toast.success(t("publicAccess.dashboardEmails.savedFlash"));
     } catch (error) {
       setEmails(previous);

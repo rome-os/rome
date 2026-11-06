@@ -13,6 +13,7 @@
     "./chat-settings": "./src/chat-settings.ts",
     "./trace-segments": "./src/trace-segments.ts",
     "./app-manager-errors": "./src/app-manager-errors.ts",
+    "./dashboard-access": "./src/dashboard-access.ts",
     "./approvals": "./src/approvals.ts",
     "./apps": "./src/apps.ts",
     "./projects": "./src/projects.ts",
