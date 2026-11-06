@@ -5,7 +5,12 @@ import {
   normalizeDashboardAccessConfig,
   readDashboardAccessRevision,
 } from "./dashboard-access-config.js";
-import { cloudBearer, getInstanceToken, instanceCredentialId } from "./instance-identity.js";
+import {
+  cloudBearer,
+  getInstanceToken,
+  instanceCredentialId,
+  onInstanceTokenChanged,
+} from "./instance-identity.js";
 import { normalizePublicAccessEmail } from "./public-access-config.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
@@ -20,6 +25,8 @@ export interface VisitorAllowListSyncDeps {
   /** A bearer for one request. Null while linked is a passing gap, such as a signer restart. */
   getToken?: () => string | null | Promise<string | null>;
   getOrigin?: () => string | null;
+  /** Subscribes to the instance linking, unlinking, or changing its credential. */
+  onLinkChanged?: (listener: () => void) => () => void;
   fetchImpl?: typeof fetch;
   logger?: Pick<Logger, "debug" | "info" | "warn">;
   /** Wait before each retry. The last entry repeats until a send settles. */
@@ -42,8 +49,11 @@ const DEFAULT_RETRY_DELAYS_MS = [5_000, 30_000, 120_000, 600_000, 1_800_000];
  */
 export class VisitorAllowListSync {
   private latest: VisitorAllowList | null = null;
-  // The revision Rome Cloud last accepted.
-  private settled = -1;
+  // What Rome Cloud last accepted, and under which enrollment. A link change
+  // bumps the generation, so a list accepted before it never counts after it.
+  private settled: { enrollment: string; generation: number; revision: number } | null = null;
+  private linkGeneration = 0;
+  private readonly unsubscribe: () => void;
   private draining = false;
   private running: Promise<void> = Promise.resolve();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,6 +62,15 @@ export class VisitorAllowListSync {
 
   constructor(private readonly deps: VisitorAllowListSyncDeps = {}) {
     this.log = deps.logger ?? createLogger("visitor-allowlist-sync");
+    // A new enrollment, even one with the same credential, starts with an
+    // empty list on Rome Cloud, so it gets the current list again.
+    this.unsubscribe = (deps.onLinkChanged ?? onInstanceTokenChanged)(() => {
+      this.linkGeneration += 1;
+      this.settled = null;
+      this.failures = 0;
+      this.clearRetry();
+      this.kick();
+    });
   }
 
   /** Queues a list for delivery and returns at once. An older revision than the queued one is dropped. */
@@ -76,6 +95,7 @@ export class VisitorAllowListSync {
   }
 
   stop(): void {
+    this.unsubscribe();
     this.clearRetry();
   }
 
@@ -93,17 +113,27 @@ export class VisitorAllowListSync {
     try {
       for (;;) {
         const list = this.latest;
-        if (!list || list.revision === this.settled) return;
+        const enrollment = this.enrollmentId();
+        const generation = this.linkGeneration;
+        if (!list || this.isSettled(list, enrollment)) return;
         const outcome = await this.send(list);
-        // A save during the send queued a newer list: send that one instead.
-        if (this.latest !== list) continue;
+        // A save during the send queued a newer list, or the instance linked
+        // again: send the current list to the current enrollment instead.
+        if (
+          this.latest !== list ||
+          this.linkGeneration !== generation ||
+          this.enrollmentId() !== enrollment
+        )
+          continue;
         if (outcome === "retry") {
           this.scheduleRetry();
           return;
         }
         // Only an accepted list settles. A skipped or refused one is sent again
         // on the next push: a save, a boot, or the instance linking.
-        if (outcome === "ok") this.settled = list.revision;
+        if (outcome === "ok" && enrollment) {
+          this.settled = { enrollment, generation, revision: list.revision };
+        }
         return;
       }
     } finally {
@@ -126,6 +156,15 @@ export class VisitorAllowListSync {
   private clearRetry(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
+  }
+
+  private isSettled(list: VisitorAllowList, enrollment: string | null): boolean {
+    return (
+      this.settled !== null &&
+      this.settled.revision === list.revision &&
+      this.settled.generation === this.linkGeneration &&
+      this.settled.enrollment === enrollment
+    );
   }
 
   private enrollmentId(): string | null {

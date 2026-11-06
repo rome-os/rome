@@ -812,7 +812,10 @@ export async function buildTestDeps(
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
-  const visitorAllowListSync = new VisitorAllowListSync({ getEnrollmentId: () => null });
+  const visitorAllowListSync = new VisitorAllowListSync({
+    getEnrollmentId: () => null,
+    onLinkChanged: () => () => {},
+  });
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
   const channelsService = createChannelsService({

@@ -129,6 +129,75 @@ describe("VisitorAllowListSync", () => {
     expect(cloud.sent).toHaveLength(1);
   });
 
+  it("sends an unchanged list again to a new enrollment after an unlink", async () => {
+    const cloud = fakeCloud();
+    let enrollment: string | null = "key-1";
+    let linkChanged = () => {};
+    const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => enrollment,
+      getToken: () => "inst-token",
+      getOrigin: () => ORIGIN,
+      onLinkChanged: (listener) => {
+        linkChanged = listener;
+        return () => {};
+      },
+      fetchImpl: cloud.fetchImpl,
+    });
+
+    sync.push({ emails: ["ada@example.com"], revision: 3 });
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(1);
+
+    // Unlinked: nothing to send to.
+    enrollment = null;
+    linkChanged();
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(1);
+
+    // Enrolled again with the same signer key: the same list goes to the new enrollment.
+    enrollment = "key-1";
+    linkChanged();
+    await settle(sync);
+    expect(cloud.sent.map((s) => s.body)).toEqual([
+      { emails: ["ada@example.com"], revision: 3 },
+      { emails: ["ada@example.com"], revision: 3 },
+    ]);
+
+    // A different credential, found by the boot or link push, is a new enrollment too.
+    enrollment = "key-2";
+    sync.push({ emails: ["ada@example.com"], revision: 3 });
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(3);
+  });
+
+  it("does not let a send from before a relink count for the new enrollment", async () => {
+    const cloud = fakeCloud();
+    let linkChanged = () => {};
+    const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "key-1",
+      getToken: () => "inst-token",
+      getOrigin: () => ORIGIN,
+      onLinkChanged: (listener) => {
+        linkChanged = listener;
+        return () => {};
+      },
+      fetchImpl: cloud.fetchImpl,
+    });
+
+    cloud.hold();
+    sync.push({ emails: ["ada@example.com"], revision: 4 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    linkChanged();
+    cloud.release();
+    await settle(sync);
+
+    expect(cloud.sent.map((s) => s.body.revision)).toEqual([4, 4]);
+
+    sync.push({ emails: ["ada@example.com"], revision: 4 });
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(2);
+  });
+
   it("sends only the newest list and never an older one after it", async () => {
     const cloud = fakeCloud();
     const sync = new VisitorAllowListSync({
