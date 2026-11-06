@@ -827,7 +827,8 @@ checks.push({
 // --- C25 No side channel tells Sessions where to record ------------------------
 // The session knows the row it records into because it made it. Nothing hands
 // it a conversation beside `open` or `create`, in memory or otherwise.
-const SIDE_CHANNEL = /\b(openNamed|namedConversation|conversationFor|recordsTo|recordConversation)\b/g;
+// `conversationFor` is left out: it is the SDK's direct-message lookup, not this.
+const SIDE_CHANNEL = /\b(openNamed|namedConversation|recordsTo|recordConversation)\b/g;
 const sideChannel = [...coreFiles, ...appFiles].flatMap((file) =>
   (code(file).match(SIDE_CHANNEL) ?? []).map((hit) => `${rel(file)}: ${hit}`),
 );
