@@ -11,6 +11,11 @@ ROME_BUNDLE_IDENTIFIER[config=Release] = cc.romeos.mobile
 ROME_DISPLAY_NAME = Rome Dev
 ROME_DISPLAY_NAME[config=Release] = Rome
 
+// Push Notifications: Debug devices get tokens for APNs sandbox, TestFlight
+// for production. The app reads the same value to tell Rome Cloud which one.
+ROME_APS_ENVIRONMENT = development
+ROME_APS_ENVIRONMENT[config=Release] = production
+
 // The version testers see. The build number is 1 for local builds; an
 // archive sets it to a UTC timestamp (see README.md, "Release to TestFlight").
 MARKETING_VERSION = 1.0.0

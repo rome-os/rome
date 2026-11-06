@@ -1,2 +1,4 @@
-// Copy to Local.xcconfig (gitignored) to sign device builds with your team.
-DEVELOPMENT_TEAM = XXXXXXXXXX
+// Copy to Local.xcconfig (gitignored) to sign device builds. Debug builds sign
+// with Rome's own team (Amantru, Inc), like Release, so both receive pushes
+// sent with that team's APNs key.
+DEVELOPMENT_TEAM = 4YWXB26F39
