@@ -511,7 +511,7 @@ export function startConciergeFollowing(
           line: item.line,
           at: item.createdAt.toISOString(),
         })),
-        now: new Date(now()).toLocaleString("en-GB", { timeZone: timezone, hour12: false }),
+        now: guardianNow(now(), timezone),
       };
       const result = await runTriage(deps.agentRunner, input, { record: deps.triageRecord });
       if (result.error)
