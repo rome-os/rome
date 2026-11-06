@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import type { UsageFunding } from "../usage/events.js";
@@ -119,7 +119,7 @@ describe("AgentSession turn usage", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionRepository: new SessionRepository(testDb.db, artifactIdentity),
+        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),

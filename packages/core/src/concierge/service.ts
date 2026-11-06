@@ -20,7 +20,7 @@ import {
 } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
-import type { SessionRepository } from "../sessions/session-repository.js";
+import type { SessionRepository } from "../agent/index.js";
 import {
   quotaSwitchTarget,
   sameProviderTarget,
