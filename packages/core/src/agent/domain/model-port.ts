@@ -128,10 +128,16 @@ export interface ModelProvider {
 
 /**
  * How a session gets its thread. `new` opens a thread the provider names;
- * `resume` continues one it named before. The branch of a thread at a
- * checkpoint joins here when `ModelSession.fork` goes.
+ * `resume` continues one it named before; `branch` starts from a position on
+ * one. An `ephemeral` branch is closed after one use, and the provider may run
+ * it inside the source thread and roll it back when the branch has the source's
+ * model, system prompt, working dir and tools. A `kept` branch gets a thread of
+ * its own that the session records.
  */
-export type ThreadStart = { kind: "new" } | { kind: "resume"; modelThreadId: ModelThreadId };
+export type ThreadStart =
+  | { kind: "new" }
+  | { kind: "resume"; modelThreadId: ModelThreadId }
+  | { kind: "branch"; at: ModelPosition; lifetime: "ephemeral" | "kept" };
 
 /**
  * Value object. The model session's configuration: what the run fixes when
@@ -165,9 +171,6 @@ export interface ModelSessionConfig {
 
 export interface ModelSessionParams {
   config: ModelSessionConfig;
-  agentName?: string;
-  /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
-  appStoreListingId?: string;
   /**
    * The tools Rome serves the model for this session. The provider mounts
    * each group and calls back with what the model sent; what a tool does and
@@ -176,8 +179,6 @@ export interface ModelSessionParams {
   tools: RomeTools;
   /** The thread the session runs on. The provider names the thread. */
   thread: ThreadStart;
-  /** Provider-owned fork source. Normal application code should not set this. */
-  fork?: ModelSessionForkSource;
 }
 
 export interface ModelUserInput {
@@ -191,43 +192,9 @@ export interface ModelUserInput {
   injectedToolResult?: { toolUseId: string; content: unknown };
 }
 
-export type ModelSessionForkMode = "ephemeral" | "thread";
-
-export interface ModelSessionForkParams {
-  /** Ephemeral forks are closed after one use; thread forks may be persisted. */
-  mode?: ModelSessionForkMode;
-  /**
-   * Whether the fork may change the source session's runtime configuration.
-   * Providers can use exact-mode knowledge to preserve provider-specific cache
-   * lineage when the model and prompt configuration are unchanged.
-   */
-  configurationMode?: "isolated" | "exact";
-  /** Provider-native checkpoint to include as the fork's final source turn. */
-  sourceCheckpoint?: ModelCheckpointId;
-}
-
-export interface ModelSessionForkSource {
-  sourceModelThreadId: ModelThreadId;
-  mode: ModelSessionForkMode;
-  sourceCheckpoint?: ModelCheckpointId;
-}
-
-export type ModelSessionForkOpenParams = Omit<ModelSessionParams, "thread" | "fork">;
-
-export interface ModelSessionFork {
-  readonly providerId: ProviderId;
-  readonly sourceModelThreadId: ModelThreadId;
-  readonly mode: ModelSessionForkMode;
-  readonly modelThreadId?: ModelThreadId;
-
-  open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
-}
-
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
-  /** A disposed provider execution must be reopened before another turn. */
-  readonly isClosed?: boolean;
   /** Single, lifetime stream of events produced by the provider. */
   readonly events: AsyncIterable<ModelSessionEvent>;
 
@@ -243,10 +210,7 @@ export interface ModelSession {
   /** Append without interrupting. Only `deferred` is safe to submit again. */
   steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
 
-  /** Create an isolated provider-owned branch from this live session. */
-  fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
-
-  /** Stop the in-flight turn. The provider may dispose of its execution. */
+  /** Stop the in-flight turn. The session takes the next input as usual. */
   interrupt(reason?: string): Promise<void>;
 
   /**

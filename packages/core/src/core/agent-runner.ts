@@ -5,7 +5,6 @@ import type {
   ActionMcpDefinition,
   ModelReasoningEffort,
   ModelSession,
-  ModelSessionFork,
   ModelSessionParams,
   ModelToolCallContext,
   RomeToolDefinition,
@@ -50,11 +49,6 @@ export type {
   ModelProvider,
   ModelSessionParams,
   ModelUserInput,
-  ModelSessionForkMode,
-  ModelSessionForkParams,
-  ModelSessionForkSource,
-  ModelSessionForkOpenParams,
-  ModelSessionFork,
   ModelSession,
   ThreadStart,
 } from "../agent/index.js";
@@ -91,6 +85,9 @@ export function createSessionFromRun(
   run: (params: ModelRunParams) => AsyncIterable<AgentEvent | ModelSessionEvent>,
   params: ModelSessionParams,
 ): ModelSession {
+  if (params.thread.kind === "branch") {
+    throw new Error("Branching a thread is not supported by this provider");
+  }
   // Standard async-queue: emit() either hands the value to a waiting
   // consumer (resolvers FIFO) or buffers it for the next next() call. Don't
   // share a single `pending` slot — back-to-back emits would clobber each
@@ -155,9 +152,6 @@ export function createSessionFromRun(
         );
       }
     },
-    async fork(): Promise<ModelSessionFork> {
-      throw new Error("ModelSession fork is not supported by this provider");
-    },
     async interrupt(): Promise<void> {},
     async close(): Promise<void> {
       if (closed) return;
@@ -219,9 +213,6 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     async sendUserInput(): Promise<void> {
       emit({ type: "text", content: FALLBACK });
       emit({ type: "error", error: "No handler took this turn" });
-    },
-    async fork(): Promise<ModelSessionFork> {
-      throw new Error("a code-backed agent session cannot fork");
     },
     async interrupt(): Promise<void> {},
     async close(): Promise<void> {

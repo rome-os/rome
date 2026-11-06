@@ -24,6 +24,12 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 
+const SOURCE_CHECKPOINT = {
+  providerId: "openai",
+  providerThreadId: "source-thread",
+  checkpointId: "source-turn",
+} as const;
+
 const recordMetrics = rs.hoisted(() => rs.fn());
 rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
@@ -44,7 +50,6 @@ describe("AgentSession turn usage", () => {
   // Each run decides whether it reaches the provider. One that does mints a
   // provider turn id, like Codex does on turn/start.
   let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
-  let forkable: boolean;
   let funding: UsageFunding;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
   // Whether the model resolver sees Rome credits paying.
@@ -72,7 +77,6 @@ describe("AgentSession turn usage", () => {
     testDb = createTestDb();
     recorded = [];
     recordMetrics.mockClear();
-    forkable = false;
     funding = "byok";
     beforeModelDispatch = undefined;
     resolverUsesRomeCredits = false;
@@ -82,6 +86,12 @@ describe("AgentSession turn usage", () => {
       displayName: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
+        if (params.thread.kind === "branch") {
+          return createSessionFromRun("openai", () => nextRun(), {
+            ...params,
+            thread: { kind: "new" },
+          });
+        }
         const session = createSessionFromRun(
           "openai",
           () => {
@@ -91,15 +101,6 @@ describe("AgentSession turn usage", () => {
           params,
         );
         Object.defineProperty(session, "funding", { get: () => funding });
-        if (forkable) {
-          session.fork = async (fork) => ({
-            providerId: "openai",
-            sourceModelThreadId: "source-thread",
-            mode: fork.mode ?? "ephemeral",
-            modelThreadId: "fork-thread",
-            open: async () => createSessionFromRun("openai", () => nextRun(), params),
-          });
-        }
         return session;
       },
     };
@@ -303,7 +304,6 @@ describe("AgentSession turn usage", () => {
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
-    forkable = true;
     nextRun = async function* () {
       yield { type: "model_turn_started", modelTurnId: "fork-provider-turn" };
       yield {
@@ -317,7 +317,10 @@ describe("AgentSession turn usage", () => {
       };
     };
     const session = await manager.acquire(key);
-    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+    for await (const event of session.runForkedTurn!({
+      prompt: "side question",
+      sourceCheckpoint: SOURCE_CHECKPOINT,
+    })) {
       if (event.type === "result") break;
     }
 
@@ -341,7 +344,10 @@ describe("AgentSession turn usage", () => {
       yield { type: "result", content: "done" };
     };
     const session = await manager.acquire(key);
-    const events = session.runForkedTurn!({ prompt: "side question" });
+    const events = session.runForkedTurn!({
+      prompt: "side question",
+      sourceCheckpoint: SOURCE_CHECKPOINT,
+    });
     let forkSessionId: string | undefined;
     for await (const event of events) {
       if (event.type === "turn_start") forkSessionId = event.sessionId;
@@ -351,8 +357,7 @@ describe("AgentSession turn usage", () => {
     expect(recorded[0]).toMatchObject({
       romeSessionId: forkSessionId,
       romeSessionType: "fork",
-      // The fixture provider cannot fork, so the forked turn fails.
-      status: "error",
+      status: "completed",
       funding: "byok",
     });
   });

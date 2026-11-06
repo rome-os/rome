@@ -23,9 +23,6 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
       yield { type: "result" as const, content, structuredOutput, reasoningEffort: "low" };
     })(),
     sendUserInput: rs.fn(async () => undefined),
-    fork: rs.fn(async () => {
-      throw new Error("not supported");
-    }),
     interrupt: rs.fn(async () => undefined),
     close: rs.fn(async () => undefined),
   };
@@ -75,7 +72,6 @@ describe("conversation title generation", () => {
         reasoningEffort: "low",
         outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
       },
-      agentName: "conversation-title",
       thread: { kind: "new" },
     });
     // The title session serves the model no actions, skills or subagents.

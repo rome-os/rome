@@ -15,10 +15,8 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentContextUsage, AgentEvent, AgentPlan } from "../../../../types.js";
 import type {
-  ModelSessionFork,
   ModelProvider,
   ModelSession,
-  ModelSessionForkParams,
   ModelSessionParams,
   ModelUserInput,
   ModelReasoningEffort,
@@ -29,6 +27,7 @@ import type {
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
+import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
 import { createLogger } from "../../../../logger.js";
 import type { SettingsRepository } from "../../../../db/repositories/settings.js";
 import { parseTimeZone } from "../../../../lib/timezone.js";
@@ -508,6 +507,16 @@ export class AnthropicProvider implements ModelProvider {
   // its CLI subprocess down cleanly.
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
+    const open = (openParams: ModelSessionParams) => this.openQuerySession(openParams);
+    return createReopeningSession({
+      params,
+      first: await open(params),
+      open,
+      reasoningEffort: toAnthropicEffort(params.config.reasoningEffort),
+    });
+  }
+
+  private async openQuerySession(params: ModelSessionParams): Promise<ClaudeQuerySession> {
     const { model, systemPrompt, maxTurns = 1000 } = params.config;
     const outputValidator = params.config.outputSchema
       ? compileOutputSchema(params.config.outputSchema)
@@ -541,7 +550,6 @@ export class AnthropicProvider implements ModelProvider {
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
     const providerId = this.id;
-    const openProviderSession = this.openSession.bind(this);
     // Captured for the events generator below (a plain `async function*` with no
     // `this`): update runtime state before classified terminals become observable.
     const onAuthRevoked = this.options.onAuthRevoked;
@@ -610,14 +618,12 @@ export class AnthropicProvider implements ModelProvider {
         settingSources: ["project"],
         settings: CLAUDE_AGENT_SDK_SETTINGS,
         ...(params.config.workingDir ? { cwd: params.config.workingDir } : {}),
-        ...(params.fork
+        ...(params.thread.kind === "branch"
           ? {
-              resume: params.fork.sourceModelThreadId,
+              resume: params.thread.at.modelThreadId,
               forkSession: true,
               sessionId: sdkSessionId,
-              ...(params.fork.sourceCheckpoint
-                ? { resumeSessionAt: params.fork.sourceCheckpoint }
-                : {}),
+              resumeSessionAt: params.thread.at.checkpointId,
             }
           : // `{ resume }` fails with "No conversation found with session ID"
             // for a thread that never wrote a transcript, so the run asks to
@@ -644,7 +650,7 @@ export class AnthropicProvider implements ModelProvider {
     // transcript with real content exists. Exposed via `session.modelThreadId`
     // so the host persists it and gates `{ resume }` on it (see options above).
     let establishedThreadId: string | undefined =
-      params.thread.kind === "resume" ? params.thread.modelThreadId : undefined;
+      params.thread.kind === "new" ? undefined : sdkSessionId;
     let activeTurnLastAssistantMessageId: string | undefined;
 
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
@@ -1093,11 +1099,11 @@ export class AnthropicProvider implements ModelProvider {
       }
     })();
 
-    const session: ModelSession = {
+    const session: ClaudeQuerySession = {
       providerId,
       model: effectiveModel,
       funding: queryContext.funding,
-      get isClosed(): boolean {
+      get ended(): boolean {
         return closed || abortController.signal.aborted;
       },
       get modelThreadId(): string | undefined {
@@ -1172,42 +1178,6 @@ export class AnthropicProvider implements ModelProvider {
           message: { role: "user", content: [{ type: "text", text: input.text }] },
         });
         return "accepted";
-      },
-      async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
-        if (closed || abortController.signal.aborted) {
-          throw new Error("Cannot fork a closed ModelSession");
-        }
-        if (running) throw new Error("Cannot fork while source session is running");
-        const mode = forkParams.mode ?? "ephemeral";
-        // Before a turn with content reports the SDK's own id, the id this
-        // session was opened under names its transcript.
-        const sourceModelThreadId = establishedThreadId ?? sdkSessionId;
-        // The CLI id of the forked session, so the handle names its thread
-        // before it opens.
-        const forkSessionId = randomUUID();
-        let opened = false;
-
-        return {
-          providerId,
-          sourceModelThreadId,
-          mode,
-          modelThreadId: forkSessionId,
-          open: async (openParams) => {
-            if (opened) {
-              throw new Error("ModelSession fork already opened");
-            }
-            opened = true;
-            return await openProviderSession({
-              ...openParams,
-              thread: { kind: "resume", modelThreadId: forkSessionId },
-              fork: {
-                sourceModelThreadId,
-                mode,
-                sourceCheckpoint: forkParams.sourceCheckpoint,
-              },
-            });
-          },
-        };
       },
       async interrupt(reason?: string): Promise<void> {
         log.info("ModelSession interrupt requested", { reason });

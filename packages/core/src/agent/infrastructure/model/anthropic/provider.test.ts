@@ -13,7 +13,6 @@ import type { RomeTools } from "../../../domain/rome-tools.js";
 import type { AgentEvent } from "../../../../types.js";
 import type {
   ModelSession,
-  ModelSessionForkOpenParams,
   ModelSessionConfig,
   ModelSessionParams,
 } from "../../../domain/model-port.js";
@@ -96,6 +95,7 @@ function mockThrowingQuery(error: unknown) {
   return iter;
 }
 
+/** The events of one turn; the session stream itself runs until `close()`. */
 async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
   const messages: AgentEvent[] = [];
   for await (const msg of session.events) {
@@ -106,6 +106,7 @@ async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
     delete stripped.endedAt;
     delete stripped.reasoningEffort;
     messages.push(stripped as unknown as AgentEvent);
+    if (msg.type === "result" || msg.type === "error") break;
   }
   return messages;
 }
@@ -139,11 +140,22 @@ function buildParams(overrides: ParamOverrides = {}): ModelSessionParams {
   };
 }
 
-function buildForkOpenParams(overrides: ParamOverrides = {}): ModelSessionForkOpenParams {
-  const params = buildParams(overrides) as Partial<ModelSessionParams>;
-  delete params.thread;
-  delete params.fork;
-  return params as ModelSessionForkOpenParams;
+function buildBranchParams(
+  branch: { lifetime?: "ephemeral" | "kept"; checkpointId?: string } = {},
+  overrides: ParamOverrides = {},
+): ModelSessionParams {
+  return buildParams({
+    ...overrides,
+    thread: {
+      kind: "branch",
+      at: {
+        provider: "anthropic",
+        modelThreadId: "source-thread",
+        checkpointId: branch.checkpointId ?? "assistant-source",
+      },
+      lifetime: branch.lifetime ?? "ephemeral",
+    },
+  });
 }
 
 describe("AnthropicProvider", () => {
@@ -469,11 +481,15 @@ describe("AnthropicProvider", () => {
           quotaMarked = true;
         },
       }).openSession(buildParams());
+      const events: ModelSessionEvent[] = [];
+      const collected = (async () => {
+        for await (const event of session.events) events.push(event);
+      })();
       await session.sendUserInput({ text: "start it", inputId: a });
-      const events = await collectEvents(session);
+      await rs.waitFor(() => expect(quotaMarked).toBe(true));
       await session.close();
+      await collected;
 
-      expect(quotaMarked).toBe(true);
       expect(events.filter((m) => m.type === "result" || m.type === "error")).toEqual([
         expect.objectContaining({ type: "result", content: "DONE" }),
       ]);
@@ -889,7 +905,6 @@ describe("AnthropicProvider", () => {
     expect(q.interrupt).not.toHaveBeenCalled();
     expect(q.close).not.toHaveBeenCalled();
     expect(controller.signal.aborted).toBe(true);
-    expect(session.isClosed).toBe(true);
     expect(messages.filter((message) => message.type === "result")).toEqual([
       { type: "result", content: phase === "startup" ? "" : "Saved work" },
     ]);
@@ -979,6 +994,7 @@ describe("AnthropicProvider", () => {
         const next = await events.next();
         if (next.done) return messages;
         messages.push(next.value);
+        if (next.value.type === "result") return messages;
       }
     })();
     await interruptibleTurnBegun;
@@ -989,6 +1005,80 @@ describe("AnthropicProvider", () => {
       content: interruptedCheckpoint ? "Current turn" : "",
       reasoningEffort: "high",
     });
+    await session.close();
+  });
+
+  it("opens a new query on the same thread for the input after an interrupt", async () => {
+    let controller!: AbortController;
+    let beginSecondTurn!: () => void;
+    const secondTurnBegun = new Promise<void>((resolve) => {
+      beginSecondTurn = resolve;
+    });
+    queryMock.mockImplementation(({ prompt, options }) => {
+      const reopened = options.resume !== undefined;
+      if (!reopened) controller = options.abortController;
+      return {
+        async *[Symbol.asyncIterator]() {
+          const inputs = prompt[Symbol.asyncIterator]();
+          const sent = (await inputs.next()).value;
+          yield {
+            type: "assistant",
+            uuid: reopened ? "assistant-after" : "assistant-before",
+            session_id: "persisted-thread",
+            parent_tool_use_id: null,
+            user_message_uuid: sent.uuid,
+            message: { content: [{ type: "text", text: "Hello" }] },
+          };
+          if (reopened) {
+            yield {
+              type: "result",
+              subtype: "success",
+              result: "Hello",
+              num_turns: 1,
+              stop_reason: "end_turn",
+              total_cost_usd: 0,
+              duration_ms: 1,
+            };
+            return;
+          }
+          beginSecondTurn();
+          if (!controller.signal.aborted) {
+            await new Promise<void>((resolve) =>
+              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+            );
+          }
+          throw new AbortError("Cancelled");
+        },
+        close: rs.fn(),
+      };
+    });
+
+    const session = await new AnthropicProvider().openSession(buildParams());
+    const events = session.events[Symbol.asyncIterator]();
+    const nextResult = async () => {
+      for (;;) {
+        const next = await events.next();
+        if (next.done || next.value.type === "result") return next.value;
+      }
+    };
+    await session.sendUserInput({ text: "first" });
+    const interrupted = nextResult();
+    await secondTurnBegun;
+    const threadId = session.modelThreadId;
+    await session.interrupt("user-stop");
+    expect(await interrupted).toMatchObject({ type: "result", content: "Hello" });
+
+    const reopened = nextResult();
+    await session.sendUserInput({ text: "second" });
+    expect(await reopened).toMatchObject({
+      type: "result",
+      position: { checkpointId: "assistant-after" },
+    });
+
+    expect(threadId).toBeDefined();
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock.mock.calls[1]?.[0].options.resume).toBe(threadId);
+    expect(session.modelThreadId).toBe(threadId);
     await session.close();
   });
 
@@ -1119,33 +1209,25 @@ describe("AnthropicProvider", () => {
     const provider = new AnthropicProvider();
 
     const source = await provider.openSession(buildParams());
-    const fork = await source.fork({
-      mode: "thread",
-      sourceCheckpoint: "assistant-message-at-t2",
-    });
-    const forkSession = await fork.open(
-      buildForkOpenParams({ config: { model: "claude-fork", systemPrompt: "fork system" } }),
+    const forkSession = await provider.openSession(
+      buildBranchParams(
+        { lifetime: "kept", checkpointId: "assistant-message-at-t2" },
+        { config: { model: "claude-fork", systemPrompt: "fork system" } },
+      ),
     );
 
-    // Before a turn reports the SDK's own id, the source's thread is the id it
-    // opened under; the fork names its own thread before it opens.
-    const sourceSdkSessionId = queryMock.mock.calls[0]![0].options.sessionId;
-    expect(fork).toMatchObject({
-      providerId: "anthropic",
-      sourceModelThreadId: sourceSdkSessionId,
-      mode: "thread",
-    });
-    expect(fork.modelThreadId).toMatch(UUID_PATTERN);
-    expect(fork.modelThreadId).not.toBe(sourceSdkSessionId);
+    // The branch names its own thread before it opens.
+    expect(forkSession.modelThreadId).toMatch(UUID_PATTERN);
+    expect(forkSession.modelThreadId).not.toBe("source-thread");
     expect(queryMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         options: expect.objectContaining({
           model: "claude-fork",
           systemPrompt: "fork system",
-          resume: sourceSdkSessionId,
+          resume: "source-thread",
           forkSession: true,
-          sessionId: fork.modelThreadId,
+          sessionId: forkSession.modelThreadId,
           resumeSessionAt: "assistant-message-at-t2",
         }),
       }),
@@ -1153,20 +1235,6 @@ describe("AnthropicProvider", () => {
     expect(queryMock.mock.calls[0]![0].prompt).not.toBe(queryMock.mock.calls[1]![0].prompt);
 
     await forkSession.close();
-    await source.close();
-  });
-
-  it("rejects a second open of the same Claude fork descriptor", async () => {
-    const provider = new AnthropicProvider();
-    const source = await provider.openSession(buildParams());
-    const fork = await source.fork({});
-    const opened = await fork.open(buildForkOpenParams());
-
-    await expect(fork.open(buildForkOpenParams())).rejects.toThrow(
-      "ModelSession fork already opened",
-    );
-
-    await opened.close();
     await source.close();
   });
 
@@ -1654,7 +1722,10 @@ describe("AnthropicProvider", () => {
         buildParams({ config: { reasoningEffort: configured } }),
       );
       const events: ModelSessionEvent[] = [];
-      for await (const event of session.events) events.push(event);
+      for await (const event of session.events) {
+        events.push(event);
+        if (event.type === "result") break;
+      }
       await session.close();
 
       // Claude fixes effort at open, so that is the effort a turn runs at.
