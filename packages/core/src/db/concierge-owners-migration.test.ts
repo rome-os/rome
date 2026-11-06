@@ -37,6 +37,7 @@ function insertChat(
     ownerKey?: string | null;
     triggerKind?: string | null;
     parent?: string | null;
+    type?: string;
   },
 ): void {
   sqlite
@@ -48,7 +49,7 @@ function insertChat(
     .run(
       row.id,
       row.id,
-      row.parent ? "fork" : "channel",
+      row.type ?? (row.parent ? "fork" : "channel"),
       row.agentName ?? null,
       row.ownerKey ?? null,
       row.triggerKind ?? null,
@@ -82,10 +83,11 @@ describe("the Concierge owners migration", () => {
     expect(owner("t-guardian-chat")).toBe("guardian");
   });
 
-  it("marks each fork of a Concierge or task chat private to that chat's owner, and no other", () => {
+  it("marks each fork and subagent of a Concierge or task chat private to that chat's owner, and no other", () => {
     const sqlite = databaseBeforeMigration();
     insertChat(sqlite, { id: "task", triggerKind: "concierge", ownerKey: "visitor:a" });
     insertChat(sqlite, { id: "branch", triggerKind: "fork", ownerKey: "guardian", parent: "task" });
+    insertChat(sqlite, { id: "helper", ownerKey: "visitor:a", parent: "task", type: "subagent" });
     insertChat(sqlite, { id: "topic", agentName: "core:concierge", ownerKey: "visitor:b" });
     insertChat(sqlite, { id: "topic-fork", triggerKind: "fork", parent: "topic" });
     insertChat(sqlite, { id: "plain", ownerKey: "guardian" });
@@ -103,6 +105,7 @@ describe("the Concierge owners migration", () => {
         .prepare("SELECT trigger_kind AS kind, owner_key AS owner FROM rome_sessions WHERE id = ?")
         .get(id);
     expect(row("branch")).toEqual({ kind: "concierge_fork", owner: "visitor:a" });
+    expect(row("helper")).toEqual({ kind: "concierge_fork", owner: "visitor:a" });
     expect(row("topic-fork")).toEqual({ kind: "concierge_fork", owner: "visitor:b" });
     // The private chats themselves and every ordinary line are untouched.
     expect(row("task")).toEqual({ kind: "concierge", owner: "visitor:a" });

@@ -20,20 +20,21 @@ export const WEBCHAT_CHANNEL = "webchat";
  *  own reply, so prompts carry no unseen messages. */
 export const WEBCHAT_SURFACE: ChannelSurface = { interactiveCards: true, promptContext: false };
 
-/** Who reads dashboard history: the person accountable for the turn, and the chat it runs in. */
-interface HistoryReader {
+/** Who reads or writes dashboard chats from an action: the person accountable for the turn, and the chat it runs in. */
+interface DashboardCaller {
   actor?: SessionActor;
   chatId: string | null;
 }
 
 /**
- * The reader of a history read made through the worker boundary by an app's
- * action. An action run in this process carries it in its own context instead.
+ * The caller of a read or a send made through the worker boundary by an
+ * app's action. An action run in this process carries it in its own context
+ * instead.
  */
-export const webchatHistoryReader = new AsyncLocalStorage<HistoryReader>();
+export const webchatCaller = new AsyncLocalStorage<DashboardCaller>();
 
-function historyReader(): HistoryReader {
-  const given = webchatHistoryReader.getStore();
+function dashboardCaller(): DashboardCaller {
+  const given = webchatCaller.getStore();
   if (given) return given;
   const store = actionExecutionContext.getStore();
   const context = store?.channelContext;
@@ -52,12 +53,27 @@ function historyReader(): HistoryReader {
  */
 async function readerOwner(
   webchatRepo: WebChatRepository,
-  reader: HistoryReader,
+  reader: DashboardCaller,
 ): Promise<string | null> {
   const person = reader.actor && reader.actor.kind !== "anonymous" ? reader.actor : undefined;
   if (person) return sessionOwnerKey(person);
   if (!reader.chatId) return null;
   return privateOwnerOf(await webchatRepo.getSession(reader.chatId));
+}
+
+/**
+ * An action may write only into a chat its caller may open, as the dashboard's
+ * own routes allow: another person's Concierge or task chat is not found. A
+ * send no person's or chat's turn made is Rome's own work, and goes through.
+ */
+async function refuseAnotherOwnersChat(webchatRepo: WebChatRepository, chatId: string) {
+  const caller = dashboardCaller();
+  const person = caller.actor && caller.actor.kind !== "anonymous";
+  if (!person && !caller.chatId) return;
+  const owner = await readerOwner(webchatRepo, caller);
+  if (!(await canOpenChat((id) => webchatRepo.getSession(id), chatId, owner))) {
+    throw new Error(`No dashboard chat ${chatId}`);
+  }
 }
 
 /** A query naming no `since` reads the last day, as a live read does. */
@@ -74,7 +90,10 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
   return {
     name: WEBCHAT_CHANNEL,
     send: {
-      send: (chatId, message) => adapter.send(chatId, message),
+      send: async (chatId, message) => {
+        await refuseAnotherOwnersChat(webchatRepo, chatId);
+        return adapter.send(chatId, message);
+      },
       direct: null,
       activity: null,
     },
@@ -89,7 +108,7 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
         // first too.
         // A Concierge chat and its task chats are their owner's alone, by the
         // same policy the chat routes use.
-        const owner = await readerOwner(webchatRepo, historyReader());
+        const owner = await readerOwner(webchatRepo, dashboardCaller());
         const allowed = new Map<string, boolean>();
         for (const id of new Set(lines.map((message) => message.chatId))) {
           allowed.set(id, await canOpenChat((chatId) => webchatRepo.getSession(chatId), id, owner));

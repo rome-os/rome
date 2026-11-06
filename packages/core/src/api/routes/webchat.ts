@@ -2088,25 +2088,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
     app.use(path, privateChatGate);
   }
-  // A turn or a message reached by its own id is its chat's, and kept the same way.
+  // A turn or a message reached by its own id is its chat's, and kept the same
+  // way: refused when any chat it may belong to is one the caller may not open.
   const privateByIdGate =
-    (chatOf: (id: string) => Promise<string | null>): MiddlewareHandler =>
+    (chatsOf: (id: string) => Promise<(string | null | undefined)[]>): MiddlewareHandler =>
     async (c, next) => {
-      const chatId = await chatOf(c.req.param("id") ?? c.req.param("turnId") ?? "");
-      if (
-        chatId &&
-        !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, await callerOwner()))
-      ) {
-        return c.json({ error: "Not found" }, 404);
+      const owner = await callerOwner();
+      for (const chatId of await chatsOf(c.req.param("id") ?? c.req.param("turnId") ?? "")) {
+        if (
+          chatId &&
+          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))
+        ) {
+          return c.json({ error: "Not found" }, 404);
+        }
       }
       await next();
     };
-  const chatOfTurn = async (turnId: string) =>
-    streamsByTurnId.get(turnId)?.sessionId ?? (await deps.webchatRepo.sessionIdOfTurn(turnId));
-  const chatOfMessage = (messageId: string) => deps.webchatRepo.sessionIdOfMessage(messageId);
-  app.use("/chat/turns/:turnId/*", privateByIdGate(chatOfTurn));
-  app.use("/chat/messages/:id/*", privateByIdGate(chatOfMessage));
-  app.use("/sessions/messages/:id/*", privateByIdGate(chatOfMessage));
+  // A fork's, subagent's or backend turn is in the stream registry from its
+  // start, before any of its messages is stored.
+  const chatsOfTurn = async (turnId: string) => [
+    streamsByTurnId.get(turnId)?.sessionId,
+    deps.agentTurnStreamRegistry.get(turnId)?.sessionId,
+    await deps.webchatRepo.sessionIdOfTurn(turnId),
+  ];
+  const chatsOfMessage = async (messageId: string) => [
+    await deps.webchatRepo.sessionIdOfMessage(messageId),
+  ];
+  app.use("/chat/turns/:turnId/*", privateByIdGate(chatsOfTurn));
+  app.use("/chat/messages/:id/*", privateByIdGate(chatsOfMessage));
+  app.use("/sessions/messages/:id/*", privateByIdGate(chatsOfMessage));
 
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");

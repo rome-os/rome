@@ -1,6 +1,6 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { canOpenSql } from "../../concierge/privacy.js";
+import { canOpenSql, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "../../concierge/privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -1000,6 +1000,11 @@ export class WebChatRepository {
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
+    // A child session (a fork, a subagent) takes its parent's owner. A child of
+    // a private chat is private to that owner from the start, whatever it is,
+    // and stays so after its parent is gone.
+    const parent = input.parentSessionId ? await this.getSession(input.parentSessionId) : null;
+    const privateChild = privateOwnerOf(parent) !== null;
     // A chat is a channel row on the webchat channel, at its own address,
     // whichever of the two types the caller names it by.
     const chat =
@@ -1008,7 +1013,7 @@ export class WebChatRepository {
       .insert(romeSessions)
       .values({
         id: input.id,
-        ownerKey: await this.getSessionOwnerKey(input.parentSessionId),
+        ownerKey: parent?.ownerKey ?? null,
         name: input.name,
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
@@ -1021,7 +1026,9 @@ export class WebChatRepository {
         sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
         sourceThreadName: input.sourceThreadName ?? null,
         sourceThreadType: input.sourceThreadType ?? null,
-        triggerKind: input.trigger?.triggerKind ?? null,
+        triggerKind: privateChild
+          ? PRIVATE_CHILD_TRIGGER_KIND
+          : (input.trigger?.triggerKind ?? null),
         triggerName: input.trigger?.triggerName ?? null,
         triggerActionName: input.trigger?.triggerActionName ?? null,
         triggerExecutionId: input.trigger?.triggerExecutionId ?? null,

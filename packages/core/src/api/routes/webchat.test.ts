@@ -19,7 +19,7 @@ import {
   type SubmitInputOptions,
 } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
-import { webchatChannel, webchatHistoryReader } from "../../chats/dashboard/dashboard-account.js";
+import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import type {
@@ -251,6 +251,52 @@ describe("Webchat API", () => {
     expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
   });
 
+  it("refuses another person's live private turn before any of its messages is stored", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    await deps.webchatRepo.createSession(
+      "guardian-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("guardian-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    // A subagent of the guardian's task chat, running, with nothing stored yet.
+    await deps.webchatRepo.ensureRomeSession({
+      id: "helper",
+      type: "subagent",
+      name: "helper",
+      agentName: "researcher",
+      parentSessionId: "guardian-task",
+    });
+    const turn = deps.agentTurnStreamRegistry.register({
+      sessionId: "helper",
+      turnId: "helper-turn",
+      agentName: "researcher",
+    });
+    try {
+      for (const [path, method] of [
+        ["/chat/turns/helper-turn/stream", "GET"],
+        ["/chat/turns/helper-turn/interrupt", "POST"],
+      ] as const) {
+        const res = await runWithSessionActor(visitor, () => app.request(path, { method }));
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "Not found" });
+      }
+    } finally {
+      turn.finish?.();
+    }
+  });
+
   it("searches only chats the caller may open, before taking the 20 best", async () => {
     const app = createWebchatRuntime(deps).routes;
     const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
@@ -344,9 +390,7 @@ describe("Webchat API", () => {
     // A history read made from the visitor's chat leaves the guardian's out.
     const channel = webchatChannel(deps.webchatRepo);
     const read = (from: string) =>
-      webchatHistoryReader.run({ chatId: from }, () =>
-        channel.messages!.query({ since: new Date(0) }),
-      );
+      webchatCaller.run({ chatId: from }, () => channel.messages!.query({ since: new Date(0) }));
     const chatsOf = async (from: string) =>
       [...new Set((await read(from)).map((m) => m.chatId))].sort();
     expect(await chatsOf("visitor-main")).toEqual(["visitor-main"]);
@@ -378,7 +422,7 @@ describe("Webchat API", () => {
       [
         ...new Set(
           (
-            await webchatHistoryReader.run({ actor, chatId: from }, () =>
+            await webchatCaller.run({ actor, chatId: from }, () =>
               channel.messages!.query({ since: new Date(0) }),
             )
           ).map((m) => m.chatId),
@@ -388,6 +432,19 @@ describe("Webchat API", () => {
     expect(await readAs(visitor, "guardian-plain")).toEqual([...plain, "visitor-main"].sort());
     expect(await readAs(guardian, "visitor-plain")).toEqual(["concierge", ...plain].sort());
     expect(await readAs(undefined, "guardian-plain")).toEqual(plain);
+    // A send goes only where its caller may write: a visitor's action cannot
+    // put a line into the guardian's Concierge chat, nor the guardian's into
+    // the visitor's, and Rome's own sends go through.
+    const send = (actor: typeof guardian | typeof visitor | undefined, from: string, to: string) =>
+      webchatCaller.run({ actor, chatId: from }, () =>
+        channel.send!.send(to as never, { text: "hi" }),
+      );
+    await expect(send(visitor, "guardian-plain", "concierge")).rejects.toThrow("No dashboard chat");
+    await expect(send(guardian, "visitor-plain", "visitor-main")).rejects.toThrow(
+      "No dashboard chat",
+    );
+    await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
+    await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {

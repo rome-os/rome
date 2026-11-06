@@ -1,4 +1,4 @@
-import { WEBCHAT_CHANNEL, webchatHistoryReader } from "../chats/dashboard/dashboard-account.js";
+import { WEBCHAT_CHANNEL, webchatCaller } from "../chats/dashboard/dashboard-account.js";
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
@@ -309,6 +309,16 @@ export interface WorkerRpcServices {
   sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
 }
 
+/** The person and the dashboard chat behind an action's call across the worker boundary. */
+function callerOf(context: IpcCallContext | undefined) {
+  const caller = context?.callerActionContext;
+  const thread = caller?.channelContext;
+  return {
+    actor: caller?.actor,
+    chatId: thread?.channel === WEBCHAT_CHANNEL && thread.threadId ? thread.threadId : null,
+  };
+}
+
 export class WorkerRpcServer {
   private readonly handlers: ReadonlyMap<
     string,
@@ -319,7 +329,7 @@ export class WorkerRpcServer {
     this.handlers = new Map<string, (params: unknown, context?: IpcCallContext) => unknown>(
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
-        "channels.send": (params) => this.handleChannelsSend(params),
+        "channels.send": (params, context) => this.handleChannelsSend(params, context),
         "approvals.sendCard": (params) =>
           this.services.sendApprovalCard(
             parseParams("approvals.sendCard", ApprovalCardParams, params),
@@ -533,9 +543,15 @@ export class WorkerRpcServer {
     return { ok: true };
   }
 
-  private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
+  private async handleChannelsSend(
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<MessageReceipt> {
     const { channel, chatId, message } = parseParams("channels.send", ChannelsSendParams, params);
-    return await this.services.channelsService.send(channel, chatId as ChatId, message);
+    // The dashboard chat writes only where the calling action's person may.
+    return await webchatCaller.run(callerOf(context), () =>
+      this.services.channelsService.send(channel, chatId as ChatId, message),
+    );
   }
 
   private async handleChannelsQuery(
@@ -549,11 +565,7 @@ export class WorkerRpcServer {
     );
     // The dashboard chat reads as the person accountable for the calling
     // action's turn, in the chat it runs in.
-    const caller = context?.callerActionContext;
-    const thread = caller?.channelContext;
-    const readingChat =
-      thread?.channel === WEBCHAT_CHANNEL && thread.threadId ? thread.threadId : null;
-    return await webchatHistoryReader.run({ actor: caller?.actor, chatId: readingChat }, () =>
+    return await webchatCaller.run(callerOf(context), () =>
       this.services.channelsService.query(channel, {
         ...(chatId ? { chatId: chatId as ChatId } : {}),
         ...(since ? { since: new Date(since) } : {}),

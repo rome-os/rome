@@ -12,7 +12,6 @@ import type {
   ProviderId,
   SkillMcpDefinition,
 } from "../agent/index.js";
-import { forkTriggerKind } from "../concierge/privacy.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
@@ -536,13 +535,7 @@ export class AgentRunner {
         recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
       const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
       const label = params.label ?? "fork";
-      // A fork of a private chat (a Concierge chat, a task chat, or a fork of
-      // either) is private to that chat's owner from the start, whether or not
-      // it is ever promoted, and after the chat it came from is gone. Its owner
-      // is its parent's, as every fork's is.
-      const parentRow =
-        parent && parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null;
-      const trigger = { triggerKind: forkTriggerKind(parentRow), triggerName: label };
+      const trigger = { triggerKind: "fork", triggerName: label };
       await this.webchatRepo.ensureRomeSession({
         id: turnStart.sessionId,
         type: "fork",

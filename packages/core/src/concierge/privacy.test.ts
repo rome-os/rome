@@ -1,10 +1,7 @@
-import { describe, expect, it } from "@rstest/core";
-import {
-  type ChatPrivacyRow,
-  canOpen,
-  forkTriggerKind,
-  PRIVATE_FORK_TRIGGER_KIND,
-} from "./privacy.js";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { type ChatPrivacyRow, canOpen, PRIVATE_CHILD_TRIGGER_KIND } from "./privacy.js";
 
 const VISITOR = "visitor:a";
 
@@ -13,7 +10,7 @@ describe("chat privacy, read off the chat's own row", () => {
     const rows: ChatPrivacyRow[] = [
       { id: "topic", agentName: "core:concierge", ownerKey: VISITOR },
       { id: "task", triggerKind: "concierge", ownerKey: VISITOR },
-      { id: "branch", triggerKind: PRIVATE_FORK_TRIGGER_KIND, ownerKey: VISITOR },
+      { id: "branch", triggerKind: PRIVATE_CHILD_TRIGGER_KIND, ownerKey: VISITOR },
     ];
     for (const row of rows) {
       expect(canOpen(row, VISITOR)).toBe(true);
@@ -30,14 +27,68 @@ describe("chat privacy, read off the chat's own row", () => {
     expect(canOpen({ id: "branch", triggerKind: "fork", ownerKey: "guardian" }, null)).toBe(true);
   });
 
-  it("makes a fork private when its parent is, and open when it is not", () => {
-    expect(forkTriggerKind({ id: "task", triggerKind: "concierge", ownerKey: VISITOR })).toBe(
-      PRIVATE_FORK_TRIGGER_KIND,
-    );
-    expect(
-      forkTriggerKind({ id: "branch", triggerKind: PRIVATE_FORK_TRIGGER_KIND, ownerKey: VISITOR }),
-    ).toBe(PRIVATE_FORK_TRIGGER_KIND);
-    expect(forkTriggerKind({ id: "plain", ownerKey: "guardian" })).toBe("fork");
-    expect(forkTriggerKind(null)).toBe("fork");
+  describe("a child session", () => {
+    let testDb: TestDb;
+    let repo: ChatsWebChatRepository;
+    beforeEach(() => {
+      testDb = createTestDb();
+      repo = new ChatsWebChatRepository(testDb.db);
+    });
+    afterEach(() => testDb.close());
+
+    const chat = (id: string, ownerKey: string) =>
+      repo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        {
+          ownerKey,
+        },
+      );
+
+    it("of a visitor's task chat is private to them from the start, and after the task chat is gone", async () => {
+      await chat("task", VISITOR);
+      await repo.setSessionTrigger("task", { triggerKind: "concierge", triggerName: "Task" });
+      for (const [id, type] of [
+        ["subagent-1", "subagent"],
+        ["fork-1", "fork"],
+      ] as const) {
+        await repo.ensureRomeSession({
+          id,
+          type,
+          name: id,
+          agentName: "researcher",
+          parentSessionId: "task",
+          ...(type === "fork" ? { trigger: { triggerKind: "fork", triggerName: "feedback" } } : {}),
+        });
+      }
+      await repo.deleteSession("task");
+      for (const id of ["subagent-1", "fork-1"]) {
+        const row = await repo.getSession(id);
+        expect(row).toMatchObject({ ownerKey: VISITOR, triggerKind: PRIVATE_CHILD_TRIGGER_KIND });
+        expect(canOpen(row, VISITOR)).toBe(true);
+        expect(canOpen(row, "guardian")).toBe(false);
+      }
+    });
+
+    it("of an ordinary chat stays open", async () => {
+      await chat("plain", "guardian");
+      await repo.ensureRomeSession({
+        id: "subagent-2",
+        type: "subagent",
+        name: "s",
+        agentName: "researcher",
+        parentSessionId: "plain",
+      });
+      const row = await repo.getSession("subagent-2");
+      expect(row?.triggerKind).toBeNull();
+      expect(canOpen(row, VISITOR)).toBe(true);
+    });
   });
 });

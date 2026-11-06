@@ -11,11 +11,11 @@ export const CONCIERGE_AGENT_ID = "core:concierge";
 /** `rome_sessions.trigger_kind` of a task chat Concierge started. */
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
 /**
- * `rome_sessions.trigger_kind` of a fork of a private chat, marked when the
- * fork is made, so it stays private to that chat's owner after the chat it
- * came from is gone.
+ * `rome_sessions.trigger_kind` of a child session (a fork, a subagent) of a
+ * private chat, marked when it is made, so it stays private to that chat's
+ * owner after the chat it came from is gone.
  */
-export const PRIVATE_FORK_TRIGGER_KIND = "concierge_fork";
+export const PRIVATE_CHILD_TRIGGER_KIND = "concierge_fork";
 
 export function isConciergeAgent(agentName: string | null | undefined): boolean {
   return agentName === CONCIERGE_AGENT_ID || agentName === "concierge";
@@ -30,8 +30,9 @@ export function isConciergeChat(
 
 /**
  * The one person a chat is private to: a Concierge chat's owner, the owner of
- * a task chat a Concierge started, and the owner of a fork of either. Null for
- * any other chat, which every dashboard user may open.
+ * a task chat a Concierge started, and the owner of a child session of either
+ * (a fork, a subagent). Null for any other chat, which every dashboard user
+ * may open.
  */
 export function privateOwnerOf(
   chat:
@@ -48,7 +49,7 @@ export function privateOwnerOf(
   if (
     isConciergeChat(chat) ||
     chat.triggerKind === TASK_CHAT_TRIGGER_KIND ||
-    chat.triggerKind === PRIVATE_FORK_TRIGGER_KIND
+    chat.triggerKind === PRIVATE_CHILD_TRIGGER_KIND
   ) {
     return ownerOf(chat);
   }
@@ -75,8 +76,8 @@ export interface ChatPrivacyRow {
 /**
  * The one privacy policy for dashboard chats, read off the chat's own row:
  * a private chat opens only for its owner, and any other chat for everyone.
- * A fork inherits its parent's privacy when it is made, so no path needs to
- * look past the row.
+ * A child session inherits its parent's privacy when it is made, so no path
+ * needs to look past the row.
  */
 export function canOpen(chat: ChatPrivacyRow | null | undefined, owner: string | null): boolean {
   const privateTo = privateOwnerOf(chat);
@@ -95,11 +96,6 @@ export async function canOpenChat(
   return canOpen(await getSession(chatId), owner);
 }
 
-/** The trigger kind a fork of `parent` is made with: private when its parent is. */
-export function forkTriggerKind(parent: ChatPrivacyRow | null | undefined): string {
-  return privateOwnerOf(parent) === null ? "fork" : PRIVATE_FORK_TRIGGER_KIND;
-}
-
 /** The columns of a chat row the policy reads, for a query to filter by. */
 export interface ChatPrivacyColumns {
   id: SQL | unknown;
@@ -115,7 +111,7 @@ export interface ChatPrivacyColumns {
 export function canOpenSql(chat: ChatPrivacyColumns, owner: string | null): SQL {
   const isPrivate = sql`(${chat.id} = ${CONCIERGE_CHAT_ID}
     OR coalesce(${chat.agentName}, '') IN (${CONCIERGE_AGENT_ID}, 'concierge')
-    OR coalesce(${chat.triggerKind}, '') IN (${TASK_CHAT_TRIGGER_KIND}, ${PRIVATE_FORK_TRIGGER_KIND}))`;
+    OR coalesce(${chat.triggerKind}, '') IN (${TASK_CHAT_TRIGGER_KIND}, ${PRIVATE_CHILD_TRIGGER_KIND}))`;
   return owner === null
     ? sql`NOT ${isPrivate}`
     : sql`(NOT ${isPrivate} OR coalesce(${chat.ownerKey}, 'guardian') = ${owner})`;
