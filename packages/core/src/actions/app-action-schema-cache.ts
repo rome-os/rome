@@ -1,5 +1,6 @@
 // Remembers each app action's input schema across boots, so boot can register
 // an action from an unchanged bundle without importing its module.
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
@@ -14,6 +15,21 @@ const cacheFileSchema = z.object({
     z.object({ inputSchema: z.record(z.string(), z.unknown()).nullable() }),
   ),
 });
+
+/**
+ * The build identity a cache file is scoped to, or null when the build has
+ * none. A commit SHA alone does not separate two local images built from
+ * different uncommitted trees, so the build time joins it when present.
+ */
+export function appActionSchemaCacheBuild(build: {
+  sha: string | null;
+  version: string | null;
+  builtAt: string | null;
+}): string | null {
+  const id = build.sha ?? build.version;
+  if (!id) return null;
+  return build.builtAt ? `${id}@${build.builtAt}` : id;
+}
 
 /** What a cache hit knows about an action without importing it. */
 export interface CachedActionSchema {
@@ -97,7 +113,8 @@ export class AppActionSchemaCache {
     const entries = Object.fromEntries(this.entries);
     try {
       await mkdir(dirname(this.path), { recursive: true });
-      const tmp = `${this.path}.${process.pid}.tmp`;
+      // Saves can overlap within one process, so each writes its own temp file.
+      const tmp = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
       await writeFile(tmp, JSON.stringify({ build: this.build, entries }), "utf-8");
       await rename(tmp, this.path);
       this.dirty = false;

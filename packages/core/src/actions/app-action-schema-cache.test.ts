@@ -7,7 +7,7 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
 import type { DrizzleDb } from "../db/index.js";
-import { AppActionSchemaCache } from "./app-action-schema-cache.js";
+import { AppActionSchemaCache, appActionSchemaCacheBuild } from "./app-action-schema-cache.js";
 import { registerAppActions } from "./app-actions-wiring.js";
 import type { ActionEngine } from "./engine.js";
 import { ActionLoader } from "./loader.js";
@@ -178,5 +178,15 @@ describe("AppActionSchemaCache", () => {
       otherBuild?.get(AppActionSchemaCache.key("feeds", app.installedHash, "feeds:sync")!),
     ).toBeUndefined();
     expect(await AppActionSchemaCache.load(cachePath, null)).toBeNull();
+  });
+
+  it("scopes the cache to the build time as well as the commit", () => {
+    expect(
+      appActionSchemaCacheBuild({ sha: "abc1234", version: null, builtAt: "2026-11-06T00:00:00Z" }),
+    ).toBe("abc1234@2026-11-06T00:00:00Z");
+    expect(appActionSchemaCacheBuild({ sha: null, version: "1.2.3", builtAt: null })).toBe("1.2.3");
+    expect(
+      appActionSchemaCacheBuild({ sha: null, version: null, builtAt: "2026-11-06T00:00:00Z" }),
+    ).toBeNull();
   });
 });

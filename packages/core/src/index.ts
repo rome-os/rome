@@ -39,7 +39,10 @@ import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./us
 import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
-import { AppActionSchemaCache } from "./actions/app-action-schema-cache.js";
+import {
+  AppActionSchemaCache,
+  appActionSchemaCacheBuild,
+} from "./actions/app-action-schema-cache.js";
 import {
   initTelemetry,
   getTracer,
@@ -1334,7 +1337,7 @@ async function main() {
   // the claim boot finds every schema here.
   const appActionSchemaCache = await AppActionSchemaCache.load(
     getProfileAppActionSchemaCachePath(),
-    getBuildInfo().sha ?? getBuildInfo().version,
+    appActionSchemaCacheBuild(getBuildInfo()),
   );
   const appActionReload = await registerAppActions(
     actionLoader,

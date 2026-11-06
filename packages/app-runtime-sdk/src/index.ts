@@ -209,7 +209,12 @@ export class ActionInvocationEventOverflowError extends Error {
 
 export interface Action {
   config: ActionConfig;
-  /** Present = agent-callable action (tool). Absent = event-only action (workflow). */
+  /**
+   * Present = agent-callable action (tool). Absent = event-only action (workflow).
+   * Must depend only on the action's bundle: Rome caches it across boots and
+   * rebuilds it only when the bundle or Rome changes, never from `deps`,
+   * app keys, or the environment.
+   */
   inputSchema?: Record<string, unknown>;
   execute(args: Record<string, unknown>, context?: ActionExecutionContext): Promise<ActionResult>;
   /**
