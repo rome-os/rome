@@ -1919,6 +1919,40 @@ describe("Concierge chat", () => {
     expect(await service.isServed("guardian")).toBe(true);
   });
 
+  it("keeps whose both chats were when two of a visitor's topic chats are deleted at once", async () => {
+    const owner = "visitor:acct-ann";
+    const stored = new Map<string, unknown>();
+    // A slow settings store, so the two deletions' reads and writes interleave.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+    const service = new ConciergeService({
+      settingsRepo: {
+        get: async (key: string) => {
+          await tick();
+          return stored.get(key) ?? null;
+        },
+        set: async (key: string, value: unknown) => {
+          await tick();
+          stored.set(key, value);
+        },
+      },
+      webchatRepo: {
+        getSession: async (id: string) => ({
+          id,
+          agentName: CONCIERGE_AGENT_ID,
+          ownerKey: owner,
+          largeModelSelection: "claude-sonnet",
+        }),
+      },
+      tasks: { repo: { moveToMainChat: async () => 0 } },
+      aiToolState: { get: () => codexOnly },
+    } as unknown as ConciergeDeps);
+    await Promise.all([
+      service.retireChat("topic-a", "deleted"),
+      service.retireChat("topic-b", "deleted"),
+    ]);
+    expect(stored.get("conciergeRetiredChats")).toEqual({ "topic-a": owner, "topic-b": owner });
+  });
+
   it("leaves an existing chat and its model alone", async () => {
     const { service, createSession, update } = serviceWith(codexOnly, true, "claude-sonnet");
     expect(await service.ensureChatId()).toBe("concierge");

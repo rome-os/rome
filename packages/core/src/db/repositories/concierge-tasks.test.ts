@@ -293,7 +293,8 @@ describe("ConciergeTasksRepository", () => {
       const [delivery] = await renderTaskEvents(service, [
         { taskId: row.id, changes: [{ kind: "summary" } as never], quiet: true },
       ]);
-      expect(delivery).toMatchObject({ chatId: main, owner });
+      // A held row is its owner's and that chat's, however often its turn waits.
+      expect(delivery).toMatchObject({ chatId: main, owner, taskIds: [row.id] });
     });
 
     it("keeps a visitor's rows, finished ones too, theirs after their topic chat is deleted", async () => {

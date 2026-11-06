@@ -108,6 +108,25 @@ describe("FollowBatcher", () => {
     expect(tries).toHaveLength(4);
   });
 
+  it("counts a failed batch's tries per owner, so one event followed by three people keeps all three", async () => {
+    const tries: string[][] = [];
+    let fails = 1;
+    const batcher = new FollowBatcher({
+      now: () => Date.now(),
+      flush: async (events) => {
+        tries.push(events.map((e) => `${e.owner}:${e.id}`));
+        if (fails-- > 0) throw new Error("no such table");
+      },
+    });
+    for (const owner of ["guardian", "visitor:a", "visitor:b"]) {
+      batcher.add({ ...event("a"), owner });
+    }
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    await rs.advanceTimersByTimeAsync(BATCH_WINDOW_MS);
+    // One failure is one try for each owner's copy: all three come back.
+    expect(tries[1]).toEqual(["guardian:a", "visitor:a:a", "visitor:b:a"]);
+  });
+
   it("drops a repeat, and starts the next batch with the next event", async () => {
     const s = setup();
     expect(s.batcher.add(event("a"))).toBe(true);

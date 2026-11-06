@@ -34,6 +34,13 @@ describe("chat privacy along a line of forks", () => {
     expect(await accessOver(cycle, "guardian").canOpen("x")).toBe(true);
   });
 
+  it("leaves an ordinary branch open when the ordinary chat it came from is gone", async () => {
+    const rows: ChatLineageRow[] = [
+      { id: "branch", triggerKind: "fork", ownerKey: "guardian", parentSessionId: "gone" },
+    ];
+    expect(await accessOver(rows, VISITOR).canOpen("branch")).toBe(true);
+  });
+
   it("leaves an ordinary chat with no forked-from chat open to everyone", async () => {
     const rows: ChatLineageRow[] = [{ id: "plain", ownerKey: "guardian" }];
     expect(await accessOver(rows, VISITOR).canOpen("plain")).toBe(true);
@@ -81,6 +88,36 @@ describe("chat privacy along a line of forks", () => {
         chatAccess((id) => repo.getSession(id), owner).canOpen("branch");
       expect(await canOpen(VISITOR)).toBe(true);
       expect(await canOpen("guardian")).toBe(false);
+    });
+
+    it("stamps no ordinary branch, which stays open after its chat is gone", async () => {
+      await repo.createSession(
+        "plain",
+        "Plain",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        {
+          ownerKey: "guardian",
+        },
+      );
+      await repo.ensureRomeSession({
+        id: "branch",
+        type: "fork",
+        name: "Branch",
+        agentName: null,
+        parentSessionId: "plain",
+        trigger: { triggerKind: "fork", triggerName: "branch" },
+      });
+      await stampForkOwner(repo, "branch");
+      await repo.promoteForkToChat("branch");
+      await repo.deleteSession("plain");
+      expect((await repo.getSession("branch"))?.triggerKind).toBe("fork");
+      expect(await chatAccess((id) => repo.getSession(id), VISITOR).canOpen("branch")).toBe(true);
     });
   });
 });

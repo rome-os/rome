@@ -172,6 +172,8 @@ export class ConciergeService {
   private taskEvents: TaskEventCoalescer | null = null;
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
+  /** The last write to the retired chats' owners; each write waits for the one before. */
+  private retiredWrites: Promise<void> = Promise.resolve();
 
   constructor(readonly deps: ConciergeDeps) {}
 
@@ -346,8 +348,25 @@ export class ConciergeService {
   }
 
   /**
-   * A Concierge chat is being archived or deleted. Its follows, its unfinished
-   * tasks and the events owed to it move to its owner's main chat, and the
+   * Keeps whose a deleted chat was. Writes run one at a time, each reading
+   * what the last one wrote, so two chats deleted at once both stay known.
+   */
+  private rememberRetired(chatId: string, owner: ConciergeOwner): Promise<void> {
+    const write = this.retiredWrites.then(async () => {
+      const retired =
+        ((await this.deps.settingsRepo.get(RETIRED_CHATS_SETTING_KEY)) as Record<
+          string,
+          string
+        > | null) ?? {};
+      await this.deps.settingsRepo.set(RETIRED_CHATS_SETTING_KEY, { ...retired, [chatId]: owner });
+    });
+    this.retiredWrites = write.catch(() => undefined);
+    return write;
+  }
+
+  /**
+   * A Concierge chat is being archived or deleted. Its follows, its tasks and
+   * the events owed to it move to its owner's main chat, and the
    * Concierge says so there. A main chat is never retired: this throws for one.
    */
   async retireChat(chatId: string, how: RetiredHow): Promise<void> {
@@ -358,14 +377,7 @@ export class ConciergeService {
     const owner = ownerOf(chat);
     // A deleted chat's row goes; its owner stays known, so what still names it
     // (a defer's wake-up) reaches that owner's main chat, never another's.
-    if (how === "deleted" && owner !== GUARDIAN_OWNER) {
-      const retired =
-        ((await this.deps.settingsRepo.get(RETIRED_CHATS_SETTING_KEY)) as Record<
-          string,
-          string
-        > | null) ?? {};
-      await this.deps.settingsRepo.set(RETIRED_CHATS_SETTING_KEY, { ...retired, [chatId]: owner });
-    }
+    if (how === "deleted" && owner !== GUARDIAN_OWNER) await this.rememberRetired(chatId, owner);
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));

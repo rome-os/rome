@@ -45,6 +45,9 @@ export const MAX_DIGEST_LINES = 40;
 /** Lines a digest shows of one source and kind before counting the rest. */
 const DIGEST_LINES_PER_GROUP = 5;
 
+/** One owner's copy of an event: the same event followed by two people is two. */
+const keyOf = (event: FollowEvent) => `${event.owner ?? ""}\u0000${event.id}`;
+
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -55,7 +58,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export class FollowBatcher {
   private queue: FollowEvent[] = [];
   private seen = new Set<string>();
-  /** Failed tries per event id, for events put back after a failed batch. */
+  /** Failed tries per owner and event, for events put back after a failed batch. */
   private attempts = new Map<string, number>();
   /** After a failed batch, the next one waits a whole window from the failure. */
   private notBefore = 0;
@@ -71,7 +74,7 @@ export class FollowBatcher {
 
   /** Queues an event. Answers false for a repeat of the same event for the same owner. */
   add(event: FollowEvent): boolean {
-    const key = `${event.owner ?? ""}\u0000${event.id}`;
+    const key = keyOf(event);
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     if (this.seen.size > MAX_SEEN_IDS) {
@@ -108,13 +111,14 @@ export class FollowBatcher {
     this.queue = [];
     try {
       await this.deps.flush(batch);
-      for (const event of batch) this.attempts.delete(event.id);
+      for (const event of batch) this.attempts.delete(keyOf(event));
     } catch (error) {
       const retry = batch.filter((event) => {
-        const tries = (this.attempts.get(event.id) ?? 0) + 1;
-        this.attempts.set(event.id, tries);
+        const key = keyOf(event);
+        const tries = (this.attempts.get(key) ?? 0) + 1;
+        this.attempts.set(key, tries);
         if (tries < BATCH_ATTEMPTS) return true;
-        this.attempts.delete(event.id);
+        this.attempts.delete(key);
         return false;
       });
       log.warn("follow batch failed", {

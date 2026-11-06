@@ -9,6 +9,12 @@ import { type ConciergeOwner, mainChatIdOf, ownerOf } from "./owner.js";
 export const CONCIERGE_AGENT_ID = "core:concierge";
 /** `rome_sessions.trigger_kind` of a task chat Concierge started. */
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
+/**
+ * `rome_sessions.trigger_kind` of a fork of a Concierge or task chat, stamped
+ * when it becomes an ordinary chat, so it stays private to that chat's owner
+ * after the chat it came from is gone.
+ */
+export const PRIVATE_FORK_TRIGGER_KIND = "concierge_fork";
 
 export function isConciergeAgent(agentName: string | null | undefined): boolean {
   return agentName === CONCIERGE_AGENT_ID || agentName === "concierge";
@@ -22,9 +28,9 @@ export function isConciergeChat(
 }
 
 /**
- * The one person a chat is private to: a Concierge chat's owner, and the
- * owner of a task chat a Concierge started. Null for any other chat, which
- * every dashboard user may open.
+ * The one person a chat is private to: a Concierge chat's owner, the owner of
+ * a task chat a Concierge started, and the owner stamped on a promoted fork
+ * of either. Null for any other chat, which every dashboard user may open.
  */
 export function privateOwnerOf(
   chat:
@@ -38,7 +44,13 @@ export function privateOwnerOf(
     | undefined,
 ): ConciergeOwner | null {
   if (!chat) return null;
-  if (isConciergeChat(chat) || chat.triggerKind === TASK_CHAT_TRIGGER_KIND) return ownerOf(chat);
+  if (
+    isConciergeChat(chat) ||
+    chat.triggerKind === TASK_CHAT_TRIGGER_KIND ||
+    chat.triggerKind === PRIVATE_FORK_TRIGGER_KIND
+  ) {
+    return ownerOf(chat);
+  }
   return null;
 }
 
@@ -70,9 +82,11 @@ export interface ChatLineageRow {
  * path that reads, lists or searches chats asks it, so a fork, even one
  * promoted to an ordinary chat, stays as private as the chat it came from.
  *
- * It fails closed. When the line cannot be followed to its end (a parent that
- * no longer exists, a cycle, or more than {@link MAX_FORK_DEPTH} forks), the
- * chat is private to the owner its last readable row records, never open.
+ * A parent that no longer exists ends the line there: a fork of a private chat
+ * was stamped private when it was promoted, so it needs no parent to stay so,
+ * and an ordinary branch of an ordinary chat stays open. A line that cannot be
+ * walked to its end (a cycle, or more than {@link MAX_FORK_DEPTH} forks) fails
+ * closed: the chat is private to the owner its last readable row records.
  */
 export function chatAccess(
   getRow: (id: string) => Promise<ChatLineageRow | null | undefined>,
@@ -104,10 +118,13 @@ export function chatAccess(
         result = null;
         break;
       }
-      const parent =
-        path.length > MAX_FORK_DEPTH || path.includes(parentId) ? null : await getRow(parentId);
-      if (!parent) {
+      if (path.length > MAX_FORK_DEPTH || path.includes(parentId)) {
         result = ownerOf(current);
+        break;
+      }
+      const parent = await getRow(parentId);
+      if (!parent) {
+        result = null;
         break;
       }
       current = parent;
@@ -133,13 +150,26 @@ export function chatAccess(
  */
 export async function stampForkOwner(
   repo: {
-    getSession(id: string): Promise<ChatLineageRow | null>;
+    getSession(id: string): Promise<(ChatLineageRow & { triggerName?: string | null }) | null>;
     setSessionOwnerKey(id: string, ownerKey: string): Promise<void>;
+    setSessionTrigger(
+      id: string,
+      trigger: { triggerKind: string; triggerName: string | null },
+    ): Promise<void>;
   },
   forkId: string,
 ): Promise<void> {
+  const fork = await repo.getSession(forkId);
+  if (!fork) return;
   const privateTo = await chatAccess((id) => repo.getSession(id), null).privateOwner(forkId);
-  if (privateTo !== null) await repo.setSessionOwnerKey(forkId, privateTo);
+  // Only a fork whose line came from a private chat is stamped; any other
+  // stays as open as an ordinary chat.
+  if (privateTo === null) return;
+  await repo.setSessionOwnerKey(forkId, privateTo);
+  await repo.setSessionTrigger(forkId, {
+    triggerKind: PRIVATE_FORK_TRIGGER_KIND,
+    triggerName: fork.triggerName ?? null,
+  });
 }
 
 /** Whether `owner` may open chat `chatId`, by {@link chatAccess}. */
