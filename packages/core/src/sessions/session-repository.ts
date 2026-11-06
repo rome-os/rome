@@ -138,7 +138,7 @@ export class SessionRepository {
     }
     const retiredPending = retired.pendingChanges();
     const successorPending = successor.pendingChanges();
-    const carriedOver = successorState.chatId === retiredState.chatId;
+    const carriedOver = successor.deprecatedChatCarriedOver;
     const storedChat = this.db.transaction((tx) => {
       writeChanges(tx, retiredState, retiredPending.changes);
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);

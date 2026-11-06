@@ -308,6 +308,23 @@ describe("SessionRepository", () => {
     expect(successor.deprecatedChatId).toBe("chat-3");
   });
 
+  it("replace() keeps a named chat even when it equals the chat the retired instance lost with", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await repo.add(session);
+    const first = (await repo.session(session.id))!;
+    const second = (await repo.session(session.id))!;
+    first.deprecatedRecordChat("chat-1");
+    await repo.save(first);
+    second.deprecatedRecordChat("chat-2");
+
+    const successor = second.replace({ deprecatedChatId: "chat-2" });
+    await repo.replace(second, successor);
+    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
+    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-2");
+    expect(second.deprecatedChatId).toBe("chat-1");
+    expect(successor.deprecatedChatId).toBe("chat-2");
+  });
+
   it("save() never brings a completed session back to active", async () => {
     const session = Session.create("main", { continuityKey: "k" });
     await repo.add(session);

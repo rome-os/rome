@@ -137,9 +137,15 @@ describe("Session", () => {
     expect(successor.deprecatedChatId).toBe("chat-1");
   });
 
-  it("replace() takes the chat named over the one carried over", () => {
+  it("replace() takes the chat named over the one carried over, and tells the two apart", () => {
     const session = Session.create("main", { continuityKey: "k", deprecatedChatId: "chat-1" });
-    expect(session.replace({ deprecatedChatId: "chat-2" }).deprecatedChatId).toBe("chat-2");
+    const named = session.replace({ deprecatedChatId: "chat-2" });
+    expect(named.deprecatedChatId).toBe("chat-2");
+    expect(named.deprecatedChatCarriedOver).toBe(false);
+    expect(session.replace().deprecatedChatCarriedOver).toBe(true);
+    // Naming the same chat is still naming it.
+    expect(session.replace({ deprecatedChatId: "chat-1" }).deprecatedChatCarriedOver).toBe(false);
+    expect(Session.create("main").deprecatedChatCarriedOver).toBe(false);
   });
 
   it("deprecatedRecordChat() fills a missing chat and never overwrites one", () => {

@@ -89,6 +89,8 @@ export class Session {
   private readonly changes = new Set<SessionChange>();
   /** Checkpoints recorded since the last save, one per turn. */
   private readonly checkpoints = new Map<string, TurnCheckpoint>();
+  /** Whether `replace` carried the chat over from the retired session. */
+  private chatCarriedOver = false;
 
   private constructor(state: SessionState) {
     this.state = state;
@@ -224,11 +226,13 @@ export class Session {
    */
   replace(options: ReplaceSessionOptions = {}): Session {
     this.complete();
-    return Session.create(this.state.agentName, {
+    const successor = Session.create(this.state.agentName, {
       continuityKey: this.state.continuityKey ?? undefined,
       workingDir: options.workingDir,
       deprecatedChatId: options.deprecatedChatId ?? this.state.chatId ?? undefined,
     });
+    successor.chatCarriedOver = options.deprecatedChatId === undefined;
+    return successor;
   }
 
   /** @deprecated Records the chat only when none is recorded yet. Answers
@@ -240,6 +244,14 @@ export class Session {
     this.state.chatId = chatId;
     this.changes.add("chat");
     return true;
+  }
+
+  /** @deprecated Only the repository reads this: whether the chat came from
+   *  the retired session rather than being named on the reset. Equal chats
+   *  do not tell the two apart, and only a carried-over chat follows the
+   *  stored one. */
+  get deprecatedChatCarriedOver(): boolean {
+    return this.chatCarriedOver;
   }
 
   /** @deprecated Only the repository calls this, after a save found that
