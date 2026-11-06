@@ -827,6 +827,7 @@ async function main() {
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       tracer: tracer,
+      describeCaller: callerFromKey,
       processRole: "main",
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses,

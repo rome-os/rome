@@ -8,7 +8,7 @@ import type { ActionEngine } from "./engine.js";
 import type { ActionRunObserver } from "./runtime-events.js";
 import type { ThreadContext } from "../core/types.js";
 import type { SessionActor } from "../lib/session-actor.js";
-import { callerFromKey } from "../core/session-caller.js";
+import type { SessionCaller } from "../core/session-caller.js";
 
 export interface ActionExecutionStore {
   actionName?: string;
@@ -30,6 +30,8 @@ export interface ActionExecutionStore {
   turnId?: string;
   agentName?: string;
   channelThreadKey?: string;
+  /** The calling session's caller, typed, when the engine could read it. */
+  caller?: SessionCaller;
   runtimeObserver?: ActionRunObserver;
 }
 
@@ -54,7 +56,7 @@ setCurrentActionContextResolver(() => {
     sessionId: store.sessionId,
     turnId: store.turnId,
     agentName: store.agentName,
-    caller: store.channelThreadKey ? callerFromKey(store.channelThreadKey) : undefined,
+    caller: store.caller,
     channelThreadKey: store.channelThreadKey,
     sharedContext: store.sharedContext,
   };

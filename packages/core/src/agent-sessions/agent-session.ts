@@ -2077,7 +2077,7 @@ class AgentSessionImpl implements AgentSession {
   // One-shot guard: the caller's opening is prepended to the FIRST user
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
-  private threadContextInjected = false;
+  private openingPlaced = false;
   /**
    * The current provider thread started in this session rather than resuming
    * one, so its first turn carries the caller's opening.
@@ -2267,7 +2267,7 @@ class AgentSessionImpl implements AgentSession {
       if (resumeThreadId === undefined) {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
-        this.threadContextInjected = false;
+        this.openingPlaced = false;
         if (previous.providerThreadId !== undefined) {
           this.continuationPending = true;
           this.previousModel = previous.model;
@@ -3612,8 +3612,8 @@ class AgentSessionImpl implements AgentSession {
       }
       // A thread that starts in this session, the first one or one that
       // replaced it on another provider, has not seen the block yet.
-      if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && briefed?.opening) {
-        this.threadContextInjected = true;
+      if (!this.isSubagent && this.threadFresh && !this.openingPlaced && briefed?.opening) {
+        this.openingPlaced = true;
         userPrompt = `${briefed.opening}\n\n${userPrompt}`;
       }
       const initMsg: AgentEvent = {

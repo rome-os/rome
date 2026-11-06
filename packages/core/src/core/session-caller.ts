@@ -75,6 +75,12 @@ export function callerConnection(caller: SessionCaller): string | undefined {
   }
 }
 
+/** The connection a stored caller's turns are delivered on. Undefined for a
+ *  caller on no connection. */
+export function connectionOfCaller(stored: string): string | undefined {
+  return callerConnection(callerFromKey(stored));
+}
+
 /** The chat a caller is when it is a dashboard chat's own session. */
 export function chatOfCaller(caller: SessionCaller): string | undefined {
   return caller.kind === "chat" ? caller.chatId : undefined;

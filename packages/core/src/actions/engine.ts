@@ -26,8 +26,7 @@ import { actionExecutionContext, type ActionExecutionStore } from "./context.js"
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
-import { callerKey, type SessionCaller } from "../core/session-caller.js";
-import { connectionOfCaller } from "../connections/session-surface.js";
+import { callerKey, connectionOfCaller, type SessionCaller } from "../core/session-caller.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
   fromWireError,
@@ -241,6 +240,10 @@ export interface ActionEngineRepositories {
 
 interface ActionEngineOptions {
   tracer?: Tracer;
+  /** The typed caller a stored caller string names, as the context that
+   *  minted the string reads it. Without it an action reads back only the
+   *  caller its context handed over typed. */
+  describeCaller?: (stored: string) => SessionCaller;
   processRole?: "main" | "worker";
   /**
    * Hard cap for every live action-worker process owned by main, including
@@ -412,6 +415,7 @@ export class ActionNotFoundError extends Error {
 
 export class ActionEngine {
   private tracer: Tracer | null;
+  private readonly describeCaller?: (stored: string) => SessionCaller;
   private executionsRepo: ActionExecutionsRepository;
   private approvalsRepo: ApprovalsRepository;
   private journalRepo: ExecutionJournalRepository;
@@ -443,12 +447,23 @@ export class ActionEngine {
   private warmWorkers = new Set<ActionWorkerProcess>();
   private liveWorkers = new Set<ActionWorkerProcess>();
 
+  /** The typed caller of a context, as it was handed over or as the
+   *  stored string it carries names. */
+  private callerOf(
+    ctx: Pick<ActionRunContext, "caller" | "channelThreadKey"> | undefined,
+  ): SessionCaller | undefined {
+    if (ctx?.caller) return ctx.caller;
+    const stored = storedCallerOf(ctx);
+    return stored ? this.describeCaller?.(stored) : undefined;
+  }
+
   constructor(
     private registry: ActionRegistry,
     repos: ActionEngineRepositories,
     options?: ActionEngineOptions,
   ) {
     this.tracer = options?.tracer ?? null;
+    this.describeCaller = options?.describeCaller;
     this.executionsRepo = repos.executions;
     this.approvalsRepo = repos.approvals;
     this.journalRepo = repos.journal;
@@ -1138,6 +1153,7 @@ export class ActionEngine {
       turnId: invocation.context?.turnId,
       agentName: invocation.context?.agentName,
       channelThreadKey: storedCallerOf(invocation.context),
+      caller: this.callerOf(invocation.context),
       runtimeObserver: observer,
     };
     let acceptingEvents = true;
@@ -2131,6 +2147,7 @@ export class ActionEngine {
         turnId: context?.turnId,
         agentName: context?.agentName,
         channelThreadKey: storedCallerOf(context),
+        caller: this.callerOf(context),
       };
       preview = await actionExecutionContext.run(previewStore, () => action?.preview?.(args));
     } catch (previewErr) {

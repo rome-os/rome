@@ -1,3 +1,4 @@
+import { callerFromKey } from "../core/session-caller.js";
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../host-execution/service.js";
 import { getDb } from "../db/index.js";
@@ -180,6 +181,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     actionRegistry,
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
+      describeCaller: callerFromKey,
       processRole: "worker",
       // Main sends the card, on the connections it records sends on.
       onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {

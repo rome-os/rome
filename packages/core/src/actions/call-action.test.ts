@@ -155,6 +155,7 @@ describe("callAction", () => {
         },
         sessionId: "sess-7",
         agentName: "main",
+        caller: { kind: "chat", chatId: "thread-1" },
         channelThreadKey: "webchat:thread-1",
       },
       async () => {
