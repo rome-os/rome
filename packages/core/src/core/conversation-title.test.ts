@@ -19,7 +19,7 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
     providerId: "mock",
     model: "small-model",
     events: (async function* () {
-      yield { type: "result" as const, content, structuredOutput };
+      yield { type: "result" as const, content, structuredOutput, reasoningEffort: "low" };
     })(),
     sendUserInput: rs.fn(async () => undefined),
     fork: rs.fn(async () => {

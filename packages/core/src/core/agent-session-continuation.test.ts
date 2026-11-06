@@ -69,11 +69,13 @@ function createProvider(id: ProviderId) {
       },
       params,
     );
-    session.providerThreadId =
-      params.thread.kind === "resume"
-        ? params.thread.providerThreadId
-        : `${id}-thread-${opened.length}`;
-    return session;
+    return {
+      ...session,
+      providerThreadId:
+        params.thread.kind === "resume"
+          ? params.thread.providerThreadId
+          : `${id}-thread-${opened.length}`,
+    };
   });
   const provider: ModelProvider = {
     id,

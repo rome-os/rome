@@ -1,3 +1,4 @@
+import { recordModelTurnMetrics } from "../telemetry.js";
 import type { ModelSession } from "./agent-runner.js";
 import type { ModelResolver } from "./model-resolver.js";
 
@@ -119,6 +120,9 @@ export function createConversationTitleGenerator(
           reasoningEffort: "low",
         });
         for await (const message of openedSession.events) {
+          if (message.type === "result" || message.type === "error") {
+            recordModelTurnMetrics(message.accounting, { agentName: "conversation-title" });
+          }
           if (message.type === "error") throw new Error(message.error);
           if (message.type !== "result") continue;
           const title = normalizeConversationTitle(structuredTitle(message.structuredOutput));

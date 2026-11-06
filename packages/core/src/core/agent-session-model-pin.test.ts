@@ -54,9 +54,11 @@ function createProvider(id: ProviderId) {
       },
       params,
     );
-    session.providerThreadId =
-      params.thread.kind === "resume" ? params.thread.providerThreadId : `native-${id}`;
-    return session;
+    return {
+      ...session,
+      providerThreadId:
+        params.thread.kind === "resume" ? params.thread.providerThreadId : `native-${id}`,
+    };
   });
   const provider: ModelProvider = {
     id,

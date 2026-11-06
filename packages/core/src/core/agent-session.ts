@@ -13,7 +13,13 @@ import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
-import { Session, type SessionRepository } from "../agent/index.js";
+import {
+  Session,
+  type ModelSessionEvent,
+  type ModelTurnStartedEvent,
+  type ModelPosition,
+  type SessionRepository,
+} from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildContinuationBlock,
@@ -83,6 +89,8 @@ import {
   sessionDurationMetric,
   startRomeSpan,
   withRomeSpan,
+  recordModelTurnMetrics,
+  type ModelMetricAttribution,
 } from "../telemetry.js";
 import {
   context,
@@ -1668,6 +1676,7 @@ async function openSession(
     systemPrompt,
     workingDir,
     buildForkOpenParams,
+    appStoreListingId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
     isNewSession,
@@ -1714,6 +1723,8 @@ interface ImplArgs {
   workingDir: string;
   /** Builds the open params for a forked turn's session (mode-aware). */
   buildForkOpenParams: BuildForkOpenParams;
+  /** Rome Cloud App Store listing id of the app owning the agent, when installed from the store. */
+  appStoreListingId?: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
@@ -1796,13 +1807,8 @@ interface TurnSink {
   subagentLinksCleared: boolean;
   /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
   outputSchemaSuspended: boolean;
-  /**
-   * The model session's `lastProviderTurnId` when the turn took the turn
-   * mutex. A turn that never reached the provider leaves it unchanged, so an
-   * unchanged id belongs to an earlier turn. Taking it at queue time instead
-   * would hand a queued turn the id of the turn ahead of it.
-   */
-  providerTurnIdAtStart?: string;
+  /** The id the provider named the turn with, if it did. */
+  modelTurnId?: string;
   /** Payer of the provider session that executes this turn. */
   funding?: UsageFunding;
   usageRecorded: boolean;
@@ -1835,6 +1841,22 @@ function toolResultSuspendsTurn(output: unknown): boolean {
     }
   }
   return isRecord(value) && (value.pendingInteraction === true || value.pendingApproval === true);
+}
+
+/**
+ * Take the provider's facts off a model event. They stay in the run and never
+ * reach the wire, the trace or app hooks.
+ */
+function splitProviderFacts(event: Exclude<ModelSessionEvent, ModelTurnStartedEvent>): {
+  msg: AgentEvent;
+  reasoningEffort?: string;
+  position?: ModelPosition;
+} {
+  if (event.type === "result") {
+    const { reasoningEffort, position, ...msg } = event;
+    return { msg, reasoningEffort, position };
+  }
+  return { msg: event };
 }
 
 function validateProviderStructuredResult(
@@ -1945,6 +1967,7 @@ class AgentSessionImpl implements AgentSession {
   private systemPrompt: string;
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;
+  private metricAttribution: ModelMetricAttribution;
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
   private subscribers = new Map<string, AgentSessionSubscriber>();
@@ -2027,6 +2050,10 @@ class AgentSessionImpl implements AgentSession {
     this.systemPrompt = args.systemPrompt;
     this.workingDir = args.workingDir;
     this.buildForkOpenParams = args.buildForkOpenParams;
+    this.metricAttribution = {
+      agentName: args.key.agentName,
+      appStoreListingId: args.appStoreListingId,
+    };
     this.threadContext = args.threadContext;
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
@@ -2180,23 +2207,31 @@ class AgentSessionImpl implements AgentSession {
     let streamError: unknown;
     try {
       enterSession(this.sessionId);
-      for await (const msg of session.events) {
+      for await (const event of session.events) {
         const sink = this.currentSink;
         if (!sink) {
           // No active turn — log and drop. Should not happen because
           // sendTurn allocates the sink before sendUserInput.
           log.warn("agent session received event with no active turn", {
-            type: msg.type,
+            type: event.type,
             sessionId: this.sessionId,
           });
           continue;
         }
+        if (event.type === "model_turn_started") {
+          sink.modelTurnId = event.modelTurnId;
+          continue;
+        }
+        const { msg, reasoningEffort, position } = splitProviderFacts(event);
         if (msg.type === "input_status") {
           await this.inputs.observe(msg, sink.turnId);
           this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
           continue;
         }
-        if (msg.type === "result" || msg.type === "error") await this.inputs.seal(sink.turnId);
+        if (msg.type === "result" || msg.type === "error") {
+          recordModelTurnMetrics(msg.accounting, this.metricAttribution);
+          await this.inputs.seal(sink.turnId);
+        }
         // Time-to-first-token: the first *text* event of the turn (a text_delta
         // or a completed text block) marks when the model started
         // producing visible output. Gate strictly to text — thinking/tool_use
@@ -2302,7 +2337,12 @@ class AgentSessionImpl implements AgentSession {
           if (outbound.type === "result") {
             const interrupted =
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
-            await this.persistTurn(session, sink.turnId, interrupted);
+            await this.persistTurn(
+              session,
+              sink.turnId,
+              reasoningEffort,
+              interrupted ? undefined : position,
+            );
             if (sink.carriesContinuation) this.continuationPending = false;
           }
           // Use `outbound` (not `msg`) so provider-output validation is
@@ -2503,7 +2543,6 @@ class AgentSessionImpl implements AgentSession {
       terminalKind: terminal.type,
       interrupted: sink.lifecycleInterrupted,
     });
-    const providerTurnId = this.modelSession.lastProviderTurnId;
     recorder.recordTurn({
       turnId: sink.turnId,
       romeSessionId: sink.romeSessionId,
@@ -2517,7 +2556,7 @@ class AgentSessionImpl implements AgentSession {
       provider: this.modelSession.providerId,
       model: this.modelSession.model,
       funding: sink.funding,
-      providerTurnId: providerTurnId !== sink.providerTurnIdAtStart ? providerTurnId : undefined,
+      providerTurnId: sink.modelTurnId,
       accounting,
       durationMs:
         sink.lifecycleStartedAtMs === undefined
@@ -2561,16 +2600,16 @@ class AgentSessionImpl implements AgentSession {
   private async persistTurn(
     session: ModelSession,
     turnId: string,
-    interrupted: boolean,
+    reasoningEffort: string | undefined,
+    position: ModelPosition | undefined,
   ): Promise<void> {
-    const checkpointId = session.lastCompletedTurnCheckpoint;
     try {
       this.session.recordTurn({
         provider: session.providerId,
         providerThreadId: session.providerThreadId,
         model: session.model,
-        reasoningEffort: session.appliedReasoningEffort,
-        checkpoint: !interrupted && checkpointId ? { turnId, checkpointId } : undefined,
+        reasoningEffort,
+        checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
       });
       await this.deps.sessionRepository.save(this.session);
       // The pin becomes readable only once recorded: later turns of this live
@@ -2601,6 +2640,7 @@ class AgentSessionImpl implements AgentSession {
     channelThreadKey: string,
     forkSessionId: string,
     forkSession: ModelSession,
+    reasoningEffort: string | undefined,
   ): Promise<void> {
     const providerThreadId = forkSession.providerThreadId;
     if (!providerThreadId) {
@@ -2625,7 +2665,7 @@ class AgentSessionImpl implements AgentSession {
         provider: forkSession.providerId,
         providerThreadId,
         model: forkSession.model,
-        reasoningEffort: forkSession.appliedReasoningEffort,
+        reasoningEffort,
       });
       await this.deps.sessionRepository.add(fork);
     } catch (err) {
@@ -2858,6 +2898,8 @@ class AgentSessionImpl implements AgentSession {
     let forkSession: ModelSession | undefined;
     let sourceFunding: UsageFunding | undefined;
     let forkFunding: UsageFunding | undefined;
+    let forkModelTurnId: string | undefined;
+    let forkReasoningEffort: string | undefined;
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
@@ -2948,7 +2990,16 @@ class AgentSessionImpl implements AgentSession {
         const providerEvents = forkSession.events;
         void (async () => {
           try {
-            for await (const msg of providerEvents) {
+            for await (const event of providerEvents) {
+              if (event.type === "model_turn_started") {
+                forkModelTurnId = event.modelTurnId;
+                continue;
+              }
+              const { msg, reasoningEffort } = splitProviderFacts(event);
+              if (msg.type === "result" || msg.type === "error") {
+                forkReasoningEffort = reasoningEffort;
+                recordModelTurnMetrics(msg.accounting, this.metricAttribution);
+              }
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
               if (projected.some(isTerminalEvent)) break;
@@ -3027,7 +3078,7 @@ class AgentSessionImpl implements AgentSession {
         provider: forkSession?.providerId ?? this.modelSession.providerId,
         model: forkSession?.model ?? this.modelSession.model,
         funding: forkFunding ?? sourceFunding,
-        providerTurnId: forkSession?.lastProviderTurnId,
+        providerTurnId: forkModelTurnId,
         accounting: terminalAccounting,
         durationMs: Date.now() - startMs,
         finishedAt: new Date(),
@@ -3054,6 +3105,7 @@ class AgentSessionImpl implements AgentSession {
           input.persistThreadKey(forkSessionId),
           forkSessionId,
           forkSession,
+          forkReasoningEffort,
         );
       }
       // Best-effort: turn_end is the stream's true terminal, so a close-time
@@ -3244,7 +3296,6 @@ class AgentSessionImpl implements AgentSession {
     void this.turnMutex
       .runExclusive(
         async () => {
-          sink.providerTurnIdAtStart = this.modelSession.lastProviderTurnId;
           try {
             await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
           } catch (err) {

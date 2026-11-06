@@ -104,7 +104,6 @@ export async function createBorrowedExactForkSession(
   let inputSent = false;
   let runPromise: Promise<void> = Promise.resolve();
   let closePromise: Promise<void> | null = null;
-  let lastProviderTurnId: string | undefined;
   const runtime: CodexTurnRuntime = {
     ownerSessionId: args.forkOwnerId,
     sink,
@@ -115,9 +114,6 @@ export async function createBorrowedExactForkSession(
     // Revert happens before the result/error event, so consumers can never
     // observe success while the source conversation still contains the turn.
     beforeTerminal: async ({ threadId, turnId }) => await args.revertTurn(threadId, turnId),
-    onProviderTurn: (turnId) => {
-      lastProviderTurnId = turnId;
-    },
   };
 
   return {
@@ -127,9 +123,6 @@ export async function createBorrowedExactForkSession(
     providerThreadId: args.sourceThreadId,
     get funding(): UsageFunding | undefined {
       return args.funding?.();
-    },
-    get lastProviderTurnId(): string | undefined {
-      return lastProviderTurnId;
     },
     sendUserInput: async (input) => {
       if (closed || closing) throw new Error("ModelSession is closed");

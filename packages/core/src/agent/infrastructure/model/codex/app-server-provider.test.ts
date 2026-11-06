@@ -7,6 +7,7 @@ import type {
   ModelSessionForkOpenParams,
   ModelSessionConfig,
   ModelSessionParams,
+  ModelSessionEvent,
 } from "../../../domain/model-port.js";
 import type { AgentEvent } from "../../../../types.js";
 
@@ -143,13 +144,13 @@ function usage(
 }
 
 // Drain session.events until a terminal `result`/`error` arrives.
-async function collectUntilTerminal(session: ModelSession): Promise<AgentEvent[]> {
-  const out: AgentEvent[] = [];
+async function collectUntilTerminal(session: ModelSession): Promise<ModelSessionEvent[]> {
+  const out: ModelSessionEvent[] = [];
   for await (const msg of session.events) {
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
     delete stripped.endedAt;
-    out.push(stripped as unknown as AgentEvent);
+    out.push(stripped as unknown as ModelSessionEvent);
     if (msg.type === "result" || msg.type === "error") break;
   }
   return out;
@@ -855,6 +856,53 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
+  it("forks natively at a checkpoint a failed turn has moved past", async () => {
+    let turns = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
+        return { thread: { id: "source-thread", historyMode: "paginated" } };
+      }
+      if (method === "turn/start") {
+        turns += 1;
+        const id = `turn-${turns}`;
+        captured.onNotification!("turn/completed", {
+          threadId: "source-thread",
+          turn:
+            turns === 1
+              ? { id, status: "completed" }
+              : { id, status: "failed", error: { message: "upstream failed" } },
+        });
+        return { turn: { id } };
+      }
+      if (method === "thread/fork") return { thread: { id: "fork-thread" } };
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(buildParams());
+    for (const text of ["first", "second"]) {
+      const collected = collectUntilTerminal(source);
+      await source.sendUserInput({ text });
+      await collected;
+    }
+    const fork = await source.fork({
+      mode: "ephemeral",
+      configurationMode: "exact",
+      sourceCheckpoint: "turn-1",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({ threadId: "source-thread", lastTurnId: "turn-1" }),
+    );
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
+
+    await forkSession.close();
+    await source.close();
+  });
+
   it("never borrows the source thread for a fork that must survive its turn", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -1291,6 +1339,7 @@ describe("CodexAppServerProvider", () => {
 
       appServerManager.setDefaultProvider("rome_credits");
       expect(await first).toEqual([
+        { type: "model_turn_started", modelTurnId: "turn-1" },
         expect.objectContaining({
           type: "error",
           error:
@@ -1350,6 +1399,7 @@ describe("CodexAppServerProvider", () => {
     const failed = collectUntilTerminal(session);
     await session.sendUserInput({ text: "first" });
     expect(await failed).toEqual([
+      { type: "model_turn_started", modelTurnId: "turn-1" },
       expect.objectContaining({
         type: "error",
         error: "Codex stopped before the turn finished: codex app-server exited (code 137)",
@@ -1703,7 +1753,6 @@ describe("CodexAppServerProvider", () => {
     });
 
     const session = await provider.openSession(buildParams());
-    expect(session.appliedReasoningEffort).toBeUndefined();
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "weather?", reasoningEffort: "xhigh" });
     const msgs = await collected;
@@ -1719,8 +1768,12 @@ describe("CodexAppServerProvider", () => {
     ]);
     const result = msgs.find((m) => m.type === "result");
     expect(result).toMatchObject({ type: "result", content: "It's sunny." });
-    expect(session.lastCompletedTurnCheckpoint).toBe("turn-1");
+    expect(msgs.filter((m) => m.type === "model_turn_started")).toEqual([
+      { type: "model_turn_started", modelTurnId: "turn-1" },
+    ]);
     expect(result).toMatchObject({
+      reasoningEffort: "xhigh",
+      position: { provider: "openai", modelThreadId: "thr-1", checkpointId: "turn-1" },
       accounting: {
         usage: {
           inputTokens: 5,
@@ -1745,8 +1798,6 @@ describe("CodexAppServerProvider", () => {
       "turn/start",
       expect.objectContaining({ threadId: "thr-1", effort: "xhigh" }),
     );
-    // Codex applies each turn's own effort and reports it in its own terms.
-    expect(session.appliedReasoningEffort).toBe("xhigh");
     await session.close();
   });
 
@@ -1781,9 +1832,8 @@ describe("CodexAppServerProvider", () => {
       type: "result",
       accounting: { stop: { reason: "interrupted", raw: "interrupted" }, stopReason: "end_turn" },
     });
-    // The adapter still offers this turn as a checkpoint; AgentSession is
-    // what declines to persist it for an interrupted turn.
-    expect(session.lastCompletedTurnCheckpoint).toBe("turn-1");
+    // A turn cut short has no checkpoint to offer.
+    expect(result).not.toHaveProperty("position.checkpointId");
     await session.close();
   });
 
@@ -2763,14 +2813,15 @@ describe("CodexAppServerProvider", () => {
     });
 
     const session = await provider.openSession(buildParams());
-    expect(session.lastProviderTurnId).toBeUndefined();
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "hi" });
-    expect((await collected).at(-1)).toMatchObject({ type: "error" });
 
     // A failed turn is no resume checkpoint, but it still reached the provider.
-    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
-    expect(session.lastProviderTurnId).toBe("turn-1");
+    const events = await collected;
+    expect(events).toContainEqual({ type: "model_turn_started", modelTurnId: "turn-1" });
+    const terminal = events.at(-1);
+    expect(terminal).toMatchObject({ type: "error" });
+    expect(terminal).not.toHaveProperty("position");
     expect(session.funding).toBe("byok");
     funding = "rome_credits";
     expect(session.funding).toBe("rome_credits");

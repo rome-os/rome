@@ -11,14 +11,14 @@
 // `AsyncMessageQueue` on the Anthropic side.
 
 import { Mutex } from "async-mutex";
-import type { AgentEvent } from "../../../../types.js";
+import type { ModelSessionEvent } from "../../../domain/model-port.js";
 
 export class AgentMessageSink {
-  private buffer: AgentEvent[] = [];
-  private resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+  private buffer: ModelSessionEvent[] = [];
+  private resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   private done = false;
 
-  push(msg: AgentEvent): void {
+  push(msg: ModelSessionEvent): void {
     if (this.done) return;
     if (this.resolvers.length > 0) {
       const r = this.resolvers.shift()!;
@@ -37,13 +37,13 @@ export class AgentMessageSink {
     }
   }
 
-  iter(): AsyncIterable<AgentEvent> {
-    const next = async (): Promise<IteratorResult<AgentEvent>> => {
+  iter(): AsyncIterable<ModelSessionEvent> {
+    const next = async (): Promise<IteratorResult<ModelSessionEvent>> => {
       if (this.buffer.length > 0) {
         return { value: this.buffer.shift()!, done: false };
       }
       if (this.done) return { value: undefined as never, done: true };
-      return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
+      return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
         this.resolvers.push(resolve);
       });
     };

@@ -23,7 +23,11 @@ import {
   DiagLogLevel,
   SpanStatusCode,
 } from "@opentelemetry/api";
-import { setTelemetryBridge, type ChannelInbound } from "@rome-os/app-runtime";
+import {
+  setTelemetryBridge,
+  type AgentAccounting,
+  type ChannelInbound,
+} from "@rome-os/app-runtime";
 import { currentSessionId, runWithSession } from "./telemetry-context.js";
 import { resolveInstanceSlug, runningInsideDocker } from "./lib/runtime.js";
 import { createLogger } from "./logger.js";
@@ -358,6 +362,26 @@ export function modelTokenMetricAttributes(
     ...(attribution.agentName ? { "agent.name": attribution.agentName } : {}),
     ...(attribution.appStoreListingId ? { "rome.app.id": attribution.appStoreListingId } : {}),
   };
+}
+
+/** Record a turn's duration and tokens from its accounting, attributed by the run. */
+export function recordModelTurnMetrics(
+  accounting: AgentAccounting | undefined,
+  attribution: ModelMetricAttribution,
+): void {
+  if (!accounting) return;
+  const { model, durationMs, usage } = accounting;
+  if (typeof durationMs === "number" && Number.isFinite(durationMs)) {
+    modelTurnDurationMetric().record(durationMs, { model });
+  }
+  const tokens = modelTokensMetric();
+  // Cache reads and writes are billed on the input path, and the "in" series
+  // shows the total input work sent.
+  const inTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  if (inTokens > 0) tokens.add(inTokens, modelTokenMetricAttributes(model, "in", attribution));
+  if (usage.outputTokens > 0) {
+    tokens.add(usage.outputTokens, modelTokenMetricAttributes(model, "out", attribution));
+  }
 }
 
 export const actionDurationMetric = lazyDurationHistogram(

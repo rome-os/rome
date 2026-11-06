@@ -1,3 +1,4 @@
+import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type { AgentEvent, McpServerConfig } from "../types.js";
 import type { ActionRegistry } from "../actions/types.js";
 import type {
@@ -32,6 +33,8 @@ import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 
 const log = createLogger("agent-runner");
+
+import type { ModelSessionEvent } from "../agent/index.js";
 
 // The model provider port lives in the agent context; these re-exports keep
 // today's importers compiling until they import it from there.
@@ -91,18 +94,18 @@ export interface ModelRunParams {
  */
 export function createSessionFromRun(
   providerId: ProviderId,
-  run: (params: ModelRunParams) => AsyncIterable<AgentEvent>,
+  run: (params: ModelRunParams) => AsyncIterable<AgentEvent | ModelSessionEvent>,
   params: ModelSessionParams,
 ): ModelSession {
   // Standard async-queue: emit() either hands the value to a waiting
   // consumer (resolvers FIFO) or buffers it for the next next() call. Don't
   // share a single `pending` slot — back-to-back emits would clobber each
   // other since the consumer hasn't had a chance to await again yet.
-  const buffer: AgentEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+  const buffer: ModelSessionEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentEvent) => {
+  const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       const r = resolvers.shift()!;
@@ -112,15 +115,15 @@ export function createSessionFromRun(
     }
   };
 
-  const events: AsyncIterable<AgentEvent> = {
+  const events: AsyncIterable<ModelSessionEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentEvent>> {
+        async next(): Promise<IteratorResult<ModelSessionEvent>> {
           if (buffer.length > 0) {
             return { value: buffer.shift()!, done: false };
           }
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -128,15 +131,10 @@ export function createSessionFromRun(
     },
   };
 
-  let appliedReasoningEffort: string | undefined;
-
   return {
     providerId,
     model: params.config.model,
     events,
-    get appliedReasoningEffort(): string | undefined {
-      return appliedReasoningEffort;
-    },
     async sendUserInput(input: ModelUserInput): Promise<void> {
       // ModelRunParams is a per-turn snapshot for legacy `run()`-based mock
       // providers — call the getters here so each turn sees the current view.
@@ -158,9 +156,13 @@ export function createSessionFromRun(
         executeAction: params.executeAction,
         executeSubagent: params.executeSubagent,
       };
-      appliedReasoningEffort = runParams.reasoningEffort;
+      const { reasoningEffort } = runParams;
       for await (const msg of run(runParams)) {
-        emit(msg);
+        emit(
+          msg.type === "result"
+            ? { reasoningEffort: reasoningEffort ?? DEFAULT_REASONING_EFFORT, ...msg }
+            : msg,
+        );
       }
     },
     async fork(): Promise<ModelSessionFork> {
@@ -187,14 +189,14 @@ export function createSessionFromRun(
  * For a correctly-configured code-backed agent a turn middleware short-circuits
  * every turn, so `sendUserInput` is never reached. If it is (no middleware
  * matched — a misconfiguration), the turn is terminated gracefully with a
- * fallback result rather than hanging, so the session never wedges.
+ * fallback error rather than hanging, so the session never wedges.
  */
 export function createNullModelSession(params: ModelSessionParams): ModelSession {
-  const buffer: AgentEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+  const buffer: ModelSessionEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentEvent) => {
+  const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       resolvers.shift()!({ value: msg, done: false });
@@ -203,13 +205,13 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     }
   };
 
-  const events: AsyncIterable<AgentEvent> = {
+  const events: AsyncIterable<ModelSessionEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentEvent>> {
+        async next(): Promise<IteratorResult<ModelSessionEvent>> {
           if (buffer.length > 0) return { value: buffer.shift()!, done: false };
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -226,7 +228,7 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     events,
     async sendUserInput(): Promise<void> {
       emit({ type: "text", content: FALLBACK });
-      emit({ type: "result", content: FALLBACK });
+      emit({ type: "error", error: "No handler took this turn" });
     },
     async fork(): Promise<ModelSessionFork> {
       throw new Error("a code-backed agent session cannot fork");
