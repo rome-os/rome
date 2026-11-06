@@ -244,27 +244,27 @@ function useSessionsExplorerState() {
 
 type SessionsExplorerState = ReturnType<typeof useSessionsExplorerState>;
 
-/**
- * The landmark and safe-area frame the shell-less mount needs.
- *
- * `/sessions/*` renders inside `RomeShellLayout`, which owns the one `main`, so
- * a layout that added its own would nest a second one. `/full/apps/sessions/*`
- * routes outside that shell, so there the page owns the landmark, the top inset,
- * and the bounded height — the same frame this page's overview and detail views
- * carry. Without it the inventory is the one full-mode view with no landmark,
- * and its content sits under the notch.
- */
-function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children: ReactNode }) {
-  if (!fullMode) return children;
+/** The shell supplies the landmark in shell mode, so only full mode owns a `main`. */
+function SessionsListFrame({
+  fullMode,
+  header,
+  children,
+}: {
+  fullMode: boolean;
+  header: ReactNode;
+  children: ReactNode;
+}) {
+  const Frame = fullMode ? "main" : "div";
   return (
-    <main
+    <Frame
       data-safe-area-bounded
       className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
     >
+      {header}
       <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
         {children}
       </div>
-    </main>
+    </Frame>
   );
 }
 
@@ -719,8 +719,10 @@ function SessionsIndexPage({
   if (view === "sessions") {
     return (
       <TooltipProvider delayDuration={150}>
-        <SessionsListFrame fullMode={fullMode}>
-          <ActivityHeader title="Sessions" viewSwitch={viewSwitch} />
+        <SessionsListFrame
+          fullMode={fullMode}
+          header={<ActivityHeader title="Sessions" viewSwitch={viewSwitch} />}
+        >
           <Page>
             <PendingApprovalsBanner />
             <ListToolbar aria-label="Filter sessions">
@@ -1036,60 +1038,58 @@ function SessionsIndexPage({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <main
-        data-safe-area-bounded
-        className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
+      <SessionsListFrame
+        fullMode={fullMode}
+        header={
+          <ActivityHeader
+            title="Overview"
+            viewSwitch={viewSwitch}
+            actions={
+              <>
+                {rangeSelect}
+                {refreshButton}
+              </>
+            }
+          >
+            {activeFilters.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Separator className="h-5" orientation="vertical" />
+                {activeFilters.map((filter) => (
+                  <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
+                    {filter.label}
+                    <span aria-hidden>×</span>
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </ActivityHeader>
+        }
       >
-        <ActivityHeader
-          title="Overview"
-          viewSwitch={viewSwitch}
-          actions={
-            <>
-              {rangeSelect}
-              {refreshButton}
-            </>
-          }
-        >
-          {activeFilters.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <Separator className="h-5" orientation="vertical" />
-              {activeFilters.map((filter) => (
-                <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
-                  {filter.label}
-                  <span aria-hidden>×</span>
-                </Button>
-              ))}
-            </div>
-          ) : null}
-        </ActivityHeader>
-
-        <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
-          <PendingApprovalsBanner className="px-5 pt-4" />
-          <SessionsOverview
-            data={metrics.data}
-            error={metrics.error}
-            loading={metrics.loading}
-            metric={metric}
-            trendBy={trendBy}
-            groupBy={groupBy}
-            recentSessions={recentInventory.data?.sessions ?? []}
-            recentSessionsError={recentInventory.error}
-            recentSessionsLoading={recentInventory.loading}
-            onMetricChange={setMetric}
-            onTrendByChange={setTrendBy}
-            onGroupByChange={setGroupBy}
-            onGroupSelect={groupSelect}
-            onRecentSessionOpen={openSession}
-            onSeriesSelect={seriesSelect}
-            onViewAllSessions={() => {
-              setSort("activity");
-              setSortDirection("desc");
-              setOffset(0);
-              navigate("all", { relative: "path" });
-            }}
-          />
-        </div>
-      </main>
+        <PendingApprovalsBanner className="px-5 pt-4" />
+        <SessionsOverview
+          data={metrics.data}
+          error={metrics.error}
+          loading={metrics.loading}
+          metric={metric}
+          trendBy={trendBy}
+          groupBy={groupBy}
+          recentSessions={recentInventory.data?.sessions ?? []}
+          recentSessionsError={recentInventory.error}
+          recentSessionsLoading={recentInventory.loading}
+          onMetricChange={setMetric}
+          onTrendByChange={setTrendBy}
+          onGroupByChange={setGroupBy}
+          onGroupSelect={groupSelect}
+          onRecentSessionOpen={openSession}
+          onSeriesSelect={seriesSelect}
+          onViewAllSessions={() => {
+            setSort("activity");
+            setSortDirection("desc");
+            setOffset(0);
+            navigate("all", { relative: "path" });
+          }}
+        />
+      </SessionsListFrame>
     </TooltipProvider>
   );
 }
@@ -1671,12 +1671,15 @@ function ActivityEventsRoute() {
   const [params] = useSearchParams();
   const fullMode = useActivityBase() !== "/sessions";
   return (
-    <SessionsListFrame fullMode={fullMode}>
-      <ActivityPage
-        viewSwitch={<ActivityViewSwitch view="events" />}
-        initialFilter={params.get("status") === "pending" ? "pending" : "all"}
-      />
-    </SessionsListFrame>
+    <ActivityPage
+      viewSwitch={<ActivityViewSwitch view="events" />}
+      initialFilter={params.get("status") === "pending" ? "pending" : "all"}
+      renderFrame={(header, children) => (
+        <SessionsListFrame fullMode={fullMode} header={header}>
+          {children}
+        </SessionsListFrame>
+      )}
+    />
   );
 }
 

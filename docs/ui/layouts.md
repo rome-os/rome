@@ -28,7 +28,7 @@ A page that offers sibling views of one collection puts the `SegmentedControl` a
 
 The split is what the arrangement reads by: the header carries what the page *is*, and the toolbar carries what the reader does to it. `align="end"` is for exactly this header, where the actions are one control on the title's row. A header whose actions may wrap keeps the default `start`.
 
-The [Activity page](../../packages/web/src/pages/SessionsPage.tsx) uses a title-free header shared by Overview, Sessions, and Events. Its switch stays at the leading edge of the top row across all three views. Each view keeps one visually hidden `PageTitle`. View controls sit at the trailing end or in the toolbar below. A title-free header keeps its switch in the same position when the body changes.
+The [Activity page](../../packages/web/src/pages/SessionsPage.tsx) uses a title-free header shared by Overview, Sessions, and Events. Its switch stays at the leading edge of the top row across all three views. Each view keeps one visually hidden `PageTitle`. View controls sit at the trailing end or in the toolbar below. All three views share one bounded frame, with the header above the body's scroll region. The switch stays in the same position when the body changes or scrolls, in shell and full mode.
 
 ## What the slots are built from
 
