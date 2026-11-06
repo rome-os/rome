@@ -2221,6 +2221,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
+        this.lastPosition = undefined;
         if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
           this.previousModel = previous.model;
