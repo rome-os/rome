@@ -26,6 +26,8 @@ Each instance sends its whole dashboard allow-list to Rome Cloud whenever the gu
 
 Rome Cloud holds a copy of every instance's visitor emails. The copy can lag the instance when a sync is still in flight or failed. A lagging copy can only show an instance its visitor cannot open, or hide one they can. It never lets anyone in, because the instance refuses a visitor its own list does not name.
 
-Delivery runs in the background and never fails or slows the save. A failed send retries with backoff, and only the newest list is ever sent. A newer revision that reaches Rome Cloud first wins over an older one that arrives late. An instance with no Rome Cloud credential sends nothing and sends its list once it links.
+Delivery runs in the background and never fails or slows the save. A failed send retries with backoff, and only the newest list is ever sent. A newer revision that reaches Rome Cloud first wins over an older one that arrives late. When Rome Cloud holds a higher revision than the instance, as after a database reset or a restore from an older backup, the instance stores a revision past it and sends the list again. An unlinked instance sends nothing and sends its list once it links.
 
-Future diffs must respect three things. No sign-in path trusts Rome Cloud's copy of the list in place of the instance's own. A visitor code never leaves the instance as a guardian credential, and the role comes only from the signed identity token. Logs about the sync and about sign-in name counts, revisions, and outcomes, never an email.
+The instance refuses to save a list longer than Rome Cloud accepts, 500 addresses of up to 320 characters each, so a sync never fails on size.
+
+Future diffs must respect two things. No sign-in path trusts Rome Cloud's copy of the list in place of the instance's own. Logs about the sync and about sign-in name counts, revisions, and outcomes, never an email.
