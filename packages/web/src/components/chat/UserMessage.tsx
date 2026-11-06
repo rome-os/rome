@@ -46,7 +46,8 @@ export const UserMessage = memo(
         msg={msg}
         text={text}
         own={own}
-        className={cn(own && sourceBadge ? "w-full" : "max-w-[70%]", !own && "self-start")}
+        // The bubble's cap follows the message row, not a wider attribution footer.
+        className={cn(own && sourceBadge ? "max-w-[70cqw]" : "max-w-[70%]", !own && "self-start")}
       />
     );
     // Timestamp + copy under the bubble. Hover-revealed on pointer devices,
@@ -116,11 +117,11 @@ export const UserMessage = memo(
     }
     return (
       <div className="group mb-4 flex items-start justify-end gap-2">
-        <div className="flex min-w-0 flex-1 flex-col items-end">
+        <div className={cn("flex min-w-0 flex-1 flex-col items-end", sourceBadge && "@container")}>
           {sourceBadge ? (
-            <div className="flex min-w-0 max-w-[70%] flex-col">
+            <div className="flex min-w-0 max-w-full flex-col items-end">
               {bubble}
-              <div className="mt-1 flex min-w-0 items-center gap-2">
+              <div className="mt-1 flex w-full min-w-0 items-center gap-2">
                 {sourceBadge}
                 {actions}
               </div>

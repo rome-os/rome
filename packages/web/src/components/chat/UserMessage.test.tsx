@@ -267,6 +267,14 @@ describe("UserMessage sender", () => {
     expect(footer.classList.contains("flex")).toBe(true);
     expect(footer.children[0]).toBe(badge);
     expect(footer.children[1]).toBe(actions);
+    const bubble = screen.getByText(content).closest(".bg-primary")!;
+    expect(bubble.classList.contains("w-full")).toBe(false);
+    expect(bubble.classList.contains("max-w-[70cqw]")).toBe(true);
+    expect(bubble.parentElement).toBe(footer.parentElement);
+    expect(bubble.parentElement?.classList.contains("items-end")).toBe(true);
+    expect(bubble.parentElement?.classList.contains("max-w-full")).toBe(true);
+    expect(bubble.parentElement?.parentElement?.classList.contains("@container")).toBe(true);
+    expect(footer.classList.contains("w-full")).toBe(true);
     expect(actions.contains(screen.getByRole("button", { name: "message.copy" }))).toBe(true);
     expect(badge.closest('[class*="opacity-0"]')).toBeNull();
     expect(badge.classList.contains("min-w-0")).toBe(true);
