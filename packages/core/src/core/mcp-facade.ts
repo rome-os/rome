@@ -8,14 +8,14 @@
 //
 // Adapters wrap these for whichever SDK the provider speaks:
 //
-//   - Anthropic side (`anthropic-mcp-servers.ts`) wraps each into `tool()` +
+//   - Anthropic side (`agent/infrastructure/model/anthropic/mcp-servers.ts`) wraps each into `tool()` +
 //     `createSdkMcpServer()` from `@anthropic-ai/claude-agent-sdk`,
 //     converting the JSON schema to a zod shape because that's what the SDK
 //     accepts.
 //   - Codex side (`codex/rome-dynamic-tools.ts`) flattens them into app-server
 //     `dynamicTools` and calls the same handlers in process.
 //
-// The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
+// The Anthropic MCP-server test (`anthropic/mcp-servers.test.ts`) is the
 // regression gate for this module.
 
 import { isValidTimeZone } from "../lib/timezone.js";
