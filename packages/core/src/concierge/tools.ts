@@ -474,7 +474,9 @@ export async function buildConciergeTools(
           const requestedSkill = optionalString(args, "skill");
           const skill = requestedSkill ? service.deps.skillCatalog.get(requestedSkill) : undefined;
           if (args.skill !== undefined && !skill) {
-            throw new Error(`Unknown skill: ${String(args.skill)}. Use search_skills to find it.`);
+            throw new Error(
+              `Unknown skill: ${String(args.skill)}. Pass the exact name from the slash command.`,
+            );
           }
           const taskId = optionalString(args, "taskId");
           const messageId = optionalString(args, "messageId");

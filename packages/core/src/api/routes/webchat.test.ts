@@ -3672,12 +3672,15 @@ describe("Webchat API", () => {
       const prompt = turns.at(-1)?.prompt;
       expect(prompt).toContain("Acknowledge with `say` first");
       expect(prompt).toContain("`chat_start`");
-      expect(prompt).toContain('"agent":"main","skill":"coding:app_creation"');
+      expect(prompt).toContain('`agent: "main"`, `skill: "coding:app_creation"`');
+      // Concierge writes the brief itself, so it can add conversation context.
+      expect(prompt).toContain("plus any context from this conversation or a quoted message");
+      expect(prompt).not.toContain('"brief"');
       expect(prompt).not.toContain("read_skill");
       expect(prompt).toContain(
         body.text?.includes("Build")
-          ? '"brief":"Build a tracker"'
-          : "Ask the guardian what they want to do with this skill.",
+          ? "Request: Build a tracker"
+          : "The guardian did not include any task text.",
       );
     }
     const messages = await deps.webchatRepo.getMessages("concierge-skills");
