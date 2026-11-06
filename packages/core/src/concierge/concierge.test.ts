@@ -23,6 +23,7 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { readWebchatMessages } from "../chats/dashboard/webchat.js";
 import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import { startConciergeEvents } from "./events.js";
+import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import {
   CONCIERGE_ACCOUNT,
@@ -265,10 +266,14 @@ function setup(
     runBackendTurn: async (params: BackendTurnParams, turn?: { quiet?: boolean }) => {
       backendTurns.push(params);
       quietFlags.push(turn?.quiet === true);
-      await onBackendTurn(params);
+      return (await onBackendTurn(params)) ?? "completed";
     },
   } as unknown as ConciergeDeps;
-  let onBackendTurn: (params: BackendTurnParams) => Promise<void> | void = () => {};
+  /** A system turn's outcome: it ran to its end unless the hook says it failed. */
+  type BackendOutcome = "completed" | "failed" | undefined;
+  let onBackendTurn: (
+    params: BackendTurnParams,
+  ) => Promise<BackendOutcome | void> | BackendOutcome | void = () => {};
   const service = new ConciergeService(deps);
   service.attachDashboard({ chats, send });
   const context = (agentName = CONCIERGE_AGENT_ID): SessionToolContext => ({
@@ -1299,6 +1304,24 @@ describe("Concierge events", () => {
     expect(s.quietFlags).toEqual([true]);
   });
 
+  it("hands a task's result over again once the Concierge's own turns run, however long it was out", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "failed");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await rs.advanceTimersByTimeAsync(3 * RETRY_MS);
+    expect(s.backendTurns).toHaveLength(4);
+
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.backendTurns).toHaveLength(5);
+    expect(s.backendTurns[4].prompt).toContain(
+      `<task id="${taskId}" chat_id="${chatId}" title="Flights" state="doing" changes="turn_end:completed by=concierge">`,
+    );
+  });
+
   it("tells the Concierge of a failed turn at once, with its cause, and holds a stopped one", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
@@ -2233,7 +2256,7 @@ describe("Concierge chats", () => {
     const s = setup({ startEvents: false });
     s.deps.sessionRepository.current = (async (key: string) =>
       key === `webchat:${TOPIC_CHAT}` ? null : { id: "runtime-1" }) as never;
-    expect(await s.service.runSystemTurn(TOPIC_CHAT, "<task_events/>")).toBe(false);
+    expect(await s.service.runSystemTurn(TOPIC_CHAT, "<task_events/>")).toBe(true);
     expect(s.chats.openSession).toHaveBeenCalledWith(TOPIC_CHAT);
     expect(s.backendTurns.at(-1)).toMatchObject({
       sessionId: `opened-${TOPIC_CHAT}`,

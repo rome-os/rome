@@ -108,13 +108,14 @@ export async function renderTaskEvents(
   tasks: DirtyTask[],
 ): Promise<TaskEventDelivery[]> {
   const { tasks: store, messages } = service.deps;
-  const byChat = new Map<string, { blocks: string[]; quiet: boolean }>();
+  const byChat = new Map<string, { taskIds: string[]; blocks: string[]; quiet: boolean }>();
   for (const task of tasks) {
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
     const { row } = found;
-    const group = byChat.get(row.chatId ?? "") ?? { blocks: [], quiet: true };
+    const group = byChat.get(row.chatId ?? "") ?? { taskIds: [], blocks: [], quiet: true };
     byChat.set(row.chatId ?? "", group);
+    group.taskIds.push(task.taskId);
     group.quiet &&= task.quiet;
     const blocks = group.blocks;
     const changes = task.changes.map((change) => change.kind);
@@ -152,8 +153,9 @@ export async function renderTaskEvents(
       .join(" ");
     blocks.push(`<task ${attrs}>\n${lines.join("\n")}\n</task>`);
   }
-  return [...byChat.entries()].map(([chatId, { blocks, quiet }]) => ({
+  return [...byChat.entries()].map(([chatId, { taskIds, blocks, quiet }]) => ({
     chatId: chatId || null,
+    taskIds,
     prompt: `<task_events>\n${blocks.join("\n")}\n</task_events>`,
     quiet,
   }));
@@ -176,7 +178,7 @@ export function startConciergeEvents(
     deliver: async ({ chatId: from, prompt, quiet }) => {
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from);
-      if (chatId) await service.runSystemTurn(chatId, prompt, { quiet });
+      return chatId !== null && (await service.runSystemTurn(chatId, prompt, { quiet }));
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
