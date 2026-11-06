@@ -79,9 +79,36 @@ export interface ModelProvider {
  */
 export type ThreadStart = { kind: "new" } | { kind: "resume"; providerThreadId: string };
 
-export interface ModelSessionParams {
+/**
+ * Value object. Everything the model sees before the first turn, fixed for the
+ * session. The run composes it; the adapter passes it through and changes
+ * nothing in it.
+ */
+export interface ModelPrefix {
   model: string;
   systemPrompt: string;
+  /** Rome-canonical names, already filtered against `ModelProvider.builtinTools`. */
+  builtinTools: string[];
+  reasoningEffort?: ModelReasoningEffort;
+  /** Provider-native JSON Schema for every final answer. */
+  outputSchema?: Record<string, unknown>;
+  workingDir?: string;
+  /** Only the provider can mount these next to its builtin tools. */
+  externalMcpServers?: Record<string, McpServerConfig>;
+  /**
+   * Set on the shell the builtin tools run in; `undefined` clears a variable
+   * the Rome process inherited. The adapter reads none of it.
+   */
+  env?: Record<string, string | undefined>;
+  /**
+   * Agentic rounds one turn may take before the provider ends it. Only Claude
+   * honours it; it stays while an agent config (`image-gen`) sets it.
+   */
+  maxTurns?: number;
+}
+
+export interface ModelSessionParams {
+  prefix: ModelPrefix;
   agentName?: string;
   /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
   appStoreListingId?: string;
@@ -98,21 +125,12 @@ export interface ModelSessionParams {
    */
   getSkillCatalog: () => SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  /** Provider-native final-response JSON Schema for every model turn. */
-  outputSchema?: Record<string, unknown>;
-  builtinTools?: string[];
-  maxTurns?: number;
-  reasoningEffort?: ModelReasoningEffort;
-  workingDir?: string;
-  /** The channel the session's turns are delivered on, from its key. Shell
-   *  tools such as the Discord CLI read it to act as that channel's account. */
-  channel?: string;
   /**
    * The agent's text stays in its trace (`policy.finalText: private`), so it
-   * reaches the guardian only through its tools.
+   * reaches the guardian only through its tools. Read by the tool facade for
+   * the `defer` tool's wording; it leaves with the other tool fields.
    */
   textPrivate?: boolean;
-  externalMcpServers?: Record<string, McpServerConfig>;
   /** The thread the session runs on. The provider names the thread. */
   thread: ThreadStart;
   /** Provider-owned fork source. Normal application code should not set this. */

@@ -67,12 +67,14 @@ describe("conversation title generation", () => {
     expect(title).toBe("Q4 launch planning");
     expect(modelResolver.getModelProvider).toHaveBeenCalledWith({ tier: "small" });
     expect(openParams).toMatchObject({
-      model: "small-model",
+      prefix: {
+        model: "small-model",
+        builtinTools: [],
+        maxTurns: 1,
+        reasoningEffort: "low",
+        outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
+      },
       agentName: "conversation-title",
-      builtinTools: [],
-      maxTurns: 1,
-      reasoningEffort: "low",
-      outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
       thread: { kind: "new" },
     });
     expect(openParams?.getActionCatalog()).toEqual([]);

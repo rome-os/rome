@@ -1358,21 +1358,27 @@ async function openSession(
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): ModelSessionParams => ({
-    model: resolution.model,
-    systemPrompt,
+    prefix: {
+      model: resolution.model,
+      systemPrompt,
+      builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
+      reasoningEffort,
+      outputSchema: config.outputSchema,
+      workingDir,
+      externalMcpServers,
+      // The channel the session's turns are delivered on, from its key. Shell
+      // tools such as the Discord CLI read it to act as that channel's
+      // account. Set even when undefined, so a value Rome itself inherited
+      // never leaks in.
+      env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
+      maxTurns: config.maxTurns,
+    },
     agentName: key.agentName,
     appStoreListingId,
     getActionCatalog,
     getSkillCatalog,
     subagentTools,
-    outputSchema: config.outputSchema,
-    builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
-    maxTurns: config.maxTurns,
-    reasoningEffort,
-    workingDir,
-    channel: sessionKeyChannel(key.channelThreadKey),
     textPrivate: resolveSessionPolicy(config).finalText === "private",
-    externalMcpServers,
     // A thread resumes only on the provider that named it; another provider
     // starts a new one.
     thread:
@@ -1447,17 +1453,19 @@ async function openSession(
     if (fork.mode !== "exact") {
       return {
         params: {
-          model: fork.model,
-          systemPrompt,
+          prefix: {
+            model: fork.model,
+            systemPrompt,
+            builtinTools: [],
+            reasoningEffort,
+            outputSchema: config.outputSchema,
+            workingDir,
+          },
           agentName: key.agentName,
           appStoreListingId,
-          workingDir,
           getActionCatalog: () => [],
           getSkillCatalog: () => [],
           subagentTools: [],
-          outputSchema: config.outputSchema,
-          builtinTools: [],
-          reasoningEffort,
           executeAction: async () => {
             throw new Error("Actions are disabled in forked turns");
           },
@@ -1551,7 +1559,7 @@ async function openSession(
     return {
       params: {
         ...liveOpenParams,
-        model: fork.model,
+        prefix: { ...liveOpenParams.prefix, model: fork.model },
         executeAction: makeExecuteAction(refs),
         executeSubagent: makeExecuteSubagent(refs),
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,

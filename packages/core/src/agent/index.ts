@@ -19,6 +19,7 @@ export { ActiveSessionExistsError, type SessionRepository } from "./domain/sessi
 export type { ModelTier } from "./domain/model-tier.js";
 export type {
   ActionMcpDefinition,
+  ModelPrefix,
   ModelProvider,
   ModelReasoningEffort,
   ModelSession,

@@ -184,14 +184,16 @@ describe("bundled Codex app-server", () => {
   });
 
   const sessionParams = (model: string, builtinTools: string[]): ModelSessionParams => ({
-    model,
-    systemPrompt: "Integration-test thread; do not modify files.",
+    prefix: {
+      model,
+      systemPrompt: "Integration-test thread; do not modify files.",
+      builtinTools,
+      workingDir: home,
+    },
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
     subagentTools: [],
-    builtinTools,
     thread: { kind: "new" },
-    workingDir: home,
     executeAction: async () => ({ ok: true }),
     executeSubagent: async () => "unused",
   });

@@ -88,16 +88,18 @@ export function createConversationTitleGenerator(
       const operation = (async () => {
         const resolution = await modelResolver.getModelProvider({ tier: "small" });
         const openedSession = await resolution.modelProvider.openSession({
-          model: resolution.model,
-          systemPrompt: TITLE_SYSTEM_PROMPT,
-          outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
+          prefix: {
+            model: resolution.model,
+            systemPrompt: TITLE_SYSTEM_PROMPT,
+            builtinTools: [],
+            reasoningEffort: "low",
+            outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
+            maxTurns: 1,
+          },
           agentName: "conversation-title",
           getActionCatalog: () => [],
           getSkillCatalog: () => [],
           subagentTools: [],
-          builtinTools: [],
-          maxTurns: 1,
-          reasoningEffort: "low",
           thread: { kind: "new" },
           executeAction: async () => {
             throw new Error("Conversation title generation cannot execute actions");

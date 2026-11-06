@@ -185,7 +185,7 @@ function buildThreadConfigurationOverrides(
   params: ModelSessionForkOpenParams,
   model: string,
 ): ThreadConfigurationOverrides {
-  const tools = codexToolOverrides(params.builtinTools);
+  const tools = codexToolOverrides(params.prefix.builtinTools);
   const config: Record<string, unknown> = {
     model_reasoning_summary: "detailed",
     hide_agent_reasoning: false,
@@ -194,18 +194,23 @@ function buildThreadConfigurationOverrides(
     "tools.update_plan.enabled": true,
     ...tools.config,
   };
-  if (params.externalMcpServers && Object.keys(params.externalMcpServers).length > 0) {
-    config.mcp_servers = params.externalMcpServers;
+  if (
+    params.prefix.externalMcpServers &&
+    Object.keys(params.prefix.externalMcpServers).length > 0
+  ) {
+    config.mcp_servers = params.prefix.externalMcpServers;
   }
-  // The dotted key adds one variable. A nested shell_environment_policy table
-  // would replace the server-wide exclude that hides ROME_CREDITS_TOKEN.
-  if (params.channel) config["shell_environment_policy.set.ROME_CHANNEL"] = params.channel;
+  // A dotted key adds one variable each. A nested shell_environment_policy
+  // table would replace the server-wide exclude that hides ROME_CREDITS_TOKEN.
+  for (const [name, value] of Object.entries(params.prefix.env ?? {})) {
+    if (value !== undefined) config[`shell_environment_policy.set.${name}`] = value;
+  }
   return {
     model,
-    cwd: params.workingDir ?? null,
+    cwd: params.prefix.workingDir ?? null,
     sandbox: tools.sandbox,
     approvalPolicy: "never",
-    baseInstructions: params.systemPrompt,
+    baseInstructions: params.prefix.systemPrompt,
     config,
   };
 }
@@ -611,9 +616,9 @@ export class CodexAppServerProvider implements ModelProvider {
       isolated: boolean;
     },
   ): Promise<ModelSession> {
-    const modelName = stripLegacyReasoningSuffix(params.model);
-    const outputValidator = params.outputSchema
-      ? compileOutputSchema(params.outputSchema)
+    const modelName = stripLegacyReasoningSuffix(params.prefix.model);
+    const outputValidator = params.prefix.outputSchema
+      ? compileOutputSchema(params.prefix.outputSchema)
       : undefined;
 
     // Rome-owned actions, skills, subagents, and interactive tools use
@@ -702,7 +707,7 @@ export class CodexAppServerProvider implements ModelProvider {
 
     const session: ModelSession = {
       providerId: this.id,
-      model: params.model,
+      model: params.prefix.model,
       events: sink.iter(),
       providerThreadId:
         params.thread.kind === "resume" ? params.thread.providerThreadId : undefined,
@@ -745,7 +750,7 @@ export class CodexAppServerProvider implements ModelProvider {
         if (turnPhase === "final" || item.phase == null) {
           if (activeTurn) activeTurn.finalText = item.text;
         }
-        if (params.outputSchema) return;
+        if (params.prefix.outputSchema) return;
         const msg: AgentEvent = {
           type: "text",
           content: item.text,
@@ -870,7 +875,7 @@ export class CodexAppServerProvider implements ModelProvider {
         case Notify.agentMessageDelta: {
           const p = params2 as AgentMessageDeltaNotification;
           if (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId)) return;
-          if (p.delta && !params.outputSchema)
+          if (p.delta && !params.prefix.outputSchema)
             activeTurn.sink.push(
               p.itemId
                 ? { type: "text_delta", content: p.delta, blockId: p.itemId }
@@ -959,7 +964,7 @@ export class CodexAppServerProvider implements ModelProvider {
               activeTurn.errorProvider = classification.provider;
               activeTurn.errorReason = classification.reason;
               if (classification.pending) activeTurn.pending.push(classification.pending);
-            } else if (params.outputSchema && p.turn?.status !== "completed") {
+            } else if (params.prefix.outputSchema && p.turn?.status !== "completed") {
               activeTurn.failed = true;
               activeTurn.errorMessage = `Codex app-server structured turn ended with status ${p.turn?.status ?? "unknown"}`;
             }
@@ -1151,7 +1156,9 @@ export class CodexAppServerProvider implements ModelProvider {
         reasoningDeltaParts: new Map(),
       };
       activeTurn = turn;
-      const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
+      const effort = normalizeEffort(
+        inputs.at(-1)?.reasoningEffort ?? params.prefix.reasoningEffort,
+      );
       // A borrowed exact fork runs here too; only the session's own turns report.
       if (runtime === sourceRuntime) appliedReasoningEffort = effort;
       try {
@@ -1169,7 +1176,7 @@ export class CodexAppServerProvider implements ModelProvider {
             threadId: tid,
             input: turnInput,
             effort,
-            ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
+            ...(params.prefix.outputSchema ? { outputSchema: params.prefix.outputSchema } : {}),
             ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
           },
           { expectedProvider },
@@ -1207,7 +1214,7 @@ export class CodexAppServerProvider implements ModelProvider {
               lastCompletedTurnCheckpoint = turn.turnId;
             }
             const accounting = turnAccounting(turn, turn.failed);
-            if (params.outputSchema) {
+            if (params.prefix.outputSchema) {
               try {
                 const structuredOutput: unknown = JSON.parse(turn.finalText);
                 if (outputValidator && !outputValidator.validate(structuredOutput)) {
@@ -1299,7 +1306,7 @@ export class CodexAppServerProvider implements ModelProvider {
       if (input.injectedToolResult) return "deferred";
       if (
         input.reasoningEffort &&
-        normalizeEffort(input.reasoningEffort) !== normalizeEffort(params.reasoningEffort)
+        normalizeEffort(input.reasoningEffort) !== normalizeEffort(params.prefix.reasoningEffort)
       )
         return "deferred";
       const nativeInput = await buildTurnInput(input.text, input.images ?? []);
@@ -1385,8 +1392,8 @@ export class CodexAppServerProvider implements ModelProvider {
             forkParams,
             openParams,
             sourceModelName: modelName,
-            sourceSystemPrompt: params.systemPrompt,
-            sourceWorkingDir: params.workingDir,
+            sourceSystemPrompt: params.prefix.systemPrompt,
+            sourceWorkingDir: params.prefix.workingDir,
           });
           const targetIsCurrentHead =
             forkParams.sourceCheckpoint === undefined ||
@@ -1490,7 +1497,7 @@ export class CodexAppServerProvider implements ModelProvider {
           const isolatedNativeFork = forkParams.configurationMode !== "exact";
           let forkThreadConfiguration = buildThreadConfigurationOverrides(
             openParams,
-            stripLegacyReasoningSuffix(openParams.model),
+            stripLegacyReasoningSuffix(openParams.prefix.model),
           );
           if (isolatedNativeFork) {
             forkThreadConfiguration = constrainIsolatedFork(forkThreadConfiguration);

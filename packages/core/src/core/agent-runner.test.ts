@@ -147,8 +147,7 @@ describe("AgentRunner", () => {
 
   it("mock sessions reject fork with a clear unsupported error", async () => {
     const session = createSessionFromRun("mock", async function* () {}, {
-      model: "mock-model",
-      systemPrompt: "system",
+      prefix: { model: "mock-model", systemPrompt: "system", builtinTools: [] },
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
       subagentTools: [],
@@ -165,8 +164,7 @@ describe("AgentRunner", () => {
 
   it("code-backed null session parks until close and never resumes a provider", async () => {
     const session = createNullModelSession({
-      model: "code-backed",
-      systemPrompt: "unused",
+      prefix: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
       subagentTools: [],
@@ -195,8 +193,7 @@ describe("AgentRunner", () => {
     // sendUserInput is never called. If it is (no middleware matched), the turn
     // must terminate rather than hang: a fallback text + result land on events.
     const session = createNullModelSession({
-      model: "code-backed",
-      systemPrompt: "unused",
+      prefix: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
       subagentTools: [],
@@ -1313,7 +1310,7 @@ describe("AgentRunner", () => {
       );
 
       expect(openParams).toHaveLength(1);
-      expect(openParams[0].model).toBe("claude-haiku-5-5");
+      expect(openParams[0].prefix.model).toBe("claude-haiku-5-5");
       // Forks never write pins: the source session keeps the pin of
       // its own live model even after a tier-overridden forked turn ran.
       const row = await sessionRepository.current("webchat:fork-1", "test-main");
@@ -1609,8 +1606,8 @@ describe("AgentRunner", () => {
       expect(forkOpen!.getActionCatalog()).toEqual([]);
       expect(forkOpen!.getSkillCatalog()).toEqual([]);
       expect(forkOpen!.subagentTools).toEqual([]);
-      expect(forkOpen!.builtinTools).toEqual([]);
-      expect(forkOpen!.reasoningEffort).toBe("high");
+      expect(forkOpen!.prefix.builtinTools).toEqual([]);
+      expect(forkOpen!.prefix.reasoningEffort).toBe("high");
       expect(forkOpen!.supportsInteractiveSurface).toBe(false);
       await expect(forkOpen!.executeAction("demo_action", {})).rejects.toThrow(
         "Actions are disabled in forked turns",
@@ -1692,7 +1689,7 @@ describe("AgentRunner", () => {
 
       const sourceOpen = provider.sessions[0];
       expect(forkOpen).toBeDefined();
-      expect(forkOpen!.systemPrompt).toBe(sourceOpen.systemPrompt);
+      expect(forkOpen!.prefix.systemPrompt).toBe(sourceOpen.prefix.systemPrompt);
       // Same getter references, not equal copies: both sessions must
       // serialize the same catalog snapshot for the tool block to match.
       expect(forkOpen!.getActionCatalog).toBe(sourceOpen.getActionCatalog);
@@ -1701,19 +1698,19 @@ describe("AgentRunner", () => {
       expect(forkOpen!.subagentTools).toBe(sourceOpen.subagentTools);
       expect(forkOpen!.subagentTools.map((t) => t.name)).toContain(EXPLORE_TOOL);
       // test-main declares Read + Edit; Bash stays provider-only in both.
-      expect(forkOpen!.builtinTools).toBe(sourceOpen.builtinTools);
-      expect(forkOpen!.builtinTools).toEqual(["Read", "Edit"]);
+      expect(forkOpen!.prefix.builtinTools).toBe(sourceOpen.prefix.builtinTools);
+      expect(forkOpen!.prefix.builtinTools).toEqual(["Read", "Edit"]);
       // The advertised surface stays identical (prefix identity with the
       // source); only the interactive *runtime* is marked detached, since no
       // webchat drain reads a fork stream.
       expect(forkOpen!.supportsInteractiveSurface).toBe(true);
       expect(forkOpen!.interactiveSurfaceDetached).toBe(true);
-      expect(forkOpen!.maxTurns).toBe(sourceOpen.maxTurns);
-      expect(forkOpen!.workingDir).toBe(sourceOpen.workingDir);
-      expect(forkOpen!.externalMcpServers).toBe(sourceOpen.externalMcpServers);
-      expect(forkOpen!.reasoningEffort).toBe(sourceOpen.reasoningEffort);
+      expect(forkOpen!.prefix.maxTurns).toBe(sourceOpen.prefix.maxTurns);
+      expect(forkOpen!.prefix.workingDir).toBe(sourceOpen.prefix.workingDir);
+      expect(forkOpen!.prefix.externalMcpServers).toBe(sourceOpen.prefix.externalMcpServers);
+      expect(forkOpen!.prefix.reasoningEffort).toBe(sourceOpen.prefix.reasoningEffort);
       // Model follows the source's live model when no tier override is given.
-      expect(forkOpen!.model).toBe(sourceOpen.model);
+      expect(forkOpen!.prefix.model).toBe(sourceOpen.prefix.model);
       // Callbacks must be fresh fork-bound closures, never the source's.
       expect(forkOpen!.executeAction).not.toBe(sourceOpen.executeAction);
       expect(forkOpen!.executeSubagent).not.toBe(sourceOpen.executeSubagent);
@@ -1838,7 +1835,7 @@ describe("AgentRunner", () => {
         { agentName: "test-structured", fork: { mode: "exact" } },
       );
 
-      expect(forkOpen!.outputSchema).toEqual(
+      expect(forkOpen!.prefix.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
       expect(messages.some((message) => message.type === "structured_output")).toBe(false);
@@ -2133,7 +2130,7 @@ describe("AgentRunner", () => {
 
     return {
       providerId: "mock",
-      model: params.model,
+      model: params.prefix.model,
       events: {
         [Symbol.asyncIterator]() {
           return {
@@ -3023,7 +3020,7 @@ describe("AgentRunner", () => {
                 content: "partial output",
                 accounting: {
                   provider: "anthropic",
-                  model: params.model,
+                  model: params.prefix.model,
                   usage: {
                     cacheReadTokens: 0,
                     cacheWriteTokens: 0,
@@ -3077,7 +3074,7 @@ describe("AgentRunner", () => {
                 content: "partial answer",
                 accounting: {
                   provider: "openai",
-                  model: params.model,
+                  model: params.prefix.model,
                   usage: {
                     cacheReadTokens: 0,
                     cacheWriteTokens: 0,
@@ -4531,7 +4528,7 @@ describe("AgentRunner", () => {
           prompt: "Use configured effort",
         }),
       );
-      expect(configuredProvider.sessions[0].reasoningEffort).toBe("low");
+      expect(configuredProvider.sessions[0].prefix.reasoningEffort).toBe("low");
 
       const defaultProvider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       await collectMessages(
@@ -4540,7 +4537,7 @@ describe("AgentRunner", () => {
           prompt: "Use default effort",
         }),
       );
-      expect(defaultProvider.sessions[0].reasoningEffort).toBe("high");
+      expect(defaultProvider.sessions[0].prefix.reasoningEffort).toBe("high");
     });
 
     it("maps tier names correctly (large, medium, small)", async () => {
@@ -4611,7 +4608,7 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-6-luna");
+      expect(openAiSessions[0].prefix.model).toBe("gpt-6-luna");
       await manager.shutdown();
 
       const codexLoggedOut = {
@@ -4688,7 +4685,7 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-5.6-terra");
+      expect(openAiSessions[0].prefix.model).toBe("gpt-5.6-terra");
     });
 
     it("restores the selected model from the session pin on explicit cold resume", async () => {
@@ -4732,11 +4729,11 @@ describe("AgentRunner", () => {
 
       expect(openAiSessions).toHaveLength(2);
       expect(openAiSessions[0]).toMatchObject({
-        model: "gpt-5.6-terra",
+        prefix: { model: "gpt-5.6-terra" },
         thread: { kind: "new" },
       });
       expect(openAiSessions[1]).toMatchObject({
-        model: "gpt-5.6-terra",
+        prefix: { model: "gpt-5.6-terra" },
         thread: { kind: "resume", providerThreadId: "codex-thread-1" },
       });
       expect(resumedMessages.find((message) => message.type === "session_init")).toMatchObject({
@@ -4909,7 +4906,7 @@ describe("AgentRunner", () => {
                 yield { type: "error", error: "Model API failure" };
                 return;
               }
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.prefix.model };
             },
             params,
           );
@@ -4933,7 +4930,7 @@ describe("AgentRunner", () => {
       state.codex.solAccess = false;
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
-      expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
+      expect(opens.map((params) => params.prefix.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
         thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
@@ -4967,7 +4964,7 @@ describe("AgentRunner", () => {
           createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.prefix.model };
             },
             params,
           ),
@@ -5021,7 +5018,7 @@ describe("AgentRunner", () => {
           const session = createSessionFromRun(
             id,
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.prefix.model };
             },
             params,
           );
@@ -5087,7 +5084,7 @@ describe("AgentRunner", () => {
           return createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.prefix.model };
             },
             params,
           );
@@ -5110,7 +5107,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens[0].model).toBe(FABLE_MODEL);
+      expect(opens[0].prefix.model).toBe(FABLE_MODEL);
 
       // A mapping is a Rome-side preference, not an entitlement: it governs
       // new resolutions only. The pinned session stays on the mapped model.
@@ -5140,7 +5137,7 @@ describe("AgentRunner", () => {
           return createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.prefix.model };
             },
             params,
           );
@@ -5159,7 +5156,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol"]);
+      expect(opens.map((params) => params.prefix.model)).toEqual(["gpt-6.1-sol"]);
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
@@ -5212,7 +5209,7 @@ describe("AgentRunner", () => {
       // the stored provider thread; the successful turn then records the pin.
       expect(opens).toHaveLength(1);
       expect(opens[0]).toMatchObject({
-        model: "gpt-6.1-sol",
+        prefix: { model: "gpt-6.1-sol" },
         thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
       expect(await sessionRepository.session(legacyId)).toMatchObject({
@@ -5254,7 +5251,10 @@ describe("AgentRunner", () => {
 
       expect(session.sessionId).not.toBe(mainId);
       expect(opens).toHaveLength(1);
-      expect(opens[0]).toMatchObject({ model: "gpt-5.6-terra", thread: { kind: "new" } });
+      expect(opens[0]).toMatchObject({
+        prefix: { model: "gpt-5.6-terra" },
+        thread: { kind: "new" },
+      });
       await manager.shutdown();
     });
 
@@ -5275,7 +5275,7 @@ describe("AgentRunner", () => {
       });
       await collectMessages(first.sendTurn({ prompt: "Start" }).events);
       await firstManager.shutdown();
-      expect(opens.map((params) => params.model)).toEqual(["gpt-5.6-terra"]);
+      expect(opens.map((params) => params.prefix.model)).toEqual(["gpt-5.6-terra"]);
 
       // Entitlements improved while the session was cold. Tier resolution
       // would now pick Sol; the pin keeps the resume on Terra.
@@ -5288,7 +5288,7 @@ describe("AgentRunner", () => {
 
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        model: "gpt-5.6-terra",
+        prefix: { model: "gpt-5.6-terra" },
         thread: { kind: "resume", providerThreadId: "codex-thread" },
       });
       await resumedManager.shutdown();
@@ -5388,7 +5388,7 @@ describe("AgentRunner", () => {
       expect(rescued.find((message) => message.type === "result")).toMatchObject({
         content: "gpt-5.6-terra",
       });
-      expect(codexOpens.map((params) => params.model)).toEqual(["gpt-5.6-terra"]);
+      expect(codexOpens.map((params) => params.prefix.model)).toEqual(["gpt-5.6-terra"]);
       expect(await sessionRepository.session(strandedId)).toMatchObject({
         provider: "openai",
         model: "gpt-5.6-terra",
@@ -5446,7 +5446,7 @@ describe("AgentRunner", () => {
       });
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
-        model: "claude-opus-4-8[1m]",
+        prefix: { model: "claude-opus-4-8[1m]" },
         thread: { kind: "new" },
       });
       expect(codexOpens).toHaveLength(0);
@@ -5498,7 +5498,7 @@ describe("AgentRunner", () => {
       });
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
-        model: "claude-opus-4-8[1m]",
+        prefix: { model: "claude-opus-4-8[1m]" },
         thread: { kind: "new" },
       });
       expect(codexOpens).toHaveLength(0);
@@ -6262,10 +6262,10 @@ describe("AgentRunner", () => {
       const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
-      expect(provider.sessions[0].outputSchema).toEqual(
+      expect(provider.sessions[0].prefix.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
-      expect(calls[0].outputSchema).toEqual(provider.sessions[0].outputSchema);
+      expect(calls[0].outputSchema).toEqual(provider.sessions[0].prefix.outputSchema);
       expect(events.filter((event) => event.type === "result")).toEqual([
         expect.objectContaining({
           type: "result",
@@ -6358,7 +6358,7 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "hi" }));
 
       expect(provider.sessions).toHaveLength(1);
-      expect(provider.sessions[0].outputSchema).toBeUndefined();
+      expect(provider.sessions[0].prefix.outputSchema).toBeUndefined();
     });
   });
 });
