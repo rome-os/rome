@@ -62,6 +62,7 @@ describe("VisitorAllowListSync", () => {
   it("sends the whole list, lowercased and deduped, with its revision and the instance credential", async () => {
     const cloud = fakeCloud();
     const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
       getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,
@@ -80,14 +81,16 @@ describe("VisitorAllowListSync", () => {
     ]);
   });
 
-  it("does nothing without an instance credential or a Rome Cloud origin", async () => {
+  it("does nothing on an unlinked instance or without a Rome Cloud origin", async () => {
     const cloud = fakeCloud();
     const noToken = new VisitorAllowListSync({
-      getToken: () => null,
+      getEnrollmentId: () => null,
+      getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,
     });
     const noOrigin = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
       getToken: () => "inst-token",
       getOrigin: () => null,
       fetchImpl: cloud.fetchImpl,
@@ -101,11 +104,12 @@ describe("VisitorAllowListSync", () => {
     expect(cloud.sent).toEqual([]);
   });
 
-  it("sends a skipped list once the instance has a credential", async () => {
+  it("sends a skipped list once the instance links", async () => {
     const cloud = fakeCloud();
-    let token: string | null = null;
+    let enrollment: string | null = null;
     const sync = new VisitorAllowListSync({
-      getToken: () => token,
+      getEnrollmentId: () => enrollment,
+      getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,
     });
@@ -114,7 +118,7 @@ describe("VisitorAllowListSync", () => {
     await settle(sync);
     expect(cloud.sent).toEqual([]);
 
-    token = "inst-token";
+    enrollment = "enrollment-1";
     sync.push({ emails: ["ada@example.com"], revision: 3 });
     await settle(sync);
     expect(cloud.sent.map((s) => s.body.revision)).toEqual([3]);
@@ -128,6 +132,7 @@ describe("VisitorAllowListSync", () => {
   it("sends only the newest list and never an older one after it", async () => {
     const cloud = fakeCloud();
     const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
       getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,
@@ -166,6 +171,7 @@ describe("VisitorAllowListSync", () => {
           void pushLater();
       };
       sync = new VisitorAllowListSync({
+        getEnrollmentId: () => "enrollment-1",
         getToken: () => "inst-token",
         getOrigin: () => ORIGIN,
         fetchImpl: cloud.fetchImpl,
@@ -182,9 +188,30 @@ describe("VisitorAllowListSync", () => {
     }
   });
 
+  it("retries a linked instance that has no bearer for a moment, with no further push", async () => {
+    const cloud = fakeCloud();
+    const bearers: Array<string | null> = [null, null];
+    const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
+      // The signer is down for two tries, then recovers.
+      getToken: () => (bearers.length > 0 ? (bearers.shift() ?? null) : "signer-token"),
+      getOrigin: () => ORIGIN,
+      fetchImpl: cloud.fetchImpl,
+      retryDelaysMs: [0],
+    });
+
+    sync.push({ emails: ["ada@example.com"], revision: 8 });
+    await settle(sync);
+
+    expect(cloud.sent.map((s) => [s.body.revision, s.authorization])).toEqual([
+      [8, "Bearer signer-token"],
+    ]);
+  });
+
   it("retries an unreachable or failing Rome Cloud in the background", async () => {
     const cloud = fakeCloud(["throw", 503]);
     const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
       getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,
@@ -200,6 +227,7 @@ describe("VisitorAllowListSync", () => {
   it("does not retry a list Rome Cloud refuses, but sends it again on the next push", async () => {
     const cloud = fakeCloud([401]);
     const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
       getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,
@@ -219,6 +247,7 @@ describe("VisitorAllowListSync", () => {
     const { lines, logger } = recordingLogger();
     const cloud = fakeCloud([503, 200, 400]);
     const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
       getToken: () => "inst-token",
       getOrigin: () => ORIGIN,
       fetchImpl: cloud.fetchImpl,

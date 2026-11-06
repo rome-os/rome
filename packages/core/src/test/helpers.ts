@@ -811,8 +811,8 @@ export async function buildTestDeps(
   await publicAccessState.load(db);
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
-  // No credential, so a test that saves the allow-list never reaches the network.
-  const visitorAllowListSync = new VisitorAllowListSync({ getToken: () => null });
+  // Not linked, so a test that saves the allow-list never reaches the network.
+  const visitorAllowListSync = new VisitorAllowListSync({ getEnrollmentId: () => null });
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
   const channelsService = createChannelsService({

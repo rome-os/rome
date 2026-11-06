@@ -5,7 +5,7 @@ import {
   normalizeDashboardAccessConfig,
   readDashboardAccessRevision,
 } from "./dashboard-access-config.js";
-import { cloudBearer } from "./instance-identity.js";
+import { cloudBearer, getInstanceToken, instanceCredentialId } from "./instance-identity.js";
 import { normalizePublicAccessEmail } from "./public-access-config.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
@@ -15,6 +15,9 @@ export interface VisitorAllowList {
 }
 
 export interface VisitorAllowListSyncDeps {
+  /** The stable name of this instance's Rome Cloud enrollment, or null when it has none. */
+  getEnrollmentId?: () => string | null;
+  /** A bearer for one request. Null while linked is a passing gap, such as a signer restart. */
   getToken?: () => string | null | Promise<string | null>;
   getOrigin?: () => string | null;
   fetchImpl?: typeof fetch;
@@ -125,8 +128,23 @@ export class VisitorAllowListSync {
     this.retryTimer = null;
   }
 
+  private enrollmentId(): string | null {
+    // A signer-mode instance whose key is not registered yet still calls Rome
+    // Cloud with its instance token, so that token names the enrollment until then.
+    return (this.deps.getEnrollmentId ?? (() => instanceCredentialId() ?? getInstanceToken()))();
+  }
+
   private async send(list: VisitorAllowList): Promise<SendOutcome> {
     const fields = { revision: list.revision, count: list.emails.length };
+    const origin = (this.deps.getOrigin ?? getRomeCloudOrigin)();
+    if (!this.enrollmentId() || !origin) {
+      this.log.debug("visitor allow-list sync skipped", {
+        ...fields,
+        outcome: origin ? "not_linked" : "no_origin",
+      });
+      return "skipped";
+    }
+
     let token: string | null;
     try {
       token = await (this.deps.getToken ?? cloudBearer)();
@@ -138,13 +156,13 @@ export class VisitorAllowListSync {
       });
       return "retry";
     }
-    const origin = (this.deps.getOrigin ?? getRomeCloudOrigin)();
-    if (!token || !origin) {
-      this.log.debug("visitor allow-list sync skipped", {
+    if (!token) {
+      this.log.warn("visitor allow-list sync failed", {
         ...fields,
-        outcome: token ? "no_origin" : "no_credential",
+        outcome: "no_bearer",
+        attempt: this.failures + 1,
       });
-      return "skipped";
+      return "retry";
     }
 
     let response: Response;
