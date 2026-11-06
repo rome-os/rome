@@ -4200,10 +4200,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
     let recordedCardWrites: Promise<void> = Promise.resolve();
+    // The same rule as a foreground turn: an agent whose text is private keeps
+    // its narration in the trace.
+    const deliversText =
+      resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
+        .finalText === "deliver";
+    // Position of the recorded turn's next text block, numbered as a foreground
+    // turn numbers its blocks.
+    let recordedTextBlockIx = 0;
     const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
       const recorded = options?.recorded === true;
       if (recorded && msg.type === "turn_start") {
         recordedTurnId = msg.turnId;
+        recordedTextBlockIx = 0;
         // The recorded turn saves its trace and reply under its own id, so the
         // stream adopts that id: a client that names the turn by it then hides
         // the saved trace behind the live row instead of showing both.
@@ -4234,6 +4243,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         stream.traceEvents.push(msg);
         emitTraceEvent(stream, msg);
         if (msg.type === "result") replyText = msg.content;
+      }
+      if (recorded && msg.type === "text") {
+        const blockIx = recordedTextBlockIx;
+        recordedTextBlockIx += 1;
+        // The recorded turn sends only its final reply, so an in-turn
+        // commentary block would otherwise live in the trace alone. Written in
+        // line with the cards, it reads ahead of them and of that reply.
+        if (deliversText && msg.turnPhase === "commentary" && msg.content.trim().length > 0) {
+          const commentaryTurnId = recordedTurnId ?? syntheticTurnId;
+          recordedCardWrites = recordedCardWrites.then(async () => {
+            try {
+              await deps.webchatRepo.addBackendMessage(sessionId, commentaryTurnId, [
+                {
+                  type: "text",
+                  content: msg.content,
+                  turnPhase: "commentary",
+                  ...(msg.blockId ? { blockId: msg.blockId } : {}),
+                  blockIx,
+                },
+              ]);
+            } catch (err) {
+              log.warn("failed to persist commentary message", {
+                sessionId,
+                turnId: commentaryTurnId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+        }
       }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);

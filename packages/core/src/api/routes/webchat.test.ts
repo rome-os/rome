@@ -6172,6 +6172,103 @@ describe("Webchat API", () => {
       ]);
     });
 
+    describe("commentary of a recorded continuation", () => {
+      const recorded = { recorded: true };
+      const askQuestion = {
+        type: "tool_result" as const,
+        tool: "ask_question",
+        toolUseId: "recorded-ask-commentary",
+        output: {
+          pendingInteraction: true,
+          appId: "core",
+          render: {
+            kind: "inline",
+            componentId: "question-card",
+            props: { questions: [] },
+            builtin: true,
+          },
+        },
+      };
+
+      // A defer wake-up that narrates, asks the guardian, then answers briefly.
+      const runWakeUp = async (sessionId: string) => {
+        const { runtime } = createWebchatRuntime(deps);
+        await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+          await emit(
+            { type: "turn_start", turnId: "turn-c", sessionId: "agent-1", userPrompt: "Wake" },
+            recorded,
+          );
+          await emit(
+            { type: "text", content: "  ", turnPhase: "commentary", blockId: "blk-blank" },
+            recorded,
+          );
+          await emit(
+            { type: "text", content: "Review summary.", turnPhase: "commentary", blockId: "blk-1" },
+            recorded,
+          );
+          await emit(askQuestion, recorded);
+          await emit({ type: "text", content: "Pick one.", turnPhase: "final" }, recorded);
+          await emit({ type: "result", content: "Pick one." }, recorded);
+          // The channel's send port, as the backend turn calls it.
+          await deps.webchatRepo.addSentMessage(
+            "reply-c",
+            sessionId,
+            [{ type: "text", content: "Pick one." }],
+            "turn-c",
+          );
+        });
+        const messages = await deps.webchatRepo.getMessages(sessionId);
+        return messages.map((message) => ({
+          turnId: message.turnId,
+          part: (JSON.parse(message.content) as Array<Record<string, unknown>>)[0],
+        }));
+      };
+
+      it("writes it to the chat ahead of the card and the reply", async () => {
+        const sessionId = "sess-recorded-commentary";
+        await deps.webchatRepo.createSession(sessionId, "Recorded Commentary");
+
+        const rows = await runWakeUp(sessionId);
+
+        expect(rows).toEqual([
+          {
+            turnId: "turn-c",
+            // The blank block takes index 0 but writes nothing.
+            part: {
+              type: "text",
+              content: "Review summary.",
+              turnPhase: "commentary",
+              blockId: "blk-1",
+              blockIx: 1,
+            },
+          },
+          {
+            turnId: "turn-c",
+            part: expect.objectContaining({
+              type: "pending_interaction",
+              toolUseId: "recorded-ask-commentary",
+            }),
+          },
+          { turnId: "turn-c", part: { type: "text", content: "Pick one." } },
+        ]);
+      });
+
+      it("keeps a private agent's commentary in the trace", async () => {
+        rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+        rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+          name: "main",
+          policy: { finalText: "private", autoTitle: false },
+        } as ReturnType<typeof deps.agentLoader.get>);
+        const sessionId = "sess-recorded-private-commentary";
+        await deps.webchatRepo.createSession(sessionId, "Recorded Private Commentary");
+
+        const rows = await runWakeUp(sessionId);
+
+        expect(rows.map((row) => row.part.type)).toEqual(["pending_interaction", "text"]);
+        expect(rows.some((row) => row.part.turnPhase === "commentary")).toBe(false);
+      });
+    });
+
     it("addresses a recorded continuation by its own turn id while it runs", async () => {
       // A defer wake-up saves its trace under the agent's turn id. The chat
       // reattaches through the listing, so the listing and the stream must
