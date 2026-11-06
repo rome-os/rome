@@ -4143,6 +4143,49 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("keeps a deleted private chat's buffered turn from everyone but its owner", async () => {
+      mockScriptedManager();
+      await deps.webchatRepo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sent = await app.request("/chat/sessions/guardian-task/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(sent.status).toBe(200);
+      const { turnId } = (await sent.clone().json()) as { turnId: string };
+      await drainTurn(app, sent);
+      // The chat goes while its finished turn is still buffered for replay.
+      await deps.webchatRepo.deleteSession("guardian-task");
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      const asVisitor = await runWithSessionActor(visitor, () =>
+        app.request(`/chat/turns/${turnId}/stream`),
+      );
+      expect(asVisitor.status).toBe(404);
+      expect(await asVisitor.json()).toEqual({ error: "Not found" });
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const asGuardian = await runWithSessionActor(guardian, () =>
+        app.request(`/chat/turns/${turnId}/stream`),
+      );
+      expect(asGuardian.status).toBe(200);
+      await asGuardian.text();
+    });
+
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);

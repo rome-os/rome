@@ -1,4 +1,9 @@
-import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
+import {
+  canOpenChat,
+  isConciergeChat,
+  isMainConciergeChat,
+  privateOwnerOf,
+} from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -916,8 +921,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return { response: c.json({ error: "Session not found" }, 404) as Response };
   };
 
+  /**
+   * Whose private chat each live stream's turn is, read when the stream opens.
+   * It holds until the stream is evicted, so a chat deleted mid-turn keeps its
+   * buffered turn from everyone but its owner.
+   */
+  const streamPrivateTo = new WeakMap<ActiveWebchatStream, Promise<string | null>>();
+
   /** Append a stream to the per-session FIFO queue and the turnId index. */
   const enqueueStream = (sessionId: string, stream: ActiveWebchatStream): void => {
+    streamPrivateTo.set(
+      stream,
+      deps.webchatRepo
+        .getSession(sessionId)
+        .then(privateOwnerOf)
+        .catch(() => null),
+    );
     const list = activeStreams.get(sessionId);
     if (list) {
       list.push(stream);
@@ -2091,32 +2110,42 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // A turn or a message reached by its own id is its chat's, and kept the same
   // way: refused when any chat it may belong to is one the caller may not open.
   const privateByIdGate =
-    (chatsOf: (id: string) => Promise<(string | null | undefined)[]>): MiddlewareHandler =>
+    (openTo: (id: string, owner: string | null) => Promise<boolean>): MiddlewareHandler =>
     async (c, next) => {
-      const owner = await callerOwner();
-      for (const chatId of await chatsOf(c.req.param("id") ?? c.req.param("turnId") ?? "")) {
-        if (
-          chatId &&
-          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))
-        ) {
-          return c.json({ error: "Not found" }, 404);
-        }
-      }
+      const id = c.req.param("id") ?? c.req.param("turnId") ?? "";
+      if (!(await openTo(id, await callerOwner()))) return c.json({ error: "Not found" }, 404);
       await next();
     };
-  // A fork's, subagent's or backend turn is in the stream registry from its
-  // start, before any of its messages is stored.
-  const chatsOfTurn = async (turnId: string) => [
-    streamsByTurnId.get(turnId)?.sessionId,
-    deps.agentTurnStreamRegistry.get(turnId)?.sessionId,
-    await deps.webchatRepo.sessionIdOfTurn(turnId),
-  ];
-  const chatsOfMessage = async (messageId: string) => [
-    await deps.webchatRepo.sessionIdOfMessage(messageId),
-  ];
-  app.use("/chat/turns/:turnId/*", privateByIdGate(chatsOfTurn));
-  app.use("/chat/messages/:id/*", privateByIdGate(chatsOfMessage));
-  app.use("/sessions/messages/:id/*", privateByIdGate(chatsOfMessage));
+  const chatsOpenTo = async (chatIds: (string | null | undefined)[], owner: string | null) => {
+    for (const chatId of chatIds) {
+      if (chatId && !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const turnOpenTo = async (turnId: string, owner: string | null) => {
+    // A live dashboard turn answers for the chat it opened in, even once that
+    // chat is deleted.
+    const stream = streamsByTurnId.get(turnId);
+    const privateTo = stream ? await streamPrivateTo.get(stream) : null;
+    if (privateTo && privateTo !== owner) return false;
+    // A fork's, subagent's or backend turn is in the stream registry from its
+    // start, before any of its messages is stored.
+    return chatsOpenTo(
+      [
+        stream?.sessionId,
+        deps.agentTurnStreamRegistry.get(turnId)?.sessionId,
+        await deps.webchatRepo.sessionIdOfTurn(turnId),
+      ],
+      owner,
+    );
+  };
+  const messageOpenTo = async (messageId: string, owner: string | null) =>
+    chatsOpenTo([await deps.webchatRepo.sessionIdOfMessage(messageId)], owner);
+  app.use("/chat/turns/:turnId/*", privateByIdGate(turnOpenTo));
+  app.use("/chat/messages/:id/*", privateByIdGate(messageOpenTo));
+  app.use("/sessions/messages/:id/*", privateByIdGate(messageOpenTo));
 
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
