@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogEvent, ResolvedApp } from "../state.js";
@@ -43,11 +43,13 @@ describe("createAppOgImageSubscriber", () => {
   });
 
   it("generates an image for an installed web app and passes the full-route link", async () => {
-    const store = createOgImageStore(root);
+    // Store and subscriber share one host getter, as index.ts wires them.
+    const host = () => "jessie.romeos.cc";
+    const store = createOgImageStore(root, host);
     const calls: Array<string | null> = [];
     const handler = createAppOgImageSubscriber({
       store,
-      host: () => "jessie.romeos.cc",
+      host,
       generate: async (_app, link) => {
         calls.push(link);
         return Buffer.from("png");
@@ -83,6 +85,49 @@ describe("createAppOgImageSubscriber", () => {
     expect(links).toHaveLength(1);
 
     host = "acme.romeos.cc";
+    await handler(event);
+    await tick();
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit", "acme.romeos.cc/full/apps/reddit"]);
+    expect((await store.read("reddit"))?.toString()).toBe("acme.romeos.cc/full/apps/reddit");
+  });
+
+  it("files a card under the host it was drawn for when the host changes mid-render", async () => {
+    let host: string | null = "pool-7.romeos.cc";
+    const store = createOgImageStore(root, () => host);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const links: Array<string | null> = [];
+    let first = true;
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: () => host,
+      generate: async (_app, link) => {
+        links.push(link);
+        if (first) {
+          first = false;
+          await gate;
+        }
+        return Buffer.from(link ?? "none");
+      },
+    });
+    const event = { appId: "reddit", change: "changed", current: resolvedApp() } as const;
+
+    await handler(event);
+    await tick();
+    // Adoption lands while the pool-host card is still rendering.
+    host = "acme.romeos.cc";
+    release();
+    await tick();
+
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit"]);
+    expect(readFileSync(store.path("reddit", "pool-7.romeos.cc")).toString()).toBe(
+      "pool-7.romeos.cc/full/apps/reddit",
+    );
+    // Nothing is filed under the tenant host's name, so the replay is not skipped.
+    expect(await store.stat("reddit")).toBeNull();
+
     await handler(event);
     await tick();
     expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit", "acme.romeos.cc/full/apps/reddit"]);
