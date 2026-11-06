@@ -332,8 +332,9 @@ const SESSION_SIDE = [
 // Parsing a caller back, or reading what the session stored, is.
 const BYPASS_SESSION =
   /\b(findReusableSession|findResumableSessionById|findActiveByChannelThreadKey|findByChannelThreadKey|getTurnCheckpoint|sessionsRepo|SessionsRepository|SessionManager|callerFromKey|callerOfRun|persistThreadKey)\b/g;
-// The wiring builds the repositories and hands them to the session.
-const WIRING = ["index.ts"];
+// The wiring builds the repositories and hands them to the session. The
+// worker's wiring hands the codec to the action engine the same way.
+const WIRING = ["index.ts", "actions/worker-runtime.ts"];
 // The codec, and the runners that take an app's run: until the SDK drops the
 // deprecated `channelThreadKey`, a run may still name its caller by the
 // stored string, and the runner reads it back into the typed caller. Counted
@@ -879,6 +880,7 @@ const threadContextBuilt = MODULE.flatMap((file) =>
 );
 const actionsParse = coreFiles
   .filter((file) => file.startsWith(`${join(SRC, "actions")}/`))
+  .filter((file) => !WIRING.includes(relative(SRC, file)))
   .flatMap((file) =>
     (code(file).match(/\b(callerFromKey|callerConnection|parseSessionKey|callerOfRun)\b/g) ?? []).map(
       (hit) => `${rel(file)}: ${hit}`,
