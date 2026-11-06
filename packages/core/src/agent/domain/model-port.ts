@@ -88,7 +88,8 @@ export interface ModelPrefix {
  * `branch` starts from a position on one. An `ephemeral` branch is closed
  * after one use and the provider may run it inside the source thread and
  * roll it back; a `kept` branch gets a thread of its own that the session
- * records. The provider refuses a branch of a thread with a running turn.
+ * records. A branch of a thread with a running turn opens after that turn
+ * ends; the run holds no lock through `open`.
  */
 export type ThreadStart =
   | { kind: "new" }

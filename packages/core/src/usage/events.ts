@@ -7,7 +7,7 @@ import type { ModelFunding } from "../agent/index.js";
 /** Where the work came from. Subagent and fork turns take their root's kind. */
 export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
 
-/** Who paid the model provider for a turn. The word the model port's accounting carries. */
+/** Who paid the model provider for a turn. The word the model session's `funding` carries. */
 export type UsageFunding = ModelFunding;
 
 /**

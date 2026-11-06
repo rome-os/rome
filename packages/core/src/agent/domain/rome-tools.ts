@@ -1,7 +1,7 @@
 // The tools Rome serves to the model during a turn. A port the run
 // implements and the model port's adapters call: the adapter mounts each
 // group as its own server or tool set and never reads a tool's meaning.
-// Built once per open or fork; a group's catalog may change between calls.
+// Built once per open; a group's catalog may change between calls.
 
 /** Value. The provider's id for one tool call within a turn. */
 export type ToolUseId = string;
