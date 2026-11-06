@@ -45,8 +45,8 @@ Decision (user, 2026-11-04): the app always requires the instance's latest relea
 - [ ] Fix whatever the Cloud sign-in run turns up
 - [ ] Open the PR; get `ios-ci` green
 - [ ] TestFlight: Apple Team ID, signing, and upload steps (needs the user; nothing uploaded without a go)
-    - [ ] Rome's own Apple Developer organization account, not the user's personal team B2U93L2LK4 (user, 2026-11-04). The user checks whether the company already has one; otherwise enrolls (D-U-N-S, company domain Apple ID).
-    - [ ] App Store Connect app record under that team, bundle id `cc.romeos.mobile`
+    - [x] Rome's own Apple Developer organization account: Amantru, Inc, Team ID `4YWXB26F39`; the user is an Admin (2026-11-05). `cc.romeos.mobile` was already registered there as "Rome Mobile".
+    - [x] App Store Connect app record: "Rome – Personal Agent OS" (App ID 6831429506), company name Amantru, Inc, English (U.S.), SKU `rome-ios`, Full Access. "Rome" and "Rome OS" were taken; the home-screen name stays "Rome".
     - [x] Release prep that needs no account: export compliance key, version and build number rule, icon check, Release build without demo and debug entries, archive and export steps in `ios/README.md` (`c3f8f893`, `3491a51c`, `f7dd2dee`: Release is `cc.romeos.mobile` "Rome", Debug `cc.romeos.mobile.dev` "Rome Dev"; build number is the UTC archive time; privacy manifest added; icon already fine. Result: [`mobile-app-mvp-release-prep.md`](mobile-app-mvp-release-prep.md))
     - [ ] Switch signing to the new team, archive, upload (needs the user's go); team members join as internal testers
 
