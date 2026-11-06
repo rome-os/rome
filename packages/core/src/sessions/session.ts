@@ -86,8 +86,9 @@ export type SessionChange =
  */
 export class Session {
   private state: SessionState;
-  private checkpoint: TurnCheckpoint | undefined;
   private readonly changes = new Set<SessionChange>();
+  /** Checkpoints recorded since the last save, one per turn. */
+  private readonly checkpoints = new Map<string, TurnCheckpoint>();
 
   private constructor(state: SessionState) {
     this.state = state;
@@ -184,13 +185,13 @@ export class Session {
       this.changes.add("reasoningEffort");
     }
     if (run.checkpoint && run.providerThreadId) {
-      this.checkpoint = {
+      this.checkpoints.set(run.checkpoint.turnId, {
         sessionId: this.state.id,
         turnId: run.checkpoint.turnId,
         provider: run.provider,
         providerThreadId: run.providerThreadId,
         checkpointId: run.checkpoint.checkpointId,
-      };
+      });
     }
   }
 
@@ -244,16 +245,16 @@ export class Session {
     return { ...this.state };
   }
 
-  /** The facts changed since the last save, and the checkpoint recorded since
-   *  then, if any. Only the repository calls this, and `markSaved` once they
-   *  are written. */
-  pendingChanges(): { changes: ReadonlySet<SessionChange>; checkpoint?: TurnCheckpoint } {
-    return { changes: new Set(this.changes), checkpoint: this.checkpoint };
+  /** The facts changed since the last save, and the checkpoints recorded
+   *  since then, one per turn. Only the repository calls this, and
+   *  `markSaved` once they are written. */
+  pendingChanges(): { changes: ReadonlySet<SessionChange>; checkpoints: TurnCheckpoint[] } {
+    return { changes: new Set(this.changes), checkpoints: [...this.checkpoints.values()] };
   }
 
   /** Only the repository calls this, after a save. */
   markSaved(): void {
     this.changes.clear();
-    this.checkpoint = undefined;
+    this.checkpoints.clear();
   }
 }

@@ -45,25 +45,39 @@ describe("Session", () => {
     expect(session.reasoningEffort).toBe("xhigh");
   });
 
-  it("recordTurn() hands the checkpoint to the repository, and only with a thread", () => {
+  it("recordTurn() hands each turn's checkpoint to the repository, and only with a thread", () => {
     const session = Session.create("main");
     session.recordTurn({ provider: "openai", checkpoint: { turnId: "turn-1", checkpointId: "c" } });
-    expect(session.pendingChanges().checkpoint).toBeUndefined();
+    expect(session.pendingChanges().checkpoints).toEqual([]);
 
     session.recordTurn({
       provider: "openai",
       providerThreadId: "t-1",
       checkpoint: { turnId: "turn-2", checkpointId: "c-2" },
     });
-    expect(session.pendingChanges().checkpoint).toEqual({
-      sessionId: session.id,
-      turnId: "turn-2",
+    session.recordTurn({
       provider: "openai",
       providerThreadId: "t-1",
-      checkpointId: "c-2",
+      checkpoint: { turnId: "turn-3", checkpointId: "c-3" },
     });
+    expect(session.pendingChanges().checkpoints).toEqual([
+      {
+        sessionId: session.id,
+        turnId: "turn-2",
+        provider: "openai",
+        providerThreadId: "t-1",
+        checkpointId: "c-2",
+      },
+      {
+        sessionId: session.id,
+        turnId: "turn-3",
+        provider: "openai",
+        providerThreadId: "t-1",
+        checkpointId: "c-3",
+      },
+    ]);
     session.markSaved();
-    expect(session.pendingChanges().checkpoint).toBeUndefined();
+    expect(session.pendingChanges().checkpoints).toEqual([]);
   });
 
   it("tracks which facts changed since the last save", () => {

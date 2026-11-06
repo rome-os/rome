@@ -76,7 +76,7 @@ describe("SessionRepository", () => {
     expect(found.providerThreadId).toBe("t-1");
     expect(found.model).toBe("gpt-5");
     expect((await repo.deprecatedCheckpoint("fork-1", "turn-1"))?.checkpointId).toBe("c-1");
-    expect(session.pendingChanges().checkpoint).toBeUndefined();
+    expect(session.pendingChanges().checkpoints).toEqual([]);
   });
 
   it("add() accepts a successor once the earlier session is completed", async () => {
@@ -154,6 +154,24 @@ describe("SessionRepository", () => {
       checkpointId: "c-1",
     });
     expect(await repo.deprecatedCheckpoint(session.id, "turn-2")).toBeNull();
+  });
+
+  it("save() writes every turn's checkpoint recorded since the last save", async () => {
+    const session = Session.create("main");
+    await repo.add(session);
+    session.recordTurn({
+      provider: "openai",
+      providerThreadId: "t-1",
+      checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
+    });
+    session.recordTurn({
+      provider: "openai",
+      providerThreadId: "t-1",
+      checkpoint: { turnId: "turn-2", checkpointId: "c-2" },
+    });
+    await repo.save(session);
+    expect((await repo.deprecatedCheckpoint(session.id, "turn-1"))?.checkpointId).toBe("c-1");
+    expect((await repo.deprecatedCheckpoint(session.id, "turn-2"))?.checkpointId).toBe("c-2");
   });
 
   it("save() replaces a turn's checkpoint when the turn is recorded again", async () => {
@@ -317,6 +335,22 @@ describe("SessionRepository", () => {
 
     expect((await repo.session(current.id))!.providerThreadId).toBe("t-1");
     expect((await repo.deprecatedCheckpoint(current.id, "turn-1"))?.checkpointId).toBe("c-1");
+  });
+
+  it("replace() writes a turn the successor recorded before the reset was written", async () => {
+    const current = Session.create("main", { continuityKey: "k" });
+    await repo.add(current);
+    const successor = current.replace();
+    successor.recordTurn({
+      provider: "openai",
+      providerThreadId: "t-2",
+      checkpoint: { turnId: "turn-1", checkpointId: "c-1" },
+    });
+    await repo.replace(current, successor);
+
+    expect((await repo.session(successor.id))!.providerThreadId).toBe("t-2");
+    expect((await repo.deprecatedCheckpoint(successor.id, "turn-1"))?.checkpointId).toBe("c-1");
+    expect(successor.pendingChanges().checkpoints).toEqual([]);
   });
 
   it("replace() refuses a session that was not completed, or a stranger as successor", async () => {

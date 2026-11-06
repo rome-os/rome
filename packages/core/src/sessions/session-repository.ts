@@ -84,14 +84,14 @@ export class SessionRepository {
       // The row carries every fact the session holds, so a turn recorded
       // before the add needs only its checkpoint written beside it.
       tx.insert(sessions).values(toRow(state)).run();
-      if (pending.checkpoint) upsertCheckpoint(tx, pending.checkpoint);
+      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
     });
     session.markSaved();
   }
 
   /**
    * Writes the facts the session changed since it was last saved, and the
-   * checkpoint recorded since then, if any. Only changed facts are written, so
+   * checkpoints recorded since then. Only changed facts are written, so
    * two instances of one session that change different facts both keep their
    * writes. A chat is recorded only on a session that still has none, and a
    * completion is never undone. The session must have been added.
@@ -107,14 +107,15 @@ export class SessionRepository {
         .get();
       if (!stored) throw new Error(`Session "${state.id}" was never added`);
       writeChanges(tx, state, pending.changes);
-      if (pending.checkpoint) upsertCheckpoint(tx, pending.checkpoint);
+      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
     });
     session.markSaved();
   }
 
   /**
    * A reset, in one transaction: writes the retired session, completed, and
-   * adds its successor from `retired.replace()`. Every other session still
+   * adds its successor from `retired.replace()`, with any turn the successor
+   * recorded before the reset was written. Every other session still
    * active for the same continuity key and exact agent is completed too, so
    * the successor is the only one. Whoever resets serializes this per
    * continuity key.
@@ -131,10 +132,11 @@ export class SessionRepository {
     ) {
       throw new Error(`Session "${successorState.id}" does not succeed "${retiredState.id}"`);
     }
-    const pending = retired.pendingChanges();
+    const retiredPending = retired.pendingChanges();
+    const successorPending = successor.pendingChanges();
     this.db.transaction((tx) => {
-      writeChanges(tx, retiredState, pending.changes);
-      if (pending.checkpoint) upsertCheckpoint(tx, pending.checkpoint);
+      writeChanges(tx, retiredState, retiredPending.changes);
+      for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
           .set({ status: "completed", lastActiveAt: retiredState.lastActiveAt })
@@ -142,8 +144,10 @@ export class SessionRepository {
           .run();
       }
       tx.insert(sessions).values(toRow(successorState)).run();
+      for (const checkpoint of successorPending.checkpoints) upsertCheckpoint(tx, checkpoint);
     });
     retired.markSaved();
+    successor.markSaved();
   }
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back
