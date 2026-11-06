@@ -562,8 +562,9 @@ export function startConciergeFollowing(
         new Date(now()),
       ),
     send: async (items, held) => {
-      // A chat that is gone or archived hands its items to the main chat.
-      const chatId = await service.deliveryChat(items[0]?.chatId);
+      // A chat that is gone or archived hands its items to their owner's main chat.
+      const owner = items[0]?.ownerKey ?? GUARDIAN_OWNER;
+      const chatId = await service.deliveryChat(items[0]?.chatId ?? mainChatIdOf(owner));
       // The Concierge decides whether to tell each item now. Either way every
       // item also goes into the next digest.
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
@@ -685,7 +686,11 @@ export function startConciergeFollowing(
         reason: decision.reason,
         line: decision.line,
         url: event.url ?? null,
-        chatId: chatOfFollow.get(`${event.source}\u0000${event.target}`) ?? null,
+        // An event queued before its follow went reports to its owner's main
+        // chat, never to another owner's.
+        chatId: chatOfFollow.has(`${event.source}\u0000${event.target}`)
+          ? (chatOfFollow.get(`${event.source}\u0000${event.target}`) ?? null)
+          : storedChatId(mainChatIdOf(owner)),
         ownerKey: owner,
       });
     }
@@ -779,10 +784,13 @@ export function startConciergeFollowing(
       if (!wanted.has(routine.key)) await removeRoutine(routine.id);
     }
     for (const [key, { owner, localTime }] of wanted) {
+      // The guardian's digest floats with the guardian's zone, as every
+      // floating routine does. A visitor's is fixed to their own zone, and
+      // rebuilt here whenever it changes.
       const trigger = {
         type: "schedule" as const,
         tzid: await timezoneOf(owner, stored),
-        tzMode: "floating" as const,
+        tzMode: owner === GUARDIAN_OWNER ? ("floating" as const) : ("fixed" as const),
         localTime,
         rrule: "FREQ=DAILY",
       };

@@ -2557,7 +2557,7 @@ describe("Concierge chats", () => {
     expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(CONCIERGE_CHAT);
   });
 
-  it("retiring a topic chat moves its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
+  it("retiring a topic chat moves its tasks to the main chat and says so there; the main chat cannot be retired", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
     s.turnIn(TOPIC_CHAT);
@@ -2567,7 +2567,8 @@ describe("Concierge chats", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const rows = await s.tasks.listForPanel();
     expect(rows.find((row) => row.title === "Book dentist")?.conciergeChat.main).toBe(true);
-    expect(rows.find((row) => row.title === "Old")?.conciergeChat.id).toBe(TOPIC_CHAT);
+    // A finished row moves too, so none is left to fall to another owner.
+    expect(rows.find((row) => row.title === "Old")?.conciergeChat.main).toBe(true);
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: CONCIERGE_CHAT });
     expect(s.backendTurns.at(-1)?.prompt).toContain(
       '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',

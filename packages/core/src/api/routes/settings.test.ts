@@ -199,6 +199,24 @@ describe("Settings API", () => {
     expect(setConfig).not.toHaveBeenCalled();
   });
 
+  it("keeps each person's Concierge state out of the generic read and write", async () => {
+    await deps.settingsRepo.set("conciergeFollowing", { follows: [], people: {} });
+    await deps.settingsRepo.set("conciergeRetiredChats", { "chat-1": "visitor:a" });
+    await deps.settingsRepo.set("theme", "light");
+    const read = (await (await app.request("/settings")).json()) as Record<string, unknown>;
+    expect(read).not.toHaveProperty("conciergeFollowing");
+    expect(read).not.toHaveProperty("conciergeRetiredChats");
+    expect(read.theme).toBe("light");
+
+    for (const key of ["conciergeFollowing", "conciergeRetiredChats"]) {
+      const res = await putSettings(app, { [key]: {}, theme: "dark" });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain(key);
+    }
+    expect(await deps.settingsRepo.get("conciergeFollowing")).toEqual({ follows: [], people: {} });
+    expect(await deps.settingsRepo.get("theme")).toBe("light");
+  });
+
   // A guardianTimezone change must re-target floating routines.
   describe("guardianTimezone change re-activates floating routines", () => {
     it("re-activates when the timezone value actually changes", async () => {

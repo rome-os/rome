@@ -33,7 +33,7 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { guardianAuth, webchatProjects } from "../../db/schema.js";
+import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -183,6 +183,24 @@ describe("Webchat API", () => {
       triggerKind: "concierge",
       triggerName: "Task",
     });
+    // A branch of the guardian's task chat, promoted to an ordinary chat by the visitor.
+    await deps.webchatRepo.createSession(
+      "task-branch",
+      "Branch",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    testDb.db
+      .update(romeSessions)
+      .set({ parentSessionId: "guardian-task" })
+      .where(eq(romeSessions.id, "task-branch"))
+      .run();
     await deps.webchatRepo.createSession(
       "shared",
       "Shared",
@@ -229,7 +247,8 @@ describe("Webchat API", () => {
         .map((chat) => chat.id)
         .sort();
     expect(await listed(visitor)).toEqual(["shared", "visitor-main"]);
-    expect(await listed(guardian)).toEqual(["concierge", "guardian-task", "shared"]);
+    expect(await listed(guardian)).toEqual(["concierge", "guardian-task", "shared", "task-branch"]);
+    expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
   });
 
   it("keeps a Concierge chat's turns, messages and history private when reached by their own ids", async () => {

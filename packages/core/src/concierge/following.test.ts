@@ -1340,6 +1340,44 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
+  it("fixes a visitor's digest to their own zone, rebuilt when it changes, and floats the guardian's", async () => {
+    const s = withAnn(setup());
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = annMain;
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    s.calling.chat = null;
+    const triggerOf = (key: string) => [...s.routines.values()].find((r) => r.key === key)?.trigger;
+    await s.following().setTimezone(ANN, "Asia/Shanghai");
+    expect(triggerOf(`concierge-digest:${annMain}:09:00`)).toMatchObject({
+      tzMode: "fixed",
+      tzid: "Asia/Shanghai",
+      localTime: "09:00",
+    });
+    await s.following().setTimezone(ANN, "Europe/Paris");
+    expect(triggerOf(`concierge-digest:${annMain}:09:00`)).toMatchObject({
+      tzMode: "fixed",
+      tzid: "Europe/Paris",
+    });
+    expect(triggerOf("concierge-digest:09:00")).toMatchObject({ tzMode: "floating" });
+    s.stop();
+  });
+
+  it("keeps an event queued before an unfollow its owner's, never the guardian's", async () => {
+    rs.useFakeTimers();
+    const s = withAnn(setup({ triage: { e1: "important" } }));
+    s.calling.chat = annMain;
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    s.calling.chat = null;
+    await fire(s, "e1");
+    // Ann stops following while the event waits in the batch.
+    await s.following().unfollow("github", "acme/widgets", ANN);
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.turnChats).toEqual([annMain]);
+    expect((await s.items.owedToDigest(ANN)).map((i) => i.chatId)).toEqual([annMain]);
+    expect(await s.items.owedToDigest()).toEqual([]);
+    s.stop();
+  });
+
   it("serves a visitor dropped from the allow-list nothing, and resumes once they are back", async () => {
     rs.useFakeTimers();
     const s = withAnn(setup({ triage: { e1: "important", e2: "important", e3: "digest" } }));

@@ -5,6 +5,7 @@ import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.j
 import { chatMessages } from "../schema.js";
 import type { WebChatRepository } from "./webchat.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
+import { mainChatIdOf } from "../../concierge/owner.js";
 
 const DAY = 86_400_000;
 
@@ -234,7 +235,7 @@ describe("ConciergeTasksRepository", () => {
       expect((await repo.get(done.id))?.chatId).toBe("topic-1");
     });
 
-    it("moves only the unfinished rows of a chat to the main chat, and announces each", async () => {
+    it("moves every row of a chat, finished or not, to the main chat, and announces each", async () => {
       await chats.createSession(
         "topic-1",
         "Calendar",
@@ -250,10 +251,42 @@ describe("ConciergeTasksRepository", () => {
       ]);
       const announced: string[] = [];
       repo.onChange(({ row }) => announced.push(row.id));
+      // The count is of unfinished rows, which the Concierge tells its owner about.
       expect(await repo.moveToMainChat("topic-1")).toBe(1);
       expect((await repo.get(open.id))?.chatId).toBeNull();
-      expect((await repo.get(done.id))?.chatId).toBe("topic-1");
-      expect(announced).toEqual([open.id]);
+      expect((await repo.get(done.id))?.chatId).toBeNull();
+      expect(announced.sort()).toEqual([open.id, done.id].sort());
+    });
+
+    it("keeps a visitor's rows, finished ones too, theirs after their topic chat is deleted", async () => {
+      const owner = "visitor:acct-ann";
+      const main = mainChatIdOf(owner);
+      for (const id of [main, "ann-topic"]) {
+        await chats.createSession(
+          id,
+          "Concierge",
+          undefined,
+          undefined,
+          null,
+          undefined,
+          "core:concierge",
+          "webchat",
+          null,
+          { ownerKey: owner },
+        );
+      }
+      const [open, done] = await repo.upsertMany([
+        { title: "A", chatId: "ann-topic", state: "doing" },
+        { title: "B", chatId: "ann-topic", state: "done" },
+      ]);
+      await repo.moveToMainChat("ann-topic", main);
+      await chats.deleteSession("ann-topic");
+      for (const id of [open.id, done.id]) {
+        expect(await repo.getWithChat(id)).toMatchObject({
+          owner,
+          conciergeChat: { id: main, main: true },
+        });
+      }
     });
   });
 

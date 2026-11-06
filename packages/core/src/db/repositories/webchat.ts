@@ -11,6 +11,7 @@ import {
   gt,
   gte,
   inArray,
+  notInArray,
   isNotNull,
   isNull,
   like,
@@ -383,6 +384,10 @@ const sessionSelectFields = {
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
+
+/** Leaves out the chats a caller may not open; nothing when there are none. */
+const excludedIds = (ids: readonly string[] | undefined) =>
+  ids && ids.length > 0 ? notInArray(romeSessions.id, [...ids]) : undefined;
 
 // Whether the session's latest turn ended in an error, read from the
 // `turn_end` block of its newest trace. A turn still running has no
@@ -1533,9 +1538,22 @@ export class WebChatRepository {
     return rows.map((row) => row.path);
   }
 
+  /** What the chat privacy policy reads of every chat: its owner, kind and parent. */
+  async listChatLineage() {
+    return this.db
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        ownerKey: romeSessions.ownerKey,
+        triggerKind: romeSessions.triggerKind,
+        parentSessionId: romeSessions.parentSessionId,
+      })
+      .from(romeSessions);
+  }
+
   async listSessionsByProjectPath(
     projectPath: string,
-    options: { cursor?: string; limit?: number } = {},
+    options: { cursor?: string; limit?: number; excludeIds?: readonly string[] } = {},
   ) {
     const limit = Math.max(1, options.limit ?? 50);
     const cursor = decodeProjectSessionCursor(options.cursor);
@@ -1554,7 +1572,13 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
+    const excluded = excludedIds(options.excludeIds);
+    const predicates = [
+      eq(romeSessions.projectPath, projectPath),
+      isWebchatChat,
+      excluded,
+      cursorPredicate,
+    ];
 
     const rows = await this.db
       .select(this.sessionFields())
@@ -1571,7 +1595,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat));
+      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat, excluded));
 
     return {
       nextCursor,
@@ -1580,7 +1604,9 @@ export class WebChatRepository {
     };
   }
 
-  async listSessionsPage(options: { cursor?: string; limit?: number } = {}) {
+  async listSessionsPage(
+    options: { cursor?: string; limit?: number; excludeIds?: readonly string[] } = {},
+  ) {
     const limit = Math.max(1, options.limit ?? 50);
     const cursor = decodeProjectSessionCursor(options.cursor);
     const cursorPredicate = cursor
@@ -1598,7 +1624,8 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [isWebchatChat, cursorPredicate];
+    const excluded = excludedIds(options.excludeIds);
+    const predicates = [isWebchatChat, excluded, cursorPredicate];
 
     const rows = await this.db
       .select(this.sessionFields())
@@ -1615,7 +1642,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(isWebchatChat);
+      .where(and(isWebchatChat, excluded));
 
     return {
       nextCursor,

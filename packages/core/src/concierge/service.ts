@@ -71,7 +71,7 @@ const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
 
 /** The setting that keeps the owner of each visitor's deleted Concierge chat. */
-const RETIRED_CHATS_SETTING_KEY = "conciergeRetiredChats";
+export const RETIRED_CHATS_SETTING_KEY = "conciergeRetiredChats";
 
 /** How a Concierge chat was retired. */
 export type RetiredHow = "archived" | "deleted";

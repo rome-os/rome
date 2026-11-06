@@ -20,6 +20,9 @@ import { projectsFilesRoutes } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { eq } from "drizzle-orm";
+import { romeSessions } from "../../db/schema.js";
+import { runWithSessionActor } from "../../lib/session-actor.js";
 import { readArchivePaths } from "../../test/file-browser.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
@@ -298,6 +301,63 @@ describe("Projects files API", () => {
   });
 
   describe("GET /projects/dashboard", () => {
+    it("leaves another person's Concierge and task chats, and their forks, out of the feed before reading them", async () => {
+      mkdirSync(join(projectsRoot, "demo"), { recursive: true });
+      const chat = async (id: string, agentName: string | null, ownerKey: string | null) => {
+        await webchatRepo.createSession(
+          id,
+          id,
+          undefined,
+          "demo",
+          null,
+          "demo",
+          agentName,
+          "webchat",
+          null,
+          { ownerKey },
+        );
+        await webchatRepo.addMessage(`${id}-m`, id, "user", textMessage(`secret of ${id}`));
+      };
+      await chat("concierge", "core:concierge", null);
+      await chat("guardian-task", null, "guardian");
+      await webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      // A branch of the task chat, promoted to an ordinary chat, stays the guardian's.
+      await chat("task-branch", null, "visitor:a");
+      testDb.db
+        .update(romeSessions)
+        .set({ parentSessionId: "guardian-task" })
+        .where(eq(romeSessions.id, "task-branch"))
+        .run();
+      await chat("shared", null, "guardian");
+
+      const app = buildApp({ webchatRepo });
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      for (const path of [
+        "/projects/dashboard/chats?path=projects/demo",
+        "/projects/dashboard/chats?path=projects",
+      ]) {
+        const asVisitor = (await (
+          await runWithSessionActor(visitor, () => app.request(path))
+        ).json()) as ProjectDashboardChatsResponse;
+        expect(asVisitor.chats.map((c) => c.id)).toEqual(["shared"]);
+        expect(asVisitor.page.total).toBe(1);
+        expect(JSON.stringify(asVisitor)).not.toContain("secret of guardian-task");
+        // The guardian, the owner, sees them all.
+        const asGuardian = (await (
+          await app.request(path)
+        ).json()) as ProjectDashboardChatsResponse;
+        expect(asGuardian.chats.map((c) => c.id).sort()).toEqual([
+          "concierge",
+          "guardian-task",
+          "shared",
+          "task-branch",
+        ]);
+      }
+    });
+
     it("returns usage stats, chats, and cache hit rate for DB-backed projects", async () => {
       rs.useFakeTimers();
       rs.setSystemTime(new Date("2026-05-15T11:59:00.000Z"));
@@ -563,6 +623,7 @@ describe("Projects files API", () => {
       // response must keep the day window computed at request start.
       const midQueryClockSkewRepo: RouteDeps["webchatRepo"] = {
         getMessagesBatch: (sessionIds) => webchatRepo.getMessagesBatch(sessionIds),
+        listChatLineage: () => webchatRepo.listChatLineage(),
         getProjectUsageTotals: (projectPath, options) =>
           webchatRepo.getProjectUsageTotals(projectPath, options),
         getUsageTotals: (options) => {
@@ -1603,6 +1664,7 @@ describe("Projects files API", () => {
       let failCleanup = true;
       const failingCleanupRepo: RouteDeps["webchatRepo"] = {
         getMessagesBatch: (sessionIds) => webchatRepo.getMessagesBatch(sessionIds),
+        listChatLineage: () => webchatRepo.listChatLineage(),
         getProjectUsageTotals: (projectPath, options) =>
           webchatRepo.getProjectUsageTotals(projectPath, options),
         getUsageTotals: (options) => webchatRepo.getUsageTotals(options),

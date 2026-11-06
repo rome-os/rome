@@ -2,6 +2,7 @@
 // module, so the chat and action layers can ask without loading the Concierge.
 
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
+import { currentSessionActor, sessionOwnerKey } from "../lib/session-actor.js";
 import { type ConciergeOwner, mainChatIdOf, ownerOf } from "./owner.js";
 
 /** The canonical id of the core agent behind the Concierge conversation. */
@@ -53,28 +54,80 @@ export function isMainConciergeChat(chat: {
 /** How far up a chain of forks the privacy check looks. */
 const MAX_FORK_DEPTH = 8;
 
+/** What the privacy check reads of a chat. */
+export interface ChatLineageRow {
+  id: string;
+  agentName?: string | null;
+  ownerKey?: string | null;
+  triggerKind?: string | null;
+  parentSessionId?: string | null;
+}
+
 /**
- * Whether `owner` may open chat `chatId`: no for another owner's Concierge
- * chat or Concierge task chat, or a fork of one. Yes for any other chat,
- * and for one that does not exist, which the caller answers as it does today.
+ * The one privacy policy for dashboard chats: a chat is private to the owner
+ * of the first Concierge chat or Concierge task chat on its line of forks,
+ * itself included, and open to everyone when there is none. Every path that
+ * reads, lists or searches chats asks it, so a fork, even one promoted to an
+ * ordinary chat, stays as private as the chat it came from.
  */
-export async function canOpenChat(
-  getSession: (id: string) => Promise<{
-    id: string;
-    agentName?: string | null;
-    ownerKey?: string | null;
-    triggerKind?: string | null;
-    parentSessionId?: string | null;
-  } | null>,
+export function chatAccess(
+  getRow: (id: string) => Promise<ChatLineageRow | null | undefined>,
+  owner: string | null,
+) {
+  const privateTo = new Map<string, Promise<string | null>>();
+  const lineOwner = (id: string, depth: number): Promise<string | null> => {
+    const known = privateTo.get(id);
+    if (known) return known;
+    const found = (async () => {
+      const chat = await getRow(id);
+      const own = privateOwnerOf(chat);
+      if (own !== null || !chat?.parentSessionId || depth >= MAX_FORK_DEPTH) return own;
+      return lineOwner(chat.parentSessionId, depth + 1);
+    })();
+    privateTo.set(id, found);
+    return found;
+  };
+  return {
+    /** Whether the owner may open the chat. One that does not exist is open, and its caller answers as it does today. */
+    async canOpen(chatId: string): Promise<boolean> {
+      const to = await lineOwner(chatId, 0);
+      return to === null || to === owner;
+    },
+  };
+}
+
+/** Whether `owner` may open chat `chatId`, by {@link chatAccess}. */
+export function canOpenChat(
+  getSession: (id: string) => Promise<ChatLineageRow | null>,
   chatId: string,
   owner: string | null,
 ): Promise<boolean> {
-  let id: string | null | undefined = chatId;
-  for (let depth = 0; id && depth < MAX_FORK_DEPTH; depth++) {
-    const chat = await getSession(id);
-    const privateTo = privateOwnerOf(chat);
-    if (privateTo !== null) return privateTo === owner;
-    id = chat?.parentSessionId;
-  }
-  return true;
+  return chatAccess(getSession, owner).canOpen(chatId);
+}
+
+/**
+ * {@link chatAccess} over every chat's lineage read at once, for a list or a
+ * search: the ids `owner` may not open, and a check for any one id.
+ */
+export function chatAccessOver(lineage: readonly ChatLineageRow[], owner: string | null) {
+  const rows = new Map(lineage.map((row) => [row.id, row]));
+  const access = chatAccess(async (id) => rows.get(id), owner);
+  return {
+    canOpen: (chatId: string) => access.canOpen(chatId),
+    /** Every chat `owner` may not open. */
+    async hiddenIds(): Promise<string[]> {
+      const hidden: string[] = [];
+      for (const id of rows.keys()) if (!(await access.canOpen(id))) hidden.push(id);
+      return hidden;
+    },
+  };
+}
+
+/**
+ * Whose chats a request may open: the signed-in person's. No actor at all is
+ * in-process work, never a request from outside, and acts as the guardian.
+ */
+export async function callerChatOwner(): Promise<string | null> {
+  const actor = await currentSessionActor();
+  return actor ? sessionOwnerKey(actor) : "guardian";
 }

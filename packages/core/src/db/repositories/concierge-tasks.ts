@@ -72,24 +72,19 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Moves the unfinished rows of Concierge chat `from` to its owner's main
-   * chat `to` (null for the guardian's), as when that chat is archived or
-   * deleted. Answers how many moved.
+   * Moves every row of Concierge chat `from`, finished or not, to its owner's
+   * main chat `to` (null for the guardian's), as when that chat is archived or
+   * deleted. A row's owner is its chat's, so no row is left behind to fall to
+   * another owner. Answers how many unfinished rows moved.
    */
   async moveToMainChat(from: string, to: string | null = null): Promise<number> {
     const moved = await this.db
       .update(conciergeTasks)
       .set({ chatId: to })
-      .where(
-        and(
-          eq(conciergeTasks.chatId, from),
-          ne(conciergeTasks.state, "done"),
-          ne(conciergeTasks.state, "dropped"),
-        ),
-      )
-      .returning({ id: conciergeTasks.id });
+      .where(eq(conciergeTasks.chatId, from))
+      .returning({ id: conciergeTasks.id, state: conciergeTasks.state });
     for (const { id } of moved) await this.announce(id, "refresh");
-    return moved.length;
+    return moved.filter(({ state }) => state !== "done" && state !== "dropped").length;
   }
 
   onChange(listener: ChangeListener): () => void {

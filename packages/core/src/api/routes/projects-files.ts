@@ -1,3 +1,4 @@
+import { callerChatOwner, chatAccessOver } from "../../concierge/privacy.js";
 import { Hono } from "hono";
 import type {
   ProjectDashboardChat,
@@ -56,6 +57,7 @@ type ProjectsRouteDeps = {
     | "listProjectPaths"
     | "listSessionRefsByProjectPathPrefix"
     | "listSessionsByProjectPath"
+    | "listChatLineage"
     | "listSessionsPage"
     | "unarchiveProjectsByPaths"
   >;
@@ -533,6 +535,15 @@ function createChatPage(
   };
 }
 
+/**
+ * The chats the caller may not open: another person's Concierge and task
+ * chats, and their forks. Left out of a page before its messages are read or
+ * its chats counted.
+ */
+async function hiddenChatIds(webchatRepo: ProjectsRouteDeps["webchatRepo"]): Promise<string[]> {
+  return chatAccessOver(await webchatRepo.listChatLineage(), await callerChatOwner()).hiddenIds();
+}
+
 async function buildProjectDashboardChats(
   webchatRepo: ProjectsRouteDeps["webchatRepo"],
   sessions: ProjectSession[],
@@ -631,6 +642,7 @@ async function buildAllProjectsChatPage(
   const sessionPage = await webchatRepo.listSessionsPage({
     cursor: options.cursor,
     limit: options.limit,
+    excludeIds: await hiddenChatIds(webchatRepo),
   });
   const chats = await buildProjectDashboardChats(webchatRepo, sessionPage.sessions);
 
@@ -799,6 +811,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     const sessionPage = await webchatRepo.listSessionsByProjectPath(projectPath.relativePath, {
       cursor,
       limit,
+      excludeIds: await hiddenChatIds(webchatRepo),
     });
 
     const [chats, usageStats] = await Promise.all([
@@ -894,6 +907,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     const sessionPage = await webchatRepo.listSessionsByProjectPath(projectPath.relativePath, {
       cursor,
       limit,
+      excludeIds: await hiddenChatIds(webchatRepo),
     });
 
     const chats = await buildProjectDashboardChats(webchatRepo, sessionPage.sessions);
