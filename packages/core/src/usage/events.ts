@@ -52,13 +52,7 @@ export interface ActionRunUsageEvent {
 }
 
 /** How the guardian signed in. */
-export type LoginMethod =
-  | "password"
-  | "onboard"
-  | "oauth"
-  | "handoff"
-  | "rome_cloud"
-  | "rome_cloud_native";
+export type LoginMethod = "password" | "onboard" | "oauth" | "rome_cloud" | "rome_cloud_native";
 
 /** One guardian sign-in to this instance. */
 export interface LoginUsageEvent {

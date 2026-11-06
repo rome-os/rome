@@ -11,11 +11,8 @@
   },
   "include": [
     "scripts/generate-caddyfile.ts",
-    "packages/core/src/lib/app-routes.ts",
     "packages/core/src/lib/caddyfile-generator.ts",
-    "packages/core/src/lib/gateway-html.ts",
     "packages/core/src/lib/inline-script.ts",
-    "packages/core/src/lib/public-access-config.ts",
     "packages/core/src/lib/runtime-config.ts"
   ]
 }

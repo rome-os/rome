@@ -11,16 +11,6 @@ rs.mock("@/components/system-diagnosis-section", () => ({
   SystemDiagnosisSection: () => null,
 }));
 
-rs.mock("@/hooks/use-tailscale-connect", () => ({
-  useTailscaleConnect: () => ({
-    authUrl: null,
-    connecting: false,
-    error: null,
-    handleConnect: rs.fn(),
-    clearAuthUrl: rs.fn(),
-  }),
-}));
-
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -36,7 +26,7 @@ function renderAdvanced() {
     const url = String(input);
     const body =
       url === "/api/public-access"
-        ? { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} }
+        ? { allowedApps: [], cloudEmailAccess: {} }
         : url === "/api/dashboard-access"
           ? { cloudEmailAccess: [] }
           : {};

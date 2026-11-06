@@ -135,7 +135,6 @@ services:
       - $ROME_DIR/home/user:/home/user
       - rome-home:/home/rome
       - $ROME_DIR/ssh-host-keys:/etc/ssh/ssh_host_keys
-      - $ROME_DIR/tailscale:/var/lib/tailscale
     env_file: .env
     environment:
       - NODE_ENV=production
@@ -160,7 +159,6 @@ create_directories() {
   info "Creating directories"
   mkdir -p "$ROME_DIR/home/user"
   mkdir -p "$ROME_DIR/ssh-host-keys"
-  mkdir -p "$ROME_DIR/tailscale"
 }
 
 # ─── Start ───────────────────────────────────────────────────────────────────

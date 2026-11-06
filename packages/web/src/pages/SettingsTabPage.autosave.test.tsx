@@ -47,17 +47,11 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
       return ok(settings);
     }
     if (url === "/api/sentinel-log") return ok([]);
-    if (url === "/api/tailscale/devices") {
-      return ok({ mode: "oauth", configured: false, devices: [] });
-    }
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+      return ok({ allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       return ok({ cloudEmailAccess: [] });
-    }
-    if (url === "/api/tailnet") {
-      return ok({ tailnetDns: null, httpsEnabled: false, certReady: false });
     }
     if (url === "/api/uptime") return ok({ uptime: 120 });
     if (url === "/api/build-info") return ok({ sha: null, builtAt: null });

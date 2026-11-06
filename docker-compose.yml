@@ -15,7 +15,6 @@ services:
       - user-home:/home/user
       - rome-home:/home/rome
       - ~/docker/ssh-host-keys:/etc/ssh/ssh_host_keys
-      - ~/docker/tailscale:/var/lib/tailscale
       # Host helper control socket (docs/architecture/host-execution.md). Bound
       # whether or not the helper is installed: the socket appears inside the
       # directory once the helper runs, and Rome refuses to submit while

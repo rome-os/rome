@@ -206,7 +206,6 @@ import { HostExecutionService } from "./host-execution/service.js";
 import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
-import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
@@ -1904,14 +1903,7 @@ async function main() {
   };
   const publicAccessState = new PublicAccessState();
   try {
-    const config = await publicAccessState.load(db);
-    try {
-      await reconcilePublicAccessAtStartup(db, config);
-    } catch (err) {
-      log.warn("Failed to reconcile publicAccess settings with Caddy at startup; continuing", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await publicAccessState.load(db);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),

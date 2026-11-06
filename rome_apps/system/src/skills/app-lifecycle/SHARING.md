@@ -47,9 +47,9 @@ updated=$(printf '%s' "$policy" | jq -ec --arg app "$APP" --arg mode "$MODE" --a
 printf '%s' "$updated" | curl -sf -X PUT "$API" -H 'content-type: application/json' --data-binary @-
 ```
 
-The filter leaves `enableAccessControl` and every other app's entry unchanged. Afterwards, read the policy again. Confirm that this app's entry changed as intended and that the other entries match `$policy`. The server drops invalid app ids and emails without an error, so a missing entry means the input was invalid.
+The filter leaves every other app's entry unchanged. Afterwards, read the policy again. Confirm that this app's entry changed as intended and that the other entries match `$policy`. The server drops invalid app ids and emails without an error, so a missing entry means the input was invalid.
 
-Use only this endpoint. A write to `publicAccess` through `/api/settings` is rejected, and it would not reload the proxy. A `500` from this endpoint means the policy is saved but the proxy did not reload. Retry the same request.
+Use only this endpoint. A write to `publicAccess` through `/api/settings` is rejected, and it would not refresh the policy the server enforces.
 
 ## Verify
 
@@ -59,6 +59,6 @@ Test from outside, without the guardian's session, against the public address. T
 curl -s -w '\n%{http_code}\n' https://<public address>/api/apps/<encoded appId>/<any route>
 ```
 
-- A `private` app is refused before it reaches the handler. Usually this is `401`. When `enableAccessControl` is on, the proxy returns `403` with `"error":"not_public"` instead.
+- A `private` app is refused before it reaches the handler, usually with `401`.
 - A `public` app reaches the handler. A missing route returns `404`.
-- An owner-only route returns `403` to a visitor from the app's own handler. Its body is the app's error, not `not_public`.
+- An owner-only route returns `403` to a visitor from the app's own handler. Its body is the app's own error.

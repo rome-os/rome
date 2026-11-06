@@ -1,7 +1,6 @@
 import { isValidAppId } from "../apps/packaging/app-id.js";
 
 export interface PublicAccessConfig {
-  enableAccessControl: boolean;
   allowedApps: string[];
   cloudEmailAccess: Record<string, string[]>;
 }
@@ -9,7 +8,6 @@ export interface PublicAccessConfig {
 export const PUBLIC_ACCESS_SETTING_KEY = "publicAccess";
 
 export const DEFAULT_PUBLIC_ACCESS_CONFIG: PublicAccessConfig = {
-  enableAccessControl: false,
   allowedApps: [],
   cloudEmailAccess: {},
 };
@@ -32,7 +30,6 @@ function normalizeEmailList(raw: unknown): string[] {
 
 export function normalizePublicAccessConfig(raw: unknown): PublicAccessConfig {
   const body = (raw ?? {}) as {
-    enableAccessControl?: unknown;
     allowedApps?: unknown;
     cloudEmailAccess?: unknown;
   };
@@ -61,7 +58,6 @@ export function normalizePublicAccessConfig(raw: unknown): PublicAccessConfig {
   }
 
   return {
-    enableAccessControl: body.enableAccessControl === true,
     allowedApps,
     cloudEmailAccess,
   };
