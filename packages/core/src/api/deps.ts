@@ -27,6 +27,7 @@ import type { RoutineEngine } from "../routines/engine.js";
 import type { EventCatalog } from "../event-catalog.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
+import type { ArtifactLoadFailureSource } from "../apps/artifact-load-failure-reporter.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { OgImageStore } from "../apps/og/store.js";
 import type { AppManager } from "../apps/manager.js";
@@ -34,7 +35,7 @@ import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.j
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
-import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { SkillCatalog } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
@@ -158,7 +159,7 @@ export interface ApiDeps {
    * the chat composer's slash-command autocomplete. `getRegistryLoadFailures`
    * surfaces app-owned skills that were declared but failed to load, so the
    * Skills app can show an author *why* a skill is missing. */
-  skillCatalog: Pick<SkillCatalog, "get" | "getAll" | "getRegistryLoadFailures">;
+  skillCatalog: SkillCatalog & ArtifactLoadFailureSource;
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;

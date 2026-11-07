@@ -76,10 +76,7 @@ import {
 } from "../../core/prompt-builder.js";
 import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
-import {
-  buildSlashSkillPrompt,
-  parseSlashSkillInvocation,
-} from "../../core/slash-skill-command.js";
+import { buildSlashSkillPrompt, parseSlashSkillInvocation } from "../../agent/index.js";
 import { buildConciergeSkillPrompt } from "../../concierge/skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -3388,7 +3385,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // the typed-slash pass-through.
     const requestedSkillName = typeof body.skillName === "string" ? body.skillName.trim() : "";
     const requestedSkill =
-      requestedSkillName && !resolution ? deps.skillCatalog.get(requestedSkillName) : undefined;
+      requestedSkillName && !resolution ? deps.skillCatalog.find(requestedSkillName) : undefined;
     const skillName = requestedSkill?.name ?? null;
 
     // A skill selection with no task text is a valid turn on its own — the

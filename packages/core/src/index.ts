@@ -173,6 +173,7 @@ import {
   createModelAvailability,
   DrizzleSessionRepository,
   SharedCodexAccountService,
+  SkillLoader,
   romeCreditsProxyRoutes,
   resolveAgentPolicy,
 } from "./agent/index.js";
@@ -233,7 +234,6 @@ import {
   resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,
 } from "./webchat/projects.js";
-import { SkillCatalog } from "./core/skill-catalog.js";
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
@@ -673,7 +673,7 @@ async function main() {
   // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
   const agentLoader = new AgentLoader(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
+  const skillCatalog = new SkillLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   const favorService = new RomeCloudFavorService();
 

@@ -23,7 +23,7 @@ import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
 import type { ModelToolCallContext, RomeToolDefinition } from "./agent-runner.js";
 import type { ActionConfig } from "../actions/types.js";
-import type { SkillMcpDefinition } from "./skill-catalog.js";
+import type { Skill } from "../agent/index.js";
 
 /** One action as the facade lists and describes it to the model. */
 export interface ActionMcpDefinition {
@@ -97,7 +97,7 @@ export interface FacadeParams {
    * session. The skill tools always register; the getter may return `[]` for
    * agents that legitimately have no skills exposed.
    */
-  getSkillCatalog: () => SkillMcpDefinition[];
+  getSkillCatalog: () => readonly Skill[];
   subagentTools: RomeToolDefinition[];
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
@@ -192,7 +192,7 @@ interface SkillSummary {
   name: string;
   description: string;
   tools?: string[];
-  ownerType: SkillMcpDefinition["ownerType"];
+  ownerType: Skill["ownerType"];
   ownerId: string;
 }
 
@@ -443,7 +443,7 @@ function assertJsonArgs(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function toSkillSummary(skill: SkillMcpDefinition): SkillSummary {
+function toSkillSummary(skill: Skill): SkillSummary {
   return {
     name: skill.name,
     description: skill.description,
@@ -454,7 +454,7 @@ function toSkillSummary(skill: SkillMcpDefinition): SkillSummary {
 }
 
 function searchSkills(
-  skillCatalog: SkillMcpDefinition[],
+  skillCatalog: readonly Skill[],
   queryText: string,
   limit: number | undefined,
 ): SkillSummary[] {
@@ -482,7 +482,7 @@ function searchSkills(
 
       return { skill, score };
     })
-    .filter((entry): entry is { skill: SkillMcpDefinition; score: number } => entry !== null)
+    .filter((entry): entry is { skill: Skill; score: number } => entry !== null)
     .sort(
       (left, right) => right.score - left.score || left.skill.name.localeCompare(right.skill.name),
     )
@@ -490,7 +490,7 @@ function searchSkills(
     .map(({ skill }) => toSkillSummary(skill));
 }
 
-function requireSkill(skillCatalog: SkillMcpDefinition[], skillName: string): SkillMcpDefinition {
+function requireSkill(skillCatalog: readonly Skill[], skillName: string): Skill {
   const skill = skillCatalog.find((entry) => entry.name === skillName);
   if (!skill) {
     throw new Error(`Unknown skill: ${skillName}`);
@@ -650,7 +650,7 @@ function buildSubagentFacadeTools(
   }));
 }
 
-function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): FacadeToolDef[] {
+function buildSkillFacadeTools(getSkillCatalog: () => readonly Skill[]): FacadeToolDef[] {
   return [
     {
       name: "list_skills",

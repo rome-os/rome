@@ -525,7 +525,7 @@ export async function buildConciergeTools(
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
           const requestedSkill = optionalString(args, "skill");
-          const skill = requestedSkill ? service.deps.skillCatalog.get(requestedSkill) : undefined;
+          const skill = requestedSkill ? service.deps.skillCatalog.find(requestedSkill) : undefined;
           // Like the other optional fields, null or empty means no skill.
           if (requestedSkill && !skill) {
             throw new Error(

@@ -17,7 +17,7 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { ModelAvailabilityState } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
@@ -148,7 +148,7 @@ describe("AgentSession turn usage", () => {
           romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
+        skillCatalog: new SkillLoader(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
         channelSurface: testChannelSurface,
         turnMiddleware,

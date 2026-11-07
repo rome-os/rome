@@ -13,7 +13,7 @@ import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { bothAvailable, fakeAvailability } from "./kit/model-availability.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
@@ -107,7 +107,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     modelResolver,
     actionEngine,
     capabilityDiscovery: new CapabilityDiscovery(),
-    skillCatalog: new SkillCatalog(artifactIdentity),
+    skillCatalog: new SkillLoader(artifactIdentity),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
     channelSurface: testChannelSurface,
   });

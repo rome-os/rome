@@ -44,7 +44,7 @@ import { bothAvailable, fakeAvailability } from "./model-availability.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
-import { SkillCatalog } from "../../core/skill-catalog.js";
+import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
 import type { AgentConfig, AgentEvent } from "../../types.js";
@@ -281,7 +281,7 @@ async function buildHarness(
       // Real but inert collaborators: CapabilityDiscovery is never start()ed
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(artifactIdentity),
+      skillCatalog: new SkillLoader(artifactIdentity),
       lifecycleDispatcher: createAgentLifecycleDispatcher(),
       channelSurface: testChannelSurface,
     },

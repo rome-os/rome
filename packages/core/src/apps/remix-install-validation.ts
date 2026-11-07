@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { parseDocument } from "yaml";
-import { parseSkillFrontmatterResult } from "../core/skill-catalog.js";
+import { parseSkillFrontmatterResult } from "./packaging/skill-frontmatter.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
 import type { SpecSource } from "./lockfile.js";

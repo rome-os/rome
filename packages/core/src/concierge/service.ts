@@ -12,7 +12,7 @@ import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
@@ -134,7 +134,7 @@ export interface ConciergeDashboard {
 }
 
 export interface ConciergeDeps {
-  skillCatalog: Pick<SkillCatalog, "get">;
+  skillCatalog: Pick<SkillCatalog, "find">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
   owners?: ConciergeOwners;

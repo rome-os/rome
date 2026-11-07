@@ -22,6 +22,8 @@ import {
   type ModelProvider,
   type ThreadStart,
   type SessionRepository,
+  type Skill,
+  type SkillCatalog,
   resolveAgentPolicy,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
@@ -40,7 +42,6 @@ import type { FacadeParams, RoutineActivationGate } from "./mcp-facade.js";
 import { createRomeTools } from "./mcp/server.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
-import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentEvent, McpServerConfig } from "../types.js";
 import type {
   AgentStop,
@@ -70,7 +71,6 @@ import type {
   ProviderId,
 } from "./agent-runner.js";
 import type { ActionMcpDefinition } from "./mcp-facade.js";
-import type { SkillMcpDefinition } from "./skill-catalog.js";
 import {
   toModelResolutionErrorPayload,
   type ModelResolution,
@@ -1134,7 +1134,7 @@ async function openSession(
   // app_management installs land in the catalog mid-session via the
   // AppCatalog subscriber chain (skillCatalog.loadFromCatalog), and the
   // facade tools must surface them without restarting the session.
-  const getSkillCatalog = (): SkillMcpDefinition[] => deps.skillCatalog.getMcpDefinitions();
+  const getSkillCatalog = (): readonly Skill[] => deps.skillCatalog.list();
   const { tools: subagentTools, targets: subagentTargets } = buildSubagentTools(
     deps.agentLoader,
     config,
