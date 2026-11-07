@@ -1,7 +1,7 @@
 import { describe, it, expect, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { checkHealthReadiness, healthRoutes, type HealthDeps } from "./health.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 
 describe("GET /health", () => {
   it("returns 200 with status ok when the DB and required schema are ready", async () => {

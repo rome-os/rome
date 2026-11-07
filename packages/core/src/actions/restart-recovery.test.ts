@@ -3,7 +3,7 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { hostJobId } from "../host-execution/service.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import {
   endInterruptedRuns,
   INTERRUPTED_EXECUTION_ERROR,

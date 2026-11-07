@@ -26,7 +26,7 @@ import {
   FakeClock,
   type TestRome,
 } from "../test/kit/index.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import { createActionEngineRepos } from "../test/db.js";
 
 // ActionEngine tests through the real wiring (testkit): the production engine
 // over real repositories on an in-memory DB. Assertions read execution rows,

@@ -11,7 +11,7 @@ import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/sche
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 // The dashboard's repository over Chats' tables. What these pin: a dashboard

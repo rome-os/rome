@@ -8,7 +8,7 @@ import type { ChatRef } from "../chats/storage/place.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { channels, connectedAccounts, connections, romeAgentMessages } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { appChatReads } from "./chat-reads.js";

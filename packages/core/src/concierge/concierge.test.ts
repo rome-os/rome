@@ -19,7 +19,7 @@ import { MessageRepository as StoredMessages } from "../chats/storage/message-re
 import { placeIn } from "../chats/storage/place.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../chats/dashboard/webchat.js";
 import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import { startConciergeEvents } from "./events.js";

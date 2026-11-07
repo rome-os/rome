@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatRef } from "../chats/storage/place.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import { chatsTaskChatMessages, hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 

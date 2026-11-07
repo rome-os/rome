@@ -30,7 +30,7 @@ rs.mock("../../lib/guardian-auth-state.js", () => ({
 
 import type { DrizzleDb } from "../../db/index.js";
 import { oauthPendingAttempts } from "../../db/schema.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { COOKIE_NAME, createGuardianSession } from "../../lib/auth.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import { SHOPIFY_INSTALL_URL } from "../../lib/oauth-providers.js";

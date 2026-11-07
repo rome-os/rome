@@ -15,7 +15,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/db.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { type FakeChat, fakeChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction, type DreamDeps } from "./index.js";

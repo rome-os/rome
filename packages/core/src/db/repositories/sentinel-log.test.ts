@@ -1,6 +1,6 @@
 import { platformOf } from "@rome/api-types/platform";
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { SentinelLogRepository } from "./sentinel-log.js";
 import { eq } from "drizzle-orm";
 import { sentinelLog } from "../schema.js";

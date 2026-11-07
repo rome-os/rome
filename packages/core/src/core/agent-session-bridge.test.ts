@@ -17,7 +17,7 @@ import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { canOpen } from "../concierge/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 class FakeChild extends EventEmitter {

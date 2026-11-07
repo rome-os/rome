@@ -10,7 +10,7 @@ import { makePasteTalk } from "../../connections/test-fixtures.js";
 import type { ConnectionDescriptor, Credential, ProfileRecord } from "../../connections/types.js";
 import { AccountProfilesRepository } from "../../db/repositories/account-profiles.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { backfillOwnAccountProfiles, rememberOwnAccountProfile } from "./own-account-profiles.js";
 
 const SERVICE = "fake-telegram";

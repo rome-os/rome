@@ -5,7 +5,7 @@ import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef } from "../chats/storage/place.js";
 import { Speakers } from "../sessions/speakers.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { chatKey } from "./chat-ids.js";
 import { runLines, SpeakerMessages } from "./speaker-messages.js";
 

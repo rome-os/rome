@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import {
   LAST_BOOTED_VERSION_KEY,

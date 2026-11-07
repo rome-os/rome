@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
+import { createTestDb, identityConnectionKindOf } from "../../test/db.js";
 import type { DrizzleDb } from "../index.js";
 import { WhatsAppStoreRepository } from "./whatsapp-store.js";
 import { PeopleRepository } from "./people.js";

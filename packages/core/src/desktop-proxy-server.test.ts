@@ -4,7 +4,7 @@ import { type AddressInfo, connect } from "node:net";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { attachDesktopProxy, desktopUpstream } from "./desktop-proxy-server.js";
 import { createSession } from "./lib/auth.js";
-import { createTestDb } from "./test/helpers.js";
+import { createTestDb } from "./test/db.js";
 
 afterEach(() => {
   rs.unstubAllEnvs();

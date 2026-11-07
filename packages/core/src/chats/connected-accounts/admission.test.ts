@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import { createTestDb, kindChannelOf, type TestDb } from "../../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";

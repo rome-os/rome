@@ -8,7 +8,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { ChatBuffers } from "../participation/conversation-buffer.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { chats } from "../db/schema.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { startChannelChat } from "./channel-chat.js";
