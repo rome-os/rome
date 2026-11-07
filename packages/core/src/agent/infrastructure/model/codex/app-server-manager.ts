@@ -54,7 +54,7 @@ interface StoredThreadBinding {
 interface Connection {
   client: CodexAppServerConnection;
   generation: number;
-  loginKind: CodexLogin["kind"];
+  loginKind: CodexLoginChoice["kind"];
   invalidate(): void;
 }
 
@@ -268,7 +268,7 @@ export class CodexAppServerManager {
     threadId: string,
     method: string,
     params: unknown,
-    options: { expectedLogin?: CodexLogin["kind"] } = {},
+    options: { expectedLogin?: CodexLoginChoice["kind"] } = {},
   ): Promise<T> {
     const connection = await this.ensureThreadSubscribed(threadId);
     if (options.expectedLogin !== undefined && connection.loginKind !== options.expectedLogin) {
@@ -376,7 +376,7 @@ export class CodexAppServerManager {
 
   private async createConnection(
     generation: number,
-    loginKind: CodexLogin["kind"],
+    loginKind: CodexLoginChoice["kind"],
     connectionEpoch: number,
   ): Promise<Connection> {
     const startedAt = Date.now();

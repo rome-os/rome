@@ -9,9 +9,6 @@ import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js"
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
 import { settings } from "../../db/schema.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
-import * as anthropicLoginModule from "../../lib/anthropic-login.js" with {
-  rstest: "importActual",
-};
 import { reportOf } from "../../test/kit/model-accounts.js";
 
 const {
@@ -35,8 +32,13 @@ rs.mock("./desktop.js", () => ({
   openServerBrowserTab: openServerBrowserTabMock,
 }));
 
-rs.mock("../../lib/anthropic-login.js", () => ({
-  ...anthropicLoginModule,
+// The mark that the provider refused a credential lives on disk beside the adapter.
+rs.mock("../../agent/infrastructure/model/anthropic/refused-credential.js", () => ({
+  buildClaudeCliRevokedSource: rs.fn(),
+  buildStoredAnthropicCompatibleRevokedSource: rs.fn(),
+  clearAnthropicAuthRevoked: rs.fn(),
+  markAnthropicAuthRevoked: rs.fn(),
+  resolveAnthropicAuthRevokedSourceForQuery: rs.fn(),
   clearClaudeAuthRevoked: clearClaudeAuthRevokedMock,
   clearStoredAnthropicCompatibleAuthRevoked: clearStoredAnthropicCompatibleAuthRevokedMock,
   isAnthropicAuthRevoked: isAnthropicAuthRevokedMock,
@@ -507,6 +509,10 @@ describe("AI tools Anthropic-compatible credentials API", () => {
     const configured = await app.request("/ai-tools/anthropic-compatible-providers");
     const configuredBody = await configured.json();
     expect(configuredBody.configured.env.ANTHROPIC_AUTH_TOKEN).toBe("ark-key");
+
+    const status = await (await app.request("/ai-tools/status")).json();
+    expect(status.anthropicCompatible).toMatchObject({ provider: "custom" });
+    expect(status.anthropicCompatible).not.toHaveProperty("env");
 
     const update = await app.request("/ai-tools/anthropic-compatible-credentials", {
       method: "PUT",

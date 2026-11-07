@@ -44,12 +44,13 @@ import {
   markAnthropicAuthRevoked,
   resolveAnthropicAuthRevokedSourceForQuery,
   type AnthropicAuthRevokedSource,
-} from "../../../../lib/anthropic-login.js";
+} from "./refused-credential.js";
 import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth-revoked.js";
 import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
 import { anthropicFunding } from "./funding.js";
+import { claudeLoginFrom } from "./login.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -484,10 +485,11 @@ export class AnthropicProvider implements ModelProvider {
       }
     }
 
+    const login = claudeLoginFrom(credentials, baseEnv);
     return {
       env,
-      authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, baseEnv),
-      funding: anthropicFunding({ hasCompatibleCredentials: !!credentials, env: baseEnv }),
+      authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, login),
+      funding: anthropicFunding(login),
     };
   }
 

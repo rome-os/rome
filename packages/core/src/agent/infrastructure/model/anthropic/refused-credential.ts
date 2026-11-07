@@ -5,20 +5,21 @@ import { join } from "node:path";
 import {
   getAnthropicCompatibleCredentialSecret,
   getStoredAnthropicCompatibleCredentials,
-} from "./anthropic-compatible-providers.js";
+} from "../../../../lib/anthropic-compatible-providers.js";
 import {
   isAnthropicCompatibleConfigurationId,
   type AnthropicCompatibleConfigurationId,
   type StoredAnthropicCompatibleCredentials,
 } from "@rome/api-types/anthropic-compatible-providers";
-import { createLogger } from "../logger.js";
-import type { SettingsRepository } from "../db/repositories/settings.js";
+import { createLogger } from "../../../../logger.js";
+import type { SettingsRepository } from "../../../../db/repositories/settings.js";
+import type { ClaudeLogin } from "../../../domain/model-login.js";
 
-const log = createLogger("anthropic-login");
+const log = createLogger("claude-refused-credential");
 
 //
 // The Claude binary owns token refresh, so a revoked/expired credential only
-// surfaces at request time (a 401, see `agent/infrastructure/model/anthropic/auth-revoked.ts`), never from
+// surfaces at request time (a 401, see `auth-revoked.ts`), never from
 // `claude auth status` — which keeps reporting "logged in". When a turn fails
 // that way we drop a Rome-owned marker recording a fingerprint of the OAuth
 // credentials file; the settings reader then downgrades the badge to
@@ -96,11 +97,10 @@ export async function buildClaudeCliRevokedSource(): Promise<AnthropicAuthRevoke
  */
 export async function resolveAnthropicAuthRevokedSourceForQuery(
   credentials: StoredAnthropicCompatibleCredentials | null,
-  env: NodeJS.ProcessEnv = process.env,
+  login: ClaudeLogin,
 ): Promise<AnthropicAuthRevokedSource | null> {
-  if (credentials) return buildStoredAnthropicCompatibleRevokedSource(credentials);
-  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) return null;
-  return buildClaudeCliRevokedSource();
+  if (login.kind === "subscription") return buildClaudeCliRevokedSource();
+  return credentials ? buildStoredAnthropicCompatibleRevokedSource(credentials) : null;
 }
 
 function isAnthropicAuthRevokedSource(value: unknown): value is AnthropicAuthRevokedSource {

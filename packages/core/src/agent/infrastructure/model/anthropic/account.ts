@@ -1,20 +1,18 @@
 // The Claude account as Rome reads it: stored Anthropic-compatible
 // credentials, else an environment credential, else the Claude CLI's own
 // login. The guardian authorizes Claude outside Rome, with the Claude CLI, so
-// this adapter implements ModelAccount and ModelProviderLogins, and has no
+// this adapter implements ModelAccount and ClaudeLogins, and has no
 // authorization to start.
 
 import { execFile } from "node:child_process";
 import type { SettingsRepository } from "../../../../db/repositories/settings.js";
+import type { StoredAnthropicCompatibleCredentials } from "@rome/api-types/anthropic-compatible-providers";
 import {
+  ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
+  summarizeAnthropicCompatibleCredentialsForEditing,
 } from "../../../../lib/anthropic-compatible-providers.js";
-import {
-  clearClaudeAuthRevoked,
-  isAnthropicAuthRevoked,
-  isAnthropicCompatibleAuthRevoked,
-} from "../../../../lib/anthropic-login.js";
 import { getErrorMessage, readClaudeOAuthUsage } from "../../../../lib/provider-usage.js";
 import { createLogger } from "../../../../logger.js";
 import type {
@@ -22,7 +20,7 @@ import type {
   ModelAccountStatus,
   ModelAccountUsage,
 } from "../../../domain/model-account.js";
-import type { ModelProviderLogins } from "../../../domain/model-login.js";
+import type { ClaudeLogins, ClaudeStoredCredential } from "../../../domain/model-login.js";
 import type { ModelAccountReport } from "../../../domain/model-account-report.js";
 import { accountReport, refusalAfterReport, usageShowsCapacity } from "../account-report.js";
 import {
@@ -33,6 +31,13 @@ import {
   usageRefusalAt,
   usageRefusalEnded,
 } from "../refused-turn.js";
+import { claudeLoginFrom } from "./login.js";
+import {
+  clearClaudeAuthRevoked,
+  clearStoredAnthropicCompatibleAuthRevoked,
+  isAnthropicAuthRevoked,
+  isAnthropicCompatibleAuthRevoked,
+} from "./refused-credential.js";
 
 const log = createLogger("claude-account");
 
@@ -40,7 +45,7 @@ const log = createLogger("claude-account");
 const UNLIMITED_AUTH_METHODS = new Set(["stored-compatible", "environment"]);
 
 export interface ClaudeAccountOptions {
-  settingsRepo?: Pick<SettingsRepository, "get">;
+  settingsRepo?: Pick<SettingsRepository, "get" | "set" | "delete">;
   env?: NodeJS.ProcessEnv;
   readCliStatus?: () => Promise<ModelAccountStatus>;
   /** Whether the provider refused the CLI's credential, from the persisted marker. */
@@ -95,7 +100,7 @@ async function logoutClaude(): Promise<void> {
   await clearClaudeAuthRevoked();
 }
 
-export class ClaudeAccount implements ModelAccount, ModelProviderLogins, LearnsRefusedTurns {
+export class ClaudeAccount implements ModelAccount, ClaudeLogins, LearnsRefusedTurns {
   private readonly options: ClaudeAccountOptions;
   private readonly listeners = new Set<() => void>();
   /** The usage refusal the adapter last saw, until its end or a later usage read shows capacity. */
@@ -151,14 +156,17 @@ export class ClaudeAccount implements ModelAccount, ModelProviderLogins, LearnsR
 
   /** Stored Anthropic-compatible credentials or an environment credential: the provider bills per use. */
   private async billedPerUse(): Promise<boolean> {
-    const env = this.options.env ?? process.env;
-    if (await getStoredAnthropicCompatibleCredentials(this.options.settingsRepo)) return true;
-    return Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN);
+    const stored = await getStoredAnthropicCompatibleCredentials(this.options.settingsRepo);
+    return claudeLoginFrom(stored, this.options.env ?? process.env).kind === "api_credential";
   }
 
   private async readStatus(): Promise<ModelAccountStatus> {
     const env = this.options.env ?? process.env;
     const credentials = await getStoredAnthropicCompatibleCredentials(this.options.settingsRepo);
+    const login = claudeLoginFrom(credentials, env);
+    if (login.kind === "subscription") {
+      return await (this.options.readCliStatus ?? readClaudeCliStatus)();
+    }
     if (credentials) {
       const summary = summarizeAnthropicCompatibleCredentials(credentials);
       const revoked = await isAnthropicCompatibleAuthRevoked(this.options.settingsRepo);
@@ -169,10 +177,7 @@ export class ClaudeAccount implements ModelAccount, ModelProviderLogins, LearnsR
         needsReauth: revoked || undefined,
       };
     }
-    if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) {
-      return { loggedIn: true, authMethod: "environment", accountType: "API key" };
-    }
-    return await (this.options.readCliStatus ?? readClaudeCliStatus)();
+    return { loggedIn: true, authMethod: "environment", accountType: "API key" };
   }
 
   /** The usage, or an error read, or null for an account with no usage windows. */
@@ -197,6 +202,38 @@ export class ClaudeAccount implements ModelAccount, ModelProviderLogins, LearnsR
     await (this.options.logout ?? logoutClaude)();
     this.refusal = undefined;
     this.emitChanged();
+  }
+
+  async storedCredential(): Promise<(ClaudeStoredCredential & { needsReauth: boolean }) | null> {
+    const { settingsRepo } = this.options;
+    const [credentials, needsReauth] = await Promise.all([
+      getStoredAnthropicCompatibleCredentials(settingsRepo),
+      isAnthropicCompatibleAuthRevoked(settingsRepo),
+    ]);
+    const view = summarizeAnthropicCompatibleCredentialsForEditing(credentials);
+    return view ? { ...view, needsReauth } : null;
+  }
+
+  async storeCredential(
+    credential: StoredAnthropicCompatibleCredentials,
+  ): Promise<ClaudeStoredCredential> {
+    await this.settings().set(ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING, credential);
+    await clearStoredAnthropicCompatibleAuthRevoked();
+    this.emitChanged();
+    const view = summarizeAnthropicCompatibleCredentialsForEditing(credential);
+    if (!view) throw new Error("Claude credential has no summary");
+    return view;
+  }
+
+  async removeCredential(): Promise<void> {
+    await this.settings().delete(ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING);
+    await clearStoredAnthropicCompatibleAuthRevoked();
+    this.emitChanged();
+  }
+
+  private settings(): NonNullable<ClaudeAccountOptions["settingsRepo"]> {
+    if (!this.options.settingsRepo) throw new Error("Claude account has no settings");
+    return this.options.settingsRepo;
   }
 
   refusedTurn(refusal: RefusedTurn): void {

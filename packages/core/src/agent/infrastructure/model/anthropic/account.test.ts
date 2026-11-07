@@ -231,4 +231,44 @@ describe("ClaudeAccount", () => {
     expect(logout).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalledTimes(2);
   });
+
+  describe("stored credential", () => {
+    const credential = { provider: "deepseek", apiKey: "k", updatedAt: "2026-11-07" } as const;
+    const settings = () => {
+      const values = new Map<string, unknown>();
+      return {
+        get: async <T>(key: string) => (values.get(key) ?? null) as T | null,
+        set: async (key: string, value: unknown) => void values.set(key, value),
+        delete: async (key: string) => values.delete(key),
+      };
+    };
+
+    it("becomes the login when stored, tells the account, and goes when removed", async () => {
+      const account = new ClaudeAccount({
+        env: {},
+        settingsRepo: settings() as never,
+        readCliStatus: async () => ({ loggedIn: false }),
+      });
+      const changed = rs.fn();
+      account.onChanged(changed);
+
+      await account.storeCredential(credential as never);
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect(await account.status()).toMatchObject({
+        authMethod: "stored-compatible",
+        usageLimited: false,
+      });
+      expect(await account.storedCredential()).toMatchObject({ provider: "deepseek" });
+
+      await account.removeCredential();
+      expect(changed).toHaveBeenCalledTimes(2);
+      expect(await account.storedCredential()).toBeNull();
+      expect(await account.status()).toMatchObject({ loggedIn: false });
+    });
+
+    it("cannot store without settings", async () => {
+      const account = new ClaudeAccount({ env: {} });
+      await expect(account.storeCredential(credential as never)).rejects.toThrow("no settings");
+    });
+  });
 });

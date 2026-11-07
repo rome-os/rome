@@ -83,7 +83,7 @@ import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./com
 import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
 import type { LearnsRefusedModels } from "./account-service.js";
-import type { CodexLogin } from "../../../domain/model-login.js";
+import type { CodexLoginChoice } from "../../../domain/model-login.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -542,7 +542,7 @@ function isChatGptModelNotSupportedError(turnError: unknown): boolean {
 function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
-  loginKind: CodexLogin["kind"],
+  loginKind: CodexLoginChoice["kind"],
 ): CodexFailureClassification {
   // Only Rome credits can exhaust credits, and only the guardian's own login
   // can need signing in again.
@@ -1120,7 +1120,7 @@ export class CodexAppServerProvider implements ModelProvider {
 
     // The login each source input was sent under. Codex may replace its
     // process while an input waits in the turn lane or in buildTurnInput.
-    const loginAtSend = new WeakMap<ModelUserInput, CodexLogin["kind"]>();
+    const loginAtSend = new WeakMap<ModelUserInput, CodexLoginChoice["kind"]>();
 
     const runOne = async (inputs: ModelUserInput[], runtime: CodexTurnRuntime): Promise<void> => {
       const text = inputs
