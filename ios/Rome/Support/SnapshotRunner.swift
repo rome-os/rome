@@ -70,6 +70,8 @@ enum SnapshotRunner {
             model.debugCommand = .settings(nil)
             await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.routines) }
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.search) }
+            await capture("24-topic-chat", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-trip")) }
+            await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("15-task-answered", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
             }
