@@ -44,6 +44,7 @@ import {
   CONCIERGE_AGENT_ID,
   TASK_CHAT_TRIGGER_KIND,
   useConciergeChatId,
+  useConciergeName,
 } from "@/hooks/use-concierge";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -334,6 +335,7 @@ export function RecentChats({
   belowTitlebar = false,
 }: RecentChatsProps) {
   const { t } = useTranslation("common");
+  const conciergeName = useConciergeName();
   const navigate = useNavigate();
   const location = useLocation();
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
@@ -350,7 +352,6 @@ export function RecentChats({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renamingRef = useRef(false);
-  const activeSessionId = activeSessionFromPath(location.pathname);
 
   const {
     sessions: cachedSessions,
@@ -379,6 +380,7 @@ export function RecentChats({
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
+  const activeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
   // A blank topic chat opened from the Concierge entry is not New chat.
   const isTopicDraft =
     (location.state as { conciergeTopic?: unknown } | null)?.conciergeTopic === true;
@@ -779,7 +781,7 @@ export function RecentChats({
             nested={nested}
             marker={
               session.triggerKind === TASK_CHAT_TRIGGER_KIND
-                ? t("recentChats.startedByConcierge")
+                ? t("recentChats.startedByConcierge", { name: conciergeName })
                 : undefined
             }
           />

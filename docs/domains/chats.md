@@ -81,8 +81,10 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 The one Concierge chat each owner always has.
 
 - The main chat exists while the Concierge is on, and it is never archived or deleted.
+- The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
 - The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
+- The dashboard calls the Concierge by the name the guardian gave their agent (else "Concierge"), in the main chat's title and in its own copy. The stored chat name stays "Concierge".
 
 ## Topic chat
 

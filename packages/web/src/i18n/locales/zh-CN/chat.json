@@ -39,8 +39,8 @@
         "archive": "正在归档…",
         "done": "正在发送…"
       },
-      "unchanged": "Concierge 没有改动这一项",
-      "timeout": "Concierge 还没有处理",
+      "unchanged": "{{name}} 没有改动这一项",
+      "timeout": "{{name}} 还没有处理",
       "failed": "没发出去，请再试一次。",
       "notSynced": "未同步",
       "sourceMissing": "找不到原消息",
@@ -65,7 +65,7 @@
         "idle": "任务"
       },
       "emptyTitle": "还没有任务",
-      "emptyDescription": "Concierge 正在做、计划做或盯着的任务会显示在这里。"
+      "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
     },
     "messageDetails": "消息详情",
     "chooseFolder": "选择文件夹…",

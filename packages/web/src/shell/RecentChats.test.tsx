@@ -59,13 +59,14 @@ interface MockSession {
   deviceFolder?: { deviceId: string; deviceName: string; platform: string | null; path: string };
 }
 
-function mockSessions(sessions: MockSession[]) {
+function mockSessions(sessions: MockSession[], settings?: Record<string, unknown>) {
   const spy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
     const method = init?.method ?? "GET";
+    if (url === "/api/settings" && settings) return Response.json(settings);
     if (url.startsWith("/api/chat/sessions") && method === "GET") {
       const status = new URL(url, "http://localhost").searchParams.get("status") ?? "active";
       const filtered = sessions.filter((s) => {
@@ -175,11 +176,34 @@ describe("RecentChats", () => {
     ]);
     renderRecentChats();
     const entry = await screen.findByRole("link", { name: "Concierge" });
-    expect(entry.getAttribute("href")).toBe("/chat/concierge");
+    expect(entry.getAttribute("href")).toBe("/message");
     const task = await screen.findByRole("link", { name: /Find flights/ });
     expect(within(task).getByRole("img", { name: "Started by Concierge" })).toBeTruthy();
     // The Concierge chat itself stays out of the list.
     expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
+  });
+
+  it("marks the task chats the agent started by the name the guardian gave it", async () => {
+    concierge.chatId = "concierge";
+    mockSessions(
+      [
+        {
+          id: "task-1",
+          name: "Find flights",
+          createdAt: new Date().toISOString(),
+          activityAt: new Date().toISOString(),
+          lastSeenActivityAt: null,
+          unread: false,
+          projectName: "default",
+          projectPath: "default",
+          triggerKind: "concierge",
+        } as MockSession,
+      ],
+      { agentName: "Milo" },
+    );
+    renderRecentChats();
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(await within(task).findByRole("img", { name: "Started by Milo" })).toBeTruthy();
   });
 
   describe("Concierge topic chats", () => {
@@ -257,14 +281,12 @@ describe("RecentChats", () => {
           body: { archived: true },
         }),
       );
-      await waitFor(() =>
-        expect(screen.getByTestId("location-path").textContent).toBe("/chat/concierge"),
-      );
+      await waitFor(() => expect(screen.getByTestId("location-path").textContent).toBe("/message"));
     });
   });
 
   describe("Concierge unread badge", () => {
-    const server = { unread: 0, tasks: [] as unknown[] };
+    const server = { unread: 0, tasks: [] as unknown[], settings: {} as Record<string, unknown> };
     const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
       spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
     const mockConcierge = () =>
@@ -272,11 +294,13 @@ describe("RecentChats", () => {
         const url = String(input);
         const body = url.startsWith("/api/chat/sessions")
           ? []
-          : url === "/api/concierge/session"
-            ? { id: "concierge", unread: server.unread }
-            : url.startsWith("/api/concierge/tasks")
-              ? { tasks: server.tasks }
-              : null;
+          : url === "/api/settings"
+            ? server.settings
+            : url === "/api/concierge/session"
+              ? { id: "concierge", unread: server.unread }
+              : url.startsWith("/api/concierge/tasks")
+                ? { tasks: server.tasks }
+                : null;
         if (body === null) return new Response("not found", { status: 404 });
         return new Response(JSON.stringify(body), {
           status: 200,
@@ -288,6 +312,7 @@ describe("RecentChats", () => {
       concierge.chatId = "concierge";
       server.unread = 0;
       server.tasks = [];
+      server.settings = {};
       FakeWebSocket.instances = [];
     });
 
@@ -316,6 +341,41 @@ describe("RecentChats", () => {
       expect(
         await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
       ).toBeTruthy();
+    });
+
+    it("goes by the name the guardian gave their agent", async () => {
+      server.unread = 3;
+      server.settings = { agentName: " Milo " };
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Milo, 3 unread messages" });
+      expect(entry.textContent).toContain("Milo");
+      expect(screen.queryByRole("link", { name: /Concierge/ })).toBeNull();
+    });
+
+    it("goes by Concierge when the agent name is blank", async () => {
+      server.unread = 3;
+      server.settings = { agentName: "  " };
+      mockConcierge();
+      renderRecentChats();
+      expect(
+        await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
+      ).toBeTruthy();
+    });
+
+    it("lights the entry at /message, the main chat's page, and not elsewhere", async () => {
+      server.unread = 3;
+      mockConcierge();
+      const view = renderRecentChats("/message");
+      const entry = await screen.findByRole("link", { name: "Concierge" });
+      expect(entry.getAttribute("href")).toBe("/message");
+      expect(entry.className).toContain("shadow-1");
+      view.unmount();
+
+      renderRecentChats("/chat");
+      expect((await screen.findByRole("link", { name: /^Concierge, 3/ })).className).not.toContain(
+        "shadow-1",
+      );
     });
 
     it("shows no badge at 0", async () => {
@@ -380,7 +440,7 @@ describe("RecentChats", () => {
     it("shows no badge on the Concierge page", async () => {
       server.unread = 3;
       const fetchSpy = mockConcierge();
-      renderRecentChats("/chat/concierge");
+      renderRecentChats("/message");
       await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
       await act(async () => {});
       expect(screen.getByRole("link", { name: "Concierge" })).toBeTruthy();
@@ -450,23 +510,27 @@ describe("RecentChats", () => {
     ["Archived", 500],
   ])("ignores a stale %s list response with status %s", async (selection, status) => {
     let respond!: (response: Response) => void;
-    const fetchSpy = rs
-      .spyOn(globalThis, "fetch")
-      .mockImplementationOnce(
-        () =>
-          new Promise<Response>((resolve) => {
-            respond = resolve;
-          }),
-      )
-      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+    // Only the chat list is counted: the sidebar's other reads (the settings
+    // behind the Concierge's name) are not what this test is about.
+    let listRequests = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      if (!String(input).startsWith("/api/chat/sessions")) {
+        return new Response("not found", { status: 404 });
+      }
+      listRequests += 1;
+      if (listRequests > 1) return new Response(JSON.stringify([]), { status: 200 });
+      return new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+    }) as typeof fetch);
     const user = userEvent.setup();
     renderRecentChats();
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    await waitFor(() => expect(listRequests).toBe(1));
 
     await user.click(screen.getByRole("button", { name: "List settings" }));
     await user.click(screen.getByRole("menuitem", { name: selection }));
     await screen.findByText("No chats yet");
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(listRequests).toBe(2);
 
     await act(async () => {
       respond(
@@ -572,7 +636,10 @@ describe("RecentChats", () => {
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
     let attempts = 0;
-    rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      if (!String(input).startsWith("/api/chat/sessions")) {
+        return new Response("not found", { status: 404 });
+      }
       attempts += 1;
       if (attempts === 1) return new Response("boom", { status: 500 });
       return new Response(

@@ -190,7 +190,12 @@ describe("FreeGrid navigation seeds", () => {
 });
 
 describe("FreeGrid mobile header", () => {
-  function renderAt(path: string) {
+  function renderAt(
+    path: string,
+    settings: Record<string, unknown> = {},
+    // `/message` names no chat, so its page hands the grid the main chat's id.
+    grid = <FreeGrid />,
+  ) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     rs.stubGlobal(
       "fetch",
@@ -199,7 +204,7 @@ describe("FreeGrid mobile header", () => {
         return Promise.resolve(
           Response.json(
             url === "/api/settings"
-              ? {}
+              ? settings
               : url.startsWith("/api/concierge/tasks")
                 ? {
                     tasks: [
@@ -233,6 +238,7 @@ describe("FreeGrid mobile header", () => {
             <SlotOutlet name="mobileHeader" className="header" />
             <Routes>
               <Route path="/chat/*" element={<FreeGrid />} />
+              <Route path="/message" element={grid} />
             </Routes>
           </SlotProvider>
         </QueryClientProvider>
@@ -250,6 +256,20 @@ describe("FreeGrid mobile header", () => {
     const pill = header(container).querySelector<HTMLElement>("[data-concierge-tasks-pill]")!;
     await waitFor(() => expect(pill.getAttribute("data-state")).toBe("needsYou"));
     expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
+  });
+
+  it("titles the main Concierge chat with the agent's chosen name, and any other chat with its own", async () => {
+    concierge.chatId = "concierge";
+    identity.current = { sessionName: "Concierge" };
+    const first = renderAt("/chat/concierge", { agentName: "Milo" });
+    await waitFor(() => expect(header(first.container).textContent).toContain("Milo"));
+    expect(header(first.container).textContent).not.toContain("Concierge");
+    first.unmount();
+
+    identity.current = { sessionName: "Plan the launch" };
+    const second = renderAt("/chat/some-other-chat", { agentName: "Milo" });
+    await waitFor(() => expect(header(second.container).textContent).toContain("Plan the launch"));
+    expect(header(second.container).textContent).not.toContain("Milo");
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
@@ -277,6 +297,20 @@ describe("FreeGrid mobile header", () => {
     };
     const second = renderAt("/chat/some-other-chat");
     await waitFor(() => expect(header(second.container).textContent).toContain("Workflow Studio"));
+  });
+
+  it("opens the main chat at /message, under the agent's chosen name", async () => {
+    concierge.chatId = "concierge";
+    identity.current = { sessionName: "Concierge" };
+    const { container } = renderAt(
+      "/message",
+      { agentName: "Milo" },
+      <FreeGrid sessionId="concierge" />,
+    );
+    await waitFor(() =>
+      expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
+    );
+    await waitFor(() => expect(header(container).textContent).toContain("Milo"));
   });
 
   it("leaves every other chat's header without it", async () => {

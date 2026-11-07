@@ -339,6 +339,8 @@ export interface ChatProps {
   variant?: ChatVariant;
   /** The signed-in person's main Concierge chat, which shows the starters a topic chat does not. The guardian's by default. */
   conciergeMainChatId?: string;
+  /** What the main Concierge chat is called in its title, in place of the session name the server stores. */
+  conciergeName?: string;
 }
 
 // The summary persisted for a turn's trace, once the turn has one.
@@ -372,6 +374,7 @@ export function Chat({
   navbarSlot,
   variant = "default",
   conciergeMainChatId = CONCIERGE_CHAT_ID,
+  conciergeName,
 }: ChatProps) {
   const concierge = variant === "concierge";
   const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
@@ -2049,7 +2052,10 @@ export function Chat({
               <SessionLoadingTitle />
             ) : (
               <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+                {(concierge && mainSessionId === conciergeMainChatId && conciergeName) ||
+                  sessionName?.trim() ||
+                  pinnedAgentMention?.appLabel ||
+                  t("sidebar.newChat")}
               </span>
             )}
             {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
@@ -2195,7 +2201,6 @@ export function Chat({
                 ) : (
                   // A topic chat: its starters send themselves as its first message.
                   <ConciergeTopicEmptyState
-                    mainChatId={conciergeMainChatId}
                     onStart={(prompt) => composerRef.current?.submit(prompt)}
                   />
                 )

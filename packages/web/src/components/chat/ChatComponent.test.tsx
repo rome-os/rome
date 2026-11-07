@@ -21,10 +21,20 @@ rs.mock("@/components/logo", () => ({
 // mount the real Chat, because the draft composer lives inside it.
 const chatStub = rs.hoisted(() => ({ enabled: false }));
 
-function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound, variant }: ChatProps) {
+function StubChat({
+  sessionId,
+  mainAgentDisplayName,
+  onSessionNotFound,
+  variant,
+  conciergeName,
+}: ChatProps) {
   return (
     <>
-      <div data-testid="session-chat" data-variant={variant ?? "default"}>
+      <div
+        data-testid="session-chat"
+        data-variant={variant ?? "default"}
+        data-concierge-name={conciergeName}
+      >
         {mainAgentDisplayName}
       </div>
       <button type="button" onClick={() => onSessionNotFound?.(sessionId ?? "")}>
@@ -317,6 +327,26 @@ describe("ChatComponent Concierge chats", () => {
     );
     await act(async () => {});
     expect(screen.getByTestId("session-chat").getAttribute("data-variant")).toBe("default");
+  });
+});
+
+describe("ChatComponent Concierge name", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
+
+  it.each([
+    ["the agent name the guardian chose", " Milo ", "Milo"],
+    ["Concierge when the agent name is blank", "  ", "Concierge"],
+  ])("hands Chat %s", async (_label, agentName, expected) => {
+    renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true, agentName } },
+      "/chat/concierge",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-chat").getAttribute("data-concierge-name")).toBe(expected),
+    );
   });
 });
 

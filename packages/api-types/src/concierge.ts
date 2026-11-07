@@ -15,7 +15,7 @@ export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 /** The panel actions. Each one sends the Concierge a message, and never writes the row. */
 export type ConciergeTaskAction = "stop" | "archive" | "done";
 
-/** The guardian's main Concierge chat has a fixed id, so the dashboard opens it at `/chat/concierge`. */
+/** The guardian's main Concierge chat has a fixed id, and the dashboard opens it at `/message`. */
 export const CONCIERGE_CHAT_ID = "concierge";
 
 /** The Concierge chat something reports to, as a list shows it. */

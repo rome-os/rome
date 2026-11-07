@@ -11,6 +11,7 @@ import {
 import { Spinner } from "@rome-os/ui/spinner";
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { InstalledAppCard } from "@rome/api-types/apps";
@@ -44,7 +45,8 @@ import {
 } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import { isChatSearchShortcut, chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
-import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
+import { activeSessionFromPath, chatPath, sessionActivityTime } from "@/lib/chat-session";
+import { loadedConciergeChatId } from "@/hooks/use-concierge";
 import type {
   AgentCatalogGroup,
   AgentMention,
@@ -379,7 +381,9 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     enabled: open,
   });
   const shortcut = chatSearchShortcutForPlatform();
-  const currentSessionId = activeSessionFromPath(location.pathname);
+  // The sidebar loads it; the dialog has no use that would justify its own request.
+  const mainChatId = loadedConciergeChatId(useQueryClient());
+  const currentSessionId = activeSessionFromPath(location.pathname, mainChatId);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -538,10 +542,10 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       onOpenChange(false);
       const preserveHiddenSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
       navigate(
-        `/chat/${encodeURIComponent(sessionId)}${preserveHiddenSidebar ? "?hideSidebar=1" : ""}`,
+        `${chatPath(sessionId, mainChatId)}${preserveHiddenSidebar ? "?hideSidebar=1" : ""}`,
       );
     },
-    [location.search, navigate, onOpenChange],
+    [location.search, mainChatId, navigate, onOpenChange],
   );
 
   const pickAgent = useCallback((group: AgentCatalogGroup, agentName: string) => {

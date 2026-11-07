@@ -2115,6 +2115,38 @@ describe("Chat Concierge empty state", () => {
     expect(screen.queryByTestId("tasks-pill")).toBeNull();
   });
 
+  it("titles the main Concierge chat with the agent's chosen name, and a topic chat with its own", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const main = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeName="Milo" />,
+    );
+    await screen.findByTestId("tasks-pill");
+    expect(screen.getByText("Milo")).toBeTruthy();
+    expect(screen.queryByText("Concierge")).toBeNull();
+    main.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(
+      <Chat
+        sessionId="topic-1"
+        variant="concierge"
+        conciergeMainChatId="concierge"
+        conciergeName="Milo"
+      />,
+    );
+    await screen.findByTestId("tasks-pill");
+    expect(screen.getByText("Calendar")).toBeTruthy();
+    expect(screen.queryByText("Milo")).toBeNull();
+  });
+
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
     // Core agents all report "Rome" as their app, so the Concierge's label never varies.
     mockUseSessionIdentity.mockReturnValue({
