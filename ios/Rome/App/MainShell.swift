@@ -159,8 +159,16 @@ struct MainShell: View {
         #endif
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
-            if open { workspace.topics.refresh() }
+            if open {
+                Keyboard.dismiss()
+                workspace.topics.refresh()
+            }
         }
+        // Whatever covers or replaces the chat takes the keyboard with it;
+        // the composer keeps its text.
+        .onChange(of: path) { Keyboard.dismiss() }
+        .onChange(of: showTasks) { _, shown in if shown { Keyboard.dismiss() } }
+        .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             showTasks = false
@@ -361,7 +369,11 @@ struct MainShell: View {
                 // A new start point is a new drag, also after a cancelled one.
                 // The rule matches the one above, on the same first movement.
                 if dragAxis?.start != value.startLocation {
-                    dragAxis = DragAxis(start: value.startLocation, horizontal: abs(value.translation.width) > abs(value.translation.height))
+                    let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                    dragAxis = DragAxis(start: value.startLocation, horizontal: horizontal)
+                    // The drawer starts to move: the keyboard goes now, not
+                    // once it is open. A vertical scroll leaves it alone.
+                    if horizontal { Keyboard.dismiss() }
                 }
             }
             .onEnded { value in

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The 44 pt round glass button the headers use (menu, tasks, back, more).
 struct GlassCircleButton<Label: View>: View {
@@ -16,6 +17,14 @@ struct GlassCircleButton<Label: View>: View {
         }
         .buttonStyle(GlassPressStyle())
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The on-screen keyboard.
+enum Keyboard {
+    /// Takes focus from whatever field has it; the text it holds stays.
+    @MainActor static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
