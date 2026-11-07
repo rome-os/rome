@@ -76,6 +76,11 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 - [x] Settings › Appearance: Automatic (default), Light, Dark. Ember only, no more themes; stored on the phone for the whole app, independent of the web dashboard (user, 2026-11-06). Queued to the iOS app worker after drafts.
 
+## Login and Settings
+
+- [ ] Login page with the mascot: centered where the launch logo sits, "Rome" and the sign-in line below, an occasional blink; stopped / no-instance states use the mascot instead of the power icon (user, 2026-11-06). Queued after the update page.
+- [ ] Settings: the X at top right stays fixed while the list scrolls (user, 2026-11-06). Queued.
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
