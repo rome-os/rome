@@ -373,7 +373,7 @@ struct RoutineRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(RoutineText.breakable(RoutineText.title(routine.name)))
-                        .romeFont(17, .medium)
+                        .romeFont(17)
                         .foregroundStyle(Palette.fg)
                         .lineLimit(2)
                         .truncationMode(.tail)
