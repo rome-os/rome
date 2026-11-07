@@ -18,6 +18,24 @@
           }
         }
       }
+    },
+    "NSPhotoLibraryAddUsageDescription" : {
+      "comment" : "Asked before saving a photo from the viewer",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome saves photos from a chat to your library when you ask it to."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在你要求时，Rome 会把聊天中的照片存到你的相册。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

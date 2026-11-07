@@ -427,6 +427,16 @@
         }
       }
     },
+    "Could not start the chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能开始这个聊天"
+          }
+        }
+      }
+    },
     "Could not start the update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -668,6 +678,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复杂的事我会开成任务去做，做完告诉你。"
+          }
+        }
+      }
+    },
+    "Image" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片"
           }
         }
       }
@@ -1161,6 +1181,26 @@
         }
       }
     },
+    "Opens the image full screen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全屏查看图片"
+          }
+        }
+      }
+    },
+    "Opens the photo full screen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全屏查看照片"
+          }
+        }
+      }
+    },
     "Opens the task chat." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1566,6 +1606,16 @@
         }
       }
     },
+    "Share" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享"
+          }
+        }
+      }
+    },
     "Show %lld older" : {
       "localizations" : {
         "en" : {
@@ -1801,6 +1851,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拍照"
+          }
+        }
+      }
+    },
+    "Tap to try again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点重试"
           }
         }
       }

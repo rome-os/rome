@@ -54,6 +54,29 @@ struct UserBubble: View {
 /// One photo large, or two to a row.
 private struct UserImageGrid: View {
     let images: [UserImage]
+    @State private var showViewer = false
+    @State private var viewerStart = 0
+
+    /// The pictures of the message, for the viewer; other files stay tiles.
+    private var gallery: [ViewerImage] {
+        images.compactMap { image in
+            switch image {
+            case .local(let photo): return photo.thumbnail == nil ? nil : .local(photo)
+            case .stored(let upload): return upload.isImage ? .stored(upload) : nil
+            }
+        }
+    }
+
+    private func open(_ image: UserImage) {
+        let id: String
+        switch image {
+        case .local(let photo): id = photo.id.uuidString
+        case .stored(let upload): id = upload.linkPath
+        }
+        guard let start = gallery.firstIndex(where: { $0.id == id }) else { return }
+        viewerStart = start
+        showViewer = true
+    }
 
     var body: some View {
         let side: CGFloat = images.count == 1 ? 200 : 110
@@ -63,7 +86,14 @@ private struct UserImageGrid: View {
                 UserImageTile(image: image)
                     .frame(width: side, height: side)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .contentShape(Rectangle())
+                    .onTapGesture { open(image) }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Opens the photo full screen")
             }
+        }
+        .fullScreenCover(isPresented: $showViewer) {
+            PhotoViewer(images: gallery, start: viewerStart)
         }
     }
 }
@@ -91,7 +121,7 @@ private struct UserImageTile: View {
                 attachmentLabel(upload.name)
             } else if failed {
                 // Offline for a moment, say: a tap, or the next time it scrolls in, tries again.
-                attachmentLabel(upload.name)
+                ImageFailedTile(label: upload.name)
                     .onTapGesture { failed = false }
                     .onDisappear { failed = false }
             } else {

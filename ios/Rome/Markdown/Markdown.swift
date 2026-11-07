@@ -9,6 +9,8 @@ enum MarkdownBlock: Hashable {
     case quote(String)
     case code(language: String?, text: String)
     case rule
+    /// `![alt](src)`, lifted out of its paragraph to stand at its place.
+    case image(alt: String, src: String)
 }
 
 enum MarkdownParser {
@@ -24,7 +26,7 @@ enum MarkdownParser {
 
         func flushParagraph() {
             if !paragraph.isEmpty {
-                blocks.append(.paragraph(paragraph.joined(separator: "\n")))
+                blocks += splitImages(paragraph.joined(separator: "\n"))
                 paragraph = []
             }
         }
@@ -121,6 +123,28 @@ enum MarkdownParser {
         return blocks
     }
 
+    nonisolated(unsafe) private static let imagePattern = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)"#)
+
+    /// A paragraph's text with its Markdown images as blocks of their own.
+    /// Only image syntax counts: a plain link to an image file stays a link.
+    static func splitImages(_ text: String) -> [MarkdownBlock] {
+        let nsText = text as NSString
+        let matches = imagePattern.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        guard !matches.isEmpty else { return [.paragraph(text)] }
+        var blocks: [MarkdownBlock] = []
+        var cursor = 0
+        for match in matches {
+            let before = nsText.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !before.isEmpty { blocks.append(.paragraph(before)) }
+            blocks.append(.image(alt: nsText.substring(with: match.range(at: 1)), src: nsText.substring(with: match.range(at: 2))))
+            cursor = match.range.location + match.range.length
+        }
+        let after = nsText.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !after.isEmpty { blocks.append(.paragraph(after)) }
+        return blocks
+    }
+
     private static func headingLevel(_ line: String) -> (level: Int, text: String)? {
         var level = 0
         for character in line {
@@ -182,6 +206,18 @@ struct MarkdownText: View {
     var color: Color = Palette.fg
 
     private var blocks: [MarkdownBlock] { MarkdownParser.parse(source) }
+    @State private var showViewer = false
+    @State private var viewerStart = 0
+
+    /// The message's images, for paging in the viewer.
+    private var gallery: [ViewerImage] {
+        blocks.compactMap { block in
+            if case .image(let alt, let src) = block, ImageSource(src: src) != .rejected {
+                return .markdown(ImageSource(src: src), alt: alt, src: src)
+            }
+            return nil
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -191,6 +227,9 @@ struct MarkdownText: View {
         }
         .foregroundStyle(color)
         .tint(Palette.primaryText)
+        .fullScreenCover(isPresented: $showViewer) {
+            PhotoViewer(images: gallery, start: viewerStart)
+        }
     }
 
     @ViewBuilder
@@ -243,6 +282,11 @@ struct MarkdownText: View {
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         case .rule:
             Rectangle().fill(Palette.hair).frame(height: 1).padding(.vertical, 4)
+        case .image(let alt, let src):
+            MarkdownImageView(source: ImageSource(src: src), alt: alt) {
+                viewerStart = gallery.firstIndex { $0.matches(src: src) } ?? 0
+                showViewer = true
+            }
         }
     }
 }

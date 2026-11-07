@@ -103,8 +103,10 @@ final class LiveBackend: RomeBackend {
         return try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(body), as: CreatedTurn.self)
     }
 
+    /// `projects/…` from the projects route, `memory/…` from memory's.
     func asset(path: String) async throws -> Data {
-        try await client.getData("/projects/asset", query: [URLQueryItem(name: "path", value: path)])
+        let route = path.hasPrefix("memory/") ? "/memory/asset" : "/projects/asset"
+        return try await client.getData(route, query: [URLQueryItem(name: "path", value: path)])
     }
 
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
