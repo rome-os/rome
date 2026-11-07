@@ -740,6 +740,16 @@ describe("SharedCodexAccountService login", () => {
     service.close();
   });
 
+  it("reads the guardian's own login from the account's last report", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: { type: "apiKey" }, requiresOpenaiAuth: false });
+    const service = createService(rpc);
+    expect(service.login()).toEqual({ kind: "subscription" });
+    await service.report();
+    expect(service.login()).toEqual({ kind: "api_credential" });
+    service.close();
+  });
+
   it("refuses a login once closed", () => {
     const { service } = onCredits(async () => view());
     service.close();

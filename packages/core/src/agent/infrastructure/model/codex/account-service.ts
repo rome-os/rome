@@ -505,7 +505,8 @@ export class SharedCodexAccountService
 
   login(): CodexLogin {
     const login = this.manager.login();
-    return login.kind === "rome_credits" ? { ...login, modelsServed: this.modelsServed } : login;
+    if (login.kind === "rome_credits") return { ...login, modelsServed: this.modelsServed };
+    return this.last?.account.authMode === "apikey" ? { kind: "api_credential" } : login;
   }
 
   useLogin(login: CodexLoginChoice): void {

@@ -3,9 +3,7 @@ import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
   rstest: "importActual",
 };
-import * as anthropicLoginModule from "../../../../lib/anthropic-login.js" with {
-  rstest: "importActual",
-};
+import * as anthropicLoginModule from "./refused-credential.js" with { rstest: "importActual" };
 import { AnthropicProvider } from "./provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { FacadeParams } from "../../../../core/mcp-facade.js";
@@ -53,7 +51,7 @@ rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
   tool: sdkToolMock,
 }));
 
-rs.mock("../../../../lib/anthropic-login.js", () => ({
+rs.mock("./refused-credential.js", () => ({
   ...anthropicLoginModule,
   markAnthropicAuthRevoked: markAnthropicAuthRevokedMock,
   clearAnthropicAuthRevoked: clearAnthropicAuthRevokedMock,

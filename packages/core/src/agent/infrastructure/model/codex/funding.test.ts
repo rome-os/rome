@@ -13,9 +13,9 @@ describe("codexFunding", () => {
   });
 
   it("reads the Codex account type otherwise", () => {
-    expect(codexFunding({ login: subscription, accountType: "api_key", loggedIn: true })).toBe(
-      "byok",
-    );
+    expect(
+      codexFunding({ login: { kind: "api_credential" }, accountType: "api_key", loggedIn: true }),
+    ).toBe("byok");
     expect(codexFunding({ login: subscription, accountType: "plus", loggedIn: true })).toBe(
       "subscription",
     );
