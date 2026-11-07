@@ -5,7 +5,8 @@ import { toArtifactMetadata } from "../../apps/artifact-ref-adapter.js";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
 import { loadArtifactRecords } from "../../apps/artifact-records.js";
 import { parseSkillFrontmatterResult } from "../../apps/packaging/skill-frontmatter.js";
-import type { Skill, SkillCatalog, SkillLoadFailure } from "../domain/skill.js";
+import type { AppOwnedArtifactLoadFailure } from "../../apps/types.js";
+import type { Skill, SkillCatalog } from "../domain/skill.js";
 
 function stripSkillStructuredSection(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/, "").trim();
@@ -18,7 +19,7 @@ function stripSkillStructuredSection(content: string): string {
  */
 export class SkillLoader implements SkillCatalog {
   private skills: Skill[] = [];
-  private failures: SkillLoadFailure[] = [];
+  private failures: AppOwnedArtifactLoadFailure[] = [];
 
   constructor(private readonly identity: ArtifactIdentityContext) {}
 
@@ -53,7 +54,7 @@ export class SkillLoader implements SkillCatalog {
       ownerType: metadata.ownerType,
       ownerId: metadata.ownerId,
     })).sort((left, right) => left.name.localeCompare(right.name));
-    this.failures = failures.map((failure) => ({ ...failure, kind: "skill" }));
+    this.failures = failures;
   }
 
   list(): readonly Skill[] {
@@ -65,7 +66,8 @@ export class SkillLoader implements SkillCatalog {
     return this.skills.find((skill) => skill.name === resolved);
   }
 
-  loadFailures(): readonly SkillLoadFailure[] {
+  /** For the apps side, which shows an author why a skill is missing. */
+  getRegistryLoadFailures(): AppOwnedArtifactLoadFailure[] {
     return [...this.failures];
   }
 

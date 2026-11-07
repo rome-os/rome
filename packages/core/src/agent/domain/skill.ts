@@ -17,20 +17,10 @@ export interface Skill {
   ownerId: string;
 }
 
-/** Value object. A skill an app declared that did not load, and why. */
-export interface SkillLoadFailure {
-  kind: "skill";
-  ownerId: string;
-  publicName: string;
-  sourcePath: string;
-  error: string;
-}
-
 /** The skills an agent can read. */
 export interface SkillCatalog {
   /** Read on every call, so an app installed mid-session shows at once. */
   list(): readonly Skill[];
   /** By canonical id, or a legacy bare name. */
   find(name: string): Skill | undefined;
-  loadFailures(): readonly SkillLoadFailure[];
 }

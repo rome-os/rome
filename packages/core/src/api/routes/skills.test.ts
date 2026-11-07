@@ -44,7 +44,7 @@ describe("GET /skills", () => {
           }),
           skill({ name: "skill-import" }),
         ],
-        loadFailures: () => [],
+        getRegistryLoadFailures: () => [],
       };
       const app = new Hono().route("/", skillsRoutes({ ...deps, skillCatalog }));
 
@@ -96,7 +96,7 @@ describe("GET /skills", () => {
             ownerId,
           }),
         ],
-        loadFailures: () => [
+        getRegistryLoadFailures: () => [
           {
             kind: "skill" as const,
             ownerId,
@@ -138,7 +138,7 @@ describe("GET /skills", () => {
       const skillCatalog = {
         find: () => undefined,
         list: () => [],
-        loadFailures: () => [
+        getRegistryLoadFailures: () => [
           {
             kind: "skill" as const,
             ownerId: "jubensha",

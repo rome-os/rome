@@ -689,11 +689,7 @@ async function main() {
     }
   });
   const artifactLoadFailureReporter = createArtifactLoadFailureReporter({
-    sources: [
-      agentLoader,
-      actionLoader,
-      { getRegistryLoadFailures: () => [...skillCatalog.loadFailures()] },
-    ],
+    sources: [agentLoader, actionLoader, skillCatalog],
     log: appsLog,
   });
   // Subscribes after the three loaders so it reads their reloaded failures.

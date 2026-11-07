@@ -40,7 +40,7 @@ export function skillsRoutes(deps: ApiDeps): Hono {
     // silently — without this the only trace is a worker `console.warn`. Surface
     // them so the Skills app can tell an author their skill exists but was
     // rejected, and why.
-    const loadFailures = deps.skillCatalog.loadFailures().map((failure) => {
+    const loadFailures = deps.skillCatalog.getRegistryLoadFailures().map((failure) => {
       const resolved = appById.get(failure.ownerId);
       return {
         publicName: failure.publicName,

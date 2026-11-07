@@ -29,7 +29,7 @@ export type {
 } from "./domain/model-account.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
-export type { Skill, SkillCatalog, SkillLoadFailure } from "./domain/skill.js";
+export type { Skill, SkillCatalog } from "./domain/skill.js";
 export {
   buildSlashSkillPrompt,
   parseSlashSkillInvocation,

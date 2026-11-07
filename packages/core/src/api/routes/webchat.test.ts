@@ -3811,7 +3811,7 @@ describe("Webchat API", () => {
           ? ({ name } as never)
           : undefined,
       list: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
-      loadFailures: () => [],
+      getRegistryLoadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
 
@@ -3893,7 +3893,7 @@ describe("Webchat API", () => {
     deps.skillCatalog = {
       find: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
       list: () => [{ name: "research:deep-research" } as never],
-      loadFailures: () => [],
+      getRegistryLoadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
 
@@ -3976,7 +3976,7 @@ describe("Webchat API", () => {
     deps.skillCatalog = {
       find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
       list: () => [],
-      loadFailures: () => [],
+      getRegistryLoadFailures: () => [],
     };
     await deps.webchatRepo.createSession(
       "concierge-skills",
@@ -4050,7 +4050,7 @@ describe("Webchat API", () => {
     deps.skillCatalog = {
       find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
       list: () => [],
-      loadFailures: () => [],
+      getRegistryLoadFailures: () => [],
     };
     const { runtime } = createWebchatRuntime(deps);
     const chatId = await runtime.startChat({}, "guardian");
@@ -7182,7 +7182,7 @@ describe("Webchat API", () => {
       deps.skillCatalog = {
         find: (name: string) => (name === "brief" ? { name } : undefined),
         list: () => [],
-        loadFailures: () => [],
+        getRegistryLoadFailures: () => [],
       } as never;
       const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
       for (let i = 0; i < 2; i++) {
@@ -7272,7 +7272,7 @@ describe("Webchat API", () => {
       deps.skillCatalog = {
         find: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
         list: () => [{ name: "app_creation" }] as never[],
-        loadFailures: () => [],
+        getRegistryLoadFailures: () => [],
       };
       await seed("a1", "assistant", text("Start in Lisbon."), "t1");
 

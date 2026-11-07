@@ -473,7 +473,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
       ...deps.agentLoader.getRegistryLoadFailures(),
       ...deps.actionLoader.getRegistryLoadFailures(),
-      ...deps.skillCatalog.loadFailures(),
+      ...deps.skillCatalog.getRegistryLoadFailures(),
     ]);
     const cards = views.map((view) =>
       toInstalledAppCard(
