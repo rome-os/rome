@@ -133,6 +133,9 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
       if (await (this.options.readCredentialRevoked ?? isAnthropicAuthRevoked)()) {
         return { ...this.last?.account, loggedIn: false, needsReauth: true };
       }
+      // Likewise a usage refusal the account holds: the account it last read
+      // still stands for it, so the refusal is reported rather than lost.
+      if (this.heldRefusal() && this.last) return this.last.account;
       throw err;
     });
     return { ...base, usageLimited: !UNLIMITED_AUTH_METHODS.has(base.authMethod ?? "") };

@@ -163,6 +163,26 @@ describe("ClaudeAccount", () => {
     await expect(account.availability()).rejects.toThrow("claude timed out");
   });
 
+  it("still reports a held refusal when the CLI cannot be read", async () => {
+    let fail = false;
+    const account = new ClaudeAccount({
+      env: {},
+      readCliStatus: async () => {
+        if (fail) throw new Error("claude timed out");
+        return { loggedIn: true, authMethod: "oauth" };
+      },
+      readUsage: async () => null,
+      readCredentialRevoked: async () => false,
+    });
+    await expect(account.availability()).resolves.toMatchObject({ state: "available" });
+    account.refusedTurn({ kind: "usage" });
+    fail = true;
+    await expect(account.availability()).resolves.toMatchObject({
+      state: "usage_limit_reached",
+      account: { loggedIn: true, authMethod: "oauth" },
+    });
+  });
+
   it("holds a refusal no longer than the window reset it reported", async () => {
     let now = Date.parse("2026-11-07T00:00:00.000Z");
     const resetsAt = "2026-11-07T01:00:00.000Z";
