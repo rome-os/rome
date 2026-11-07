@@ -2,44 +2,17 @@ import type { ReactNode } from "react";
 import { Plug } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { GmailIcon } from "./gmail-icon";
+import { GoogleCalendarIcon } from "./google-calendar-icon";
 
-/* Monochrome glyphs for the services Rome reaches through Composio, keyed by
-   the catalog's `glyph` id (`rome_apps/connector/src/catalog.ts`); add one
-   when a service joins the catalog. GitHub, Slack and Shopify are left out:
+/* Glyphs for the services Rome reaches through Composio, keyed by the
+   catalog's `glyph` id (`rome_apps/connector/src/catalog.ts`); add one when a
+   service joins the catalog. Most are monochrome; Gmail and Google Calendar
+   draw their own multicolor brand marks. GitHub, Slack and Shopify are left out:
    Rome connects those itself, never through Composio. */
 const COMPOSIO_GLYPHS: Record<string, ReactNode> = {
-  calendar: (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      width="22"
-      height="22"
-      aria-hidden="true"
-    >
-      <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
-      <path d="M3.5 9.5h17M8 3v4M16 3v4" />
-    </svg>
-  ),
-  gmail: (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      width="22"
-      height="22"
-      aria-hidden="true"
-    >
-      <rect x="3" y="5.5" width="18" height="13" rx="2.5" />
-      <path d="M3.6 7 12 13l8.4-6" />
-    </svg>
-  ),
+  calendar: <GoogleCalendarIcon className="h-5 w-5" />,
+  gmail: <GmailIcon className="h-5 w-5" />,
   notion: (
     <svg
       viewBox="0 0 24 24"

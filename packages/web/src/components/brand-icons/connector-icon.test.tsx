@@ -27,6 +27,29 @@ describe("ConnectorIcon", () => {
     expect(el.className).toContain("h-9 w-9");
   });
 
+  it("draws Gmail's own multicolor mark, not a generic envelope", () => {
+    const el = tile("glyph:gmail", "Gmail");
+    const fills = [...el.querySelectorAll("path")].map((path) => path.getAttribute("fill"));
+    expect(fills).toEqual(["#4285f4", "#34a853", "#fbbc04", "#ea4335", "#c5221f"]);
+    expect(el.querySelector("svg")?.getAttribute("viewBox")).toBe("52 42 88 66");
+  });
+
+  it("draws Google Calendar's own multicolor mark", () => {
+    const el = tile("glyph:calendar", "Calendar");
+    const fills = new Set(
+      [...el.querySelectorAll("path")].map((path) => path.getAttribute("fill")),
+    );
+    expect(fills).toContain("#4285F4");
+    expect(fills).toContain("#EA4335");
+    expect(fills).toContain("#FBBC04");
+    expect(fills).toContain("#34A853");
+  });
+
+  it("still draws the other Composio services with their monochrome glyphs", () => {
+    const el = tile("glyph:notion", "Notion");
+    expect(el.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+  });
+
   it.each([
     ["no id", null],
     ["no id at all", undefined],
