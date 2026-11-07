@@ -6930,6 +6930,50 @@ describe("Webchat API", () => {
     });
   });
 
+  describe("the push level of a sent turn", () => {
+    it("gives the guardian's own message the active level, and an automated send none", async () => {
+      const levels: Array<string | undefined> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+          levels.push(options?.pushLevel);
+          return {
+            turnId: `turn-${levels.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      await deps.webchatRepo.createSession("push-chat", "Push");
+      const app = createWebchatRuntime(deps).routes;
+      const send = (fields: Record<string, unknown>) =>
+        app.request("/chat/sessions/push-chat/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields),
+        });
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+      await runWithSessionActor(guardian, () => send({ text: "Hello" }));
+      await runWithSessionActor(loopback, () =>
+        send({
+          text: "Status?",
+          automatedSource: "agent:core:main",
+          automatedActorKind: "guardian",
+        }),
+      );
+      expect(levels).toEqual(["active", undefined]);
+    });
+  });
+
   describe("replying to a message", () => {
     const prompts: string[] = [];
 

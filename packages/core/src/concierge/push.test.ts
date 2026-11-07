@@ -15,6 +15,7 @@ function pushWith(
     quietUntil?: number | null;
     outcome?: () => Promise<SendOutcome>;
     language?: string | null;
+    watching?: (chatId: string) => boolean;
   } = {},
 ) {
   const sent: SystemNotifyContent[] = [];
@@ -28,6 +29,7 @@ function pushWith(
     quietUntil: async () => options.quietUntil ?? null,
     pushesFor: async (chatId) => chatId !== "visitor-chat",
     language: async () => options.language ?? null,
+    watching: options.watching,
   });
   return { push, sent };
 }
@@ -94,6 +96,15 @@ describe("ConciergePush", () => {
     push.said({ turnId: "t1", chatId: "visitor-chat", ownWords: "hi", level: "active" });
     await settle();
     expect(sent).toEqual([]);
+  });
+
+  it("pushes nothing for a chat the guardian's phone shows, proactive or a reply", async () => {
+    const { push, sent } = pushWith({ watching: (chatId) => chatId === "open" });
+    push.said({ turnId: "t1", chatId: "open", ownWords: "reply", level: "active" });
+    push.said({ turnId: "t2", chatId: "open", ownWords: "digest", level: "passive" });
+    push.said({ turnId: "t3", chatId: "elsewhere", ownWords: "reply", level: "active" });
+    await settle();
+    expect(sent).toEqual([{ body: "reply", level: "active", chatId: "elsewhere" }]);
   });
 
   it("pushes nothing in quiet hours", async () => {

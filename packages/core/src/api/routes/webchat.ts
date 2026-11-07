@@ -4174,6 +4174,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     let started: ReturnType<typeof attachTurn> | undefined;
     const options = {
+      // The guardian's own message: the Concierge's reply may reach their phone
+      // (ConciergePush), unless the phone shows the chat. Automated senders don't.
+      ...(actor?.kind === "guardian" && !sourceId ? { pushLevel: "active" as const } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,

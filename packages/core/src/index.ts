@@ -231,6 +231,7 @@ import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { PhoneWatching } from "./lib/phone-watching.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
 import { emitAgentMessage } from "./actions/runtime-events.js";
@@ -1086,6 +1087,9 @@ async function main() {
   // Made here so the Concierge can tell whether a visitor is still served;
   // it is loaded with the other access settings further down.
   const dashboardAccessState = new DashboardAccessState();
+  // The chats the guardian's phone app holds open, from the live-events socket;
+  // the Concierge does not push what it says in one of them.
+  const phoneWatching = new PhoneWatching();
   const concierge = new ConciergeService({
     skillCatalog,
     settingsRepo,
@@ -1104,6 +1108,7 @@ async function main() {
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
+    phoneWatching,
   });
   const agentSessionManager = createAgentSessionManager(
     {
@@ -2070,6 +2075,7 @@ async function main() {
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       publicAccessState,
       dashboardAccessState,
+      phoneWatching,
       relayDrainer,
       bootVersionReport,
       favorService,

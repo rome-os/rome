@@ -1,10 +1,10 @@
 # Notification Delivery
 
-How a mobile push notification travels from an [instance](../concepts/deployment.md#instances) to a guardian's device, and the invariants that hold across the instance ↔ [Rome Cloud](../concepts/rome-cloud.md) ↔ push-provider boundary. A device receives push through its platform service — APNs for iOS, FCM for Android — and the notification itself originates from a user-directed [action](../concepts/actions.md) or from a [Concierge](concierge.md) turn the guardian did not start.
+How a mobile push notification travels from an [instance](../concepts/deployment.md#instances) to a guardian's device, and the invariants that hold across the instance ↔ [Rome Cloud](../concepts/rome-cloud.md) ↔ push-provider boundary. A device receives push through its platform service — APNs for iOS, FCM for Android — and the notification itself originates from a user-directed [action](../concepts/actions.md) or from a [Concierge](concierge.md) turn.
 
 ## Components
 
-- **Instance** — runs the agent and the notification action, and the Concierge's proactive turns. Decides *whether* to notify and *what* the body says.
+- **Instance** — runs the agent and the notification action, and the Concierge's turns. Decides *whether* to notify and *what* the body says. Knows which chats the guardian's phone app holds open on the live-events socket.
 - **Rome Cloud** — the central push broker. Owns device registration, the push-provider credentials (APNs for iOS, FCM for Android), and the delivery fan-out.
 - **APNs / FCM** — the platform push services (Apple's APNs for iOS, Google's FCM for Android), and the only path to the physical device.
 
@@ -20,7 +20,9 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 
 - **A push level and a chat are routing data, never shown.** A request may say whether the push alerts (`active`) or arrives silently (`passive`), and which chat a tap opens. Neither is displayed, so the body stays the only content the guardian reads. Only the instance itself sets them. The agent-facing action supplies a body alone.
 
-- **A Concierge turn the guardian did not start pushes its first message, once.** A turn the guardian started never pushes, and neither does the reminder after it. Only the guardian's own Concierge chats push, since Rome Cloud delivers to the guardian's devices: a visitor's Concierge never does. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
+- **A Concierge turn pushes its first message, once: a proactive turn, and the reply to a message the guardian sent.** The reminder after a turn, the quota recovery and the "chat retired" notice never push, nor does the reply to an automated sender. Only the guardian's own Concierge chats push, since Rome Cloud delivers to the guardian's devices: a visitor's Concierge never does. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
+
+- **Nothing pushes for a chat the guardian's phone app shows.** The phone app marks its live-events socket with the `x-rome-client: phone` upgrade header. While that socket, signed in as the guardian, subscribes to a chat's session topic, the chat counts as watched, and nothing the Concierge says there pushes. The dashboard never counts: a browser cannot set the header. The phone unsubscribes and closes the socket as it leaves the foreground, so the count drops at once. A phone killed or cut off without that goodbye counts until the socket's ping drops it, and a reply in that window does not push.
 
 - **A Concierge push carries only the Concierge's own words.** Its body is what the Concierge wrote in that message, its text or a forward's intro, or else a fixed line in the guardian's language. Forwarded or quoted text, a task's title and a chat's name never become the body, since any of them may come from a task's output and hold a code or password.
 

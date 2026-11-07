@@ -1,6 +1,6 @@
 # Proactive Concierge messages push without per-message consent
 
-- **Status**: Accepted
+- **Status**: Accepted, amended 2026-11-07 (replies push; a chat the phone shows does not)
 - **Date**: 2026-11-06
 - **Architecture**: [Notification delivery](../architecture/notification-delivery.md)
 - **Amends**: [The notification body is sender-supplied](sender-supplied-notification-body-over-contentless-push.md)
@@ -15,7 +15,13 @@ A push costs attention. A digest is expected at its time, while an important ale
 
 ## Decision
 
-The instance pushes the first message of every Concierge turn the guardian did not start — a task event, a followed event, a digest — with no consent per message. Consent is the guardian allowing notifications on the phone. A digest pushes without an alert, every other proactive turn with one, and nothing pushes in quiet hours. A turn the guardian started never pushes, and neither does the reminder turn after it.
+The instance pushes the first message of every Concierge turn the guardian did not start — a task event, a followed event, a digest — with no consent per message. Consent is the guardian allowing notifications on the phone. A digest pushes without an alert, every other proactive turn with one, and nothing pushes in quiet hours. The reminder turn after a turn never pushes.
+
+## Amendment: replies push, unless the phone shows the chat
+
+*2026-11-07.* A guardian who sends a message and locks the phone missed the reply: a turn the guardian started never pushed. Now the reply to the guardian's own message pushes its first message with an alert, under the same rules: once per turn, the Concierge's own words, quiet hours, the guardian's own chats. The reply to an automated sender does not push, nor do the reminder, the quota recovery and the "chat retired" notice.
+
+No turn pushes while the guardian's phone app shows its chat. The phone marks its live-events socket with the `x-rome-client: phone` upgrade header, and a chat its socket subscribes to counts as watched. This holds for proactive turns too: what the phone shows needs no push. The dashboard never counts, since a browser cannot set that header, so a guardian reading on a computer still gets the push on the phone. The phone says goodbye as it leaves the foreground: it unsubscribes and closes the socket, and the count drops at once. A phone killed or cut off without the goodbye counts until the socket's ping drops it, and a reply in that window does not push. That gap is accepted. A reply's first message can now show on the lock screen too, so the Concierge is told to keep any secret, even one the guardian asked for, out of it and give it in a later message.
 
 ## Alternatives
 
@@ -33,11 +39,12 @@ The guardian learns of a proactive message wherever they are, and taps it to ope
 
 A forwarded task answer can hold a one-time code, and the Concierge's instructions alone cannot keep it off the lock screen. A task's title and a chat's name can come from the same output. So a forward pushes the Concierge's intro, and a forward with no intro or a card pushes a fixed line, never the forwarded text, the title or the name. The Concierge is told that its first message in such a turn can show on the lock screen, as `send_notification` tells its callers.
 
-A turn the guardian did not start pushes even when the guardian has the chat open. One turn pushes once, however many messages it says. A proactive turn that writes its message outside `say` and is then reminded pushes nothing, since the reminder carries no push.
+A turn pushes even when the guardian has the chat open on a computer, but not while the phone app shows it. One turn pushes once, however many messages it says. A proactive turn that writes its message outside `say` and is then reminded pushes nothing, since the reminder carries no push.
 
 Future diffs must respect:
 
-- The instance decides when a turn pushes, from how the turn started, never from the text of its input or output.
+- The instance decides when a turn pushes, from how the turn started and whether the phone shows the chat, never from the text of its input or output.
+- Only the phone app's socket counts as watching, and only while it is signed in as the guardian. A diff that lets the dashboard hold back a push reopens this record.
 - Only the guardian's own Concierge pushes. A visitor's Concierge chats are private to the visitor, and the push reaches the guardian's devices.
 - One push per turn, the turn's first message. A diff that pushes each message reopens this record.
 - Quiet hours suppress the push and keep the message in the chat. Nothing queues the push for later.

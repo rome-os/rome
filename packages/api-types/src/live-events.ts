@@ -9,6 +9,14 @@ export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
 
+/**
+ * The upgrade header the phone app sends, with {@link PHONE_CLIENT} as its
+ * value. A chat the guardian's phone holds open this way gets no push for
+ * what the Concierge says there. Browsers cannot set it on a WebSocket.
+ */
+export const LIVE_EVENTS_CLIENT_HEADER = "x-rome-client";
+export const PHONE_CLIENT = "phone";
+
 /** The topic carrying one chat session's events. */
 export function chatSessionTopicName(sessionId: string): string {
   return `${CHAT_SESSION_TOPIC_PREFIX}${sessionId}`;
