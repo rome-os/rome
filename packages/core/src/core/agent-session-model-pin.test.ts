@@ -175,8 +175,8 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("pins a credit-funded session to the model ChatGPT would run", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
+    // No account authorized: credits pay, and serve the frontier models.
     state.openai = availabilityOf("unauthorized");
-    state.openai = availabilityOf("available", RESTRICTED_PLAN);
     state.anthropic = availabilityOf("unauthorized");
     let usingRomeCredits = true;
     const session = await createManager(false, () => usingRomeCredits).acquire(key, {
@@ -189,7 +189,6 @@ describe("agent model pins through AgentSessionManager", () => {
     });
 
     // Connecting ChatGPT changes only who pays: the pinned model keeps running.
-    state.openai = availabilityOf("available");
     state.openai = availabilityOf("available");
     usingRomeCredits = false;
     await collect(session.sendTurn({ prompt: "guardian" }).events);
@@ -206,8 +205,6 @@ describe("agent model pins through AgentSessionManager", () => {
     await firstManager.shutdown();
 
     state.openai = availabilityOf("unauthorized");
-    // luna access follows the plan
-    state.openai = availabilityOf("available", RESTRICTED_PLAN);
     const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "credits" }).events);
 

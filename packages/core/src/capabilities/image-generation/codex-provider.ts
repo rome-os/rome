@@ -129,14 +129,11 @@ export function createCodexImageGenerationProvider(
           remedy: CONNECT_REMEDY,
         };
       }
-      {
-        return {
-          available: false,
-          reason: "the Codex (ChatGPT) account has hit its usage limit",
-          remedy: "Wait for the Codex usage limit to reset, then retry.",
-        };
-      }
-      return { available: true };
+      return {
+        available: false,
+        reason: "the Codex (ChatGPT) account has hit its usage limit",
+        remedy: "Wait for the Codex usage limit to reset, then retry.",
+      };
     },
 
     async generate(
