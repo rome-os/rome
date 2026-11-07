@@ -177,6 +177,14 @@ final class AppModel {
         case stopped(instanceName: String)
         case noInstance
         case ready
+
+        /// Launching or opening an instance: the opening screen shows.
+        var isOpening: Bool {
+            switch self {
+            case .launching, .connecting: return true
+            default: return false
+            }
+        }
     }
 
     private enum Defaults {

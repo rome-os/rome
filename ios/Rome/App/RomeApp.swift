@@ -85,6 +85,10 @@ struct RootView: View {
                     .environment(\.assetLoader) { [backend = workspace.backend] path in try await backend.asset(path: path) }
                     .id(ObjectIdentifier(workspace))
                     .transition(.opacity)
+            } else if model.phase.isOpening {
+                // The launch screen hands over to it without a jump.
+                OpeningScreen()
+                    .transition(.opacity)
             } else {
                 LoginView()
                     .transition(.opacity)

@@ -33,16 +33,6 @@ struct LoginView: View {
     @ViewBuilder
     private var center: some View {
         switch model.phase {
-        case .connecting(let host):
-            VStack(spacing: 18) {
-                Spinner(size: 28, lineWidth: 2.5, color: Palette.fg, trackOpacity: 0.12)
-                VStack(spacing: 4) {
-                    Text("Opening your Rome").romeFont(17, .semibold)
-                    Text(host).romeFont(15).foregroundStyle(Palette.sub)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .transition(.opacity.combined(with: .scale(scale: 0.98)))
         case .stopped, .noInstance:
             VStack(spacing: 16) {
                 Image(systemName: "power")
@@ -60,8 +50,6 @@ struct LoginView: View {
             }
             .frame(maxWidth: .infinity)
             .transition(.opacity)
-        case .launching:
-            Color.clear.frame(height: 1)
         default:
             VStack(alignment: .leading, spacing: 14) {
                 Text("Rome")
