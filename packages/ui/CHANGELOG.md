@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.9](https://github.com/rome-os/rome/compare/ui-v0.3.8...ui-v0.3.9) (2026-11-07)
+
+
+### Performance Improvements
+
+* **ui:** resolve the Mermaid theme only for Markdown with a Mermaid fence ([#1787](https://github.com/rome-os/rome/issues/1787)) ([495c8d3](https://github.com/rome-os/rome/commit/495c8d315279a5566014948fb33dcbac648157d7))
+
 ## [0.3.8](https://github.com/rome-os/rome/compare/ui-v0.3.7...ui-v0.3.8) (2026-10-31)
 
 
