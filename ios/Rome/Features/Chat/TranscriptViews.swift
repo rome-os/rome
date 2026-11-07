@@ -38,13 +38,26 @@ struct UserBubble: View {
 
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
 /// corner and the last a small top-left corner, as on the design's Chat board.
+/// Every reply sits in a bubble, a long one too: past about fifteen lines it
+/// folds, with "Show more".
 struct AgentBubble: View {
     let text: String
-    let long: Bool
     let forwardedFrom: MessagePart.ForwardedFrom?
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     @State private var expanded = false
+
+    /// How many lines a bubble shows before it folds.
+    nonisolated static let foldedLines = 15
+
+    /// Whether `text` runs past `foldedLines` in a bubble: each paragraph
+    /// counts its wrapped lines at about 34 characters a line.
+    nonisolated static func folds(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { total, line in
+            total + max(1, Int((Double(line.count) / 34).rounded(.up)))
+        }
+        return lines > foldedLines
+    }
 
     private var shape: UnevenRoundedRectangle {
         let big = Metrics.bubbleRadius
@@ -57,63 +70,50 @@ struct AgentBubble: View {
         )
     }
 
-    private var isTall: Bool { text.count > 600 }
+    private var folds: Bool { Self.folds(text) }
 
     var body: some View {
-        if long && forwardedFrom == nil {
-            // A long message reads as a document: full width, no bubble.
-            VStack(alignment: .leading, spacing: 8) {
-                MarkdownText(source: text, lineSpacing: 6)
-                    .frame(maxHeight: isTall && !expanded ? 360 : nil, alignment: .top)
-                    .clipped()
-                    .overlay(alignment: .bottom) {
-                        if isTall && !expanded {
-                            LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg], startPoint: .top, endPoint: .bottom)
-                                .frame(height: 64)
-                        }
+        VStack(alignment: .leading, spacing: 8) {
+            if let forwardedFrom {
+                Button {
+                    onOpenChat(forwardedFrom.chatId, forwardedFrom.title)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrowshape.turn.up.right").romeFont(11, .semibold)
+                        Text("From “\(forwardedFrom.title)”").lineLimit(1)
                     }
-                if isTall { expandButton }
+                    .romeFont(12, .semibold)
+                    .foregroundStyle(Palette.sub)
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contextMenu { CopyButton(text: text) }
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                if let forwardedFrom {
-                    Button {
-                        onOpenChat(forwardedFrom.chatId, forwardedFrom.title)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrowshape.turn.up.right").romeFont(11, .semibold)
-                            Text("From “\(forwardedFrom.title)”").lineLimit(1)
-                        }
-                        .romeFont(12, .semibold)
-                        .foregroundStyle(Palette.sub)
+            MarkdownText(source: text)
+                .frame(maxHeight: folds && !expanded ? 330 : nil, alignment: .top)
+                .clipped()
+                .overlay(alignment: .bottom) {
+                    if folds && !expanded {
+                        LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 48)
+                            .allowsHitTesting(false)
                     }
-                    .buttonStyle(.plain)
                 }
-                MarkdownText(source: text)
-                    .frame(maxHeight: isTall && !expanded ? 320 : nil, alignment: .top)
-                    .clipped()
-                if isTall { expandButton }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Palette.bubble, in: shape)
-            .overlay(alignment: .leading) {
-                if forwardedFrom != nil {
-                    Capsule().fill(Palette.sub.opacity(0.55)).frame(width: 3).padding(.vertical, 10).padding(.leading, 5)
-                }
-            }
-            .contextMenu { CopyButton(text: text) }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, forwardedFrom == nil ? 64 : 32)
+            if folds { expandButton }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Palette.bubble, in: shape)
+        .overlay(alignment: .leading) {
+            if forwardedFrom != nil {
+                Capsule().fill(Palette.sub.opacity(0.55)).frame(width: 3).padding(.vertical, 10).padding(.leading, 5)
+            }
+        }
+        .contextMenu { CopyButton(text: text) }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, forwardedFrom == nil ? 64 : 32)
     }
 
     private var expandButton: some View {
-        Button(expanded ? "Show less" : "Show full text") {
+        Button(expanded ? "Show less" : "Show more") {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
         }
         .romeFont(14, .semibold)
@@ -255,8 +255,8 @@ struct Composer: View {
         .padding(.leading, 18)
         .padding(.trailing, 7)
         .frame(minHeight: 50)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-        .softElevation(radius: 25)
+        // Glass like the header's buttons: the transcript shows through.
+        .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
     }

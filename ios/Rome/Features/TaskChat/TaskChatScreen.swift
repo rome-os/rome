@@ -52,10 +52,6 @@ struct TaskChatScreen: View {
                 .padding(.horizontal, Metrics.pagePadding)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
-                .background(alignment: .bottom) {
-                    LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg, Palette.bg], startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea()
-                }
             }
         }
         .onAppear {
@@ -163,8 +159,8 @@ struct TaskChatScreen: View {
             } else {
                 UserBubble(text: text, pending: pending) { store.retry(id) }
             }
-        case .agentText(_, let text, let long, let forwardedFrom, let position):
-            AgentBubble(text: text, long: long, forwardedFrom: forwardedFrom, position: long ? .single : position)
+        case .agentText(_, let text, _, let forwardedFrom, let position):
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
         case .tools(_, let traceID, let count):
             ToolSummary(count: count, calls: store.toolCalls[traceID]) { store.loadToolCalls(traceID) }
         case .approval(_, let part, _):

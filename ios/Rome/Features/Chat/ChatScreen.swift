@@ -45,10 +45,6 @@ struct ChatScreen: View {
                 .padding(.horizontal, Metrics.pagePadding)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
-                .background(alignment: .bottom) {
-                    LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg, Palette.bg], startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea()
-                }
             }
         }
     }
@@ -152,8 +148,8 @@ struct ConciergeRow: View {
             TimeSeparator(date: date)
         case .userText(let id, let text, let pending):
             UserBubble(text: text, pending: pending) { store.retry(id) }
-        case .agentText(_, let text, let long, let forwardedFrom, let position):
-            AgentBubble(text: text, long: long, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
+        case .agentText(_, let text, _, let forwardedFrom, let position):
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
         case .taskCard(_, let chatId, let title):
             let name = tasks.title(forChat: chatId, fallback: title)
             TaskCard(title: name) {

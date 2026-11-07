@@ -77,10 +77,6 @@ struct TopicChatScreen: View {
             .padding(.horizontal, Metrics.pagePadding)
             .padding(.top, 6)
             .padding(.bottom, 8)
-            .background(alignment: .bottom) {
-                LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg, Palette.bg], startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-            }
         }
         .onAppear { store?.start() }
         // A blank chat that just started its chat keeps this view.
