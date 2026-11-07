@@ -84,3 +84,22 @@ The user's report: the push arrived, a tap opened Concierge, and the chat still 
   - Socket refused by a proxy that passes REST and answers 503 to the upgrade, resume from the icon: the missed message shows (one messages fetch, one task-list fetch).
   - The same refused socket, a push for instance `local` opened from Notification Center: the missed message shows (two messages fetches: resume and tap).
 - **Not confirmed.** Why the phone's socket gave no frame is not known; the fix does not depend on it. If the phone's live updates also stop while the app stays open, the socket through Rome Cloud needs a look of its own. A topic chat is ruled out: both phone-run pushes carried `chatId: "concierge"`, the main chat.
+
+### Retest on the iPhone 15: still stale, second fix
+
+The lead's retest of `68cd71da`: back to the foreground after a trip to the Home screen, the chat stopped at 16:22 and a cold relaunch showed the newer rows.
+
+- **Two more causes, both reproduced on the simulator.**
+  - The list stopped following the bottom. The swipe home (and Notification Center pulled down) starts on the transcript and reads as a drag away from the bottom. The refetch did land, but its rows sat below the screen with no "New messages" pill, because only live events counted as arrivals. A cold relaunch opens at the bottom, which is why it looked fixed.
+  - The refetch depended on `pause()` having run. It was driven by SwiftUI's scene phase, and `resume()` did nothing without a pause, so a return that skipped the background leg (Notification Center over the app), or a socket that sat through a suspension, refetched nothing.
+- **Fix** (`89d5309e`, `0dfa2e70`, `affade6c`):
+  - UIKit's lifecycle notifications drive it. Any trip to the background, or a second or more inactive, makes the screens refetch and the socket start over, paused or not.
+  - The list goes by where it stood when the app left: if the bottom was on screen, it scrolls there and catches the rows that land in the next five seconds. A tapped push always shows the newest rows.
+  - Replies a refetch brings count as arrivals: the pill shows for a guardian reading further up, and the chat is marked read.
+  - A GET that finds its pooled connection dead after a suspension is sent once more.
+- **Tests** (`7a3d469e`): the foreground gate (background, long and brief inactive, once per trip), resume without a pause still refetches, a refetched reply is an arrival but the first load is not, and the GET retry (a GET repeats, a POST does not). 89 pass on Mac Catalyst.
+- **Simulator**, local Rome behind the socket-refusing proxy, a message posted while away each time:
+  - Notification Center over the app, no background: before the fix the message loaded below the screen; after it, Chat shows it.
+  - Swipe home from the list, back from the icon: Chat shows it at the bottom.
+  - Scrolled up, then a push opened from Notification Center: Chat scrolls to the newest message.
+- **Device question.** Whether the phone's scene phase reached the background on that trip was not measured. The fix no longer depends on it: a return refetches after any background trip, or after a second or more inactive.
