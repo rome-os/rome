@@ -177,6 +177,16 @@
         }
       }
     },
+    "Archive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归档"
+          }
+        }
+      }
+    },
     "Back" : {
       "localizations" : {
         "zh-Hans" : {
@@ -193,6 +203,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法检查更新"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
           }
         }
       }
@@ -747,6 +767,16 @@
         }
       }
     },
+    "Name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称"
+          }
+        }
+      }
+    },
     "Needs approval" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1113,6 +1143,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已拒绝"
+          }
+        }
+      }
+    },
+    "Rename" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名"
+          }
+        }
+      }
+    },
+    "Rename chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名聊天"
           }
         }
       }
@@ -1610,16 +1660,6 @@
         }
       }
     },
-    "Suggestions" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "建议"
-          }
-        }
-      }
-    },
     "Sun" : {
       "comment" : "Sunday in a weekly schedule",
       "localizations" : {
@@ -1818,16 +1858,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重试"
-          }
-        }
-      }
-    },
-    "Try asking" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "试着问问"
           }
         }
       }

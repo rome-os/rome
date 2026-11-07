@@ -9,7 +9,6 @@ struct ChatScreen: View {
 
     @Environment(AppModel.self) private var model
     @State private var draft = ""
-    @State private var suggestions = SuggestionsState()
     @FocusState private var composerFocused: Bool
 
     private var store: TranscriptStore { workspace.concierge }
@@ -34,11 +33,15 @@ struct ChatScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
-                SuggestingComposer(state: suggestions, focus: $composerFocused) {
+                VStack(spacing: 10) {
+                    if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
+                        ConciergeStarters { store.send($0.text) }
+                    }
                     Composer(text: $draft, placeholder: "Message", focus: $composerFocused) {
                         if store.send(draft) { draft = "" }
                     }
                 }
+                .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
                 .padding(.horizontal, Metrics.pagePadding)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
@@ -48,13 +51,6 @@ struct ChatScreen: View {
                 }
             }
         }
-        .suggestionsOverlay(suggestions)
-        .onAppear { suggestions.send = { text in store.send(text) } }
-        #if DEBUG
-        .onChange(of: model.debugCommand) { _, command in
-            if case .suggestions(let open) = command { suggestions.isOpen = open }
-        }
-        #endif
     }
 
     @ViewBuilder
@@ -178,6 +174,9 @@ struct ChatHeader: View {
     let title: Text
     let onMenu: () -> Void
     let onTasks: () -> Void
+    /// A topic chat's "…" menu. Without both, only the Tasks button shows.
+    var onRename: (() -> Void)? = nil
+    var onArchive: (() -> Void)? = nil
 
     var body: some View {
         HStack {
@@ -195,8 +194,37 @@ struct ChatHeader: View {
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             // No count: task progress is not reported accurately enough to badge.
-            GlassCircleButton(accessibilityLabel: "Tasks", action: onTasks) {
-                ChecklistGlyph()
+            if let onRename, let onArchive {
+                HStack(spacing: 0) {
+                    Button(action: onTasks) {
+                        ChecklistGlyph()
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScaleStyle(scale: 0.9))
+                    .accessibilityLabel("Tasks")
+                    Menu {
+                        Button(action: onRename) {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        Button(role: .destructive, action: onArchive) {
+                            Label("Archive", systemImage: "archivebox")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .romeFont(17, .semibold)
+                            .foregroundStyle(Palette.fg)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("More")
+                }
+                .padding(.horizontal, 2)
+                .glassSurface(Capsule(), interactive: true)
+            } else {
+                GlassCircleButton(accessibilityLabel: "Tasks", action: onTasks) {
+                    ChecklistGlyph()
+                }
             }
         }
         .padding(.horizontal, 12)

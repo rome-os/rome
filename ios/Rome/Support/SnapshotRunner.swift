@@ -11,8 +11,6 @@ enum DebugCommand: Equatable {
     case section(MainSection)
     /// The Settings sheet with these pages pushed in it; nil closes it.
     case settings([SettingsRoute]?)
-    /// Chat's suggestions bubble open or closed.
-    case suggestions(Bool)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -49,9 +47,6 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
-            await capture("26-chat-suggestions", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .suggestions(true) }
-            model.debugCommand = .suggestions(false)
-            try? await Task.sleep(for: .seconds(0.6))
             await capture("05-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))

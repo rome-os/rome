@@ -184,7 +184,7 @@ struct MainShell: View {
             case .settings(let routes):
                 settingsPath = routes ?? []
                 if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
-            case .suggestions, nil: break
+            case nil: break
             }
         }
         #endif
@@ -251,6 +251,7 @@ struct MainShell: View {
                 showTasks = true
             },
             onOpenChat: { id, title in path.append(.taskChat(chatId: id, title: title)) },
+            onArchived: { show(.chat) },
             onCreated: { id in
                 if let key { startedTopics[id] = key }
                 var instant = Transaction()

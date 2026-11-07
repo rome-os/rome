@@ -9,15 +9,24 @@ struct TopicChatScreen: View {
     let onMenu: () -> Void
     let onTasks: (String?) -> Void
     let onOpenChat: (String, String) -> Void
+    /// The chat was archived: the shell shows the main Chat.
+    let onArchived: () -> Void
     let onCreated: (String) -> Void
 
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
-    @State private var suggestions = SuggestionsState()
+    @State private var renaming = false
+    @State private var newName = ""
     @FocusState private var composerFocused: Bool
 
     private var store: TranscriptStore? { chatId.map(workspace.topicStore) }
+
+    /// A blank chat, or one whose transcript loaded empty.
+    private var showsStarters: Bool {
+        if let store { return ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) }
+        return starting == nil
+    }
 
     private var title: String {
         TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
@@ -36,15 +45,34 @@ struct TopicChatScreen: View {
                     composerFocused = false
                     onMenu()
                 },
-                onTasks: { onTasks(chatId) }
+                onTasks: { onTasks(chatId) },
+                // A blank chat has nothing to rename or archive yet.
+                onRename: chatId == nil ? nil : {
+                    newName = title
+                    renaming = true
+                },
+                onArchive: chatId.map { id in { archive(id) } }
             )
+        }
+        .alert("Rename chat", isPresented: $renaming) {
+            TextField("Name", text: $newName)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                guard let chatId else { return }
+                let name = newName
+                Task { await workspace.renameTopic(chatId, to: name) }
+            }
         }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            SuggestingComposer(state: suggestions, focus: $composerFocused) {
+            VStack(spacing: 10) {
+                if showsStarters {
+                    ConciergeStarters { send(text: $0.text) }
+                }
                 Composer(text: $draft, placeholder: "Message", focus: $composerFocused) { send() }
             }
+            .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
             .padding(.horizontal, Metrics.pagePadding)
             .padding(.top, 6)
@@ -54,17 +82,9 @@ struct TopicChatScreen: View {
                     .ignoresSafeArea()
             }
         }
-        .suggestionsOverlay(suggestions)
-        .onAppear {
-            store?.start()
-            suggestions.send = { text in send(text: text) }
-        }
-        // A blank chat that just started its chat keeps this view; a pick now
-        // goes to that chat.
-        .onChange(of: chatId) {
-            store?.start()
-            suggestions.send = { text in send(text: text) }
-        }
+        .onAppear { store?.start() }
+        // A blank chat that just started its chat keeps this view.
+        .onChange(of: chatId) { store?.start() }
         .onDisappear { store?.stop() }
     }
 
@@ -97,6 +117,12 @@ struct TopicChatScreen: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
+        }
+    }
+
+    private func archive(_ id: String) {
+        Task {
+            if await workspace.archiveTopic(id) { onArchived() }
         }
     }
 
