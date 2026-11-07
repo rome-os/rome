@@ -5,6 +5,7 @@
 // listeners after each read. The accounts decide what they report
 // (domain/model-account.ts); this module decides only when to ask.
 
+import type { AgentLog } from "../domain/agent-log.js";
 import type { ModelAccount } from "../domain/model-account.js";
 import type { ProviderId } from "../domain/model-port.js";
 import {
@@ -27,12 +28,6 @@ export interface ModelAccounts {
   refresh(provider?: ProviderId): Promise<void>;
   onChanged(listener: (provider: ProviderId, change: ModelAccountChange) => void): () => void;
   close(): void;
-}
-
-/** What the application logs. The composition root passes Rome's logger. */
-export interface AgentLog {
-  info(message: string, data?: Record<string, unknown>): void;
-  warn(message: string, data?: Record<string, unknown>): void;
 }
 
 export interface CreateModelAccountsOptions {

@@ -9,7 +9,7 @@ import type {
   ModelSessionParams,
 } from "../../../domain/model-port.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
+import { testRomeTools } from "../../../../test/tool-calls.js";
 import { NO_ROME_TOOLS } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
@@ -195,13 +195,7 @@ describe("bundled Codex app-server", () => {
       builtinTools,
       workingDir: home,
     },
-    tools: createRomeTools({
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "unused",
-    }),
+    tools: testRomeTools({}),
     thread: { kind: "new" },
   });
 

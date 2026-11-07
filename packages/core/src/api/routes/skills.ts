@@ -5,7 +5,7 @@ import type { ApiDeps } from "../deps.js";
 /**
  * Lists skills currently loaded in the catalog so dashboard surfaces (the
  * Skills app, the chat composer's slash-command autocomplete) can offer them.
- * Metadata only — agents read skill bodies via the MCP facade (`read_skill`),
+ * Metadata only — agents read skill bodies via the Rome tools (`read_skill`),
  * the SPA never needs them.
  */
 export function skillsRoutes(deps: ApiDeps): Hono {

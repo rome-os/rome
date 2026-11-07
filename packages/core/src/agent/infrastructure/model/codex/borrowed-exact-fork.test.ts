@@ -5,13 +5,12 @@ import {
   evaluateBorrowedExactFork,
 } from "./borrowed-exact-fork.js";
 import { createRomeDynamicTools, type RomeDynamicToolCallResult } from "./rome-dynamic-tools.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import { testRomeTools, type TestRomeToolsOptions } from "../../../../test/tool-calls.js";
 
 type OpenOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
   /** What the session's Rome tools are built from. */
-  tools?: Partial<FacadeParams>;
+  tools?: TestRomeToolsOptions;
 };
 
 type McpServers = ModelSessionConfig["externalMcpServers"];
@@ -26,12 +25,7 @@ function openParams(overrides: OpenOverrides = {}): ModelSessionParams {
       workingDir: "/workspace",
       ...config,
     },
-    tools: createRomeTools({
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
+    tools: testRomeTools({
       ...tools,
     }),
     thread: { kind: "new" },
@@ -124,12 +118,9 @@ describe("createBorrowedExactForkSession", () => {
     expect(revertTurn).toHaveBeenCalledWith("source-thread", "fork-turn");
   });
 
-  // A webchat-sourced exact fork opens with supportsInteractiveSurface: true
-  // (the advertised catalog must stay byte-identical to the source) and
-  // interactiveSurfaceDetached: true (nothing drains the fork stream to mount
-  // cards). The borrowed turn's dynamic-tool runtime must
-  // carry the detached flag through, or the interactive tools claim UI was
-  // delivered that no one will ever see. This pins the wire-through.
+  // A fork has no speaker, so no widget shows. The borrowed turn's dynamic-tool
+  // runtime must carry that through, or `ask_question` claims a card was
+  // delivered that no one will ever see.
   it("keeps a webchat-sourced fork's interactive dynamic tools detached", async () => {
     let advertised: readonly string[] = [];
     let askRes: RomeDynamicToolCallResult | undefined;
@@ -139,8 +130,7 @@ describe("createBorrowedExactForkSession", () => {
       sourceThreadId: "source-thread",
       openParams: openParams({
         tools: {
-          supportsInteractiveSurface: true,
-          interactiveSurfaceDetached: true,
+          widgetsShow: false,
         },
       }),
       runExclusive: async (work) => await work(),

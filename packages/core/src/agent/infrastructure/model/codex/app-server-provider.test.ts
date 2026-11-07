@@ -1,8 +1,7 @@
 import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { CodexAppServerProvider } from "./app-server-provider.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import { testRomeTools, type TestRomeToolsOptions } from "../../../../test/tool-calls.js";
 import { NO_ROME_TOOLS, type RomeTools } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import type { CodexLoginChoice } from "../../../domain/model-login.js";
@@ -94,16 +93,11 @@ rs.mock("./app-server-client.js", () => ({
 type ParamOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
   /** What the session's Rome tools are built from. */
-  tools?: Partial<FacadeParams>;
+  tools?: TestRomeToolsOptions;
 };
 
-function buildTools(overrides: Partial<FacadeParams> = {}): RomeTools {
-  return createRomeTools({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "delegated",
+function buildTools(overrides: TestRomeToolsOptions = {}): RomeTools {
+  return testRomeTools({
     ...overrides,
   });
 }
@@ -594,7 +588,7 @@ describe("CodexAppServerProvider", () => {
     expect(closeMock).toHaveBeenCalledTimes(1);
   });
 
-  it("maps dynamic facade results into app-server responses and Rome tool traces", async () => {
+  it("maps dynamic tool results into app-server responses and Rome tool traces", async () => {
     let dynamicResponse: unknown;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thread-ask" } };
@@ -641,9 +635,7 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const provider = new CodexAppServerProvider();
-    const session = await provider.openSession(
-      buildParams({ tools: { supportsInteractiveSurface: true } }),
-    );
+    const session = await provider.openSession(buildParams({ tools: { widgetsShow: true } }));
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "ask" });
     const messages = await collected;

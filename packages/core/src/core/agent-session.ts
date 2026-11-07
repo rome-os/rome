@@ -30,24 +30,25 @@ import {
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
   resolveAgentPolicy,
-  actionToolOutput,
+  createRomeTools,
+  detachSessionTools,
   showsWidgets,
   widgetDrawingFor,
   type AgentAction,
+  type AgentActions,
   type DeferInput,
   type RomeTool,
+  type RomeToolsOptions,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import { projectRelativePath } from "../webchat/projects.js";
 import type { ActionRegistry, Action, ActionResult } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
-import type { FacadeParams } from "./mcp-facade.js";
 import {
   proposeRoutineTools,
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
-import { createRomeTools } from "./mcp/server.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { AgentEvent, McpServerConfig } from "../types.js";
@@ -138,7 +139,7 @@ import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
-import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
+import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
@@ -244,14 +245,6 @@ export interface AgentSessionInit {
    */
   selectionId?: ModelSelectionId | null;
   reasoningEffort?: ModelReasoningEffort;
-  /**
-   * Open this session with the same tool catalog and system prompt but no live
-   * interactive surface: the interactive built-ins fall back to prose instead
-   * of parking a turn on a card nobody can answer. Set for a side chat's
-   * follow-up turns, which render in the read-only Sessions detail view — the
-   * same degradation an exact fork's own turn already gets.
-   */
-  interactiveSurfaceDetached?: boolean;
   /**
    * This acquire starts a turn for an inbound channel message, so the
    * connection's provider-session reset policy applies before the session opens.
@@ -789,14 +782,6 @@ interface TurnExecRefs {
   getThreadContext: () => ThreadContext | undefined;
   getSharedContext: () => Record<string, unknown> | undefined;
   /**
-   * Whether this owner's tool results reach a surface that mounts interactive
-   * UI. The live webchat session's drain loop does; a forked turn's stream has
-   * no such drain, so fork refs set false and interactive action results
-   * degrade to the same prose fallbacks messaging channels use — the advertised
-   * tool catalog is unaffected (that's ModelSessionParams, not refs).
-   */
-  widgetsShow: boolean;
-  /**
    * Manager that owns this owner's subagent child sessions. The live session
    * hands out its own child manager; each exact fork gets a fork-owned manager
    * (disposed with the fork) so a fork's subagent turns never append to — or
@@ -1064,8 +1049,8 @@ async function openSession(
   // Subagents fail (b): the parent turn blocks on the child, and the next user
   // turn always routes to the main agent — so a suspended subagent call would
   // hang forever. Where this is false, an action that returns `renderComponent`
-  // falls back to relaying its `promptText` as prose; see the executeAction shim
-  // below. The answer feeds the cached system prompt, so the opening caller's
+  // falls back to relaying its `promptText` as prose; see `actionToolOutput`.
+  // The answer feeds the cached system prompt, so the opening caller's
   // channel decides it for the session's life. An opener without a thread
   // context falls back to the channel the key names.
   const keyChannel = sessionKeyChannel(key.channelThreadKey);
@@ -1080,7 +1065,6 @@ async function openSession(
     placeDrawsCards: !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards,
     isSubagent: !!opts.isSubagent,
   });
-  const supportsInteractiveSurface = widgets === "card";
 
   const systemPrompt = deps.systemPrompts.build(
     { ...config, owner: metadata.ownerType },
@@ -1132,11 +1116,6 @@ async function openSession(
   });
   const getActionCatalog = (): AgentAction[] =>
     deps.actionRegistry.getForAgent(allowList).map(toAgentAction);
-  // Live view onto SkillCatalog for the same reason as `getActionCatalog`:
-  // app_management installs land in the catalog mid-session via the
-  // AppCatalog subscriber chain (skillCatalog.loadFromCatalog), and the
-  // facade tools must surface them without restarting the session.
-  const getSkillCatalog = (): readonly Skill[] => deps.skillCatalog.list();
   const { tools: subagentTools, targets: subagentTargets } = buildSubagentTools(
     deps.agentLoader,
     config,
@@ -1151,7 +1130,7 @@ async function openSession(
     }
   }
 
-  // We hold the AgentSessionImpl handle in a closure so the executeAction
+  // We hold the AgentSessionImpl handle in a closure so the action
   // callback can route channel-context / shared-context from the right place.
   let impl!: AgentSessionImpl;
 
@@ -1174,10 +1153,6 @@ async function openSession(
     getTurnId: () => impl.currentTurnId,
     getThreadContext: () => impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
-    // Action results that hand back a widget read this. A session with no
-    // speaker must degrade them, or the agent parks on a component nobody can
-    // mount.
-    widgetsShow: showsWidgets(widgets, !init.interactiveSurfaceDetached),
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
     attachSubagentExecution: (toolUseId, execution) =>
@@ -1203,28 +1178,21 @@ async function openSession(
           turnId: refs.getTurnId(),
         });
       });
-  const makeExecuteAction = (refs: TurnExecRefs) => {
-    const runAction = makeRunAction(refs);
-    return async (name: string, input: unknown): Promise<unknown> =>
-      actionToolOutput(await runAction(name, input), refs.widgetsShow);
-  };
-  const executeAction = makeExecuteAction(sessionExecRefs);
+  const agentActions = (refs: TurnExecRefs): AgentActions => ({
+    list: getActionCatalog,
+    run: makeRunAction(refs),
+  });
 
   // `defer`: schedule a one-off wakeup back into this same thread. The
-  // facade tool relays here; we capture the live thread context off the session
+  // tool relays here; we capture the live thread context off the session
   // key + current turn and create the one-off via `create_routine` directly
   // (not through the agent's action allow-list — `defer` is a built-in). Only
   // wired for guardian-facing threads with a real `channelThreadKey` to wake;
   // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
-  // A detached session (a side chat) gets no defer tool either: its wake-up
-  // would resume through a path that cannot honor the detached surface, and
-  // the first branch turn still carries its parent's delivery address.
   const deferEnabled =
-    isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) &&
-    !opts.isSubagent &&
-    !init.interactiveSurfaceDetached;
+    isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) && !opts.isSubagent;
   const eventSources = deps.eventSources;
   // Actions `defer` runs on the agent's behalf are attributed to its turn.
   const agentRunContext = (refs: TurnExecRefs) => ({
@@ -1266,7 +1234,10 @@ async function openSession(
           now: Date.now(),
         }),
       );
-  const executeDefer = deferEnabled ? makeExecuteDefer(sessionExecRefs) : undefined;
+  const deferTool = (refs: TurnExecRefs) =>
+    deferEnabled
+      ? { schedule: makeExecuteDefer(refs), finalText: resolveAgentPolicy(config).finalText }
+      : undefined;
 
   const makeExecuteSubagent =
     (refs: TurnExecRefs) =>
@@ -1310,35 +1281,29 @@ async function openSession(
         }
         return await execution.completion;
       });
-  const executeSubagent = makeExecuteSubagent(sessionExecRefs);
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
   // What the Rome tools are made of for this session. Captured on open so an
   // exact fork rebuilds the same catalog with its own callbacks.
-  const liveToolParams: FacadeParams = {
-    getActionCatalog,
-    getSkillCatalog,
-    subagentTools,
-    executeAction,
-    executeSubagent,
-    executeDefer,
+  const liveToolParams: RomeToolsOptions = {
+    actions: agentActions(sessionExecRefs),
+    skills: deps.skillCatalog,
+    subagents: { tools: subagentTools, run: makeExecuteSubagent(sessionExecRefs) },
+    widgetsShow: showsWidgets(widgets, true),
+    log,
+    defer: deferTool(sessionExecRefs),
     sessionTools: proposeRoutineTools({
       widgets,
-      hasSpeaker: !init.interactiveSurfaceDetached,
+      hasSpeaker: true,
       gate: routineActivation,
       runAction: makeRunAction(sessionExecRefs),
     }),
-    supportsInteractiveSurface,
-    interactiveSurfaceDetached: init.interactiveSurfaceDetached,
-    // The agent's text stays in its trace, so it reaches the guardian only
-    // through its tools; `defer` then asks for no confirmation line.
-    textPrivate: resolveAgentPolicy(config).finalText === "private",
   };
 
   const buildSessionParams = (
     resolution: ModelResolution,
-    toolParams: FacadeParams,
+    toolParams: RomeToolsOptions,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): ModelSessionParams => ({
@@ -1371,7 +1336,7 @@ async function openSession(
   // identity by construction: a field added to ModelSessionParams flows into
   // exact forks without a second hand-maintained list.
   let lastOpenParams: ModelSessionParams | undefined;
-  let lastToolParams: FacadeParams | undefined;
+  let lastToolParams: RomeToolsOptions | undefined;
   // Held apart from `lastToolParams`, because a fork refuses these outright
   // and rebuilds `propose_routine` itself.
   let lastProvidedTools: RomeTool[] = [];
@@ -1390,7 +1355,7 @@ async function openSession(
       getThreadContext: sessionExecRefs.getThreadContext,
       getTurnPushLevel: () => impl.currentTurnPushLevelRef,
     });
-    const toolParams: FacadeParams = providedTools?.length
+    const toolParams: RomeToolsOptions = providedTools?.length
       ? {
           ...liveToolParams,
           sessionTools: [...providedTools, ...(liveToolParams.sessionTools ?? [])],
@@ -1502,10 +1467,6 @@ async function openSession(
       getTurnId: () => fork.forkTurnId,
       getThreadContext: () => fork.threadContext ?? init.threadContext,
       getSharedContext: () => init.sharedContext,
-      // A fork has no speaker, so action results that hand back a widget take
-      // their plain-text forms. Otherwise the tool result claims a card was
-      // shown while nothing mounted and the fork dead-ends.
-      widgetsShow: false,
       getChildManager: () => {
         if (!forkChildManager) {
           forkChildManager = createAgentSessionManager(deps, {
@@ -1541,9 +1502,13 @@ async function openSession(
         // callbacks, never the source's per-turn closures.
         tools: createRomeTools({
           ...lastToolParams,
-          executeAction: makeExecuteAction(refs),
-          executeSubagent: makeExecuteSubagent(refs),
-          executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+          actions: agentActions(refs),
+          subagents: { tools: subagentTools, run: makeExecuteSubagent(refs) },
+          // A fork has no speaker, so action results that hand back a widget
+          // take their plain-text forms. Otherwise the tool result claims a card
+          // was shown while nothing mounted and the fork dead-ends.
+          widgetsShow: showsWidgets(widgets, false),
+          defer: fork.continuable ? undefined : deferTool(refs),
           sessionTools: [
             ...detachSessionTools(lastProvidedTools),
             ...proposeRoutineTools({
@@ -1553,12 +1518,6 @@ async function openSession(
               runAction: makeRunAction(refs),
             }),
           ],
-          // `supportsInteractiveSurface` stays (it shapes the advertised
-          // catalog + system prompt, which must stay byte-identical to the
-          // source); this flag makes the interactive *runtime* degrade to the
-          // non-interactive fallbacks instead — see
-          // FacadeParams.interactiveSurfaceDetached.
-          interactiveSurfaceDetached: true,
         }),
       },
       projectProviderMessage: async (msg) => {
@@ -1806,7 +1765,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * True when a tool result parked the turn on a pending interaction or an
- * approval. Facade results may reach us directly, JSON-encoded, or wrapped
+ * approval. Tool results may reach us directly, JSON-encoded, or wrapped
  * in an MCP text-content array, so normalize all three shapes.
  */
 function toolResultSuspendsTurn(output: unknown): boolean {
@@ -1969,7 +1928,7 @@ class AgentSessionImpl implements AgentSession {
   private currentAgentSpan: Span | null = null;
   private currentModelSpan: Span | null = null;
   // Active OTel context for the current turn, set in runOneTurn after the
-  // agent span is created. executeAction / executeSubagent re-bind into it
+  // agent span is created. The action and subagent callbacks re-bind into it
   // so `action:*` and child `agent:*` spans land under the current agent
   // span even when the model SDK invokes the MCP callback asynchronously
   // after the original `context.with(turnCtx, sendUserInput)` call has
@@ -2120,9 +2079,9 @@ class AgentSessionImpl implements AgentSession {
   get childManager(): AgentSessionManager {
     if (!this._childManager) {
       // Children share the same dep wiring + keepAlive setting. Flag the
-      // child manager as subagent-only so human-blocking surfaces (propose_routine,
-      // inline components) stay disabled on these sessions even when the parent
-      // runs on webchat — see openSession's supportsInteractiveSurface.
+      // child manager as subagent-only so widgets (propose_routine, inline
+      // components) stay off on these sessions even when the parent's place draws
+      // cards: see `widgetDrawingFor`.
       this._childManager = createAgentSessionManager(this.deps, {
         keepAliveAcrossTurns: this.keepAlive,
         isSubagent: true,

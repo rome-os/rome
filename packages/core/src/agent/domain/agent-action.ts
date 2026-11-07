@@ -18,6 +18,18 @@ export interface AgentAction {
   inputSchema: Record<string, unknown>;
 }
 
+/** What this agent may call. */
+export interface AgentActions {
+  /** Read on every call, so an action installed mid-session shows at once. */
+  list(): readonly AgentAction[];
+  /**
+   * Runs an action this agent may call. Resolves with the action's result,
+   * its domain rejections included. Throws `Unknown action: <name>` for any
+   * other name, and on an invocation failure; either becomes an error result.
+   */
+  run(name: string, input: unknown): Promise<ActionResult>;
+}
+
 interface ActionArgumentSummary {
   name: string;
   type: string;
