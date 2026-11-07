@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { type RootSession, walkToRoot } from "../agent/index.js";
+import { type StoredRoot, walkToRoot } from "../agent/index.js";
 
 // Builds and reads channelThreadKeys. Each builder serializes to the exact
 // string stored in `sessions.channel_thread_key`, so existing rows keep
@@ -34,7 +34,7 @@ export type ParsedSessionKey =
 
 /** The one reader of a root session's channelThreadKey. It takes the end of
  *  a `walkToRoot`, so a subagent's or a fork's key is never read as a root's. */
-export function parseSessionKey(root: RootSession): ParsedSessionKey {
+export function parseSessionKey(root: StoredRoot): ParsedSessionKey {
   return parseRootKey(root.stored);
 }
 
