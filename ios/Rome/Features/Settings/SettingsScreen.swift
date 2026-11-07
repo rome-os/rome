@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A page's top and a large title: a glass back button on a pushed page, or
-/// room for a close button at the right on the first page of a sheet. The
-/// close itself is pinned over the scroll (`pinnedClose`), so it stays put.
+/// A page's header, as the chats have it: one row with a plain title in
+/// the middle, a glass button at the left (Back on a pushed page, the drawer
+/// on a drawer page) and the close button at the right on a sheet's first
+/// page. It floats over the scroll (`floatingTopBar`), which fades under it.
 struct PageHeader: View {
     let title: LocalizedStringKey
     var onClose: (() -> Void)? = nil
@@ -13,44 +14,31 @@ struct PageHeader: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                if onClose != nil {
-                    // The pinned close button sits over this space.
-                    Color.clear.frame(width: 44, height: 44)
-                } else if let onMenu {
-                    GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
-                        MenuGlyph()
-                    }
-                } else {
-                    GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
-                        Image(systemName: "chevron.left").romeFont(17, .semibold)
-                    }
+        HStack {
+            if let onMenu {
+                GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
+                    MenuGlyph()
                 }
+            } else if onClose == nil {
+                GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
+                    Image(systemName: "chevron.left").romeFont(17, .semibold)
+                }
+            } else {
+                Color.clear.frame(width: 44, height: 44)
             }
-            .padding(.horizontal, inSheet ? 16 : 12)
-            .padding(.top, inSheet ? 16 : 4)
-            Text(title)
-                .romeFont(34, .bold)
-                .tracking(-0.8)
-                .padding(.horizontal, 20)
-                .accessibilityAddTraits(.isHeader)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-extension View {
-    /// A sheet's close button fixed at the top right, over the scrolling
-    /// list, on glass so it reads over the rows.
-    func pinnedClose(_ action: @escaping () -> Void) -> some View {
-        overlay(alignment: .topTrailing) {
-            GlassCircleButton(accessibilityLabel: "Close", action: action) {
-                Image(systemName: "xmark").romeFont(16, .semibold)
+            PlainHeaderTitle(title: Text(title))
+            if let onClose {
+                GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
+                    Image(systemName: "xmark").romeFont(16, .semibold)
+                }
+            } else {
+                Color.clear.frame(width: 44, height: 44)
             }
-            .padding(.trailing, 16)
-            .padding(.top, 16)
         }
+        .padding(.horizontal, inSheet ? 16 : 12)
+        .padding(.top, inSheet ? 12 : 4)
+        .padding(.bottom, 4)
+        .headerFade()
     }
 }
 
@@ -62,10 +50,10 @@ struct SettingsGroup<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let header {
+                // At the card's edge, like every section title.
                 Text(header)
                     .romeFont(13, .medium)
                     .foregroundStyle(Palette.sub)
-                    .padding(.horizontal, 20)
             }
             VStack(spacing: 0, content: content)
                 .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
@@ -121,10 +109,9 @@ struct SettingsScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                PageHeader(title: "Settings", onClose: onClose, inSheet: true)
                 accountCard
                     .padding(.horizontal, 16)
-                    .padding(.top, -8)
+                    .padding(.top, 8)
                 SettingsGroup(header: "AI tool usage") {
                     UsageRow(name: "Claude", provider: usage?.claude, last: false)
                     UsageRow(name: "Codex", provider: usage?.codex, last: true)
@@ -213,8 +200,9 @@ struct SettingsScreen: View {
             }
             .padding(.bottom, 32)
         }
+        .softTopScrollEdge()
+        .floatingTopBar { PageHeader(title: "Settings", onClose: onClose, inSheet: true) }
         .background(Palette.bg.ignoresSafeArea())
-        .pinnedClose(onClose)
         .toolbar(.hidden, for: .navigationBar)
         .task { usage = try? await workspace.backend.aiTools() }
         .task {

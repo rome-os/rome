@@ -10,7 +10,6 @@ struct InstancesScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHeader(title: "Switch instance", inSheet: true)
                 if model.instances.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(0..<3, id: \.self) { index in
@@ -35,17 +34,20 @@ struct InstancesScreen: View {
                     Text(stoppedNotice)
                         .romeFont(13)
                         .foregroundStyle(Palette.destructive)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 16)
                         .transition(.opacity)
                 }
                 Text("Instances are managed in Rome Cloud.")
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 16)
             }
+            .padding(.top, 8)
             .padding(.bottom, 32)
             .animation(.easeOut(duration: 0.2), value: stoppedNotice)
         }
+        .softTopScrollEdge()
+        .floatingTopBar { PageHeader(title: "Switch instance", inSheet: true) }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
@@ -290,7 +292,8 @@ struct RoutinesScreen: View {
                                     Text(group.kind.title)
                                         .romeFont(13, .semibold)
                                         .foregroundStyle(Palette.sub)
-                                        .padding(.horizontal, 32)
+                                        // At the card's edge, like every section title.
+                                        .padding(.horizontal, 16)
                                         .accessibilityAddTraits(.isHeader)
                                 }
                                 card(group.routines)
