@@ -41,6 +41,21 @@ describe("the Concierge agent", () => {
       expect(prompt).toContain(text);
   });
 
+  it("keeps secrets out of the first message of a turn the guardian did not start", () => {
+    const section = concierge.systemPromptPrefix.slice(
+      concierge.systemPromptPrefix.indexOf("# How you speak"),
+      concierge.systemPromptPrefix.indexOf("# What you do yourself"),
+    );
+    for (const text of [
+      "a turn the guardian did not start",
+      "lock screen",
+      "before any `chat_forward` or card",
+      "Never put a code, password, token or other secret in it",
+      "attention or approval is needed",
+    ])
+      expect(section).toContain(text);
+  });
+
   it("names every defer for a row with task:<id> and reads its wake-ups and batches", () => {
     const prompt = concierge.systemPromptPrefix;
     const section = prompt.slice(prompt.indexOf("# Task list"));

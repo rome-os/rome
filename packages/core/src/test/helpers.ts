@@ -22,8 +22,13 @@ import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
-import { createAIToolState } from "../core/ai-tool-state.js";
-import { type ModelAccount, romeCreditsProxyRoutes } from "../agent/index.js";
+import {
+  createModelAvailability,
+  ClaudeAccount,
+  type ModelAccount,
+  type ModelAccountAuthorization,
+  romeCreditsProxyRoutes,
+} from "../agent/index.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
@@ -687,12 +692,17 @@ export async function buildTestDeps(
   const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
-  const codexAccountService: ModelAccount = {
-    async status() {
-      return { loggedIn: true, authMode: "chatgpt", planType: "plus", accountType: "plus" };
-    },
-    async usage() {
-      return null;
+  const codexAccountService: ModelAccount & ModelAccountAuthorization = {
+    async availability() {
+      return {
+        state: "available" as const,
+        account: {
+          loggedIn: true,
+          authMode: "chatgpt" as const,
+          planType: "plus" as const,
+          accountType: "plus",
+        },
+      };
     },
     authorizationState() {
       return {
@@ -723,18 +733,17 @@ export async function buildTestDeps(
       codexAccountChangedListeners.clear();
     },
   };
-  const aiToolState = createAIToolState({
-    settingsRepo,
-    probes: {
-      codexStatus: () => codexAccountService.status(),
-      codexUsage: () => codexAccountService.usage(),
-    },
+  // The real adapter: the dashboard route tests put a fake `claude` binary on
+  // PATH and mock the revoked marker, and read status through it.
+  const claudeAccount = new ClaudeAccount({ settingsRepo });
+  const modelAvailability = createModelAvailability({
+    accounts: { openai: codexAccountService, anthropic: claudeAccount },
     startRefresh: false,
     refreshIntervalMs: null,
   });
   const modelResolver = createModelResolver({
     providers: [new MockModelProvider()],
-    aiToolState,
+    availability: modelAvailability,
   });
   const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
@@ -886,8 +895,9 @@ export async function buildTestDeps(
     agentRunner,
     activeSubagentRegistry,
     agentTurnStreamRegistry,
-    aiToolState,
+    modelAvailability,
     codexAccountService,
+    claudeAccount,
     romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),
     publicAccessState,
     dashboardAccessState,

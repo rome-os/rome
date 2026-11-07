@@ -188,7 +188,7 @@ export function startConciergeEvents(
       // A visitor dropped from the dashboard allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
-      return await service.systemTurnOutcome(chatId, prompt, { quiet });
+      return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
@@ -207,7 +207,7 @@ export function startConciergeEvents(
     }
     if (event.status === "error") {
       const failure = event.output.failure;
-      const reason = failoverReason(failure, service.deps.aiToolState.get());
+      const reason = failoverReason(failure, service.deps.availability.read());
       if (!reason || !failure) return;
       const chain: { finished?: AgentTurnFinishedEvent } = {};
       recoveriesRunning.set(chatId, chain);
@@ -233,7 +233,7 @@ export function startConciergeEvents(
           );
           // The wait may have ended Concierge or the subscription that paid for this turn.
           if (!(await service.isEnabled())) return;
-          if (!failoverReason(failure, service.deps.aiToolState.get())) return;
+          if (!failoverReason(failure, service.deps.availability.read())) return;
           next = await recover(failure, reason, true);
         } else {
           const moved = await service.switchForFailure(chatId, failure, reason);
@@ -242,7 +242,7 @@ export function startConciergeEvents(
           next = await recover(failure, reason, !crossed);
         }
         if (crossed || next?.status !== "error" || !next.output.failure) return;
-        const second = failoverReason(next.output.failure, service.deps.aiToolState.get());
+        const second = failoverReason(next.output.failure, service.deps.availability.read());
         if (!second) return;
         const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
         if (moved) await recover(next.output.failure, second, false);

@@ -1,12 +1,18 @@
-import { execFile } from "node:child_process";
 import { Hono } from "hono";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import {
-  clearClaudeAuthRevoked,
   clearStoredAnthropicCompatibleAuthRevoked,
   isAnthropicCompatibleAuthRevoked,
 } from "../../lib/anthropic-login.js";
+import type { SettingsRepository } from "../../db/repositories/settings.js";
+import {
+  accountAllowsModel,
+  providerAuthorized,
+  CODEX_LUNA_MODEL,
+  CODEX_SOL_MODEL,
+  type ProviderAvailability,
+} from "../../agent/index.js";
 import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
   getStoredAnthropicCompatibleCredentials,
@@ -27,27 +33,72 @@ import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
 const log = createLogger("api:ai-tools");
 
-// Log out of Claude by running `claude auth logout` (non-interactive, so no PTY
-// terminal — mirrors getClaudeStatus's execFile usage).
-function logoutClaude(): Promise<{ ok: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    execFile("claude", ["auth", "logout"], { timeout: 10_000 }, (err) => {
-      resolve(err ? { ok: false, error: getErrorMessage(err) } : { ok: true });
-    });
-  });
+/**
+ * The dashboard's shape of a provider's availability, unchanged since it was
+ * read off the AI tool state: `loggedIn`, `quotaExhausted` and the account's
+ * fields side by side. Unread providers show as not yet checked.
+ */
+function providerStatusJson(availability: ProviderAvailability | undefined) {
+  if (!availability) return { quotaExhausted: false };
+  const { state, usageLimitUntil, account, usage } = availability;
+  const { modelsDenied: _denied, usageLimited: _limited, ...rest } = account;
+  return {
+    ...rest,
+    loggedIn: state !== "unauthorized" && state !== "expired",
+    ...(state === "expired" ? { needsReauth: true } : {}),
+    quotaExhausted: state === "usage_limit_reached",
+    ...(usageLimitUntil ? { quotaExhaustedUntil: usageLimitUntil } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+function codexStatusJson(availability: ProviderAvailability | undefined) {
+  // A logged-out account allows nothing, as the old state reported.
+  const allows = (model: string): boolean =>
+    availability !== undefined &&
+    providerAuthorized(availability) &&
+    accountAllowsModel(availability.account, model);
+  return {
+    ...providerStatusJson(availability),
+    solAccess: allows(CODEX_SOL_MODEL),
+    lunaAccess: allows(CODEX_LUNA_MODEL),
+  };
+}
+
+async function anthropicCompatibleJson(settingsRepo: Pick<SettingsRepository, "get">) {
+  const credentials = await getStoredAnthropicCompatibleCredentials(settingsRepo);
+  if (!credentials) return null;
+  const summary = summarizeAnthropicCompatibleCredentials(credentials);
+  if (!summary) return null;
+  const revoked = await isAnthropicCompatibleAuthRevoked(settingsRepo);
+  return { ...summary, needsReauth: revoked || undefined };
 }
 
 export function aiToolsRoutes(
-  deps: Pick<ApiDeps, "settingsRepo" | "aiToolState" | "codexAccountService">,
+  deps: Pick<
+    ApiDeps,
+    "settingsRepo" | "modelAvailability" | "codexAccountService" | "claudeAccount"
+  >,
 ): Hono {
   const app = new Hono();
 
-  app.get("/ai-tools/status", (c) => {
-    const state = deps.aiToolState.get();
+  const statusJson = async () => {
+    const state = deps.modelAvailability.read();
+    return {
+      claude: {
+        ...providerStatusJson(state.anthropic),
+        anthropicCompatible: await anthropicCompatibleJson(deps.settingsRepo),
+      },
+      codex: codexStatusJson(state.openai),
+    };
+  };
+
+  app.get("/ai-tools/status", async (c) => {
+    const { claude, codex } = await statusJson();
     const login = deps.codexAccountService.authorizationState();
     return c.json({
-      claude: state.claude,
-      codex: state.codex,
+      claude,
+      codex,
       codexLogin: {
         running: login.running && login.mode === "browser",
         lastExit: null,
@@ -59,7 +110,7 @@ export function aiToolsRoutes(
         verificationUrl: login.mode === "device" ? login.verificationUrl : null,
         lastError: login.lastError,
       },
-      anthropicCompatible: state.claude.anthropicCompatible ?? null,
+      anthropicCompatible: claude.anthropicCompatible,
     });
   });
 
@@ -75,8 +126,11 @@ export function aiToolsRoutes(
   });
 
   app.get("/ai-tools/usage", (c) => {
-    const state = deps.aiToolState.get();
-    return c.json({ claude: state.claude.usage ?? null, codex: state.codex.usage ?? null });
+    const state = deps.modelAvailability.read();
+    return c.json({
+      claude: state.anthropic?.usage ?? null,
+      codex: state.openai?.usage ?? null,
+    });
   });
 
   app.post("/ai-tools/refresh", async (c) => {
@@ -89,7 +143,8 @@ export function aiToolsRoutes(
       const providerParam = c.req.query("provider");
       const provider =
         providerParam === "anthropic" || providerParam === "openai" ? providerParam : undefined;
-      return c.json(await deps.aiToolState.refresh(provider));
+      await deps.modelAvailability.refresh(provider);
+      return c.json(await statusJson());
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Refresh failed" }, 500);
     }
@@ -125,7 +180,7 @@ export function aiToolsRoutes(
       };
       await deps.settingsRepo.set(ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING, credentials);
       await clearStoredAnthropicCompatibleAuthRevoked();
-      await deps.aiToolState.refresh("anthropic");
+      await deps.modelAvailability.refresh("anthropic");
       return c.json({
         ok: true,
         configured: summarizeAnthropicCompatibleCredentialsForEditing(credentials),
@@ -147,7 +202,7 @@ export function aiToolsRoutes(
       updatedAt,
     });
     await clearStoredAnthropicCompatibleAuthRevoked();
-    await deps.aiToolState.refresh("anthropic");
+    await deps.modelAvailability.refresh("anthropic");
 
     return c.json({
       ok: true,
@@ -162,7 +217,7 @@ export function aiToolsRoutes(
   app.delete("/ai-tools/anthropic-compatible-credentials", async (c) => {
     await deps.settingsRepo.delete(ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING);
     await clearStoredAnthropicCompatibleAuthRevoked();
-    await deps.aiToolState.refresh("anthropic");
+    await deps.modelAvailability.refresh("anthropic");
     return c.json({ ok: true });
   });
 
@@ -207,15 +262,16 @@ export function aiToolsRoutes(
     return c.json({ ok: true });
   });
 
-  // Re-probe login state on success so the agent gate reflects it immediately.
+  // Re-read the account on success so the agent gate reflects it immediately.
   app.post("/ai-tools/claude/logout", async (c) => {
-    const result = await logoutClaude();
-    if (!result.ok) {
-      log.warn("claude logout failed", { error: result.error });
-      return c.json({ error: result.error ?? "Claude logout failed" }, 500);
+    try {
+      await deps.claudeAccount.revoke();
+    } catch (err) {
+      const error = getErrorMessage(err);
+      log.warn("claude logout failed", { error });
+      return c.json({ error }, 500);
     }
-    await clearClaudeAuthRevoked();
-    await deps.aiToolState.refresh("anthropic");
+    await deps.modelAvailability.refresh("anthropic");
     return c.json({ ok: true });
   });
 
@@ -224,7 +280,7 @@ export function aiToolsRoutes(
   app.post("/ai-tools/codex/logout", async (c) => {
     try {
       await deps.codexAccountService.revoke();
-      await deps.aiToolState.refresh("openai");
+      await deps.modelAvailability.refresh("openai");
       return c.json({ ok: true });
     } catch (err) {
       const error = getErrorMessage(err);

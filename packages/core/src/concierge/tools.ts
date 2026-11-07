@@ -301,11 +301,18 @@ export async function buildConciergeTools(
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
+  // A message the guardian did not ask for may also reach their phone. Its
+  // lock-screen line is only ever words the Concierge wrote in this message,
+  // and null when it wrote none, which pushes a fixed line.
+  const said = (chatId: string, turnId: string, ownWords: string | null) =>
+    service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
+
   const say = async (text: string, format: "bubble" | "long") => {
     const { chatId, turnId } = currentTurn();
     const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
     ]);
+    said(chatId, turnId, text);
     return id;
   };
 
@@ -317,6 +324,10 @@ export async function buildConciergeTools(
       ...(intro ? [{ type: "text" as const, content: intro }] : []),
       { type: "text", content: text, format: "long", forwardedFrom: from },
     ]);
+    // Forwarded text is the task's, not the Concierge's, and so are a task's
+    // title and chat name, which can come from its output: none becomes the
+    // push's line, which could carry a code or password onto the lock screen.
+    said(chatId, turnId, intro ?? null);
     return id;
   };
 
@@ -326,6 +337,7 @@ export async function buildConciergeTools(
     const { id } = await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
       { type: "task_chat", chatId, title },
     ]);
+    said(conciergeChatId, turnId, null);
     return id;
   };
 

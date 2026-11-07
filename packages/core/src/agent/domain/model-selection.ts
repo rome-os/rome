@@ -96,6 +96,11 @@ export const MODEL_SELECTIONS: Record<ModelSelectionId, ModelSelection> = {
   },
 };
 
+/** The concrete Codex models the resolver and the usage switch name. */
+export const CODEX_SOL_MODEL = "gpt-6.1-sol";
+export const CODEX_LUNA_MODEL = "gpt-6-luna";
+export const CODEX_TERRA_MODEL = "gpt-5.6-terra";
+
 export function isModelSelectionId(value: unknown): value is ModelSelectionId {
   return typeof value === "string" && Object.hasOwn(MODEL_SELECTIONS, value);
 }

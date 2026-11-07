@@ -22,6 +22,7 @@ import {
   type ModelProvider,
   type ThreadStart,
   type SessionRepository,
+  resolveAgentPolicy,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
@@ -130,12 +131,12 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
-import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
   forkSessionKey,
@@ -317,6 +318,8 @@ export interface SendTurnOptions {
    *  stands, or null when Rome holds none. Read only with `turnLinks`. */
   quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
+  /** Pushes the first message said in the turn at this level (RunParams.pushLevel). */
+  pushLevel?: NotifyLevel;
 }
 
 export interface AgentSessionStatusEvent {
@@ -1392,7 +1395,7 @@ async function openSession(
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
     // The agent's text stays in its trace, so it reaches the guardian only
     // through its tools; `defer` then asks for no confirmation line.
-    textPrivate: resolveSessionPolicy(config).finalText === "private",
+    textPrivate: resolveAgentPolicy(config).finalText === "private",
   };
 
   const buildSessionParams = (
@@ -1444,6 +1447,7 @@ async function openSession(
       isSubagent: opts.isSubagent === true,
       getTurnId: sessionExecRefs.getTurnId,
       getThreadContext: sessionExecRefs.getThreadContext,
+      getTurnPushLevel: () => impl.currentTurnPushLevelRef,
     });
     const toolParams: FacadeParams = sessionTools?.length
       ? { ...liveToolParams, sessionTools }
@@ -1830,6 +1834,7 @@ interface TurnSink {
   replyTo?: MessageReplyReference;
   quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
+  pushLevel?: NotifyLevel;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   subagentExecutions: Map<string, { parent: ParentSubagentRef; execution: SubagentExecution }>;
@@ -2117,6 +2122,10 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnThreadContextRef(): ThreadContext | undefined {
     return this.currentSink?.threadContext ?? this.threadContext;
+  }
+
+  get currentTurnPushLevelRef(): NotifyLevel | undefined {
+    return this.currentSink?.pushLevel;
   }
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
@@ -3272,6 +3281,7 @@ class AgentSessionImpl implements AgentSession {
       replyTo: options?.replyTo,
       quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
+      pushLevel: options?.pushLevel,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       subagentExecutions: new Map(),
