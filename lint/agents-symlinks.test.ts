@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { LintEnvironmentError, lintAgentsSymlinks, runCli } from "./check-agents-symlinks.js";
+import { LintEnvironmentError, lintAgentsSymlinks, runCli } from "./agents-symlinks.js";
 
 const execFileAsync = promisify(execFile);
 

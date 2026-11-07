@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The root package.json declares no "type", so NodeNext would read these as
+    // CommonJS and reject `import.meta`. tsx runs them as the ES modules they are.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}
