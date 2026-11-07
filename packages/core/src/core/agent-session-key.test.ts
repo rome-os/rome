@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { storeForkParent, storeSubagentParent } from "../agent/index.js";
+import { storeForkParent, storeSubagentParent, walkToRoot } from "../agent/index.js";
 import {
   adhocSessionKey,
   parseSessionKey,
@@ -23,7 +23,7 @@ describe("agent session keys", () => {
 
 describe("parseSessionKey", () => {
   it("names a webchat chat's own key", () => {
-    expect(parseSessionKey("webchat:chat-1")).toEqual({
+    expect(parseSessionKey(walkToRoot("webchat:chat-1"))).toEqual({
       kind: "webchat",
       chatId: "chat-1",
     });
@@ -37,7 +37,7 @@ describe("parseSessionKey", () => {
   });
 
   it("keeps a colon inside a messaging thread id", () => {
-    expect(parseSessionKey("slack:C1:1700000000.1")).toEqual({
+    expect(parseSessionKey(walkToRoot("slack:C1:1700000000.1"))).toEqual({
       kind: "channel",
       channel: "slack",
       threadId: "C1:1700000000.1",
@@ -46,7 +46,7 @@ describe("parseSessionKey", () => {
   });
 
   it("gives a sentinel no delivery channel", () => {
-    expect(parseSessionKey("sentinel:telegram:t1")).toEqual({
+    expect(parseSessionKey(walkToRoot("sentinel:telegram:t1"))).toEqual({
       kind: "sentinel",
       watched: { kind: "channel", channel: "telegram", threadId: "t1" },
     });

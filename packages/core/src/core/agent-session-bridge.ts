@@ -118,7 +118,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     if (session.conversation?.origin === "recorded") known.add(session.conversation.id);
     const root = walkToRoot(session.key.channelThreadKey);
     for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
-    const rootKey = parseSessionKey(root.stored);
+    const rootKey = parseSessionKey(root);
     if (rootKey.kind === "webchat") required.push(rootKey.chatId);
     for (const chatId of required) {
       const chat = await repo.getSession(chatId);
