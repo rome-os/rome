@@ -51,6 +51,10 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 - [ ] Local end-to-end test with a sandbox-only APNs key: "Rome Push Local Test", Key ID `GL5Q9DS43J`, team `4YWXB26F39` (created 2026-11-06 at the user's OK). The `.p8` is outside every repo, in `~/.config/rome-push/` (mode 600). Needs a local Pantheon (`.env` with `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_P8`), a local instance linked to it, and Rome Dev pointed at it. **Delete the key in Apple Developer › Keys and the local file after testing.** Cleanup 2026-11-07: local `.p8`, `~/.config/rome-push/`, the Caddy CA volume, local Pantheon (PM2, database, `.env`) and the pushtest stack removed; push worker sessions archived, their worktrees and branches deleted. Key `GL5Q9DS43J` revoked in Apple Developer the same day. Still open: the user removes the local CA profile from the iPhone 15.
 - [ ] Concierge topic chats: open the push's `chatId` (parsed, not used yet)
 
+## Topic chats
+
+- [x] Drawer: the coming-soon entries are gone; under Chat and Routines, a divider and a "Topic chats" section with + (44 pt) and each topic chat with its unread count. + opens a blank chat in Chat's style; nothing is created until the first send, which starts the chat and then sends to it; the chat then shows in the drawer with the name the server gives it. Each chat's Tasks lists its own tasks; a push for a topic chat opens it (`a4376ba1`, `f07c0ff5`, `80f71ff5`, `97f037a6`). 100 Mac Catalyst tests pass; snapshots `05-drawer`, `24-topic-chat`, `25-topic-blank` light and dark; checked on the Simulator against a local Rome (create from +, send, named in the drawer, reopen, a push opens it). Screenshots: notes folder `topic-chats/`.
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
@@ -65,7 +69,7 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 ## Small changes (batched)
 
 - [ ] Login wordmark in Funnel Sans (system font today)
-- [ ] Drawer "Apps", "Memory", "Activity" are not in the string catalog (English on both languages)
+- [x] Drawer "Apps", "Memory", "Activity" are not in the string catalog (removed with the coming-soon entries)
 - [ ] Demo instance names in `DemoBackend.instances` stay Chinese on an English phone (debug only)
 - [ ] Tests cover the Chinese weekly schedule text and Chinese date formats again (tests now run in English only)
 - [ ] Chinese error strings keep a full stop the English dropped ("没有网络连接。", "会话已过期。")
