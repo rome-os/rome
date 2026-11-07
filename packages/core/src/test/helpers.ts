@@ -20,7 +20,7 @@ import type {
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
 import { AgentLoader } from "../core/agent-loader.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import {
   createModelAvailability,
@@ -672,7 +672,7 @@ export async function buildTestDeps(
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const actionLoader = new ActionLoader(artifactIdentity);
   const agentLoader = new AgentLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
+  const skillCatalog = new SkillLoader(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -1143,7 +1143,7 @@ export interface AppLifecycleHarness {
   actionRegistry: ActionRegistryImpl;
   actionLoader: ActionLoader;
   agentLoader: AgentLoader;
-  skillCatalog: SkillCatalog;
+  skillCatalog: SkillLoader;
   fetch(path: string, init?: RequestInit): Promise<Response>;
   hasAction(name: string): boolean;
   /** Bypasses the ActionEngine subprocess fork — tests don't need a worker entry. */
@@ -1165,7 +1165,7 @@ interface HarnessRuntime {
   actionRegistry: ActionRegistryImpl;
   actionLoader: ActionLoader;
   agentLoader: AgentLoader;
-  skillCatalog: SkillCatalog;
+  skillCatalog: SkillLoader;
   router: Hono;
 }
 
@@ -1192,7 +1192,7 @@ export async function createAppLifecycleHarness(
     const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
     const agentLoader = new AgentLoader(artifactIdentity);
-    const skillCatalog = new SkillCatalog(artifactIdentity);
+    const skillCatalog = new SkillLoader(artifactIdentity);
 
     appCatalog.subscribe(async function agentLoaderSubscriber() {
       try {

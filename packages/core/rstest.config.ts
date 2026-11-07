@@ -32,6 +32,7 @@ export default defineConfig({
     "../channel-test-ui/src/**/*.test.ts",
     "../../rome_apps/*/src/**/*.test.ts",
     "../../scripts/**/*.test.ts",
+    "../../lint/**/*.test.ts",
     "../../infra/**/*.test.ts",
   ],
   exclude: [

@@ -1,14 +1,10 @@
 import { describe, it, expect } from "@rstest/core";
-import {
-  parseSlashSkillInvocation,
-  buildSlashSkillPrompt,
-  expandSlashSkillPrompt,
-} from "./slash-skill-command.js";
-import type { SkillCatalog, LoadedSkill } from "./skill-catalog.js";
+import { parseSlashSkillInvocation, buildSlashSkillPrompt } from "./slash-skill.js";
+import type { Skill, SkillCatalog } from "./skill.js";
 
-function catalogWith(...names: string[]): Pick<SkillCatalog, "get"> {
+function catalogWith(...names: string[]): Pick<SkillCatalog, "find"> {
   return {
-    get: (name) => (names.includes(name) ? ({ name } as LoadedSkill) : undefined),
+    find: (name) => (names.includes(name) ? ({ name } as Skill) : undefined),
   };
 }
 
@@ -68,12 +64,9 @@ describe("parseSlashSkillInvocation", () => {
   });
 });
 
-describe("expandSlashSkillPrompt", () => {
+describe("buildSlashSkillPrompt", () => {
   it("expands a known command into a read_skill instruction carrying the task", () => {
-    const prompt = expandSlashSkillPrompt(
-      "/app_creation build a tracker",
-      catalogWith("app_creation"),
-    );
+    const prompt = buildSlashSkillPrompt({ skillName: "app_creation", task: "build a tracker" });
     expect(prompt).toContain('invoked the skill "app_creation"');
     expect(prompt).toContain("read_skill");
     expect(prompt).toContain("Task: build a tracker");
@@ -82,9 +75,5 @@ describe("expandSlashSkillPrompt", () => {
   it("asks for a task when none was given", () => {
     const prompt = buildSlashSkillPrompt({ skillName: "app_creation", task: "" });
     expect(prompt).toContain("ask what they want to do with it");
-  });
-
-  it("passes non-command text through as null", () => {
-    expect(expandSlashSkillPrompt("hello there", catalogWith("app_creation"))).toBeNull();
   });
 });

@@ -15,8 +15,12 @@
 // a context with a computed path, is reported as `unchecked`.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
+
+/** Contexts in packages/core/src laid out as `<context>/<layer>`. A context adopting the layout joins this list. */
+export const LAYERED_CONTEXTS = ["agent"];
 
 /** One import that breaks a rule. `file` is relative to the scanned src directory. */
 export interface LayerViolation {
@@ -196,4 +200,25 @@ function isPathSpecifier(specifier: string): boolean {
 
 function toPosix(path: string): string {
   return path.split(sep).join("/");
+}
+
+/** Checks packages/core/src and prints each violation. Returns the exit code. */
+export function runCli(): number {
+  const core = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core");
+  const violations = checkLayerBoundaries(
+    join(core, "src"),
+    join(core, "tsconfig.json"),
+    LAYERED_CONTEXTS,
+  );
+  if (violations.length > 0) {
+    for (const violation of violations) console.error(`  - ${formatLayerViolation(violation)}`);
+    console.error(`layer-boundaries: ${violations.length} import(s) break a layer rule`);
+    return 1;
+  }
+  console.log(`layer-boundaries: ${LAYERED_CONTEXTS.join(", ")} imports follow the layer rules`);
+  return 0;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(runCli());
 }

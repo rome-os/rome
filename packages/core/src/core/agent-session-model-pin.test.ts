@@ -23,7 +23,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
@@ -127,7 +127,7 @@ describe("agent model pins through AgentSessionManager", () => {
           },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
+        skillCatalog: new SkillLoader(artifactIdentity),
         lifecycleDispatcher,
         channelSurface: testChannelSurface,
       },

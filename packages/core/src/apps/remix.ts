@@ -17,7 +17,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { extract as tarExtract, list as tarList } from "tar";
 import { parseDocument } from "yaml";
-import { parseSkillFrontmatterResult } from "../core/skill-catalog.js";
+import { parseSkillFrontmatterResult } from "./packaging/skill-frontmatter.js";
 import { getCustomAppAuthoringRoot, getProfileInstalledAppsDir } from "../paths.js";
 import { getCustomAppAuthoringPath } from "./authoring.js";
 import type { AppCatalog } from "./catalog.js";

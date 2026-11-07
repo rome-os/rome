@@ -14,7 +14,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -83,7 +83,7 @@ describe("AgentSessionManager working dirs", () => {
           availability: fakeAvailability(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
+        skillCatalog: new SkillLoader(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
         channelSurface: testChannelSurface,
       },

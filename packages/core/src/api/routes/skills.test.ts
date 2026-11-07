@@ -2,21 +2,17 @@ import { describe, it, expect } from "@rstest/core";
 import { Hono } from "hono";
 import { skillsRoutes } from "./skills.js";
 import { createTestDb, buildTestDeps } from "../../test/helpers.js";
-import type { LoadedSkill } from "../../core/skill-catalog.js";
+import type { Skill } from "../../agent/index.js";
 
-function loadedSkill(overrides: Partial<LoadedSkill> & { name: string }): LoadedSkill {
+function skill(overrides: Partial<Skill> & { name: string }): Skill {
   return {
-    metadata: {
-      kind: "skill",
-      ownerType: "app",
-      ownerId: "coding",
-      publicName: overrides.name,
-      sourcePath: `/installed/coding/skills/${overrides.name}`,
-    },
+    localName: overrides.name,
     description: "A test skill",
-    content: "---\n---\nbody",
+    content: "body",
+    ownerType: "app",
+    ownerId: "coding",
     ...overrides,
-  } as LoadedSkill;
+  };
 }
 
 describe("GET /skills", () => {
@@ -39,14 +35,14 @@ describe("GET /skills", () => {
     try {
       const deps = await buildTestDeps(testDb.db);
       const skillCatalog = {
-        get: () => undefined,
-        getAll: () => [
-          loadedSkill({
+        find: () => undefined,
+        list: () => [
+          skill({
             name: "app_creation",
             description: "Scaffold a new Rome app",
             tools: ["Read", "Edit", "Bash"],
           }),
-          loadedSkill({ name: "skill-import" }),
+          skill({ name: "skill-import" }),
         ],
         getRegistryLoadFailures: () => [],
       };
@@ -58,6 +54,7 @@ describe("GET /skills", () => {
         skills: [
           {
             name: "app_creation",
+            localName: "app_creation",
             description: "Scaffold a new Rome app",
             tools: ["Read", "Edit", "Bash"],
             ownerType: "app",
@@ -68,6 +65,7 @@ describe("GET /skills", () => {
           },
           {
             name: "skill-import",
+            localName: "skill-import",
             description: "A test skill",
             tools: [],
             ownerType: "app",
@@ -90,19 +88,12 @@ describe("GET /skills", () => {
       const deps = await buildTestDeps(testDb.db);
       const ownerId = "@foo/bar";
       const skillCatalog = {
-        get: () => undefined,
-        getAll: () => [
-          loadedSkill({
+        find: () => undefined,
+        list: () => [
+          skill({
             name: `${ownerId}:baz`,
             localName: "baz",
-            metadata: {
-              kind: "skill",
-              ownerType: "app",
-              ownerId,
-              publicName: "baz",
-              aliases: [],
-              sourcePath: "/installed/%40foo%2Fbar/skills/baz",
-            },
+            ownerId,
           }),
         ],
         getRegistryLoadFailures: () => [
@@ -145,8 +136,8 @@ describe("GET /skills", () => {
     try {
       const deps = await buildTestDeps(testDb.db);
       const skillCatalog = {
-        get: () => undefined,
-        getAll: () => [],
+        find: () => undefined,
+        list: () => [],
         getRegistryLoadFailures: () => [
           {
             kind: "skill" as const,

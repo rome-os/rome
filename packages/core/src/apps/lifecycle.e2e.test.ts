@@ -1444,7 +1444,7 @@ describe("App lifecycle e2e", () => {
       // The skill catalog subscriber runs after the action loader; wait on
       // the skill itself, not just the action — otherwise we might race the
       // catalog refresh and assert before skillCatalog.loadFromCatalog has run.
-      await waitFor(() => harness.skillCatalog.getMcpDefinitions().some((s) => s.name === skillId));
+      await waitFor(() => harness.skillCatalog.list().some((s) => s.name === skillId));
 
       const skills = parseMcpJson<Array<{ name: string; description: string; tools?: string[] }>>(
         await callMcpTool(server, "skills", "list_skills"),
