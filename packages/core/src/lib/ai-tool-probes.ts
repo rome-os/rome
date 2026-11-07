@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { ModelAccountStatus } from "../agent/index.js";
+import type { AnthropicCompatibleCredentialsSummary } from "@rome/api-types/anthropic-compatible-providers";
 import {
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
@@ -8,7 +9,10 @@ import {
 import { isAnthropicAuthRevoked, isAnthropicCompatibleAuthRevoked } from "./anthropic-login.js";
 import { type AIToolUsageStatus, getErrorMessage, readClaudeOAuthUsage } from "./provider-usage.js";
 
-export type AIToolStatusProbeResult = ModelAccountStatus;
+/** The model account's status plus the Anthropic-compatible credentials only the Claude probe reports. */
+export type AIToolStatusProbeResult = ModelAccountStatus & {
+  anthropicCompatible?: (AnthropicCompatibleCredentialsSummary & { needsReauth?: boolean }) | null;
+};
 
 function readClaudeCliStatus(): Promise<AIToolStatusProbeResult> {
   return new Promise((resolve, reject) => {
