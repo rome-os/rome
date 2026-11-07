@@ -171,6 +171,7 @@ struct MainShell: View {
         #endif
         // Which chat is in front, for pushes: none under a sheet or the drawer.
         .onChange(of: visibleChat, initial: true) { _, chat in model.visibleChat = chat }
+        .onChange(of: workspace.mainChatServerID) { model.rewatch() }
         .onDisappear { model.visibleChat = nil }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in

@@ -547,9 +547,16 @@ final class AppModel {
     /// and opening it clears its delivered notifications.
     var visibleChat: String? {
         didSet {
-            guard let visibleChat, visibleChat != oldValue else { return }
-            clearDelivered(for: visibleChat)
+            guard visibleChat != oldValue else { return }
+            workspace?.backend.events.watch(PushPresentation.serverChat(visibleChat, mainServerID: workspace?.mainChatServerID))
+            if let visibleChat { clearDelivered(for: visibleChat) }
         }
+    }
+
+    /// Holds the watch again, as the server names the chat now: the main
+    /// chat's own id arrives after Chat first shows.
+    func rewatch() {
+        workspace?.backend.events.watch(PushPresentation.serverChat(visibleChat, mainServerID: workspace?.mainChatServerID))
     }
 
     /// Whether a push that arrives while the app is open shows its banner.

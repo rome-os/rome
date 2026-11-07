@@ -390,3 +390,26 @@ final class StubBackend: RomeBackend {
         #expect(!gate.isInBackground)
     }
 }
+
+@Suite struct ChatWatchTests {
+    /// The watch follows the chat on screen: one chat at a time, none under a sheet.
+    @Test func followsTheChatOnScreen() {
+        var watch = ChatWatch()
+        #expect(watch.move(to: "topic-b").map(\.topic) == ["chat.watch:topic-b"])
+        #expect(watch.move(to: "topic-b").isEmpty)
+        let moved = watch.move(to: "c-42")
+        #expect(moved.map(\.type) == ["unsubscribe", "subscribe"])
+        #expect(moved.map(\.topic) == ["chat.watch:topic-b", "chat.watch:c-42"])
+        #expect(watch.topic == "chat.watch:c-42")
+        #expect(watch.move(to: nil).map(\.topic) == ["chat.watch:c-42"])
+        #expect(watch.topic == nil)
+    }
+
+    /// The main chat is watched by the server's own id once it is known.
+    @Test func watchesTheMainChatByItsServerID() {
+        #expect(PushPresentation.serverChat(conciergeChatID, mainServerID: "c-42") == "c-42")
+        #expect(PushPresentation.serverChat(conciergeChatID, mainServerID: nil) == conciergeChatID)
+        #expect(PushPresentation.serverChat("topic-b", mainServerID: "c-42") == "topic-b")
+        #expect(PushPresentation.serverChat(nil, mainServerID: "c-42") == nil)
+    }
+}

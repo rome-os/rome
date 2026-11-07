@@ -24,12 +24,41 @@ protocol LiveEventSource: AnyObject {
     func unsubscribe(_ token: UUID)
     func pause()
     func resume()
+    /// The chat on the phone's screen, by the server's id, or nil for none:
+    /// the instance does not push what the Concierge says there.
+    func watch(_ chatId: String?)
+}
+
+extension LiveEventSource {
+    /// Stand-ins (demo, tests) have no instance to tell.
+    func watch(_ chatId: String?) {}
 }
 
 enum LiveTopic {
     static let chatStatus = "chat.status"
     static let conciergeTasks = "concierge.tasks"
     static func chat(_ sessionId: String) -> String { "chat.session:\(sessionId)" }
+    /// Held for the one chat on screen; it carries no events.
+    static func watch(_ chatId: String) -> String { "chat.watch:\(chatId)" }
+}
+
+/// The phone's one watch: which frames move it from chat to chat.
+struct ChatWatch {
+    private(set) var chatId: String?
+
+    /// The frames that move the watch to `next`: leave the old chat, then
+    /// hold the new one. None when it stays.
+    mutating func move(to next: String?) -> [(type: String, topic: String)] {
+        guard next != chatId else { return [] }
+        var frames: [(type: String, topic: String)] = []
+        if let chatId { frames.append(("unsubscribe", LiveTopic.watch(chatId))) }
+        if let next { frames.append(("subscribe", LiveTopic.watch(next))) }
+        chatId = next
+        return frames
+    }
+
+    /// What a new connection holds, if a chat is on screen.
+    var topic: String? { chatId.map(LiveTopic.watch) }
 }
 
 /// When the socket's listeners must refetch after a connection that followed
@@ -75,6 +104,7 @@ final class LiveEventsSocket: LiveEventSource {
     private var reconnectWork: Task<Void, Never>?
     private var pingWork: Task<Void, Never>?
     private var generation = 0
+    private var watching = ChatWatch()
 
     init(client: APIClient) {
         self.client = client
@@ -108,6 +138,8 @@ final class LiveEventsSocket: LiveEventSource {
         paused = true
         resync.dropped()
         let hold = BackgroundHold("live-events-goodbye")
+        // The watch first: it is what the push depends on.
+        if let watch = watching.topic { sendFrame(type: "unsubscribe", topic: watch) }
         for topic in Set(subscriptions.values.map(\.topic)) {
             sendFrame(type: "unsubscribe", topic: topic)
         }
@@ -132,6 +164,13 @@ final class LiveEventsSocket: LiveEventSource {
         connect()
     }
 
+    func watch(_ chatId: String?) {
+        let frames = watching.move(to: chatId)
+        // Paused or not connected: the next connection holds the new watch.
+        guard !paused, task != nil else { return }
+        for frame in frames { sendFrame(type: frame.type, topic: frame.topic) }
+    }
+
     private func connect() {
         guard !paused else { return }
         disconnect()
@@ -145,6 +184,7 @@ final class LiveEventsSocket: LiveEventSource {
         for topic in topics {
             sendFrame(type: "subscribe", topic: topic)
         }
+        if let watch = watching.topic { sendFrame(type: "subscribe", topic: watch) }
         receive(task, generation: current)
         pingWork = Task { [weak self] in
             while !Task.isCancelled {

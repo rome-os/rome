@@ -123,6 +123,12 @@ enum PushPrompt {
 /// chat clears. A chat is named by its store's id: `concierge` for the main
 /// chat, which the server may name by its own id instead.
 enum PushPresentation {
+    /// A chat as the server names it: the main chat by its own id once known.
+    static func serverChat(_ chat: String?, mainServerID: String?) -> String? {
+        guard let chat else { return nil }
+        return chat == conciergeChatID ? (mainServerID ?? conciergeChatID) : chat
+    }
+
     /// The push's chat and `chat` are the same chat.
     static func sameChat(_ pushChat: String?, _ chat: String, mainServerID: String?) -> Bool {
         let push = pushChat ?? conciergeChatID
