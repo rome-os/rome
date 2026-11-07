@@ -9,6 +9,7 @@ struct ChatScreen: View {
 
     @Environment(AppModel.self) private var model
     @State private var draft = ""
+    @State private var suggestions = SuggestionsState()
     @FocusState private var composerFocused: Bool
 
     private var store: TranscriptStore { workspace.concierge }
@@ -33,8 +34,10 @@ struct ChatScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
-                Composer(text: $draft, placeholder: "Message", focus: $composerFocused) {
-                    if store.send(draft) { draft = "" }
+                SuggestingComposer(state: suggestions, focus: $composerFocused) {
+                    Composer(text: $draft, placeholder: "Message", focus: $composerFocused) {
+                        if store.send(draft) { draft = "" }
+                    }
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .padding(.top, 6)
@@ -45,6 +48,13 @@ struct ChatScreen: View {
                 }
             }
         }
+        .suggestionsOverlay(suggestions)
+        .onAppear { suggestions.send = { text in store.send(text) } }
+        #if DEBUG
+        .onChange(of: model.debugCommand) { _, command in
+            if case .suggestions(let open) = command { suggestions.isOpen = open }
+        }
+        #endif
     }
 
     @ViewBuilder

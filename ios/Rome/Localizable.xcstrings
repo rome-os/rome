@@ -1117,6 +1117,16 @@
         }
       }
     },
+    "Plan my weekend trip and check the weather" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我规划周末出行，顺便看看天气"
+          }
+        }
+      }
+    },
     "Reject" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1382,6 +1392,16 @@
         }
       }
     },
+    "Sends this message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送这条消息"
+          }
+        }
+      }
+    },
     "Sent. Thank you." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1620,6 +1640,16 @@
         }
       }
     },
+    "Suggestions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议"
+          }
+        }
+      }
+    },
     "Sun" : {
       "comment" : "Sunday in a weekly schedule",
       "localizations" : {
@@ -1850,6 +1880,16 @@
         }
       }
     },
+    "Try asking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "试着问问"
+          }
+        }
+      }
+    },
     "Tue" : {
       "comment" : "Tuesday in a weekly schedule",
       "localizations" : {
@@ -2009,6 +2049,16 @@
         }
       }
     },
+    "Watch my Gmail inbox for me" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我订阅 Gmail 邮件"
+          }
+        }
+      }
+    },
     "Watching" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2046,6 +2096,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每周%@"
+          }
+        }
+      }
+    },
+    "What can you watch for me?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你能帮我订阅哪些消息？"
           }
         }
       }

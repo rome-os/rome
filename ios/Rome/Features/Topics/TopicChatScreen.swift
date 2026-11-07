@@ -14,6 +14,7 @@ struct TopicChatScreen: View {
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
+    @State private var suggestions = SuggestionsState()
     @FocusState private var composerFocused: Bool
 
     private var store: TranscriptStore? { chatId.map(workspace.topicStore) }
@@ -42,19 +43,29 @@ struct TopicChatScreen: View {
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Composer(text: $draft, placeholder: "Message", focus: $composerFocused) { send() }
-                .disabled(starting != nil)
-                .padding(.horizontal, Metrics.pagePadding)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
-                .background(alignment: .bottom) {
-                    LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg, Palette.bg], startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea()
-                }
+            SuggestingComposer(state: suggestions, focus: $composerFocused) {
+                Composer(text: $draft, placeholder: "Message", focus: $composerFocused) { send() }
+            }
+            .disabled(starting != nil)
+            .padding(.horizontal, Metrics.pagePadding)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+            .background(alignment: .bottom) {
+                LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg, Palette.bg], startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+            }
         }
-        .onAppear { store?.start() }
-        // A blank chat that just started its chat keeps this view.
-        .onChange(of: chatId) { store?.start() }
+        .suggestionsOverlay(suggestions)
+        .onAppear {
+            store?.start()
+            suggestions.send = { text in send(text: text) }
+        }
+        // A blank chat that just started its chat keeps this view; a pick now
+        // goes to that chat.
+        .onChange(of: chatId) {
+            store?.start()
+            suggestions.send = { text in send(text: text) }
+        }
         .onDisappear { store?.stop() }
     }
 
@@ -72,7 +83,7 @@ struct TopicChatScreen: View {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {
                 VStack(spacing: 8) {
-                    UserBubble(text: starting, pending: startFailed ? .failed : .sending) { send(retrying: starting) }
+                    UserBubble(text: starting, pending: startFailed ? .failed : .sending) { send(text: starting) }
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -90,14 +101,24 @@ struct TopicChatScreen: View {
         }
     }
 
-    private func send(retrying text: String? = nil) {
+    /// Sends the draft.
+    private func send() {
         if let store {
             if store.send(draft) { draft = "" }
             return
         }
-        let text = text ?? draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
+        send(text: text)
+    }
+
+    /// Sends `text`, starting the chat first when this one is blank.
+    private func send(text: String) {
+        if let store {
+            store.send(text)
+            return
+        }
         starting = text
         startFailed = false
         Task {
