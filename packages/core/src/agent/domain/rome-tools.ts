@@ -41,6 +41,16 @@ export interface RomeToolResult {
   isError?: boolean;
 }
 
+export type RomeToolHandler = (
+  input: Record<string, unknown>,
+  context?: ModelToolCallContext,
+) => Promise<RomeToolResult>;
+
+/** A Rome tool with the handler that runs it. */
+export interface RomeTool extends RomeToolDefinition {
+  handler: RomeToolHandler;
+}
+
 export interface RomeTools {
   listTools(group: RomeToolGroup): readonly RomeToolDefinition[];
   /**

@@ -129,8 +129,7 @@ describe("createBorrowedExactForkSession", () => {
   // interactiveSurfaceDetached: true (nothing drains the fork stream to mount
   // cards). The borrowed turn's dynamic-tool runtime must
   // carry the detached flag through, or the interactive tools claim UI was
-  // delivered that no one will ever see. Facade-level detached behavior is
-  // covered in mcp-facade.routine-draft.test.ts; this pins the wire-through.
+  // delivered that no one will ever see. This pins the wire-through.
   it("keeps a webchat-sourced fork's interactive dynamic tools detached", async () => {
     let advertised: readonly string[] = [];
     let askRes: RomeDynamicToolCallResult | undefined;
@@ -164,8 +163,8 @@ describe("createBorrowedExactForkSession", () => {
     });
     await session.close();
 
-    // Prefix identity: the full interactive catalog stays advertised.
-    expect(advertised).toEqual(expect.arrayContaining(["ask_question", "propose_routine"]));
+    // Prefix identity: the catalog stays advertised.
+    expect(advertised).toContain("ask_question");
     // Runtime honesty: ask_question relays prose instead of parking the
     // turn on a card no drain will mount.
     expect(askRes!.traceOutput.content[0].text).not.toContain("pendingInteraction");

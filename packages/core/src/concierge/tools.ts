@@ -18,7 +18,7 @@ import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
 } from "../core/conversation-title.js";
-import type { FacadeToolDef } from "../core/mcp-facade.js";
+import type { RomeTool } from "../agent/index.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
@@ -96,7 +96,7 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
 export async function buildConciergeTools(
   service: ConciergeService,
   context: SessionToolContext,
-): Promise<FacadeToolDef[]> {
+): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
   if (!(await service.isEnabled())) return [];
   const { webchatRepo, messages, tasks } = service.deps;

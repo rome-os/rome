@@ -12,7 +12,7 @@
 // caller (`agent-session.ts`) so this stays testable without a running engine.
 
 import { parseDeferInput, type DeferInput } from "../agent/index.js";
-import type { ThreadContext } from "./types.js";
+import type { ThreadContext } from "../core/types.js";
 
 /** The action the one-off routine fires: `resume_session` continues this
  * thread's conversation on any channel. It's a thin shim over the
@@ -94,7 +94,7 @@ function buildResumeArgs(
   };
 }
 
-/** Schedule the deferred wakeup. Throws (for the facade to relay as an error)
+/** Schedule the deferred wakeup. Throws (for the tool to relay as an error)
  * on bad input or a missing thread context. `parseDeferInput` still re-validates
  * the value-level rules the MCP schema can't express (note non-empty, the
  * afterMinutes/at xor). */

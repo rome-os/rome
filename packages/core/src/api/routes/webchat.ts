@@ -71,7 +71,7 @@ import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
 import { buildWorkspaceContextSection, type WorkspaceContextSnapshot } from "../../agent/index.js";
-import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
+import { normalizeRoutineDraftForCard } from "../../routines/propose-routine-tool.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
 import { buildSlashSkillPrompt, parseSlashSkillInvocation } from "../../agent/index.js";
 import { buildConciergeSkillPrompt } from "../../concierge/skill-command.js";
