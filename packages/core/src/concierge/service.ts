@@ -3,6 +3,7 @@
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
 // docs/adrs/one-concierge-with-several-chats.md). Design: rome-os/rome#1344.
 
+import type { PhoneWatching } from "../lib/phone-watching.js";
 import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -167,13 +168,15 @@ export interface ConciergeDeps {
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
   /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
   notify?: ConciergePushDeps["notify"];
+  /** The chats the guardian's phone app holds open; nothing said there is pushed. */
+  phoneWatching?: Pick<PhoneWatching, "isWatching">;
 }
 
 export interface SystemTurnOptions {
   quiet?: boolean;
   inputLabel?: string;
   /** The first message the Concierge says in the turn goes to the guardian's
-   *  phone at this level. Only a turn the guardian did not start has one. */
+   *  phone at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;
 }
 
@@ -193,6 +196,7 @@ export class ConciergeService {
           notify: deps.notify,
           quietUntil: (at) => this.quietUntil(at),
           pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
+          watching: (chatId) => deps.phoneWatching?.isWatching(chatId) ?? false,
           language: async () => {
             const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
             return typeof stored === "string" ? stored : null;

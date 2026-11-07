@@ -1,5 +1,7 @@
-// A Concierge turn the guardian did not start sends the first message it says
-// to the guardian's phone (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
+// A Concierge turn with a push level, proactive or the reply to the guardian's
+// own message, sends the first message it says to the guardian's phone, unless
+// the phone app shows the chat
+// (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
 
 import { marked, type Token } from "marked";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
@@ -74,6 +76,8 @@ export interface ConciergePushDeps {
   quietUntil: (at: number) => Promise<number | null>;
   /** Whether a message in this chat may reach the guardian's phone: only one of their own chats. */
   pushesFor: (chatId: string) => Promise<boolean>;
+  /** Whether the guardian's phone app shows this chat now: then it is read there, not pushed. */
+  watching?: (chatId: string) => boolean;
   /** The guardian's dashboard language, as its setting holds it, or null. */
   language: () => Promise<string | null>;
   now?: () => number;
@@ -90,7 +94,7 @@ export interface SaidInTurn {
    * for a bare forward or a card: the push then says {@link FIXED_LINE}.
    */
   ownWords: string | null;
-  /** The turn's push level; undefined for a turn the guardian started. */
+  /** The turn's push level; undefined for a reminder, a recovery or a notice. */
   level: NotifyLevel | undefined;
 }
 
@@ -131,6 +135,10 @@ export class ConciergePush {
 
   private async send({ turnId, chatId, ownWords }: SaidInTurn, level: NotifyLevel): Promise<void> {
     if (!(await this.deps.pushesFor(chatId))) return;
+    if (this.deps.watching?.(chatId)) {
+      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+      return;
+    }
     if ((await this.deps.quietUntil(this.now())) !== null) {
       log.info("concierge push held back by quiet hours", { turnId, chatId });
       return;

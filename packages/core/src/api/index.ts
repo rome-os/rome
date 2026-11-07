@@ -352,6 +352,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeConciergeTasks: (owner, emit) =>
             deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
         },
+        deps.phoneWatching,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);
