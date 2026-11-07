@@ -36,7 +36,7 @@
  *     Social cards carry the host in their cache name (apps/og/store.ts), and the
  *     provisioning step after a link re-renders them, so cards drawn with the
  *     pool host are never served after adoption.
- *   - index.ts `new PromptBuilder(...)`: `romePublicOrigin` is a getter. Note
+ *   - index.ts `createPromptSources(...)`: `publicOrigin` is a getter. Note
  *     the main-agent prefix is cached on the first turn, so an origin adopted
  *     after a turn only shows once the cache is dropped.
  *   - Action workers: the adopt route calls `restartWorkerWarmPool()`, so new

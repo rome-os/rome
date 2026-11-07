@@ -12,7 +12,7 @@ import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { SkillLoader } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
@@ -68,14 +68,14 @@ describe("AgentSessionManager working dirs", () => {
       anthropic: availabilityOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Working dir test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Working dir test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
         webchatRepo,
-        promptBuilder,
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({

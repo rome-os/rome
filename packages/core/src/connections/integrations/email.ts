@@ -114,7 +114,7 @@ export interface EmailDescriptorDeps {
   /**
    * Called synchronously right after each fresh `EmailAdapter` is built (every
    * epoch — birth, relock/re-authorize, and Disconnected backoff rebuild).
-   * index.ts uses this to keep its `emailAdapterRef` (the prompt-builder's "our
+   * index.ts uses this to keep its `emailAdapterRef` (the system prompt's "our
    * own inbox address" lookup) pointed at the CURRENT instance — the same role
    * the old `emailAdapterRef = email` assignment played. Optional so tests don't
    * need to supply it.

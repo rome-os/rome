@@ -16,7 +16,7 @@ Fake a dependency only if it crosses the process boundary:
 | Subprocess fork | avoided via `ActionEngine` `processRole: "worker"` (the harness does this) |
 | Outbound HTTP | `createFetchRecorder()` (inject `recorder.fetch` via a module's `fetch?: typeof fetch` option) |
 
-Everything else — repositories, ActionEngine, SessionRepository, PromptBuilder, AgentRunner, ChannelManager — runs the production class over in-memory SQLite with real migrations. Don't hand-roll `{ … } as unknown as SomeRepository` stubs and don't `rs.mock` internal modules; if you feel the need to, the harness is probably missing something — raise it on #763 instead.
+Everything else — repositories, ActionEngine, SessionRepository, SystemPrompts, AgentRunner, ChannelManager — runs the production class over in-memory SQLite with real migrations. Don't hand-roll `{ … } as unknown as SomeRepository` stubs and don't `rs.mock` internal modules; if you feel the need to, the harness is probably missing something — raise it on #763 instead.
 
 Assert **outcomes**, not stub call shapes: read the DB row, the outbound channel message, or the prompt the model received — not `expect(mock.run).toHaveBeenCalledWith(…)`.
 
@@ -36,7 +36,7 @@ rome.model
   .whenPromptIncludes("send hi")
   .reply(invokeAction("send_message", { to: "u1", body: "hi" }), result("Sent."));
 
-// Drive a real turn: real AgentLoader/PromptBuilder/SessionRepository/ActionEngine
+// Drive a real turn: real AgentLoader/SystemPrompts/SessionRepository/ActionEngine
 const messages = await rome.runAgent({ prompt: "send hi", channelThreadKey: "telegram:t1" });
 
 // Assert real outcomes

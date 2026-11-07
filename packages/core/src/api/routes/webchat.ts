@@ -3536,7 +3536,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // keeps it.
     const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
-    // user message so the cached system prefix in PromptBuilder stays stable.
+    // user message so the cached fixed part of the system prompt stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`

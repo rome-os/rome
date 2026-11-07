@@ -21,7 +21,7 @@ import type {
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { SkillLoader } from "../agent/index.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
 import {
   createModelAvailability,
   ClaudeAccount,
@@ -690,7 +690,7 @@ export async function buildTestDeps(
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
   const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
-  const promptBuilder = new PromptBuilder(appCatalog);
+  const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: ModelAccount & ModelAccountAuthorization = {
     async availability() {
@@ -755,7 +755,7 @@ export async function buildTestDeps(
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
-    promptBuilder,
+    systemPrompts,
     actionRegistry,
     modelResolver,
     actionEngine,
