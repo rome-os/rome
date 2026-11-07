@@ -113,6 +113,15 @@ enum SnapshotRunner {
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }
+            await capture("31-update-starting", style: styleName, in: directory, wait: 1) {
+                model.update.debugShow(.starting(current: "0.41.3", latest: DemoBackend.releasedVersion))
+            }
+            await capture("32-update-restarting", style: styleName, in: directory, wait: 1) {
+                model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now), progress: .restarting)
+            }
+            await capture("33-update-almost-done", style: styleName, in: directory, wait: 1) {
+                model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now), progress: .almostDone)
+            }
             await capture("22-update-failed", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.failed(.timedOut(target: DemoBackend.releasedVersion)))
             }

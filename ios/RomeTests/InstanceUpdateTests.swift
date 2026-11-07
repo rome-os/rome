@@ -219,3 +219,24 @@ final class Counter: @unchecked Sendable {
     var value: Int { lock.withLock { count } }
     func add() { lock.withLock { count += 1 } }
 }
+
+@Suite struct UpdateStatusLineTests {
+    @Test func eachPhaseHasItsLine() {
+        #expect(UpdateGate.statusLine(.starting(current: "1.1.183", latest: "1.1.190"), progress: .downloading) == "Asking Rome Cloud to start the update…")
+        let updating = InstanceUpdater.State.updating(target: "1.1.190", since: .now)
+        #expect(UpdateGate.statusLine(updating, progress: .downloading) == "Downloading 1.1.190…")
+        #expect(UpdateGate.statusLine(updating, progress: .restarting) == "Restarting your Rome…")
+        #expect(UpdateGate.statusLine(updating, progress: .almostDone) == "Almost done…")
+    }
+
+    @Test func noLineWhenNotWaiting() {
+        #expect(UpdateGate.statusLine(.required(current: "1", latest: "2", latestChanged: false), progress: .downloading) == nil)
+        #expect(UpdateGate.statusLine(.failed(.timedOut(target: "2")), progress: .restarting) == nil)
+    }
+
+    @Test func whatTheInstanceAnswersDecidesThePhase() {
+        #expect(UpdateGate.progress(version: "1.1.183", target: "1.1.190") == .downloading)
+        #expect(UpdateGate.progress(version: nil, target: "1.1.190") == .restarting)
+        #expect(UpdateGate.progress(version: "1.1.190", target: "1.1.190") == .almostDone)
+    }
+}
