@@ -42,7 +42,7 @@ const deferEventSchema = z.strictObject({
 type DeferEvent = z.infer<typeof deferEventSchema>;
 
 /** The `defer` tool input. The MCP boundary already validates the model's call
- * against the advertised JSON schema ,
+ * against the advertised JSON schema,
  * so field types are guaranteed by the time we get here; this schema is the
  * runtime source of truth that also encodes the constraints a JSON schema
  * can't express — exactly one of `afterMinutes`, `at` or `event` is required.
