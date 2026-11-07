@@ -74,6 +74,8 @@ export interface ConciergePushDeps {
   quietUntil: (at: number) => Promise<number | null>;
   /** Whether a message in this chat may reach the guardian's phone: only one of their own chats. */
   pushesFor: (chatId: string) => Promise<boolean>;
+  /** The guardian's dashboard language, as its setting holds it, or null. */
+  language: () => Promise<string | null>;
   now?: () => number;
 }
 
@@ -82,13 +84,21 @@ export interface SaidInTurn {
   turnId: string;
   chatId: string;
   /**
-   * The message in the Concierge's own words: what it wrote itself, never
-   * content it forwarded or quoted, which may hold a secret it would not repeat.
+   * The message in the Concierge's own words: what it wrote in this message,
+   * never content it forwarded or quoted, nor a task's title or chat name,
+   * which may hold a secret it would not repeat. Null when it wrote none, as
+   * for a bare forward or a card: the push then says {@link FIXED_LINE}.
    */
-  ownWords: string;
+  ownWords: string | null;
   /** The turn's push level; undefined for a turn the guardian started. */
   level: NotifyLevel | undefined;
 }
+
+/** The line a push says for a message with none of the Concierge's own words, by dashboard language. */
+export const FIXED_LINE: Record<string, string> = {
+  en: "A task has an update",
+  "zh-CN": "有个任务有了新进展",
+};
 
 export class ConciergePush {
   private readonly pushed = new Set<string>();
@@ -125,8 +135,14 @@ export class ConciergePush {
       log.info("concierge push held back by quiet hours", { turnId, chatId });
       return;
     }
-    const outcome = await this.deps.notify.send({ body: pushBody(ownWords), level, chatId });
+    const body = ownWords ?? (await this.fixedLine());
+    const outcome = await this.deps.notify.send({ body: pushBody(body), level, chatId });
     // The outcome only: the body never reaches a log.
     log.info("concierge push", { turnId, chatId, level, outcome: outcome.kind });
+  }
+
+  private async fixedLine(): Promise<string> {
+    const language = await this.deps.language().catch(() => null);
+    return language && Object.hasOwn(FIXED_LINE, language) ? FIXED_LINE[language] : FIXED_LINE.en;
   }
 }

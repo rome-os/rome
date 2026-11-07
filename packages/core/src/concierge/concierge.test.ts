@@ -1940,13 +1940,15 @@ describe("Concierge pushes", () => {
   };
   const SECRET_ANSWER = "Your one-time login code is 7291.";
 
-  it("pushes the task's title, never the forwarded answer, for a forward with no intro", async () => {
+  it("pushes a fixed line, never the forwarded answer or the task's title, for a forward with no intro", async () => {
     const s = setup();
     const chatId = await finishedTask(s, SECRET_ANSWER);
     s.pushLevel("active");
     await s.tool("chat_forward", { chatId });
     await s.settle();
-    expect(s.pushes).toEqual([{ body: "Bank sign-in", level: "active", chatId: CONCIERGE_CHAT }]);
+    expect(s.pushes).toEqual([
+      { body: "A task has an update", level: "active", chatId: CONCIERGE_CHAT },
+    ]);
   });
 
   it("pushes only the intro of a forward that has one", async () => {
@@ -1958,31 +1960,38 @@ describe("Concierge pushes", () => {
     expect(s.pushes.map((push) => push.body)).toEqual(["The bank sent a sign-in code."]);
   });
 
-  it("pushes a fixed line, not the chat's name, for a forward whose task chat has no row", async () => {
+  it("pushes a fixed line for a card", async () => {
     const s = setup();
-    // A task chat from before the task list: its name came from its output.
+    const chatId = await finishedTask(s, SECRET_ANSWER);
+    s.pushLevel("active");
+    await s.tool("chat_card", { chatId });
+    await s.settle();
+    expect(s.pushes.map((push) => push.body)).toEqual(["A task has an update"]);
+  });
+
+  it("keeps a legacy task chat's name off the lock screen after its row is filled in from it", async () => {
+    const s = setup();
+    // A task chat from before the task list, named from its output.
     const chatId = "task-unlisted";
     s.sessions.set(chatId, {
       id: chatId,
       name: "Login code 7291",
       triggerKind: TASK_CHAT_TRIGGER_KIND,
     });
+    await s.storedChats.createSession(chatId, "Login code 7291");
     s.messages.set(chatId, [
       { role: "assistant", content: JSON.stringify([{ type: "text", content: SECRET_ANSWER }]) },
     ]);
+    // A guardian's turn sends into it, which fills in its row from the chat's name.
+    await s.tool("chat_send", { chatId, text: "Anything new?" });
+    expect((await s.tasks.repo.findBySession(chatId))?.title).toBe("Login code 7291");
+    // A later turn the guardian did not start forwards its answer, then shows its card.
     s.pushLevel("active");
     await s.tool("chat_forward", { chatId });
-    await s.settle();
-    expect(s.pushes.map((push) => push.body)).toEqual(["A task reported back"]);
-  });
-
-  it("pushes a card as its task's title", async () => {
-    const s = setup();
-    const chatId = await finishedTask(s, SECRET_ANSWER);
-    s.pushLevel("active");
     await s.tool("chat_card", { chatId });
     await s.settle();
-    expect(s.pushes.map((push) => push.body)).toEqual(["Bank sign-in"]);
+    expect(s.pushes.map((push) => push.body)).toEqual(["A task has an update"]);
+    expect(JSON.stringify(s.pushes)).not.toContain("7291");
   });
 
   it("never sends a forwarded answer to Rome Cloud, whatever the turn says", async () => {

@@ -11,7 +11,11 @@ const { ConciergePush, pushBody } = await import("./push.js");
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 function pushWith(
-  options: { quietUntil?: number | null; outcome?: () => Promise<SendOutcome> } = {},
+  options: {
+    quietUntil?: number | null;
+    outcome?: () => Promise<SendOutcome>;
+    language?: string | null;
+  } = {},
 ) {
   const sent: SystemNotifyContent[] = [];
   const push = new ConciergePush({
@@ -23,6 +27,7 @@ function pushWith(
     },
     quietUntil: async () => options.quietUntil ?? null,
     pushesFor: async (chatId) => chatId !== "visitor-chat",
+    language: async () => options.language ?? null,
   });
   return { push, sent };
 }
@@ -61,6 +66,20 @@ describe("ConciergePush", () => {
       { body: "first", level: "active", chatId: "c" },
       { body: "next turn", level: "passive", chatId: "c" },
     ]);
+  });
+
+  it("pushes a fixed line in the guardian's language for a message with none of its own words", async () => {
+    for (const [language, line] of [
+      ["zh-CN", "有个任务有了新进展"],
+      ["en", "A task has an update"],
+      [null, "A task has an update"],
+      ["constructor", "A task has an update"],
+    ] as const) {
+      const { push, sent } = pushWith({ language });
+      push.said({ turnId: "t1", chatId: "c", ownWords: null, level: "active" });
+      await settle();
+      expect(sent.map((content) => content.body)).toEqual([line]);
+    }
   });
 
   it("pushes nothing for a turn without a level", async () => {

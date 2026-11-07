@@ -39,9 +39,6 @@ const log = createLogger("concierge-tools");
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
-/** A push's line for a forwarded answer or a card whose task has no row to name it. */
-const FORWARD_PREVIEW = "A task reported back";
-const CARD_PREVIEW = "A task chat";
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -304,15 +301,11 @@ export async function buildConciergeTools(
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
-  // A message the guardian did not ask for may also reach their phone, and
-  // its lock-screen line is only ever the Concierge's own words.
-  const said = (chatId: string, turnId: string, ownWords: string) =>
+  // A message the guardian did not ask for may also reach their phone. Its
+  // lock-screen line is only ever words the Concierge wrote in this message,
+  // and null when it wrote none, which pushes a fixed line.
+  const said = (chatId: string, turnId: string, ownWords: string | null) =>
     service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
-
-  // A task chat as the Concierge named it on its row. The chat's own name may
-  // come from the task's output, so it never stands in.
-  const ownTaskTitle = async (taskChatId: string, fallback: string) =>
-    (await tasks.repo.findBySession(taskChatId))?.title ?? fallback;
 
   const say = async (text: string, format: "bubble" | "long") => {
     const { chatId, turnId } = currentTurn();
@@ -331,9 +324,10 @@ export async function buildConciergeTools(
       ...(intro ? [{ type: "text" as const, content: intro }] : []),
       { type: "text", content: text, format: "long", forwardedFrom: from },
     ]);
-    // Forwarded text is the task's, not the Concierge's: it never becomes the
+    // Forwarded text is the task's, not the Concierge's, and so are a task's
+    // title and chat name, which can come from its output: none becomes the
     // push's line, which could carry a code or password onto the lock screen.
-    said(chatId, turnId, intro ?? (await ownTaskTitle(from.chatId, FORWARD_PREVIEW)));
+    said(chatId, turnId, intro ?? null);
     return id;
   };
 
@@ -343,7 +337,7 @@ export async function buildConciergeTools(
     const { id } = await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
       { type: "task_chat", chatId, title },
     ]);
-    said(conciergeChatId, turnId, await ownTaskTitle(chatId, CARD_PREVIEW));
+    said(conciergeChatId, turnId, null);
     return id;
   };
 
