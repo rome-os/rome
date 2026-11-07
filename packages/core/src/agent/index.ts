@@ -84,7 +84,7 @@ export type {
   RomeTools,
   ModelToolCallId,
 } from "./domain/rome-tools.js";
-export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
+export { NO_ROME_TOOLS, ROME_TOOL_GROUPS } from "./domain/rome-tools.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 
 // The model port's adapters, for the composition root alone. Everything else

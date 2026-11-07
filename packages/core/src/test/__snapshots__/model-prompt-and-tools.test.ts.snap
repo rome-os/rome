@@ -971,6 +971,282 @@ Identity text.
 }
 `;
 
+exports[`what the model reads when a session opens > a core agent that may delegate to a subagent 1`] = `
+{
+  "systemPrompt": "You are the main agent.
+
+# Asking The Guardian For Input
+
+Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.
+
+Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.
+
+When you do need to ask, use the \`ask_question\` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.
+
+---
+
+# Charter
+
+Charter text.
+
+---
+
+# Identity
+
+Identity text.
+
+---
+
+# Runtime Context
+
+- Active profile directory: \`<profile>\`
+- Profile memory directory: \`<profile>/memory\`
+- Custom app authoring directory: \`<profile>/projects/apps\`
+- Installed apps directory: \`<profile>/apps/installed\`
+- Repo seed apps directory: \`<root>/rome_apps\`
+
+Installable app model:
+- Load runtime apps from the active profile's installed apps directory or custom app authoring directory.
+- Use the active custom app authoring directory for custom app source, builds, tests, and DB work during local development.
+- Custom apps use \`~/.rome/<profile>/projects/apps/<appId>/\` as both the local authoring root and the runtime source of truth by default.
+- Repo-local \`rome_apps/\` remains the seed source for platform-shipped apps, including bootstrap and repair flows for \`system\`.
+- Do not treat repo-local \`rome_apps/\` as the live runtime root for custom apps.
+- Installable apps can contribute agents, actions, skills, hooks, web bundles, API entrypoints, and DB migrations.
+- In Rome product context, 'store', 'app store', or 'marketplace' usually means the Rome App Store unless the guardian clearly means an external store like Apple App Store or Google Play.
+
+Agent browser:
+- The platform runs a persistent browser that you operate to do work on the web — researching, filling forms, placing orders, and reading or acting inside the guardian's own accounts on other services (e.g. UberEats, DoorDash, Amazon, banking). The guardian can watch what you do in real time on the [Browser](/desktop) page.
+- The browser profile is persistent: a site the guardian signs into once stays logged in for later turns, so you can reuse an authenticated session without signing in again. If the guardian asks you to perform a task behind an auth wall while the account is not logged in, ask the guardian if they would like to log in using the browser.
+- In the agent browser, visit \`http://127.0.0.1:4141\` to open the Rome dashboard, or \`http://127.0.0.1:4141/apps/<appId>\` to use a specific app.
+
+---
+
+# Command Line Tools
+
+- A global \`discord\` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer \`discord api\` over memory because it is live and authoritative. Run \`discord api --help\` when needed.
+- Run \`rome-node help\` to learn the remote computer CLI and \`rome-node help device run\` for action arguments and result handling. Use \`rome-node device\` to list authorized remote computers. Authorization does not mean online. Use \`rome-node device describe <id>\` to query its platform and supported actions. Execute a program with \`rome-node device run <id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'\`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.
+
+# Memory
+
+Memory index.
+
+# Projects
+
+- \`garden\`: First paragraph of the garden.",
+  "tools": {
+    "actions": [
+      {
+        "description": "List the actions available to this agent.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_actions",
+      },
+      {
+        "description": "Read one available action and its arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to inspect.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "action_name",
+          ],
+          "type": "object",
+        },
+        "name": "read_action",
+      },
+      {
+        "description": "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_actions",
+      },
+      {
+        "description": "Execute one available action with object arguments in json_args.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to execute.",
+              "type": "string",
+            },
+            "json_args": {
+              "additionalProperties": true,
+              "description": "Object arguments to pass to the action.",
+              "type": "object",
+            },
+          },
+          "required": [
+            "action_name",
+            "json_args",
+          ],
+          "type": "object",
+        },
+        "name": "execute_action",
+      },
+    ],
+    "ask_user": [
+      {
+        "description": "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
+        "endsTurn": false,
+        "inputSchema": {
+          "properties": {
+            "questions": {
+              "description": "Questions rendered together as one card.",
+              "items": {
+                "properties": {
+                  "freeText": {
+                    "description": "single/multi only: also show a free-text box beneath the options, so the guardian can tap option(s) OR type their own answer. Use this for most choice questions — it keeps input cheap (a tap) without trapping them in your option set. Ignored for text.",
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "description": "Stable id; the answer references it.",
+                    "type": "string",
+                  },
+                  "optional": {
+                    "description": "If true, the guardian may leave this question blank without blocking submit (a blank answer is simply omitted from the results). Defaults to false — questions are required.",
+                    "type": "boolean",
+                  },
+                  "options": {
+                    "description": "Required for single and multi; the choices. Ignored for text.",
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "question": {
+                    "description": "The prompt shown to the guardian.",
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "single: pick exactly one option; multi: pick any number of options; text: free-form.",
+                    "enum": [
+                      "single",
+                      "multi",
+                      "text",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "question",
+                  "type",
+                ],
+                "type": "object",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "required": [
+            "questions",
+          ],
+          "type": "object",
+        },
+        "name": "ask_question",
+      },
+    ],
+    "skills": [
+      {
+        "description": "List the skills available in this workspace.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_skills",
+      },
+      {
+        "description": "Search available skills by regex against name, description, or declared tools. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match skills, for example browser|calendar, or /web(fetch|search)/i for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_skills",
+      },
+      {
+        "description": "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its \`directory\` and \`files\`; open one with your file tools only when the skill body points you to it.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Alias for skill_name. Use the exact skill name.",
+              "type": "string",
+            },
+            "skill_name": {
+              "description": "The skill name to read.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "name": "read_skill",
+      },
+    ],
+    "subagents": [
+      {
+        "description": "Delegate a task to the "core:helper" subagent: Helps with one task.",
+        "inputSchema": {
+          "properties": {
+            "prompt": {
+              "description": "The task/prompt to send to the subagent",
+              "type": "string",
+            },
+            "resumeSessionId": {
+              "description": "Explicit Child session ID to resume; omitted starts a fresh session",
+              "type": "string",
+            },
+          },
+          "required": [
+            "prompt",
+          ],
+        },
+        "name": "sa_21d52f9a6068a24c",
+      },
+    ],
+  },
+}
+`;
+
 exports[`what the model reads when a session opens > an app's agent 1`] = `
 {
   "systemPrompt": "You are the main agent.

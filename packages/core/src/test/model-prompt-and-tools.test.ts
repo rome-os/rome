@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ModelSessionParams } from "../agent/index.js";
+import { ROME_TOOL_GROUPS, type ModelSessionParams } from "../agent/index.js";
 import { getCoreRoot, getProfileDir, getProfileMemoryDir, getProjectRoot } from "../paths.js";
 import { buildAgentConfig } from "./helpers.js";
 import { createTestRome, type TestRome } from "./kit/index.js";
@@ -10,8 +10,6 @@ import { createTestRome, type TestRome } from "./kit/index.js";
 // prompt and every Rome tool. The stored snapshot is the gate for moving this
 // code: a refactor leaves it unchanged, and a change to it is a change to what
 // the model sees.
-
-const GROUPS = ["actions", "subagents", "skills", "ask_user"] as const;
 
 function seedPromptFiles(): void {
   writeFileSync(join(getCoreRoot(), "CHARTER.md"), "Charter text.\n");
@@ -32,7 +30,7 @@ function readByModel(session: ModelSessionParams | undefined) {
   return {
     systemPrompt: mask(session.config.systemPrompt),
     tools: Object.fromEntries(
-      GROUPS.map((group) => [
+      ROME_TOOL_GROUPS.map((group) => [
         group,
         JSON.parse(mask(JSON.stringify(session.tools.listTools(group)))),
       ]),
@@ -51,11 +49,13 @@ describe("what the model reads when a session opens", () => {
 
   afterEach(async () => {
     rs.restoreAllMocks();
+    rs.unstubAllEnvs();
     await rome?.cleanup();
     rome = undefined;
   });
 
   async function start(agents = [mainAgent]): Promise<TestRome> {
+    rs.stubEnv("INTERNAL_API_PORT", "4141");
     rome = await createTestRome({ agents, repoView: "empty" });
     seedPromptFiles();
     return rome;
@@ -87,6 +87,19 @@ describe("what the model reads when a session opens", () => {
       buildAgentConfig({ name: "helper", systemPromptPrefix: "You are a helper." }),
     ]);
     await rome.runAgent({ agentName: "helper", prompt: "Hello" });
+    expect(readByModel(rome.model.sessions[0])).toMatchSnapshot();
+  });
+
+  it("a core agent that may delegate to a subagent", async () => {
+    const rome = await start([
+      { ...mainAgent, allowedSubagents: ["core:helper"] },
+      buildAgentConfig({
+        name: "helper",
+        description: "Helps with one task.",
+        systemPromptPrefix: "You are a helper.",
+      }),
+    ]);
+    await rome.runAgent({ prompt: "Hello" });
     expect(readByModel(rome.model.sessions[0])).toMatchSnapshot();
   });
 
