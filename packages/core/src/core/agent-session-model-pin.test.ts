@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -132,6 +133,7 @@ describe("agent model pins through AgentSessionManager", () => {
         turnLifecycle,
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },

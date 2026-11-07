@@ -252,6 +252,7 @@ import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.j
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
 import {
+  agentFolders,
   ensureProfileDevAppsDirInitialized,
   getProfileAppActionSchemaCachePath,
   getProfileAppsLockfilePath,
@@ -1125,6 +1126,7 @@ async function main() {
       resolveProviderSessionReset: async (ref) =>
         (await chatSettings.get(ref)).effective.session.reset,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
+      folders: agentFolders(),
       channelSurface: (channel) => {
         if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
         const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))

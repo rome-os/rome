@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { randomUUID } from "node:crypto";
@@ -161,6 +162,7 @@ describe("continuation notice through AgentSessionManager", () => {
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },

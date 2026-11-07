@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
@@ -112,6 +113,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
     channelSurface: testChannelSurface,
   });
   const runner = new AgentRunner(manager, agentLoader);

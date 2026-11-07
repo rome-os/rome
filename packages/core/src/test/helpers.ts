@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -781,6 +782,7 @@ export async function buildTestDeps(
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
     channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,
