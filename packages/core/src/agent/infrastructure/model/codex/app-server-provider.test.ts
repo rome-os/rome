@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { UsageFunding } from "../../../../usage/events.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { FacadeParams } from "../../../../core/mcp-facade.js";
 import { NO_ROME_TOOLS, type RomeTools } from "../../../domain/rome-tools.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
+import type { CodexLoginChoice } from "../../../domain/model-login.js";
 import type {
   ModelSession,
   ModelSessionConfig,
@@ -206,6 +207,13 @@ async function collectUntilTerminal(session: ModelSession): Promise<ModelSession
   return out;
 }
 
+const ROME_CREDITS: CodexLoginChoice = { kind: "rome_credits", credentialId: "romeinst_test" };
+
+/** A manager on Rome credits. */
+function onRomeCredits(): CodexAppServerManager {
+  return new CodexAppServerManager({ login: ROME_CREDITS });
+}
+
 describe("CodexAppServerProvider", () => {
   it("warms its app-server on construction unless told not to", () => {
     const manager = new CodexAppServerManager();
@@ -292,7 +300,12 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  afterEach(() => {
+    rs.unstubAllEnvs();
+  });
+
   beforeEach(() => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     rs.clearAllMocks();
     getCodexCliStatusMock.mockResolvedValue({ loggedIn: true });
     markCodexAuthRevokedMock.mockResolvedValue(undefined);
@@ -1309,12 +1322,12 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("names the payer change when Codex restarts before turn/start returns", async () => {
+  it("names the login change when Codex restarts before turn/start returns", async () => {
     const appServerManager = new CodexAppServerManager();
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };
       if (method === "turn/start") {
-        appServerManager.restart();
+        appServerManager.useLogin(ROME_CREDITS);
         throw new Error("app-server client closed");
       }
       return {};
@@ -1327,8 +1340,7 @@ describe("CodexAppServerProvider", () => {
 
       const error = (await collected).find((m) => m.type === "error");
       expect(error).toMatchObject({
-        error:
-          "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+        error: "Codex stopped before the turn finished: the model login changed",
       });
       expect(error).not.toHaveProperty("code");
       await session.close();
@@ -1361,14 +1373,14 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("fails a queued turn instead of starting it after the payer changes", async () => {
+  it("fails a queued turn instead of starting it after the login changes", async () => {
     const previousOrigin = process.env.PANTHEON_BASE_ORIGIN;
     process.env.PANTHEON_BASE_ORIGIN = "https://rome.example";
     requestMock.mockImplementation(async (method: string) => {
-      if (method === "thread/start") return { thread: { id: "thread-payer" } };
+      if (method === "thread/start") return { thread: { id: "thread-login" } };
       if (method === "turn/start") {
         captured.onNotification?.("turn/started", {
-          threadId: "thread-payer",
+          threadId: "thread-login",
           turn: { id: "turn-1" },
         });
       }
@@ -1383,22 +1395,21 @@ describe("CodexAppServerProvider", () => {
       await rs.waitFor(() => {
         expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);
       });
-      // Queued behind the active turn while ChatGPT is still the payer.
+      // Queued behind the active turn while ChatGPT is still the login.
       await session.sendUserInput({ text: "second" });
 
-      appServerManager.setDefaultProvider("rome_credits");
+      appServerManager.useLogin(ROME_CREDITS);
       expect(await first).toEqual([
         { type: "model_turn_started", modelTurnId: "turn-1" },
         expect.objectContaining({
           type: "error",
-          error:
-            "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+          error: "Codex stopped before the turn finished: the model login changed",
         }),
       ]);
       expect(await collectUntilTerminal(session)).toEqual([
         expect.objectContaining({
           type: "error",
-          error: "Model payer changed while preparing this turn; please retry.",
+          error: "Model login changed while preparing this turn; please retry.",
           code: "transient",
         }),
       ]);
@@ -2748,10 +2759,13 @@ describe("CodexAppServerProvider", () => {
   it("re-reads the served models before exposing a Rome credits model refusal", async () => {
     let refreshed = false;
     const provider = new CodexAppServerProvider({
-      isUsingRomeCredits: () => true,
-      onRomeCreditsModelNotServed: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        refreshed = true;
+      appServerManager: onRomeCredits(),
+      account: {
+        refusedTurn: () => {},
+        refusedModel: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          refreshed = true;
+        },
       },
     });
     requestMock.mockImplementation(async (method: string) => {
@@ -3030,21 +3044,19 @@ describe("CodexAppServerProvider", () => {
       return error;
     }
 
-    it("flags the login for re-login while ChatGPT pays", async () => {
+    it("flags the login for re-login on the guardian's own login", async () => {
       const refusedTurn = rs.fn();
-      const error = await runFailedTurn(
-        new CodexAppServerProvider({ account: { refusedTurn }, isUsingRomeCredits: () => false }),
-      );
+      const error = await runFailedTurn(new CodexAppServerProvider({ account: { refusedTurn } }));
 
       expect(error).toMatchObject({ type: "error", error: WORKSPACE_401, code: "auth_revoked" });
       expect(markCodexAuthRevokedMock).toHaveBeenCalledTimes(1);
       expect(refusedTurn).toHaveBeenCalledWith({ kind: "credential" });
     });
 
-    it("leaves the login alone while Rome credits pay", async () => {
+    it("leaves the login alone on Rome credits", async () => {
       const refusedTurn = rs.fn();
       const error = await runFailedTurn(
-        new CodexAppServerProvider({ account: { refusedTurn }, isUsingRomeCredits: () => true }),
+        new CodexAppServerProvider({ account: { refusedTurn }, appServerManager: onRomeCredits() }),
       );
 
       expect(error).toMatchObject({ type: "error", error: WORKSPACE_401 });

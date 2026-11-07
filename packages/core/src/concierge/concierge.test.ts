@@ -2501,7 +2501,7 @@ describe("Concierge provider recovery", () => {
       ),
     ).toMatchObject({ from: "anthropic", to: "openai" });
   });
-  it("keeps a Codex pick that Rome credits pay for, and still moves on a Codex reauth", async () => {
+  it("keeps a Codex pick on Rome credits, and still moves on a Codex reauth", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
     await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");

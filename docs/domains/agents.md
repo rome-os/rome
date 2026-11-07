@@ -38,30 +38,43 @@ The words a turn was asked, plus what Rome adds about where the turn stands: whe
 
 ## Model provider account
 
-Whose subscription an agent's turns run under when Rome credits is not the payer: the guardian's Codex (ChatGPT) account today. Rome never acts or chats as this account, so it is not a [connection](connections.md#connection) and has no connected account. Its alternative, Rome credits, has no external account at all.
+Whose subscription an agent's turns run under: the guardian's Codex (ChatGPT) account today. A [login](#model-provider-login) says how Rome reaches it. Rome never acts or chats as this account, so it is not a [connection](connections.md#connection) and has no connected account. Rome credits lead to no account at all.
 
 - The guardian **authorizes** Rome to run models under the account, in a browser or by entering a device code, may **cancel** an authorization still in progress, and **revokes** it to take it back. Signing in to Rome is a different act ([Connections](connections.md#connection)) and never authorizes an account.
 - The account is unauthorized, authorizing or authorized. An authorized account can be **expired**, as a [grant](connections.md#grant) can, when the provider stops accepting it. Authorizing again fixes it.
-- The account reports its own availability ([Model provider availability](#model-provider-availability)), with the status and usage it read it off. Rome reads the report and derives nothing from it.
+- The account reports its own status ([Model provider account status](#model-provider-account-status)), with the usage it read it off. Rome reads the report and derives nothing from it.
 - The account also reports what the provider lets it do: the models its plan withholds, when the provider withholds some, and whether the provider limits its usage, as a subscription is and a billed account is not. Rome keeps no table of plans.
 - A turn the provider refuses, for the credential or for usage, is learned by the provider's adapter, which tells its own account. The account shows it in its next report and holds a usage refusal until its end or until a later usage read shows capacity, since the provider's usage lags the turn it refused. Nothing else in Rome relays it.
-- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex and Claude adapters. Authorizing, cancelling and the authorization state are the `ModelAccountAuthorization` port, which only the Codex adapter implements, since the guardian authorizes Claude outside Rome with the Claude CLI. The dashboard calls both. An agent's run never does.
+- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex and Claude adapters. It only reports. Authorizing, cancelling and revoking are on the login's ports ([Model provider login](#model-provider-login)). The dashboard calls them. An agent's run never does.
+
+## Model provider account status
+
+Whether the guardian's own account is authorized, expired or absent, and whether it is at its usage limit. The account reports it, and Rome remembers the report. An account is **available**, **unauthorized** (no account authorized), **expired** (authorized once, and the provider stopped accepting it) or its **usage limit is reached**, until a time when one is known. Expired and unauthorized outrank a usage limit. How the account reads its provider's status and usage into one of these, and what it assumes when the provider states no end, is the adapter's, not Rome's.
+
+- Before Rome has read an account, it knows nothing about that provider and a run treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
+- A run never tells an account anything. What it learns from a refused turn reaches the status through the account ([Model provider account](#model-provider-account)).
+- Rome remembers the last report so the resolver, the concierge and the dashboard can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
+- The dashboard, the concierge, image generation and a tier restricted to one provider read the status, because they ask about the guardian's own account.
+- In code the words and the reader's rules are in [`packages/core/src/agent/domain/model-account-report.ts`](../../packages/core/src/agent/domain/model-account-report.ts). `ModelAccounts` in [`packages/core/src/agent/application/model-accounts.ts`](../../packages/core/src/agent/application/model-accounts.ts) remembers the accounts' reports and decides when to ask. The reading of a provider's status, usage and refused turns into a report is `account-report.ts` beside the adapters. The usage switch, which moves a chat to another provider when one is at its limit, is `usage-switch.ts` beside the rules.
 
 ## Model provider availability
 
-Whether a run can use a model provider now, and why not. The provider's account reports it, and Rome remembers the report. A provider is **available**, **unauthorized** (no account authorized), **expired** (authorized once, and the provider stopped accepting it) or its **usage limit is reached**, until a time when one is known. Expired and unauthorized outrank a usage limit. How the account reads its provider's status and usage into one of these, and what it assumes when the provider states no end, is the adapter's, not Rome's.
+Whether a run can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
 
-- Before Rome has read an account, it knows nothing about that provider and a run treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
-- A run never tells availability anything. What it learns from a refused turn reaches availability through the account ([Model provider account](#model-provider-account)).
-- Rome remembers the last report so the resolver, the concierge and the dashboard can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
-- In code the words and the reader's rules are in [`packages/core/src/agent/domain/model-account-report.ts`](../../packages/core/src/agent/domain/model-account-report.ts). `ModelAccounts` in [`packages/core/src/agent/application/model-accounts.ts`](../../packages/core/src/agent/application/model-accounts.ts) remembers the accounts' reports and decides when to ask. The reading of a provider's status, usage and refused turns into a report is `account-report.ts` beside the adapters. The resolver, the concierge and the dashboard read it. The usage switch, which moves a chat to another provider when one is at its limit, is `usage-switch.ts` beside the rules.
+- The resolver is its one reader. A reader that asks about the guardian's own account reads the [account status](#model-provider-account-status) instead.
+- In code it is `providerAvailability` in [`packages/core/src/agent/domain/provider-availability.ts`](../../packages/core/src/agent/domain/provider-availability.ts), a pure function over the account's report and the login.
+
+## Model provider login
+
+How Rome is let in to a model provider: the guardian's ChatGPT login, an API credential, or Rome credits. The [account](#model-provider-account) is who, the login is how. Rome holds at most one login per provider at a time. A login leads to at most one account, and Rome credits lead to none.
+
+- The provider reports what the login allows, the models and whether it is usage limited. Who is billed follows from the login, and `ModelFunding` on the model port is each turn's report of that.
+- Getting a login and using one are two acts. The guardian authorizes a ChatGPT login. Rome's setup picks which login Codex runs on.
+- For Codex, Rome credits are used only while the ChatGPT account is unauthorized or expired, the instance is linked to Rome Cloud, and the credits can be spent. A usage limit alone, or an account not read yet, keeps the subscription login. This is one choice for the whole instance, and it can change while Rome runs ([Rome Cloud](../concepts/rome-cloud.md#rome-credits)).
+- In code the login and its ports are in [`packages/core/src/agent/domain/model-login.ts`](../../packages/core/src/agent/domain/model-login.ts): `CodexLogin` has the kinds `subscription`, which is a ChatGPT login or an API credential, and `rome_credits`. `CodexLogins` logs Rome in to and out of Codex and runs Codex on the login it is told to use, and only the Codex adapter implements it, since the guardian authorizes Claude outside Rome with the Claude CLI. `ModelProviderLogins` is the revoke both adapters share. Rome's setup choice is [`packages/core/src/rome-cloud/codex-login.ts`](../../packages/core/src/rome-cloud/codex-login.ts), outside the agent context.
 
 ## Model selection
 
 A model a guardian picks by name for a chat, such as `claude-sonnet` or `gpt-6-luna`, and the provider that serves it. It is one of a fixed list the agent context owns. Leaving the choice to Rome ("auto" in the dashboard) is not a selection but the absence of one, so the resolver picks by [tier](../concepts/agents.md#model-selection) instead.
 
 - In code it is `ModelSelection` in [`packages/core/src/agent/domain/model-selection.ts`](../../packages/core/src/agent/domain/model-selection.ts). The webchat settings that store a guardian's pick read it from there.
-
-## Payer
-
-Who pays for a turn: the model provider account or Rome credits, one at a time. The provider that served the turn reports it, and Rome records it as read. In code it is `ModelFunding` on the model port.

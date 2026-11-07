@@ -1,11 +1,9 @@
 // The model provider account: whose subscription the agent's turns run under
-// when Rome credits is not the payer (the payer is `ModelFunding` in
-// model-port.ts). The account reports its own availability, with the status
+// on the `subscription` login (model-login.ts). The account reports its own availability, with the status
 // and usage it read it off, and Rome derives none of it: a turn the provider
 // refuses is learned by the provider's adapter and shows in the account's
-// next report. The guardian authorizes Rome to run models under their
-// subscription, by browser or by device code, may cancel an authorization in
-// progress, and revokes it.
+// next report. Getting and taking back the login that leads to the account is
+// model-login.ts.
 //
 // Rome never acts or chats as this account, so it is not a connection
 // (docs/domains/connections.md), and the guardian signing in to Rome is a
@@ -91,8 +89,7 @@ export interface ModelDeviceAuthorization {
 
 /**
  * The model provider account as this context reads it. Model accounts
- * read it and remember the answer; the dashboard revokes it; the agent run
- * never calls it. The adapter in infrastructure/ implements it on the
+ * read it and remember the answer; the agent run never calls it. The adapter in infrastructure/ implements it on the
  * provider's own process.
  */
 export interface ModelAccount {
@@ -101,21 +98,7 @@ export interface ModelAccount {
    * usage it was read off. Rejects when the account could not be read at all.
    */
   report(): Promise<ModelAccountReport>;
-  /** Takes the authorization back. */
-  revoke(): Promise<void>;
   /** Fires when the account's report may have changed; returns the unsubscribe. */
   onChanged(listener: () => void): () => void;
   close(): void;
-}
-
-/**
- * Authorizing Rome under the account from inside Rome. Only the Codex
- * adapter implements it: the guardian authorizes Claude outside Rome, with
- * the Claude CLI.
- */
-export interface ModelAccountAuthorization {
-  authorizationState(): ModelAuthorizationState;
-  startBrowserAuthorization(): Promise<ModelBrowserAuthorization>;
-  startDeviceAuthorization(): Promise<ModelDeviceAuthorization>;
-  cancelAuthorization(): Promise<void>;
 }

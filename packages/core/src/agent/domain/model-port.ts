@@ -32,8 +32,8 @@ export interface McpServerConfig {
 }
 
 /**
- * Who pays the model provider for a turn. The provider knows its payer and
- * reports it; Rome's usage record carries it as read.
+ * Who pays the model provider for a turn, which follows from the login. The
+ * provider reports it; Rome's usage record carries it as read.
  */
 export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 

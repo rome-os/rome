@@ -1,4 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
+import type { CodexLoginChoice } from "../../../domain/model-login.js";
 import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import {
   RESTRICTED_PLAN_DENIED_MODELS,
@@ -16,6 +18,7 @@ class FakeAccountRpc {
   readonly responses = new Map<string, unknown[]>();
   private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
   private readonly exitListeners = new Set<(error: Error) => void>();
+  private currentLogin: CodexLoginChoice = { kind: "subscription" };
 
   queue(method: string, ...responses: unknown[]): void {
     this.responses.set(method, [...(this.responses.get(method) ?? []), ...responses]);
@@ -42,6 +45,14 @@ class FakeAccountRpc {
   onExit(listener: (error: Error) => void): () => void {
     this.exitListeners.add(listener);
     return () => this.exitListeners.delete(listener);
+  }
+
+  login(): CodexLoginChoice {
+    return this.currentLogin;
+  }
+
+  useLogin(login: CodexLoginChoice): void {
+    this.currentLogin = login;
   }
 
   notify(method: string, params: unknown): void {
@@ -300,9 +311,10 @@ describe("SharedCodexAccountService", () => {
     });
     expect(markAuthRevoked).toHaveBeenCalledTimes(1);
 
-    // Under the credits payer Codex hides the account, and the marker keeps
+    // On Rome credits Codex hides the account, and the marker keeps
     // the same login reading as needing re-login.
-    rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
+    const noAccount = { account: null, requiresOpenaiAuth: false };
+    rpc.queue("account/read", noAccount, noAccount);
     await expect(service.status()).resolves.toMatchObject({
       loggedIn: false,
       needsReauth: true,
@@ -409,7 +421,8 @@ describe("SharedCodexAccountService", () => {
 
   it("uses auth.json when the credits default hides the guardian's OpenAI account", async () => {
     const rpc = new FakeAccountRpc();
-    rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
+    const noAccount = { account: null, requiresOpenaiAuth: false };
+    rpc.queue("account/read", noAccount, noAccount);
     const service = createService(rpc);
 
     await expect(service.status()).resolves.toMatchObject({
@@ -627,5 +640,109 @@ describe("SharedCodexAccountService", () => {
     });
     expect(changed).toHaveBeenCalledTimes(1);
     service.close();
+  });
+});
+
+describe("SharedCodexAccountService login", () => {
+  const CREDITS: CodexLoginChoice = { kind: "rome_credits", credentialId: "romeinst_123" };
+  const view = (models?: string[]): RomeCreditsView => ({
+    grantedMicros: "5000000",
+    balanceMicros: "5000000",
+    availableMicros: "5000000",
+    enabled: true,
+    ...(models ? { models } : {}),
+  });
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const onCredits = (readRomeCredits: () => Promise<RomeCreditsView | null>) => {
+    const rpc = new FakeAccountRpc();
+    const noAccount = { account: null, requiresOpenaiAuth: false };
+    rpc.queue("account/read", noAccount, noAccount);
+    return { rpc, service: createService(rpc, { readRomeCredits }) };
+  };
+
+  it("does not read the gateway on the guardian's own login", async () => {
+    const read = rs.fn(async () => view(["gpt-5.6-terra"]));
+    const { service } = onCredits(read);
+    await service.report();
+    expect(service.login()).toEqual({ kind: "subscription" });
+    expect(read).not.toHaveBeenCalled();
+    service.close();
+  });
+
+  it("reads the gateway's list when Rome credits start, and reports it on the login", async () => {
+    const { service } = onCredits(async () => view(["gpt-5.6-terra"]));
+    service.useLogin(CREDITS);
+    expect(service.login()).toEqual({ ...CREDITS, modelsServed: null });
+    await flush();
+    expect(service.login()).toEqual({ ...CREDITS, modelsServed: ["gpt-5.6-terra"] });
+    service.close();
+  });
+
+  it("reads the list again on each account read and keeps it when a read fails", async () => {
+    const reads: Array<() => RomeCreditsView> = [
+      () => view(["gpt-6-luna"]),
+      () => view(["gpt-5.6-terra"]),
+      () => {
+        throw new Error("down");
+      },
+    ];
+    const { service } = onCredits(async () => reads.shift()!());
+    service.useLogin(CREDITS);
+    await flush();
+    await service.report();
+    await flush();
+    expect(service.login()).toMatchObject({ modelsServed: ["gpt-5.6-terra"] });
+    await service.report();
+    await flush();
+    expect(service.login()).toMatchObject({ modelsServed: ["gpt-5.6-terra"] });
+    service.close();
+  });
+
+  it("treats a gateway that reports no list as not having said", async () => {
+    const { service } = onCredits(async () => view());
+    service.useLogin(CREDITS);
+    await flush();
+    expect(service.login()).toMatchObject({ modelsServed: null });
+    service.close();
+  });
+
+  it("drops the list and a read in flight when the credential changes", async () => {
+    const answers: Array<(v: RomeCreditsView) => void> = [];
+    const { service } = onCredits(
+      () => new Promise<RomeCreditsView>((resolve) => answers.push(resolve)),
+    );
+    service.useLogin(CREDITS);
+    answers[0]?.(view(["gpt-6.1-sol"]));
+    await flush();
+    const stale = service.refusedModel();
+    service.useLogin({ kind: "rome_credits", credentialId: "romeinst_456" });
+    expect(service.login()).toMatchObject({ modelsServed: null });
+    answers[1]?.(view(["gpt-6-luna"]));
+    await stale;
+    expect(service.login()).toMatchObject({ modelsServed: null });
+    answers[2]?.(view(["gpt-5.6-terra"]));
+    await flush();
+    expect(service.login()).toMatchObject({ modelsServed: ["gpt-5.6-terra"] });
+    service.close();
+  });
+
+  it("re-reads the list after a refused model, then tells its listeners", async () => {
+    let served = ["gpt-6.1-sol"];
+    const { service } = onCredits(async () => view(served));
+    const changed = rs.fn();
+    service.onChanged(changed);
+    service.useLogin(CREDITS);
+    await flush();
+    served = ["gpt-5.6-terra"];
+    await service.refusedModel();
+    expect(service.login()).toMatchObject({ modelsServed: ["gpt-5.6-terra"] });
+    expect(changed).toHaveBeenCalledTimes(1);
+    service.close();
+  });
+
+  it("refuses a login once closed", () => {
+    const { service } = onCredits(async () => view());
+    service.close();
+    expect(() => service.useLogin(CREDITS)).toThrow("closed");
   });
 });

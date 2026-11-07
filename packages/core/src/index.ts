@@ -15,7 +15,6 @@ import {
   isInstanceLinked,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
-  onInstanceTokenChanged,
   proveIdentity,
   onInstanceLinked,
 } from "./lib/instance-identity.js";
@@ -39,7 +38,6 @@ import {
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
-import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
@@ -171,6 +169,7 @@ import {
   CodexAppServerProvider,
   createModelAccounts,
   DrizzleSessionRepository,
+  codexFunding,
   SharedCodexAccountService,
   SkillLoader,
   romeCreditsProxyRoutes,
@@ -179,7 +178,7 @@ import {
   createSystemPrompts,
 } from "./agent/index.js";
 import { createModelResolver } from "./core/model-resolver.js";
-import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
+import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
 import { ConciergeService } from "./concierge/service.js";
@@ -887,31 +886,20 @@ async function main() {
     startRefresh: false,
     log: createLogger("model-accounts"),
   });
-  const romeCreditsPayer = createRomeCreditsPayer({
+  const stopCodexLoginChoice = startCodexLoginChoice({
     accounts: modelAccounts,
-    appServerManager: codexAppServerManager,
-  });
-  const syncRomeCreditsPayer = (): void => romeCreditsPayer.sync();
-  const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
-  romeCreditsPayer.sync();
-  // The Codex authorization drives the payer, and each settled read of the
-  // account re-reads the credits.
-  const unsubscribeAvailabilityChanged = modelAccounts.onChanged((provider, change) => {
-    if (provider !== "openai") return;
-    if (change === "authorization") syncRomeCreditsPayer();
-    else void romeCreditsPayer.refresh();
+    logins: codexAccountService,
+    log: createLogger("codex-login"),
   });
   const anthropicProvider = new AnthropicProvider({ settingsRepo, account: claudeAccount });
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
     account: codexAccountService,
     warmup: false,
-    isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
-    onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
       const codex = modelAccounts.read().openai;
       return codexFunding({
-        defaultProvider: codexAppServerManager.getDefaultProvider(),
+        login: codexAccountService.login(),
         accountType: codex?.account.accountType,
         loggedIn: codex ? codex.state !== "unauthorized" && codex.state !== "expired" : undefined,
       });
@@ -921,7 +909,7 @@ async function main() {
     accounts: modelAccounts,
     providers: [anthropicProvider, codexProvider],
     settingsRepo,
-    romeCreditsPayer,
+    codexLogins: codexAccountService,
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
   const lifecycleAppRuntimeServices: RomeAppRuntimeServices = {
@@ -2344,10 +2332,8 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
-    unsubscribeAvailabilityChanged();
-    unsubscribeInstanceTokenChanged();
+    stopCodexLoginChoice();
     unsubscribeInstanceLinked();
-    romeCreditsPayer.close();
     modelAccounts.close();
     shutdownLog.info("model accounts stopped");
     codexAccountService.close();

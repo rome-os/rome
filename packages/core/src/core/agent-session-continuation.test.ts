@@ -38,7 +38,7 @@ import { DrizzleSessionRepository, type SessionRepository } from "../agent/index
 import { SkillLoader } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
+import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -153,7 +153,7 @@ describe("continuation notice through AgentSessionManager", () => {
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           accounts: fakeAccounts(() => state),
-          romeCreditsPayer: { isUsingRomeCredits: () => false },
+          codexLogins: loginsOn(false),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),

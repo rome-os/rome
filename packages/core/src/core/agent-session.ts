@@ -1839,7 +1839,7 @@ interface TurnSink {
   outputSchemaSuspended: boolean;
   /** The id the provider named the turn with, if it did. */
   modelTurnId?: string;
-  /** Payer of the provider session that executes this turn. */
+  /** Funding of the provider session that executes this turn. */
   funding?: UsageFunding;
   usageRecorded: boolean;
 }
@@ -3639,7 +3639,7 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            // The payer this turn is sent under; Codex holds a queued turn to it.
+            // The funding this turn is sent under; Codex holds a queued turn to it.
             sink.funding = this.modelSession.funding;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
@@ -3648,7 +3648,7 @@ class AgentSessionImpl implements AgentSession {
               reasoningEffort: mwInput.reasoningEffort,
               injectedToolResult: input.injectedToolResult,
             });
-            // Taking the input may have replaced a Claude query, and its payer.
+            // Taking the input may have replaced a Claude query, and its funding.
             sink.funding = this.modelSession.funding;
             this.inputs.ready(turnId);
             if (this.deps.turnLinks && unseenLineIds.length > 0) {

@@ -6,7 +6,6 @@ import { describe, expect, it } from "@rstest/core";
 import { CodexAppServerManager, type CodexThreadBinding } from "./app-server-manager.js";
 import { Method, type ThreadStartParams } from "./app-server-protocol.js";
 import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
-import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 import { isRomeCreditsExhaustedError } from "./rome-credits-error.js";
 
 const TOKEN = "romeinst_integration_test_token";
@@ -26,11 +25,11 @@ async function filesContaining(dir: string, needle: string): Promise<string[]> {
 }
 
 /**
- * Smoke the bundled Codex binary: after a payer replacement, a resumed thread
+ * Smoke the bundled Codex binary: after a login change, a resumed thread
  * follows the replacement process default.
  */
 describe("Rome credits provider on the bundled Codex app-server", () => {
-  it("routes a thread to the gateway after a payer replacement", async () => {
+  it("routes a thread to the gateway after a login change", async () => {
     const home = await mkdtemp(join(tmpdir(), "rome-codex-credits-"));
     const authorizations: string[] = [];
     let exhaustCredits = false;
@@ -122,7 +121,7 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
           PATH: process.env.PATH ?? "",
           [ROME_CREDITS_TOKEN_ENV]: TOKEN,
         },
-        defaultProvider: ROME_CREDITS_MODEL_PROVIDER_ID,
+        login: { kind: "rome_credits", credentialId: "romeinst_test" },
       });
     const config: ThreadStartParams = {
       model: "gpt-5.6-terra",
@@ -154,8 +153,8 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
       const { threadId } = await manager.openThread(config, binding);
       await runTurn(manager, threadId);
 
-      await manager.setDefaultProvider(null);
-      await manager.setDefaultProvider(ROME_CREDITS_MODEL_PROVIDER_ID);
+      manager.useLogin({ kind: "subscription" });
+      manager.useLogin({ kind: "rome_credits", credentialId: "romeinst_test" });
       await runTurn(manager, threadId);
 
       // The real gateway response from #124 makes bundled Codex retain the

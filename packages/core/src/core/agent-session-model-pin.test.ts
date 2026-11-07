@@ -29,7 +29,7 @@ import {
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
-import { reportOf, fakeAccounts, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
+import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -117,9 +117,11 @@ describe("agent model pins through AgentSessionManager", () => {
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           accounts: fakeAccounts(() => state),
-          romeCreditsPayer: {
-            isUsingRomeCredits: () =>
-              typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
+          codexLogins: {
+            login: () =>
+              loginsOn(
+                typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
+              ).login(),
           },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
@@ -171,7 +173,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("pins a credit-funded session to the model ChatGPT would run", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
-    // No account authorized: credits pay, and serve the frontier models.
+    // No account authorized: Rome credits are the login, and serve the frontier models.
     state.openai = reportOf("unauthorized");
     state.anthropic = reportOf("unauthorized");
     let usingRomeCredits = true;
@@ -184,7 +186,7 @@ describe("agent model pins through AgentSessionManager", () => {
       model: "gpt-6.1-sol",
     });
 
-    // Connecting ChatGPT changes only who pays: the pinned model keeps running.
+    // Connecting ChatGPT changes only the login: the pinned model keeps running.
     state.openai = reportOf("available");
     usingRomeCredits = false;
     await collect(session.sendTurn({ prompt: "guardian" }).events);

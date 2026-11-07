@@ -46,7 +46,7 @@ import {
 } from "./image-trace.js";
 import {
   CodexAppServerManager,
-  PayerChangedError,
+  LoginChangedError,
   type CodexThreadBinding,
 } from "./app-server-manager.js";
 import {
@@ -82,6 +82,8 @@ import { buildTurnInput } from "./turn-input.js";
 import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
 import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
+import type { LearnsRefusedModels } from "./account-service.js";
+import type { CodexLogin } from "../../../domain/model-login.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -438,18 +440,13 @@ interface ActiveTurn {
 interface CodexAppServerProviderOptions {
   appServerManager?: CodexAppServerManager;
   /** The account this provider runs under, told of each turn the provider refuses. */
-  account?: LearnsRefusedTurns;
+  account?: LearnsRefusedTurns & Partial<LearnsRefusedModels>;
   /**
    * Starts the app-server on construction so the first turn finds it ready.
    * Defaults to true. Rome's boot passes false and warms the shared manager
    * once it has started, so the spawn does not compete with boot for CPU.
    */
   warmup?: boolean;
-  /** Only the Rome credits payer may classify its 402 as exhausted credits, and
-   *  only the ChatGPT payer may mark the saved login as needing re-login. */
-  isUsingRomeCredits?: () => boolean;
-  /** The Rome credits gateway refused a model it no longer serves. */
-  onRomeCreditsModelNotServed?: () => Promise<void> | void;
   /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
   funding?: () => ModelFunding;
 }
@@ -545,14 +542,18 @@ function isChatGptModelNotSupportedError(turnError: unknown): boolean {
 function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
+  loginKind: CodexLogin["kind"],
 ): CodexFailureClassification {
-  if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
+  // Only Rome credits can exhaust credits, and only the guardian's own login
+  // can need signing in again.
+  const onRomeCredits = loginKind === "rome_credits";
+  if (onRomeCredits && isRomeCreditsExhaustedError(turnError)) {
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
   }
   // The served list is stale. Re-read it before the terminal block, so a retry
   // falls back or fails closed instead of choosing the same model again.
-  if (options.isUsingRomeCredits?.() && isRomeCreditsModelNotServedError(turnError)) {
-    const refreshed = options.onRomeCreditsModelNotServed?.();
+  if (onRomeCredits && isRomeCreditsModelNotServedError(turnError)) {
+    const refreshed = options.account?.refusedModel?.();
     return {
       code: "model_unavailable",
       httpStatus: 403,
@@ -566,15 +567,15 @@ function classifyCodexFailure(
     // Matches the resolver's refusal, so clients show the same recovery.
     return { code: "model_unavailable", provider: "openai", reason: "model_access_denied" };
   }
-  // The turn never started; a retry runs under the new payer.
-  if (turnError instanceof PayerChangedError) {
+  // The turn never started; a retry runs on the new login.
+  if (turnError instanceof LoginChangedError) {
     return { code: "transient" };
   }
   if (isCodexUsageLimitError(turnError)) {
     options.account?.refusedTurn({ kind: "usage" });
     return { code: "usage_limit" };
   }
-  if (!options.isUsingRomeCredits?.() && isCodexAuthRevokedError(turnError)) {
+  if (!onRomeCredits && isCodexAuthRevokedError(turnError)) {
     return {
       code: CODEX_AUTH_REVOKED_CODE,
       pending: persistCodexAuthRevoked(options.account),
@@ -974,7 +975,11 @@ export class CodexAppServerProvider implements ModelProvider {
               // not a string — extract the human message and classify quota
               // exhaustion / revoked credentials off it.
               activeTurn.failed = true;
-              const classification = classifyCodexFailure(p.turn?.error, this.options);
+              const classification = classifyCodexFailure(
+                p.turn?.error,
+                this.options,
+                this.appServerManager.login().kind,
+              );
               activeTurn.errorMessage =
                 classification.error ?? codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               activeTurn.errorCode = classification.code;
@@ -996,7 +1001,11 @@ export class CodexAppServerProvider implements ModelProvider {
           if (p.turnId && (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId))) {
             return;
           }
-          const classification = classifyCodexFailure(p.error, this.options);
+          const classification = classifyCodexFailure(
+            p.error,
+            this.options,
+            this.appServerManager.login().kind,
+          );
           const message =
             classification.error ?? codexTurnErrorMessage(p.error, "codex app-server error");
           const code = classification.code;
@@ -1109,9 +1118,9 @@ export class CodexAppServerProvider implements ModelProvider {
     const failedTurnAccounting = (turn: ActiveTurn) =>
       turn.usage ? turnAccounting(turn, true) : undefined;
 
-    // The payer each source input was sent under. Codex may replace its
+    // The login each source input was sent under. Codex may replace its
     // process while an input waits in the turn lane or in buildTurnInput.
-    const payerAtSend = new WeakMap<ModelUserInput, string | null>();
+    const loginAtSend = new WeakMap<ModelUserInput, CodexLogin["kind"]>();
 
     const runOne = async (inputs: ModelUserInput[], runtime: CodexTurnRuntime): Promise<void> => {
       const text = inputs
@@ -1174,13 +1183,11 @@ export class CodexAppServerProvider implements ModelProvider {
       // A borrowed exact fork runs here too, and leaves the source's head alone.
       if (runtime === sourceRuntime) lastCheckpointId = undefined;
       try {
-        const payers = new Set(
-          inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
-        );
-        // A batch that spans a payer change fails whole, including inputs sent
-        // under the current payer, and surfaces as a transient failure to retry.
-        if (payers.size > 1) throw new PayerChangedError();
-        const [expectedProvider] = payers;
+        const logins = new Set(inputs.flatMap((i) => loginAtSend.get(i) ?? []));
+        // A batch that spans a login change fails whole, including inputs sent
+        // under the current login, and surfaces as a transient failure to retry.
+        if (logins.size > 1) throw new LoginChangedError();
+        const [expectedLogin] = logins;
         const started = (await this.appServerManager.requestForThread(
           tid,
           Method.turnStart,
@@ -1191,7 +1198,7 @@ export class CodexAppServerProvider implements ModelProvider {
             ...(params.config.outputSchema ? { outputSchema: params.config.outputSchema } : {}),
             ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
           },
-          { expectedProvider },
+          { expectedLogin },
         )) as { turn?: { id?: string } } | undefined;
         nameProviderTurn(turn, started?.turn?.id);
         // turn/start can acknowledge before the native input becomes steerable.
@@ -1271,7 +1278,11 @@ export class CodexAppServerProvider implements ModelProvider {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.warn("codex app-server turn failed", { error: message });
-        const classification = classifyCodexFailure(err, this.options);
+        const classification = classifyCodexFailure(
+          err,
+          this.options,
+          this.appServerManager.login().kind,
+        );
         if (classification.pending) await classification.pending;
         // A restart or shutdown records its cause on the turn and then closes
         // the client, which rejects a pending turn/start with a bare
@@ -1315,7 +1326,7 @@ export class CodexAppServerProvider implements ModelProvider {
         sourceStarted = new Promise<void>((resolve) => {
           resolveSourceStarted = resolve;
         });
-        payerAtSend.set(input, this.appServerManager.getDefaultProvider());
+        loginAtSend.set(input, this.appServerManager.login().kind);
         dispatcher.enqueue(input);
       }
     };
@@ -1439,7 +1450,7 @@ export class CodexAppServerProvider implements ModelProvider {
             runExclusive: async (work) => await turnCoordinator.run(work),
             runTurn: async (input, runtime) => await runOne([input], runtime),
             // The fork turn queues behind the source's turns like any other.
-            onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
+            onSend: (input) => loginAtSend.set(input, this.appServerManager.login().kind),
             revertTurn: async (threadIdToRevert, beforeTurnId) => {
               // Revert is the only thing keeping the borrowed turn out of
               // the source conversation, so its failure cannot be a plain
