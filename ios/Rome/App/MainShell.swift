@@ -30,6 +30,8 @@ struct MainShell: View {
     @State private var section: MainSection = .chat
     @State private var path: [Route] = []
     @State private var drawerOpen = false
+    /// A finger is on the drawer's edge.
+    @State private var edgeTouched = false
     /// The finger's pull on the drawer while a drag runs. It springs back to
     /// zero with the drawer when the drag ends or the system cancels it.
     @GestureState(resetTransaction: Transaction(animation: MainShell.drawerSpring))
@@ -108,6 +110,13 @@ struct MainShell: View {
                             .frame(width: 22)
                             .contentShape(Rectangle())
                             .gesture(drawerDrag(width: width))
+                            // The edge sits above the list, which never feels this
+                            // touch: stop its glide on touch-down, as the list would.
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { _ in if !edgeTouched { edgeTouched = true; Scrolling.stopGlides() } }
+                                    .onEnded { _ in edgeTouched = false }
+                            )
                     }
                 }
             }
@@ -373,7 +382,11 @@ struct MainShell: View {
                     dragAxis = DragAxis(start: value.startLocation, horizontal: horizontal)
                     // The drawer starts to move: the keyboard goes now, not
                     // once it is open. A vertical scroll leaves it alone.
-                    if horizontal { Keyboard.dismiss() }
+                    if horizontal {
+                        Keyboard.dismiss()
+                        // A drawer drag that starts in a glide stops it first.
+                        Scrolling.stopGlides()
+                    }
                 }
             }
             .onEnded { value in

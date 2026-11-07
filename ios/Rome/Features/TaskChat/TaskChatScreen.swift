@@ -206,7 +206,10 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             let begins = (navigationController?.viewControllers.count ?? 0) > 1
             // The back swipe starts: the keyboard goes with the page.
-            if begins { Keyboard.dismiss() }
+            if begins {
+                Keyboard.dismiss()
+                Scrolling.stopGlides()
+            }
             return begins
         }
     }

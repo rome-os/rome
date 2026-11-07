@@ -28,6 +28,25 @@ enum Keyboard {
     }
 }
 
+/// Scroll views of the app.
+enum Scrolling {
+    /// Stops every glide where it is, as a finger on the list would: for
+    /// touches that land on something above the list, such as the drawer's
+    /// edge, which the scroll view never sees.
+    @MainActor static func stopGlides() {
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { stop(in: window) }
+        }
+    }
+
+    @MainActor private static func stop(in view: UIView) {
+        if let scroll = view as? UIScrollView, scroll.isDecelerating {
+            scroll.setContentOffset(scroll.contentOffset, animated: false)
+        }
+        for subview in view.subviews { stop(in: subview) }
+    }
+}
+
 /// How much page color lies on a floating control's glass: enough that
 /// text scrolling behind is softened, light enough that the glass shows.
 enum Frost {
