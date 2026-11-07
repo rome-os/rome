@@ -15,15 +15,18 @@
 // live socket from the ledger, and `flush()` on stop guarantees the final state
 // is never lost to the debounce.
 
-import {
-  BufferJSON,
-  initAuthCreds,
+import type {
+  AuthenticationCreds,
+  AuthenticationState,
+  SignalDataTypeMap,
   proto,
-  type AuthenticationCreds,
-  type AuthenticationState,
-  type SignalDataTypeMap,
 } from "@whiskeysockets/baileys";
 import type { SecretRecord } from "../types.js";
+import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+
+// Baileys loads when WhatsApp is first used, not with every boot.
+const baileys =
+  requireOnFirstUse<typeof import("@whiskeysockets/baileys")>("@whiskeysockets/baileys");
 
 /**
  * The serialized WhatsApp `session` grant material. Both fields are
@@ -70,15 +73,15 @@ export function createWhatsAppAuthState(
   persist: (material: WhatsAppAuthMaterial) => Promise<void>,
 ): WhatsAppAuthStateHandle {
   const creds: AuthenticationCreds = material
-    ? (JSON.parse(material.creds, BufferJSON.reviver) as AuthenticationCreds)
-    : initAuthCreds();
+    ? (JSON.parse(material.creds, baileys().BufferJSON.reviver) as AuthenticationCreds)
+    : baileys().initAuthCreds();
   const keys: KeyStoreRecord = material
-    ? (JSON.parse(material.keys, BufferJSON.reviver) as KeyStoreRecord)
+    ? (JSON.parse(material.keys, baileys().BufferJSON.reviver) as KeyStoreRecord)
     : {};
 
   const serialize = (): WhatsAppAuthMaterial => ({
-    creds: JSON.stringify(creds, BufferJSON.replacer),
-    keys: JSON.stringify(keys, BufferJSON.replacer),
+    creds: JSON.stringify(creds, baileys().BufferJSON.replacer),
+    keys: JSON.stringify(keys, baileys().BufferJSON.replacer),
   });
 
   // Debounce: coalesce a burst of rotations into one write per tick without ever
@@ -110,7 +113,7 @@ export function createWhatsAppAuthState(
           // Mirror useMultiFileAuthState: app-state-sync-key values must be
           // rehydrated back into their proto message wrapper.
           if (type === "app-state-sync-key") {
-            value = proto.Message.AppStateSyncKeyData.fromObject(value as object);
+            value = baileys().proto.Message.AppStateSyncKeyData.fromObject(value as object);
           }
           out[id] = value;
         }

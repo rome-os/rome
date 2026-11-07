@@ -14,7 +14,6 @@
 //   - any other terminal gateway/websocket failure → Disconnected → runtime
 //     backs off and rebuilds.
 
-import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
@@ -26,6 +25,9 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { directoryPage } from "./talk-features.js";
+import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+
+const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
 // (users/@me). Declared next to the material shape ({ token }); parse-then-store,
@@ -89,9 +91,9 @@ export function discordProfileFromSettings(
  */
 export function isDiscordAuthError(err: unknown): boolean {
   return (
-    err instanceof DiscordjsError &&
-    (err.code === DiscordjsErrorCodes.TokenInvalid ||
-      err.code === DiscordjsErrorCodes.DisallowedIntents)
+    err instanceof discordJs().DiscordjsError &&
+    (err.code === discordJs().DiscordjsErrorCodes.TokenInvalid ||
+      err.code === discordJs().DiscordjsErrorCodes.DisallowedIntents)
   );
 }
 
