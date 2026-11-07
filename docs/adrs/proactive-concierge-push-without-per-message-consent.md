@@ -26,6 +26,8 @@ The instance pushes the first message of every Concierge turn the guardian did n
 
 The guardian learns of a proactive message wherever they are, and taps it to open the chat it was said in. Nothing in the agent decides whether to push, so a model cannot forget the push or push a reply the guardian asked for.
 
+A forwarded task answer can hold a one-time code, and the Concierge's instructions alone cannot keep it off the lock screen, so a forward or a card pushes the Concierge's intro or the task's title instead of the forwarded text. The Concierge is told that its first message in such a turn can show on the lock screen, as `send_notification` tells its callers.
+
 A turn the guardian did not start pushes even when the guardian has the chat open. One turn pushes once, however many messages it says. A proactive turn that writes its message outside `say` and is then reminded pushes nothing, since the reminder carries no push.
 
 Future diffs must respect:
@@ -34,4 +36,4 @@ Future diffs must respect:
 - One push per turn, the turn's first message. A diff that pushes each message reopens this record.
 - Quiet hours suppress the push and keep the message in the chat. Nothing queues the push for later.
 - `send_notification` keeps its rule. The agent-facing action and this push stay separate paths.
-- The push follows the [notification delivery invariants](../architecture/notification-delivery.md#invariants): the body is the message's own text, and it never reaches a log.
+- The push follows the [notification delivery invariants](../architecture/notification-delivery.md#invariants): the body is only ever the Concierge's own words, never forwarded or quoted text, and it never reaches a log.

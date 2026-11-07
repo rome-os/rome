@@ -22,6 +22,8 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 
 - **A Concierge turn the guardian did not start pushes its first message, once.** A turn the guardian started never pushes, and neither does the reminder after it. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
 
+- **A Concierge push carries only the Concierge's own words.** Its body comes from what the Concierge wrote itself, or from the title it gave a task, or from a fixed line. Text it forwards or quotes from a task never becomes the body, since that text may hold a code or password the Concierge would not repeat.
+
 - **A push never holds or fails the turn that caused it.** The message is in the chat before the push is asked for, and a failed or refused push is logged with its outcome only. An instance with no Rome Cloud credential sends nothing.
 
 - **Rome Cloud is the single content-enforcement point.** All validation, normalization, length-capping, and fallback of the body happen at the broker, once, before device lookup and delivery. The instance forwards the body unchanged and makes no content decisions.
