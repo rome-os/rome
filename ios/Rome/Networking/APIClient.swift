@@ -186,10 +186,17 @@ final class APIClient: Sendable {
         if let token = token() {
             request.setValue("rome_session=\(token)", forHTTPHeaderField: "Cookie")
         }
+        // The phone app's socket: a chat it subscribes to counts as watched on
+        // the guardian's phone, and the Concierge does not push what it says there.
+        request.setValue(Self.phoneClient, forHTTPHeaderField: Self.clientHeader)
         // The server takes a cookie on the socket only from its own origin.
         request.setValue(Self.originString(origin), forHTTPHeaderField: "Origin")
         return request
     }
+
+    /// The live-events upgrade header that marks the phone app's socket.
+    static let clientHeader = "x-rome-client"
+    static let phoneClient = "phone"
 
     static func originString(_ url: URL) -> String {
         var text = "\(url.scheme ?? "https")://\(url.host() ?? "")"

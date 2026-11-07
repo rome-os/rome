@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// An event from the dashboard's live-events socket (`/ws/events`).
 enum LiveEvent: Sendable {
@@ -98,11 +99,23 @@ final class LiveEventsSocket: LiveEventSource {
         }
     }
 
+    /// The app left the foreground: a goodbye. Every topic is unsubscribed and
+    /// the socket closed at once, so the server stops counting this phone as
+    /// watching its chats and pushes what is said there. A background task
+    /// holds the app awake while the frames go out.
     func pause() {
         guard !paused else { return }
         paused = true
         resync.dropped()
+        let hold = BackgroundHold("live-events-goodbye")
+        for topic in Set(subscriptions.values.map(\.topic)) {
+            sendFrame(type: "unsubscribe", topic: topic)
+        }
         disconnect()
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            hold.end()
+        }
     }
 
     /// The app is back in front. Listeners refetch right away, before the
@@ -234,5 +247,23 @@ extension JSONValue {
     func decoded<T: Decodable>(_ type: T.Type) -> T? {
         guard let data = try? JSONEncoder().encode(self) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
+    }
+}
+
+/// A short stretch of background time, ended once, by hand or by the system.
+@MainActor
+final class BackgroundHold {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+
+    init(_ name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }
