@@ -44,4 +44,6 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **The swipe home starts on the transcript and reads as a drag away from the bottom.** So does Notification Center pulled down over the app. Rows refetched on return then land below the screen, which looks like a stale chat. `TranscriptList` goes by whether the bottom was on screen when the app resigned active, and a tapped push always shows the newest rows.
 
+**A fling's glide wins over `ScrollViewReader.scrollTo`.** The tap reaches the button and `scrollTo` runs, but the list keeps decelerating the other way, so a tap mid-glide seems to do nothing. A Simulator tap after a slow drag does not show it; a real fling does. `ScrollHandle` stops the `UIScrollView`'s deceleration before scrolling, and older pages wait until the jump lands, because content that grows under the scroll animation moves its target.
+
 **A system switch ignores the Simulator panel's `tap`.** The tap has no duration, and a `Toggle` waits for a touch that lasts. Use `touch_path` with two samples at the same point about 120 ms apart; the simulator log (`xcrun simctl spawn booted log show`) tells whether the app received anything.
