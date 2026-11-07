@@ -292,6 +292,28 @@ struct ChatHeader: View {
     }
 }
 
+/// A drawer page's header (Routines, Search): the drawer button at the left
+/// and a plain title in the middle, as a topic chat has it.
+struct DrawerPageHeader: View {
+    let title: Text
+    let onMenu: () -> Void
+
+    var body: some View {
+        HStack {
+            GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
+                MenuGlyph()
+            }
+            PlainHeaderTitle(title: title)
+            // Balances the button, so the title sits in the middle.
+            Color.clear.frame(width: 44, height: 44)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .frame(height: 52)
+        .headerFade()
+    }
+}
+
 /// The fade a plain title needs; the main Chat's pill reads on its own.
 private struct PlainTitleFade: ViewModifier {
     let active: Bool

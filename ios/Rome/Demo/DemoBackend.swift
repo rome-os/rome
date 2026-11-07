@@ -276,6 +276,12 @@ final class DemoBackend: RomeBackend {
         Routine(id: "r8", name: "team_digest", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=WEEKLY;BYDAY=MO")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 4, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(9 * 3600))),
         Routine(id: "r9", name: "每月对账：汇总所有订阅、发票和退款，整理成表格发到邮箱", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("10:00"), "rrule": .string("FREQ=MONTHLY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 12, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(10 * 3600))),
         Routine(id: "r10", name: "Weekend reading list for the family trip planning", enabled: false, trigger: .object(["type": .string("schedule"), "localTime": .string("08:00"), "rrule": .string("FREQ=WEEKLY;BYDAY=SA,SU")]), nextRunAt: nil),
+        // As core keeps them for Chat: a follow is two routines (two triggers),
+        // with the target in the name, and a digest with its time.
+        Routine(id: "c1", name: "Concierge follows lin.chen.workspace@example.com (Google Calendar)", enabled: true, trigger: .object(["type": .string("event-bus")]), nextRunAt: nil, key: "concierge-follow:gcal:1", actionName: "core:concierge_follow_event"),
+        Routine(id: "c2", name: "Concierge follows lin.chen.workspace@example.com (Google Calendar)", enabled: true, trigger: .object(["type": .string("event-bus")]), nextRunAt: nil, key: "concierge-follow:gcal:2", actionName: "core:concierge_follow_event"),
+        Routine(id: "c3", name: "Concierge digest at 09:00", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: DemoBackend.nextAt(9), key: "concierge-digest:guardian", actionName: "core:concierge_digest"),
+        Routine(id: "s1", name: "system_upgrade", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("03:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: DemoBackend.nextAt(3), actionName: "system_upgrade"),
         // A one-off that already ran: hidden, as on the dashboard.
         Routine(id: "r6", name: "dentist_reminder", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("10:00")]), nextRunAt: nil, lastFiredAt: .string("2026-11-01T10:00:00Z"), lastRun: .init(status: "success")),
     ]

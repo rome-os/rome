@@ -238,6 +238,8 @@ struct Routine: Codable, Identifiable, Hashable, Sendable {
     var trigger: JSONValue?
     var nextRunAt: String?
     var managedBy: String?
+    /// Set by core for the routines it keeps itself, such as `concierge-digest:…`.
+    var key: String? = nil
     var actionName: String?
     /// When it last fired; its type is not relied on, only whether it is set.
     var lastFiredAt: JSONValue?

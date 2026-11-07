@@ -652,6 +652,16 @@
         }
       }
     },
+    "From Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 Chat"
+          }
+        }
+      }
+    },
     "From “%@”" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1107,16 +1117,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按计划"
-          }
-        }
-      }
-    },
-    "On a trigger" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "触发运行"
           }
         }
       }
@@ -1895,6 +1895,16 @@
         }
       }
     },
+    "System" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统"
+          }
+        }
+      }
+    },
     "Take photo" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2396,6 +2406,16 @@
         }
       }
     },
+    "When something new arrives" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有新动态时"
+          }
+        }
+      }
+    },
     "Working" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2442,6 +2462,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 已停止"
+          }
+        }
+      }
+    },
+    "Yours" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的"
           }
         }
       }

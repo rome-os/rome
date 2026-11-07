@@ -147,10 +147,8 @@ struct SearchScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            DrawerPageHeader(title: Text("Search"), onMenu: onMenu)
             HStack(spacing: 8) {
-                GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
-                    MenuGlyph()
-                }
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").romeFont(16, .medium).foregroundStyle(Palette.sub)
                     TextField("Search messages", text: $query)
@@ -170,7 +168,7 @@ struct SearchScreen: View {
                 .background(Palette.elevated, in: Capsule())
                 .softElevation(radius: 22)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 10)
 
@@ -277,12 +275,6 @@ struct RoutinesScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHeader(title: "Routines", onMenu: onMenu)
-                Text("To add or change one, ask in Chat.")
-                    .romeFont(15)
-                    .foregroundStyle(Palette.sub)
-                    .padding(.horizontal, 20)
-                    .padding(.top, -6)
                 if let routines {
                     if routines.isEmpty {
                         Text("No routines yet")
@@ -291,21 +283,26 @@ struct RoutinesScreen: View {
                             .padding(.top, 60)
                     } else {
                         let groups = RoutineList.groups(routines)
-                        if !groups.active.isEmpty {
-                            group(groups.active)
-                        }
-                        if !groups.paused.isEmpty {
+                        ForEach(groups, id: \.kind) { group in
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Paused")
-                                    .romeFont(13, .semibold)
-                                    .foregroundStyle(Palette.sub)
-                                    .padding(.horizontal, 32)
-                                    .accessibilityAddTraits(.isHeader)
-                                group(groups.paused)
+                                // One group needs no title.
+                                if groups.count > 1 {
+                                    Text(group.kind.title)
+                                        .romeFont(13, .semibold)
+                                        .foregroundStyle(Palette.sub)
+                                        .padding(.horizontal, 32)
+                                        .accessibilityAddTraits(.isHeader)
+                                }
+                                card(group.routines)
                             }
-                            .padding(.top, groups.active.isEmpty ? 0 : 6)
                         }
                     }
+                    Text("To add or change one, ask in Chat.")
+                        .romeFont(13)
+                        .foregroundStyle(Palette.sub)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 32)
+                        .multilineTextAlignment(.center)
                 } else if failed {
                     CenteredMessage(title: "Could not load routines", detail: "Check the network and try again", actionTitle: "Try again") {
                         Task { await load() }
@@ -315,14 +312,17 @@ struct RoutinesScreen: View {
                     Spinner(size: 20, color: Palette.sub).frame(maxWidth: .infinity).padding(.top, 60)
                 }
             }
+            .padding(.top, 8)
             .padding(.bottom, 32)
         }
+        .softTopScrollEdge()
+        .floatingTopBar { DrawerPageHeader(title: Text("Routines"), onMenu: onMenu) }
         .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
     }
 
-    private func group(_ list: [Routine]) -> some View {
+    private func card(_ list: [Routine]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(list.enumerated()), id: \.element.id) { index, routine in
                 RoutineRow(routine: routine, last: index == list.count - 1) { enabled in
@@ -366,13 +366,14 @@ struct RoutineRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Two lines at most: the name, then when it runs.
+            // The name in two lines at most, then when it runs.
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(RoutineText.title(routine.name))
+                    Text(RoutineText.breakable(RoutineText.title(routine.name)))
                         .romeFont(17, .medium)
                         .foregroundStyle(Palette.fg)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                     if routine.lastRunFailed {
                         Circle()
                             .fill(Palette.destructive)
@@ -402,20 +403,57 @@ struct RoutineRow: View {
 }
 
 /// Which routines the page lists, in what order. Like the dashboard, it
-/// leaves out one-off routines that are done; it also leaves out routines an
-/// app or the system manages (Concierge follows and digests, the nightly
-/// upgrade check), which the guardian does not run. Paused ones stay, in a
-/// group of their own after the active ones.
+/// leaves out one-off routines that are done. The rest group by who keeps
+/// them: the guardian's own, then the ones Chat keeps (what it follows, its
+/// digests), then the system's (the nightly upgrade check, app routines),
+/// then every paused one, quieter, at the bottom.
 enum RoutineList {
-    /// The active routines, then the paused ones, each by name.
-    static func groups(_ routines: [Routine]) -> (active: [Routine], paused: [Routine]) {
-        let shown = shown(routines)
-        return (shown.filter(\.enabled), shown.filter { !$0.enabled })
+    enum Kind: Hashable {
+        case yours, chat, system, paused
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .yours: return "Yours"
+            case .chat: return "From Chat"
+            case .system: return "System"
+            case .paused: return "Paused"
+            }
+        }
+    }
+
+    struct Group {
+        let kind: Kind
+        let routines: [Routine]
+    }
+
+    /// Who keeps a routine. Core marks app routines with `managedBy`; the
+    /// ones it keeps itself carry none, so their action and key tell.
+    static func owner(_ routine: Routine) -> Kind {
+        if let app = routine.managedBy { return app == "concierge" ? .chat : .system }
+        if let action = routine.actionName {
+            if action.hasPrefix("core:concierge_") { return .chat }
+            if action == "system_upgrade" { return .system }
+        }
+        if routine.key?.hasPrefix("concierge-") == true { return .chat }
+        return .yours
+    }
+
+    /// The non-empty groups, in order, each by name.
+    static func groups(_ routines: [Routine]) -> [Group] {
+        let listed = shown(routines)
+        let active = listed.filter(\.enabled)
+        let all: [Group] = [
+            Group(kind: .yours, routines: active.filter { owner($0) == .yours }),
+            Group(kind: .chat, routines: active.filter { owner($0) == .chat }),
+            Group(kind: .system, routines: active.filter { owner($0) == .system }),
+            Group(kind: .paused, routines: listed.filter { !$0.enabled }),
+        ]
+        return all.filter { !$0.routines.isEmpty }
     }
 
     static func shown(_ routines: [Routine]) -> [Routine] {
         routines
-            .filter { $0.managedBy == nil && !isCompletedOneOff($0) }
+            .filter { !isCompletedOneOff($0) }
             .sorted { ($0.enabled ? 0 : 1, $0.name) < ($1.enabled ? 0 : 1, $1.name) }
     }
 
@@ -435,6 +473,20 @@ extension Routine {
 }
 
 enum RoutineText {
+    /// Lets a long token such as an email address break inside, after its
+    /// `@`, dots and the like, instead of going to a line of its own.
+    static func breakable(_ title: String) -> String {
+        title.split(separator: " ", omittingEmptySubsequences: false).map { word -> String in
+            guard word.count > 14 else { return String(word) }
+            var out = ""
+            for character in word {
+                out.append(character)
+                if "@._-/".contains(character) { out.append("\u{200B}") }
+            }
+            return out
+        }.joined(separator: " ")
+    }
+
     /// `price_watch` → "Price watch"; names already in words stay as written.
     static func title(_ name: String) -> String {
         guard name.contains("_") || name == name.lowercased() else { return name }
@@ -450,7 +502,7 @@ enum RoutineText {
             let rule = routine.trigger?["rrule"]?.string ?? ""
             parts.append("\(frequency(rule)) \(time)".trimmingCharacters(in: .whitespaces))
         } else if let type = routine.trigger?["type"]?.string {
-            parts.append(type == "event" ? String(localized: "On an event") : String(localized: "On a trigger"))
+            parts.append(type == "event" ? String(localized: "On an event") : String(localized: "When something new arrives"))
         }
         if showsNext(routine, now: now), let next = RomeDate.parse(routine.nextRunAt) {
             parts.append(String(localized: "Next: \(RelativeTime.until(next))"))
