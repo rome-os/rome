@@ -577,8 +577,16 @@ struct QuestionCardView: View {
 
 /// Parts the phone does not draw: open them on the Web.
 struct WebOnlyCard: View {
+    /// The chat it is in, opened on the dashboard.
+    var sessionId: String? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+
+    /// The web dashboard's page for a chat: `/chat/<id>`.
+    static func url(origin: URL, sessionId: String?) -> URL {
+        guard let sessionId, !sessionId.isEmpty else { return origin }
+        return origin.appending(path: "chat").appending(path: sessionId)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -591,7 +599,7 @@ struct WebOnlyCard: View {
                 .romeFont(15)
             Spacer(minLength: 0)
             Button("Open") {
-                if let url = model.webURL { openURL(url) }
+                if let origin = model.webURL { openURL(Self.url(origin: origin, sessionId: sessionId)) }
             }
             .romeFont(14, .semibold)
             .foregroundStyle(Palette.fg)

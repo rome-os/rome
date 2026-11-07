@@ -174,7 +174,8 @@ final class DemoBackend: RomeBackend {
         setRunning(sessionId, "turn-\(nextID())")
         Task {
             try? await pause(3)
-            insert(sessionId, agent("好的，只看国内产品。我整理好表格后告诉你。", at: .now))
+            let reply = toolUseId == "q-hk" ? "好，我查一下海口明天的天气。" : "好的，只看国内产品。我整理好表格后告诉你。"
+            insert(sessionId, agent(reply, at: .now, session: sessionId))
             setRunning(sessionId, nil)
         }
     }
@@ -479,7 +480,23 @@ final class DemoBackend: RomeBackend {
             agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40)),
             parts([.object(["type": .string("task_chat"), "chatId": .string("chat-price"), "title": .string("价格追踪：发提醒邮件")])], at: at(9, 40).addingTimeInterval(1), session: conciergeChatID),
             agent("竞品调研想确认一下范围，你看下。", at: at(9, 40).addingTimeInterval(2)),
+            // The Concierge asks and waits for an approval in the main chat too.
+            user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
+            parts([.object([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-hk"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                    .object(["id": .string("intent"), "question": .string("你是想查海口明天的天气，还是了解海口这座城市？"), "type": .string("single"), "options": .array([.string("查明天的天气"), .string("了解这座城市")]), "freeText": .bool(true)]),
+                ])])]),
+            ])], at: at(9, 52).addingTimeInterval(20), session: conciergeChatID),
+            parts([.object([
+                "type": .string("approval_card"), "approvalId": .string("ap-cal"), "actionName": .string("calendar:create_event"), "status": .string("pending"),
+                "preview": .object(["kind": .string("generic"), "title": .string("添加日程"), "summary": .string(""), "fields": .array([
+                    .object(["label": .string("标题"), "value": .string("和设计团队过首页文案")]),
+                    .object(["label": .string("时间"), "value": .string("明天 15:00–15:30")]),
+                ])]),
+            ])], at: at(9, 53), session: conciergeChatID),
         ]
+        approvals["ap-cal"] = ApprovalRecord(id: "ap-cal", status: "pending")
 
         // Task: price tracking, waiting on an approval.
         let price = "chat-price"

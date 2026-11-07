@@ -162,3 +162,43 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(RelativeTime.weekday(date) == "Mon")
     }
 }
+
+/// Chat and topic chats draw the same answerable cards as task chats.
+@MainActor
+@Suite struct ConciergeCardTests {
+    private func cards(session: String) -> [InteractionCard?] {
+        let asked = message("m", [
+            ["type": "pending_interaction", "toolUseId": "q1", "render": ["componentId": "question-card", "builtin": true,
+             "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"], "freeText": true]]]]],
+            ["type": "approval_card", "approvalId": "a1", "actionName": "calendar:create_event", "status": "pending",
+             "preview": ["kind": "generic", "title": "Add event", "summary": "", "fields": []]],
+            ["type": "pending_interaction", "toolUseId": "h1", "render": ["componentId": "handoff"]],
+        ], at: 0, session: session)
+        return TranscriptBuilder.rows(messages: [asked], pending: [], answers: [:], options: .init())
+            .filter { if case .separator = $0 { return false } else { return true } }
+            .map(InteractionCard.init)
+    }
+
+    @Test func theMainChatAnswersQuestionsAndApprovals() {
+        #expect(cards(session: "concierge") == [.question(sessionId: "concierge"), .approval, .webOnly])
+    }
+
+    @Test func aTopicChatAnswersInItsOwnSession() {
+        #expect(cards(session: "topic-1") == [.question(sessionId: "topic-1"), .approval, .webOnly])
+    }
+
+    @Test func theAnswerGoesToTheQuestionsSession() async {
+        let backend = FakeBackend()
+        let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
+        let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [.init(id: "s", text: "Which?", multi: false, freeTextOnly: false, options: ["A"])])
+        store.answer(part, values: ["s": "A"], sessionId: "topic-1")
+        for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.answeredSessions == ["topic-1"])
+    }
+
+    @Test func webOnlyCardsOpenTheirChatOnTheDashboard() {
+        let origin = URL(string: "https://me.romeos.cc")!
+        #expect(WebOnlyCard.url(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
+        #expect(WebOnlyCard.url(origin: origin, sessionId: nil) == origin)
+    }
+}

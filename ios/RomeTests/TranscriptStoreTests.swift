@@ -93,7 +93,11 @@ final class FakeBackend: RomeBackend {
         if sendSucceeds { return CreatedTurn(turnId: "turn", inputId: inputId, disposition: "started") }
         throw APIError.network
     }
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.network }
+    var answeredSessions: [String] = []
+    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+        answeredSessions.append(sessionId)
+        throw APIError.network
+    }
     func markRead(sessionId: String) async {}
     func sessions() async throws -> [ChatSession] { [] }
     func tasks() async throws -> [ConciergeTask] {

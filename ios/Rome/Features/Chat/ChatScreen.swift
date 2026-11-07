@@ -189,7 +189,7 @@ struct ConciergeRow: View {
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
         case .approval, .question, .webOnly, .tools:
-            WebOnlyCard()
+            InteractionRow(row: row, store: store)
         case .error(_, let text):
             ErrorLine(text: text)
         }

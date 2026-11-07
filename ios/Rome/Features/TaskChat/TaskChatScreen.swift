@@ -173,25 +173,8 @@ struct TaskChatScreen: View {
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
-        case .tools(_, let traceID, let count):
-            ToolSummary(count: count, calls: store.toolCalls[traceID]) { store.loadToolCalls(traceID) }
-        case .approval(_, let part, _):
-            ApprovalCardView(
-                part: part,
-                status: store.approvals[part.approvalId] == nil ? nil : store.approvalStatus(part),
-                submitting: store.resolvingApproval[part.approvalId],
-                error: store.approvalErrors[part.approvalId],
-                resolvedAt: RomeDate.parse(store.approvals[part.approvalId]?.resolvedAt ?? store.approvals[part.approvalId]?.updatedAt)
-            ) { approve in
-                store.resolve(part.approvalId, approve: approve)
-            }
-            .onAppear { store.watchApproval(part.approvalId) }
-        case .question(_, let part, _, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { values in
-                store.answer(part, values: values)
-            }
-        case .webOnly:
-            WebOnlyCard()
+        case .tools, .approval, .question, .webOnly:
+            InteractionRow(row: row, store: store)
         case .error(_, let text):
             ErrorLine(text: text)
         case .taskCard(_, let id, let title):

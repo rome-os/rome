@@ -409,7 +409,8 @@ final class TranscriptStore {
 
     // MARK: Questions
 
-    func answer(_ part: MessagePart.QuestionPart, values: [String: String]) {
+    /// `sessionId`: the question's own chat, this one unless it says otherwise.
+    func answer(_ part: MessagePart.QuestionPart, values: [String: String], sessionId: String? = nil) {
         guard !answering.contains(part.toolUseId) else { return }
         let answers: [JSONValue] = part.questions.compactMap { question in
             guard let value = values[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
@@ -421,7 +422,7 @@ final class TranscriptStore {
         localAnswers[part.toolUseId] = output
         Task {
             do {
-                try await backend.answer(sessionId: sessionId, toolUseId: part.toolUseId, output: output)
+                try await backend.answer(sessionId: sessionId ?? self.sessionId, toolUseId: part.toolUseId, output: output)
                 markRunning()
             } catch {
                 localAnswers[part.toolUseId] = nil
