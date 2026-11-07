@@ -2998,25 +2998,25 @@ describe("Concierge connect_card", () => {
 });
 
 describe("Concierge first sign-in and connection notices", () => {
-  it("turns the Concierge on, makes its main chat, and sends the guardian's message into it", async () => {
+  it("makes the Concierge's main chat and sends the guardian's message into it", async () => {
     const s = setup({ startEvents: false });
 
     const chatId = await s.service.startMainChat("Help me follow Gmail.");
 
     expect(chatId).toBe(CONCIERGE_CHAT);
-    expect(s.settingsWrites).toEqual([["experimentalConcierge", true]]);
+    expect(s.settingsWrites).toEqual([]);
     expect(s.chats.sendAsGuardian).toHaveBeenCalledTimes(1);
     expect(s.chats.sendAsGuardian).toHaveBeenCalledWith(CONCIERGE_CHAT, "Help me follow Gmail.");
     // The message is the guardian's own, so no system turn or input is made for it.
     expect(s.backendTurns).toEqual([]);
   });
 
-  it("only turns the Concierge on when there is no message to send", async () => {
+  it("only makes the main chat when there is no message to send", async () => {
     const s = setup({ startEvents: false });
 
     expect(await s.service.startMainChat(null)).toBe(CONCIERGE_CHAT);
 
-    expect(s.settingsWrites).toEqual([["experimentalConcierge", true]]);
+    expect(s.settingsWrites).toEqual([]);
     expect(s.chats.sendAsGuardian).not.toHaveBeenCalled();
   });
 

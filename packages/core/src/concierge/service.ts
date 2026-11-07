@@ -281,15 +281,14 @@ export class ConciergeService {
   }
 
   /**
-   * The guardian's first sign-in: turns the Concierge on and makes sure their
-   * main chat exists. With a `message`, it goes into that chat as the guardian's
-   * own, the way the composer sends it, and the Concierge answers it as any
-   * other. Answers the main chat's id. The message is not awaited, and a failure
-   * to send it (no model signed in yet) is logged, so the sign-in that calls
-   * this never fails on it.
+   * The guardian's first sign-in: makes sure their main chat exists. With a
+   * `message`, it goes into that chat as the guardian's own, the way the
+   * composer sends it, and the Concierge answers it as any other. Answers the
+   * main chat's id. The message is not awaited, and a failure to send it (no
+   * model signed in yet) is logged, so the sign-in that calls this never fails
+   * on it.
    */
   async startMainChat(message: string | null): Promise<string> {
-    await this.deps.settingsRepo.set(EXPERIMENTAL_CONCIERGE_SETTING_KEY, true);
     const chatId = await this.ensureChatId();
     if (message) {
       this.dashboard.chats.sendAsGuardian(chatId, message).catch((error: unknown) =>

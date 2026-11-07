@@ -165,7 +165,7 @@ export function conciergeRoutes(
   // The guardian connected a service from a connect card in one of their
   // Concierge chats: the Concierge hears of it there, quietly, and goes on. The
   // service must be connected as the list reads it now, so a call cannot make
-  // the Concierge believe something that is not so. 404 while off.
+  // the Concierge believe something that is not so.
   app.post("/concierge/chats/:chatId/service-connected", async (c) => {
     const { concierge, following, owner, error } = await followingOf(c);
     if (error) return error;
