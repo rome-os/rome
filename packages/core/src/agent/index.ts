@@ -17,7 +17,6 @@ export {
 } from "./domain/session.js";
 export type {
   ModelAccount,
-  ModelAccountAuthorization,
   ModelAccountStatus,
   ModelAccountUsage,
   ModelAuthorizationMode,
@@ -27,6 +26,13 @@ export type {
   ModelPlanType,
   ModelUsageWindow,
 } from "./domain/model-account.js";
+export type {
+  CodexLogin,
+  CodexLoginChoice,
+  CodexLogins,
+  ModelProviderLogins,
+} from "./domain/model-login.js";
+export { providerAvailability } from "./domain/provider-availability.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export type { Skill, SkillCatalog } from "./domain/skill.js";
@@ -76,6 +82,7 @@ export {
 } from "./domain/usage-switch.js";
 export {
   createModelAccounts,
+  type AgentLog,
   type CreateModelAccountsOptions,
   type ModelAccounts,
   type ModelAccountChange,
@@ -114,4 +121,5 @@ export { ClaudeAccount } from "./infrastructure/model/anthropic/account.js";
 export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";
+export { codexFunding } from "./infrastructure/model/codex/funding.js";
 export { romeCreditsProxyRoutes } from "./infrastructure/model/codex/rome-credits-proxy-route.js";

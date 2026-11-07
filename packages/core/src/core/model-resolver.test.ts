@@ -8,7 +8,7 @@ import {
   type ModelAccountReports,
 } from "../agent/index.js";
 import { createModelResolver, TIER_MODEL_MAPPINGS_SETTING_KEY } from "./model-resolver.js";
-import { reportOf, fakeAccounts, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
+import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
 
 const codex = { id: "openai" } as ModelProvider;
 const claude = { id: "anthropic" } as ModelProvider;
@@ -33,10 +33,7 @@ function resolver(
           ? (settings.tierModelMappings ?? null)
           : null) as T | null,
     },
-    romeCreditsPayer: {
-      isUsingRomeCredits: () => usingRomeCredits,
-      servedModels: () => servedModels,
-    },
+    codexLogins: loginsOn(usingRomeCredits, servedModels),
   });
 }
 
@@ -54,7 +51,7 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("resolves Codex models the same way while Rome credits pay and the served list is unknown", async () => {
+  it("resolves Codex models the same way on Rome credits while the served list is unknown", async () => {
     const loggedOut = {
       openai: reportOf("unauthorized"),
       anthropic: reportOf("unauthorized"),
@@ -76,7 +73,7 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
   });
 
-  describe("while Rome credits pay with a reported served list", () => {
+  describe("on Rome credits with a reported served list", () => {
     const loggedOut = {
       openai: reportOf("unauthorized"),
       anthropic: reportOf("unauthorized"),
@@ -162,65 +159,20 @@ describe("ModelResolver", () => {
       });
     });
 
-    it("waits for the first served list before resolving", async () => {
-      let served: readonly string[] | null = null;
-      let finish: () => void = () => {};
-      const settled = new Promise<void>((resolve) => {
-        finish = () => {
-          served = ["gpt-5.6-terra"];
-          resolve();
-        };
-      });
-      const value: ModelAccountReports = {
-        openai: reportOf("unauthorized"),
-        anthropic: reportOf("unauthorized"),
-      };
-      const r = createModelResolver({
-        accounts: fakeAccounts(() => value),
-        providers: [claude, codex],
-        romeCreditsPayer: {
-          isUsingRomeCredits: () => true,
-          servedModels: () => served,
-          settled: () => settled,
-        },
-      });
-      const resolution = r.getModelProvider({ tier: "large" });
-      finish();
-      await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
-    });
-
-    it("waits for the first credits read to decide whether credits pay", async () => {
-      let paying = false;
-      let finish: () => void = () => {};
-      const settled = new Promise<void>((resolve) => {
-        finish = () => {
-          paying = true;
-          resolve();
-        };
-      });
-      const value: ModelAccountReports = {
-        openai: reportOf("unauthorized"),
-        anthropic: reportOf("unauthorized"),
-      };
-      const r = createModelResolver({
-        accounts: fakeAccounts(() => value),
-        providers: [claude, codex],
-        romeCreditsPayer: {
-          isUsingRomeCredits: () => paying,
-          servedModels: () => (paying ? ["gpt-5.6-terra"] : null),
-          settled: () => settled,
-        },
-      });
-      const resolution = r.getModelProvider({ tier: "large" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      finish();
-      await expect(resolution).resolves.toMatchObject({
+    it("resolves at once when the gateway has not said, and the gateway refuses what it does not serve", async () => {
+      const r = resolver(
+        { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+        {},
+        true,
+        null,
+      );
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
         modelProvider: codex,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       });
     });
 
-    it("does not wait for the served list when Claude serves the turn", async () => {
+    it("leaves a turn Claude serves to Claude on Rome credits", async () => {
       const value: ModelAccountReports = {
         openai: reportOf("unauthorized"),
         anthropic: reportOf("available"),
@@ -228,11 +180,7 @@ describe("ModelResolver", () => {
       const r = createModelResolver({
         accounts: fakeAccounts(() => value),
         providers: [claude, codex],
-        romeCreditsPayer: {
-          isUsingRomeCredits: () => true,
-          servedModels: () => null,
-          settled: () => new Promise<void>(() => {}),
-        },
+        codexLogins: loginsOn(true, null),
       });
       await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
         modelProvider: claude,
@@ -242,7 +190,7 @@ describe("ModelResolver", () => {
       ).resolves.toMatchObject({ modelProvider: claude });
     });
 
-    it("ignores the served list while ChatGPT pays", async () => {
+    it("ignores the served list on the guardian's own login", async () => {
       const r = resolver({}, {}, false, []);
       await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
         modelProvider: codex,
@@ -254,7 +202,7 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("keeps a Codex provider pin by tier on the ChatGPT login while Rome credits pay", async () => {
+  it("keeps a Codex provider pin by tier on the ChatGPT login while on Rome credits", async () => {
     const r = resolver(
       {
         openai: reportOf("unauthorized"),
@@ -281,7 +229,7 @@ describe("ModelResolver", () => {
       // Production returns a fresh copy on every read.
       accounts: { read: () => structuredClone(state), refresh: async () => {} },
       providers: [claude, codex],
-      romeCreditsPayer: { isUsingRomeCredits: () => false },
+      codexLogins: loginsOn(false),
     });
     await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
       code: "no_model_provider_available",
@@ -302,7 +250,7 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("uses the payer and provider state that are current after settings reads", async () => {
+  it("uses the login and provider state that are current after settings reads", async () => {
     let releaseSettings!: () => void;
     const settingsReady = new Promise<void>((resolve) => {
       releaseSettings = resolve;
@@ -326,9 +274,7 @@ describe("ModelResolver", () => {
           return null;
         },
       },
-      romeCreditsPayer: {
-        isUsingRomeCredits: () => usingRomeCredits,
-      },
+      codexLogins: { login: () => loginsOn(usingRomeCredits).login() },
     });
 
     const resolution = r.getModelProvider({ tier: "large" });
@@ -697,7 +643,6 @@ describe("ModelResolver", () => {
       });
       const codexAccount: ModelAccount = {
         report: async () => ({ state: "unauthorized", account: { loggedIn: false } }),
-        revoke: async () => {},
         onChanged: () => () => {},
         close: () => {},
       };

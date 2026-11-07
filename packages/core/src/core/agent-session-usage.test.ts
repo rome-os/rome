@@ -23,7 +23,7 @@ import type { ModelAccountReports } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
-import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
+import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
 
 /** Lets the run finish sending, so what follows happens during the turn. */
 const turnUnderway = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -60,7 +60,7 @@ describe("AgentSession turn usage", () => {
   let shortCircuit: boolean;
   // What the session does as it takes an input.
   let onSend: (() => void) | undefined;
-  // Whether the model resolver sees Rome credits paying.
+  // Whether the model resolver sees Rome credits as the login.
   let resolverUsesRomeCredits: boolean;
   let state: ModelAccountReports;
   let providerCalls: number;
@@ -145,7 +145,7 @@ describe("AgentSession turn usage", () => {
         modelResolver: createModelResolver({
           providers: [provider],
           accounts: fakeAccounts(() => state),
-          romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
+          codexLogins: { login: () => loginsOn(resolverUsesRomeCredits).login() },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
@@ -243,7 +243,7 @@ describe("AgentSession turn usage", () => {
     ]);
   });
 
-  it("keeps funding from the turn's payer when the payer changes during it", async () => {
+  it("keeps funding from the turn's login when the login changes during it", async () => {
     let releaseFirst!: () => void;
     const firstRelease = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -291,7 +291,7 @@ describe("AgentSession turn usage", () => {
     expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
   });
 
-  it("records the payer of the query that took the input", async () => {
+  it("records the funding of the query that took the input", async () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
     };
@@ -330,7 +330,7 @@ describe("AgentSession turn usage", () => {
     );
   });
 
-  it("dispatches a turn whose funding label resolves without a payer change", async () => {
+  it("dispatches a turn whose funding label resolves without a login change", async () => {
     let releasePreparation!: () => void;
     const preparationGate = new Promise<void>((resolve) => {
       releasePreparation = resolve;
@@ -351,7 +351,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const turn = session.sendTurn({ prompt: "boot-time turn" });
     await preparationStartedPromise;
-    // The first status probe lands; Codex's payer is still ChatGPT.
+    // The first status probe lands; Codex's login is still ChatGPT.
     funding = "subscription";
     releasePreparation();
     await drain(turn.events);

@@ -101,7 +101,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
           if (!cancelled) setProbe("connected");
           return;
         }
-        // The payer counts an unknown ChatGPT login as connected, so credits
+        // Rome counts an unknown ChatGPT login as connected, so credits
         // are offered only once ChatGPT reads as signed out.
         if (status.codex?.loggedIn !== false) {
           if (!cancelled) setProbe("absent");

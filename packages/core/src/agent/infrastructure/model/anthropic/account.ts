@@ -1,7 +1,8 @@
 // The Claude account as Rome reads it: stored Anthropic-compatible
 // credentials, else an environment credential, else the Claude CLI's own
 // login. The guardian authorizes Claude outside Rome, with the Claude CLI, so
-// this adapter implements ModelAccount and not ModelAccountAuthorization.
+// this adapter implements ModelAccount and ModelProviderLogins, and has no
+// authorization to start.
 
 import { execFile } from "node:child_process";
 import type { SettingsRepository } from "../../../../db/repositories/settings.js";
@@ -21,6 +22,7 @@ import type {
   ModelAccountStatus,
   ModelAccountUsage,
 } from "../../../domain/model-account.js";
+import type { ModelProviderLogins } from "../../../domain/model-login.js";
 import type { ModelAccountReport } from "../../../domain/model-account-report.js";
 import { accountReport, refusalAfterReport, usageShowsCapacity } from "../account-report.js";
 import {
@@ -93,7 +95,7 @@ async function logoutClaude(): Promise<void> {
   await clearClaudeAuthRevoked();
 }
 
-export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
+export class ClaudeAccount implements ModelAccount, ModelProviderLogins, LearnsRefusedTurns {
   private readonly options: ClaudeAccountOptions;
   private readonly listeners = new Set<() => void>();
   /** The usage refusal the adapter last saw, until its end or a later usage read shows capacity. */

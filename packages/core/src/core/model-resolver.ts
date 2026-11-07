@@ -7,16 +7,18 @@ import {
   CODEX_TERRA_MODEL,
   MODEL_SELECTIONS,
   providerAuthorized,
+  providerAvailability,
   providerUsable,
   stripLegacyReasoningSuffix,
   type AccountedProviderId,
+  type CodexLogin,
+  type CodexLogins,
   type ModelAccounts,
   type ModelAccountReports,
   type ModelSelectionId,
   type ModelAccountReport,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
-import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
 const log = createLogger("model-resolver");
 
@@ -114,8 +116,7 @@ export interface CreateModelResolverOptions {
   accounts: Pick<ModelAccounts, "read" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
-  romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits"> &
-    Partial<Pick<RomeCreditsPayer, "servedModels" | "settled">>;
+  codexLogins?: Pick<CodexLogins, "login">;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -132,7 +133,7 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
 
 /**
  * The Codex model for a tier, within what the account's plan allows, or the
- * models the Rome credits gateway serves while credits pay. An unread account
+ * models the Rome credits gateway serves on that login. An unread account
  * allows any.
  */
 function codexModel(
@@ -206,10 +207,18 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
-  /** Throws when the provider is read as unauthorized, expired or at its usage limit. */
-  const requireUsableProvider = (provider: ModelProvider, state: ModelAccountReports): void => {
+  /**
+   * Throws when the provider is unauthorized, expired or at its usage limit on
+   * `login`. Without a login it asks about the guardian's own account.
+   */
+  const requireUsableProvider = (
+    provider: ModelProvider,
+    state: ModelAccountReports,
+    login?: CodexLogin,
+  ): void => {
     const report = state[provider.id];
-    if (!report || providerUsable(report)) return;
+    const codexLogin = provider.id === "openai" ? login : undefined;
+    if (!report || providerAvailability(report, codexLogin) === "available") return;
     const providerId = provider.id as AccountedProviderId;
     refreshAfterFailure(providerId);
     throw new ModelResolutionError(
@@ -246,21 +255,21 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
-  const usingRomeCredits = (): boolean => options.romeCreditsPayer?.isUsingRomeCredits() === true;
+  const usingRomeCredits = (): boolean => options.codexLogins?.login().kind === "rome_credits";
   /**
-   * The models the Rome credits gateway reports serving while credits pay.
-   * Null when ChatGPT pays, or when the gateway has not reported a list, in
+   * The models the Rome credits gateway reports serving on that login. Null on
+   * the guardian's own login, or when the gateway has not reported a list, in
    * which case credits are assumed to serve Sol and Luna.
    */
   const creditsServedModels = (): ReadonlySet<string> | null => {
-    if (!usingRomeCredits()) return null;
-    const served = options.romeCreditsPayer?.servedModels?.();
-    return served ? new Set(served) : null;
+    const login = options.codexLogins?.login();
+    if (login?.kind !== "rome_credits" || !login.modelsServed) return null;
+    return new Set(login.modelsServed);
   };
   /**
-   * Availability as seen by resolution. Rome credits are another way to pay
-   * for Codex: while they pay, Codex is available and allows the models the
-   * gateway serves, or any when the gateway has not said.
+   * Availability as seen by resolution. On Rome credits, Codex is available
+   * and allows the models the gateway serves, or any when the gateway has not
+   * said.
    */
   const resolutionState = (state = options.accounts.read()): ModelAccountReports => {
     if (!usingRomeCredits()) return state;
@@ -272,31 +281,21 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
   return {
     async getModelProvider(request) {
-      // ChatGPT just disconnected or the credential changed, and the first
-      // read of the account's credits has not answered yet. Wait for it: it
-      // decides whether credits pay at all, and which models they serve. Only
-      // a Codex resolution can spend credits, so only that waits. The read is
-      // bounded by its request timeout.
-      const settleServedModels = async (): Promise<void> => {
-        await options.romeCreditsPayer?.settled?.();
-      };
       if (request.exact) {
-        if (request.exact.providerId === "openai") await settleServedModels();
         const state = resolutionState();
         const { providerId, model } = request.exact;
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
-        requireUsableProvider(provider, state);
+        requireUsableProvider(provider, options.accounts.read(), options.codexLogins?.login());
         requireModelAccess(provider.id, model, state.openai, creditsServedModels());
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
         const selection = MODEL_SELECTIONS[request.selectionId];
-        if (selection.providerId === "openai") await settleServedModels();
         const state = resolutionState();
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
-        requireUsableProvider(provider, state);
+        requireUsableProvider(provider, options.accounts.read(), options.codexLogins?.login());
         requireModelAccess(provider.id, selection.model, state.openai, creditsServedModels());
         return { modelProvider: provider, model: selection.model };
       }
@@ -304,20 +303,11 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const tierModelMappings = await options.settingsRepo?.get<unknown>(
         TIER_MODEL_MAPPINGS_SETTING_KEY,
       );
-      // A tier reaches credits only when no subscription can serve it, and a
-      // provider pin ignores the served list.
-      if (!request.providerId) {
-        const current = options.accounts.read();
-        const subscriptionServes =
-          (providers.has("openai") && providerUsable(current.openai)) ||
-          (providers.has("anthropic") && providerUsable(current.anthropic));
-        if (!subscriptionServes) await settleServedModels();
-      }
-      // Settings reads can yield while account state changes. Read the payer
-      // and provider state after the final await so this resolution sees the
-      // current login-selected payer.
+      // Settings reads can yield while account state changes. Read the login
+      // and provider state after the await so this resolution sees the current
+      // login.
       const accountState = options.accounts.read();
-      const creditsPay = usingRomeCredits();
+      const onRomeCredits = usingRomeCredits();
       const state = resolutionState(accountState);
       const creditsServed = creditsServedModels();
 
@@ -334,8 +324,8 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
             : provider.id === "anthropic"
               ? CLAUDE_TIER_TO_MODEL[request.tier]
               : TEST_TIER_TO_MODEL[request.tier]);
-        // A configured model is intentional, but known Codex entitlement
-        // restrictions still fail with the same recoverable error as an exact
+        // A configured model is intentional, but what the login does not allow
+        // still fails with the same recoverable error as an exact
         // model selection instead of reaching the provider with a bad request.
         requireModelAccess(provider.id, model, providerState.openai, served);
         return model;
@@ -362,14 +352,14 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       if (claude && providerUsable(state.anthropic)) {
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
-      // Rome credits pay only when no subscription can serve the tier, and only
+      // Rome credits run only when no subscription can serve the tier, and only
       // for a tier whose default model the gateway serves. A configured model
       // the gateway does not serve still fails with model_unavailable.
       const creditsServeTier =
         !creditsServed ||
         configuredTierModel(tierModelMappings, "openai", request.tier) !== null ||
         creditsServed.has(codexModel(request.tier, state.openai, creditsServed));
-      if (codex && creditsPay && creditsServeTier) {
+      if (codex && onRomeCredits && creditsServeTier) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
 

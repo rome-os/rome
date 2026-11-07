@@ -49,7 +49,7 @@ import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth
 import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
-import { anthropicFunding } from "../../../../usage/funding.js";
+import { anthropicFunding } from "./funding.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,

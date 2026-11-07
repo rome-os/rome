@@ -18,7 +18,7 @@ export function failoverReason(
   const report = state[failure.provider];
   // An account billed per use has no subscription to fail over from.
   if (report?.account.usageLimited === false) return null;
-  // Rome credits pay for Codex while its login is out, and recovery must not spend them.
+  // Codex runs on Rome credits while the ChatGPT account is out, and recovery must not spend them.
   if (
     failure.provider === "openai" &&
     !providerAuthorized(report) &&

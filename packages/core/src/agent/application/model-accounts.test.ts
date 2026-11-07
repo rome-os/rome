@@ -23,7 +23,6 @@ function fakeAccount(initial: ModelAccountReport) {
       if (!hold) return Promise.resolve(answer);
       return new Promise<ModelAccountReport>((resolve) => pending.push(resolve));
     }),
-    async revoke() {},
     onChanged(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

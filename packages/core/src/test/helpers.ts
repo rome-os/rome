@@ -26,7 +26,7 @@ import {
   createModelAccounts,
   ClaudeAccount,
   type ModelAccount,
-  type ModelAccountAuthorization,
+  type CodexLogins,
   romeCreditsProxyRoutes,
 } from "../agent/index.js";
 import { createModelResolver } from "../core/model-resolver.js";
@@ -692,7 +692,7 @@ export async function buildTestDeps(
   const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
   const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
-  const codexAccountService: ModelAccount & ModelAccountAuthorization = {
+  const codexAccountService: ModelAccount & CodexLogins = {
     async report() {
       return {
         state: "available" as const,
@@ -725,6 +725,8 @@ export async function buildTestDeps(
     },
     async cancelAuthorization() {},
     async revoke() {},
+    login: () => ({ kind: "subscription" }),
+    useLogin() {},
     onChanged(listener) {
       codexAccountChangedListeners.add(listener);
       return () => codexAccountChangedListeners.delete(listener);

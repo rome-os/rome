@@ -2,6 +2,7 @@
 // `ModelAccounts` that reads it.
 
 import type {
+  CodexLogins,
   ModelAccountStatus,
   ModelAccounts,
   ModelAccountReports,
@@ -41,7 +42,6 @@ export function fakeAccounts(
   return { read, refresh: async () => {} };
 }
 
-/** A ChatGPT plan that serves Terra alone. */
 /** A ChatGPT plan that withholds the frontier models, so a tier resolves to Terra. */
 export const RESTRICTED_PLAN = {
   modelsDenied: [
@@ -53,3 +53,16 @@ export const RESTRICTED_PLAN = {
     "gpt-5.6-luna",
   ],
 } as const;
+
+/** The login side of a fake Codex: on Rome credits with `modelsServed`, or the guardian's own. */
+export function loginsOn(
+  romeCredits: boolean,
+  modelsServed: readonly string[] | null = null,
+): Pick<CodexLogins, "login"> {
+  return {
+    login: () =>
+      romeCredits
+        ? { kind: "rome_credits", credentialId: "romeinst_test", modelsServed }
+        : { kind: "subscription" },
+  };
+}

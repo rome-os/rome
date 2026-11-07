@@ -469,7 +469,7 @@ export class ConciergeService {
     reason ??=
       source?.state === "usage_limit_reached"
         ? "quota"
-        : // Rome credits pay for Codex while its login is out, so that alone is no failure.
+        : // Codex runs on Rome credits while the ChatGPT account is out, so that alone is no failure.
           (from === "anthropic" && source?.state === "unauthorized") || source?.state === "expired"
           ? "login"
           : undefined;

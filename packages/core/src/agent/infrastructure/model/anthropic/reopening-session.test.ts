@@ -239,7 +239,7 @@ describe("createReopeningSession", () => {
     await expect(session.sendUserInput({ text: "late" })).rejects.toThrow("closed");
   });
 
-  it("reports the payer of the query that took the input", async () => {
+  it("reports the funding of the query that took the input", async () => {
     const first = fakeQuery("thread-1", "subscription");
     const { session } = setup(first);
     expect(session.funding).toBe("subscription");
