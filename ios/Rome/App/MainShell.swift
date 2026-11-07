@@ -5,6 +5,8 @@ enum Route: Hashable {
     case taskChat(chatId: String, title: String)
     /// An app of the instance, full screen.
     case app(InstalledApp)
+    /// A page of the instance a chat linked to, in the app's web view.
+    case page(URL)
 }
 
 /// The pages the drawer switches between. Each is the root of the main stack,
@@ -94,6 +96,7 @@ struct MainShell: View {
                         destination(route)
                     }
                 }
+                .environment(\.chatLinkOpener, openChatLink)
                 // Pushed aside, the page becomes a card of its own color, following the drag.
                 .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
                 .frame(width: geometry.size.width, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
@@ -253,6 +256,39 @@ struct MainShell: View {
         case .app(let app):
             AppWebScreen(workspace: workspace, app: app)
                 .id(app.id)
+        case .page(let url):
+            AppWebScreen(workspace: workspace, app: InstalledApp(id: url.absoluteString, displayName: workspace.instanceName), pageURL: url)
+                .id(url)
+        }
+    }
+
+    /// A link tapped in chat text: an app opens full screen, a page of the
+    /// instance in the app's web view, anything else as the system opens it.
+    private func openChatLink(_ url: URL) -> OpenURLAction.Result {
+        switch AppLinks.chatLink(url, origin: workspace.backend.origin, apps: workspace.apps) {
+        case .app(let id, let page):
+            Task { await openLinkedApp(id, page: page) }
+            return .handled
+        case .page(let page):
+            path.append(.page(page))
+            return .handled
+        case .external, .system:
+            return .systemAction
+        }
+    }
+
+    /// An app just built may not be in the list yet: it is read again first.
+    /// Still missing, the link opens as a page.
+    private func openLinkedApp(_ id: String, page: URL?) async {
+        var app = workspace.apps.first { $0.id == id }
+        if app == nil, let all = try? await workspace.backend.apps() {
+            await workspace.shelve(AppLinks.mine(all))
+            app = all.first { $0.id == id }
+        }
+        if let app {
+            path.append(.app(app))
+        } else if let page {
+            path.append(.page(page))
         }
     }
 

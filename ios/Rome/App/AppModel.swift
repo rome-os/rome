@@ -218,8 +218,12 @@ final class Workspace {
         }
     }
 
-    /// Keeps the widget's copy of the apps list and their icons.
+    /// The guardian's apps as last read, for links in chat text.
+    private(set) var apps: [InstalledApp] = []
+
+    /// Keeps the apps list, and the widget's copy of it with their icons.
     func shelve(_ apps: [InstalledApp]) async {
+        self.apps = apps
         guard let instanceID else { return }
         await WidgetShelf.shelve(apps, instanceId: instanceID, backend: backend)
     }

@@ -7,6 +7,8 @@ import WebKit
 struct AppWebScreen: View {
     let workspace: Workspace
     let app: InstalledApp
+    /// A page of the instance a chat linked to, shown in place of the app's own.
+    var pageURL: URL? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -23,7 +25,7 @@ struct AppWebScreen: View {
             header
             ZStack(alignment: .top) {
                 AppWebView(
-                    url: origin.flatMap { AppLinks.fullURL(origin: $0, app: app) },
+                    url: pageURL ?? origin.flatMap { AppLinks.fullURL(origin: $0, app: app) },
                     origin: origin,
                     cookie: workspace.backend.webSessionCookie(),
                     theme: AppWebView.themeValue(model.appearance.current),
@@ -57,7 +59,10 @@ struct AppWebScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         // The widget fills its spare spots with the apps opened last.
-        .task(id: app.id) { WidgetShelf.recordOpen(appId: app.id, instanceId: workspace.instanceID) }
+        .task(id: app.id) {
+            guard pageURL == nil else { return }
+            WidgetShelf.recordOpen(appId: app.id, instanceId: workspace.instanceID)
+        }
     }
 
     private var header: some View {
@@ -70,7 +75,7 @@ struct AppWebScreen: View {
                 Button { failed = false; reloads += 1 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
-                if let web = model.webURL, let url = AppLinks.fullURL(origin: web, app: app) {
+                if let web = model.webURL, let url = pageURL ?? AppLinks.fullURL(origin: web, app: app) {
                     Button { openURL(url) } label: {
                         Label("Open on the web", systemImage: "safari")
                     }

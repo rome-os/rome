@@ -209,6 +209,7 @@ struct MarkdownText: View {
     @State private var showViewer = false
     @State private var viewerStart = 0
     @Environment(\.instanceOrigin) private var origin
+    @Environment(\.chatLinkOpener) private var linkOpener
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
@@ -228,6 +229,8 @@ struct MarkdownText: View {
         }
         .foregroundStyle(color)
         .tint(Palette.primaryText)
+        // Links in the text: the shell's opener, else the system's.
+        .environment(\.openURL, OpenURLAction { url in linkOpener?(url) ?? .systemAction })
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }
