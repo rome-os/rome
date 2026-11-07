@@ -62,12 +62,6 @@ export function detachSessionTools(tools: readonly RomeTool[]): RomeTool[] {
   }));
 }
 
-/** The subagents this agent may hand work to, each served as a tool. */
-export interface Subagents {
-  tools: readonly RomeToolDefinition[];
-  run(name: string, input: unknown, call: ModelToolCallContext): Promise<unknown>;
-}
-
 export interface RomeTools {
   listTools(group: RomeToolGroup): readonly RomeToolDefinition[];
   /**

@@ -4,7 +4,7 @@
 // docs/domains/agents.md carries the language.
 
 import type { ModelAccounts } from "./model-accounts.js";
-import type { AgentLog } from "./model-accounts.js";
+import type { AgentLog } from "../domain/agent-log.js";
 import type { AccountedProviderId } from "../domain/model-account-report.js";
 import type { CodexLogins } from "../domain/model-login.js";
 import type { ModelProvider, ProviderId } from "../domain/model-port.js";

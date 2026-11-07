@@ -36,6 +36,8 @@ The tools a session carries beyond the ones every session of its agent has, such
 
 An agent that another agent's turn hands work to. The session that runs it has that turn as its parent.
 
+- In code, the `Subagents` port is in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
+
 ## System prompt
 
 What the model reads before the conversation. It is built when a run opens the agent's session, and kept across reopens and forks of the model's session.

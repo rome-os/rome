@@ -10,9 +10,9 @@ import type {
   RomeToolDefinition,
   RomeToolGroup,
   RomeTools,
-  Subagents,
 } from "../domain/rome-tools.js";
 import type { SkillCatalog } from "../domain/skill.js";
+import type { Subagents } from "../domain/subagent.js";
 import { actionTools } from "./action-tools.js";
 import { askUserTools, type DeferTool } from "./ask-user-tools.js";
 import { romeToolRunner, type RomeToolRunner } from "./rome-tool-runner.js";

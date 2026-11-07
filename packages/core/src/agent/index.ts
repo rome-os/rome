@@ -125,8 +125,8 @@ export type {
   RomeToolResult,
   RomeTools,
   ModelToolCallId,
-  Subagents,
 } from "./domain/rome-tools.js";
+export type { Subagents } from "./domain/subagent.js";
 export { detachSessionTools, NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { createRomeTools, type RomeToolsOptions } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
