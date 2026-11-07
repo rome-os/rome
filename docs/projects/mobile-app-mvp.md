@@ -60,7 +60,12 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 - [x] I–L by the iOS app worker (`71aa41a9`, `1281aafc`, `42684366`, `5ade4aaa`): glass composer; + menu (camera, library), up to 4 photos as thumbnails in the composer, JPEG long edge 2048 and ≤ 2.5 MB, sent as the turn's `files`; image paste (the field is now a UIKit text view, since SwiftUI's paste hook needs iOS 27); every Concierge reply in a bubble, folded past about 15 lines. 139 Mac Catalyst tests pass; checked on the Simulator against a local Rome. Snapshots: notes folder `photos-glass-bubbles/`. Independent review: no crashes, concurrency or auth problems; 10 fixes sent back (big-image memory, failed loads never retrying, a photo sent late, `+` in file names, parser edge, main-thread decoding, fold by measured height, light-mode composer contrast). Due after M–O, before drafts.
 - Uploads need no server change: the server saves each file in the chat's project folder and appends `- File N: [name](</projects/…>)` to the stored message text; the app parses those lines and loads the photos from `GET /api/projects/asset?path=…`. Not live-checked: paste and the camera.
 - [x] M–O (`78475787`, `aa394b09`, `9a49aac3`, `17a60455`; part of M landed in `c7f25614` by a lead mistake): the mascot (drawn from the web icon's paths) on the launch and opening screens, "Rome" and three pulsing dots, blink/glance/nod, still under Reduce Motion, the launch logo and the live one line up exactly; `Palette.drawerPage` behind the open drawer, blended by drawer progress, replacing the scrim; starter "Summarize this week's AI news". 145 Mac Catalyst tests pass. Snapshots: notes folder `mascot-drawer-starter/`. Nit: faint gray edge on the launch SVG's eyes (a PDF asset would fix it).
-- [ ] Review fixes for I–L, then install on both iPhones
+- [x] Review fixes for I–L (`8e544e1b`), installed on both iPhones (153 Mac Catalyst tests passed first)
+
+## Update page and chat titles
+
+- [ ] Update page in the opening screen's style: mascot, versions named ("Your Rome is on X. The latest is Y."), while updating the animated mascot plus a status line that follows the real state (asking Rome Cloud, downloading Y, restarting, almost done), "This can take a few minutes…" (user, 2026-11-06). Queued after the appearance setting.
+- [ ] Topic and task chat headers: the title is one line of small text, no glass pill; side buttons keep their glass; main Chat unchanged (user, 2026-11-06). Queued.
 
 ## Composer drafts
 
