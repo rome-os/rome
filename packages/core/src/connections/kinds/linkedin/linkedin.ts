@@ -46,6 +46,11 @@ const SNAPSHOT_TIMEOUT_MS = 240_000;
 /** One failed tick is routine (a Chrome restart, a slow page); the guardian is
  *  warned once failures look persistent. */
 const DEGRADE_AFTER_CONSECUTIVE_FAILURES = 2;
+/** The container starts Chrome only after Rome is healthy, so polls right after
+ *  start() can find no browser yet. Those retry soon, uncounted, for about three
+ *  minutes, which outlasts the container's wait for Rome. */
+const STARTUP_RETRY_DELAY_MS = 30_000;
+const STARTUP_RETRIES = 6;
 
 export interface LinkedInPollerCallbacks {
   /** The session behind the browser is signed out; the epoch owner decides
@@ -68,6 +73,8 @@ export interface LinkedInPollerOptions {
   profileSync?: LinkedInParticipantProfileSynchronizerOptions;
   /** Test seam for the jitter draw. */
   random?: () => number;
+  /** Test seam for the delay between retries right after start(). */
+  startupRetryDelayMs?: number;
 }
 
 /** A fresh uniform delay in [minMs, maxMs]. */
@@ -104,6 +111,7 @@ export class LinkedInInboxPoller {
   private readonly membershipRefreshIntervalMs: number;
   private readonly profileSynchronizer: LinkedInParticipantProfileSynchronizer | null;
   private readonly random: () => number;
+  private readonly startupRetryDelayMs: number;
 
   private callbacks: LinkedInPollerCallbacks | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -115,6 +123,7 @@ export class LinkedInInboxPoller {
   /** The message-derived participant seed is a one-shot, not a per-tick cost. */
   private participantsSeeded = false;
   private consecutiveFailures = 0;
+  private startupRetriesLeft = 0;
   private lastFailureMessage: string | null = null;
   private nextRunAt: Date | null = null;
 
@@ -143,6 +152,7 @@ export class LinkedInInboxPoller {
           )
         : null;
     this.random = opts.random ?? Math.random;
+    this.startupRetryDelayMs = opts.startupRetryDelayMs ?? STARTUP_RETRY_DELAY_MS;
   }
 
   /** First tick runs immediately (a fresh connect should mirror right away);
@@ -151,6 +161,7 @@ export class LinkedInInboxPoller {
     this.callbacks = callbacks;
     this.stopped = false;
     this.abort = new AbortController();
+    this.startupRetriesLeft = STARTUP_RETRIES;
     void this.tick();
   }
 
@@ -381,16 +392,24 @@ export class LinkedInInboxPoller {
   private async tick(): Promise<void> {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
+    let retrySoon = false;
     try {
       await this.pollOnce();
       this.consecutiveFailures = 0;
       this.lastFailureMessage = null;
+      this.startupRetriesLeft = 0;
     } catch (err) {
       if (this.stopped) return; // an aborted in-flight command is not a failure
       if (err instanceof OpencliAuthError) {
         // Grant state owns the user-facing warning from here; the epoch is
         // torn down by the registry, which calls stop().
         this.callbacks?.onAuthRejected(err);
+      } else if (this.startupRetriesLeft > 0) {
+        this.startupRetriesLeft--;
+        retrySoon = true;
+        log.info("linkedin poll failed while the browser may still be starting; retrying soon", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       } else {
         this.consecutiveFailures++;
         this.lastFailureMessage = err instanceof Error ? err.message : String(err);
@@ -401,13 +420,13 @@ export class LinkedInInboxPoller {
       }
     } finally {
       this.ticking = false;
-      this.scheduleNext();
+      this.scheduleNext(retrySoon ? this.startupRetryDelayMs : undefined);
     }
   }
 
-  private scheduleNext(): void {
+  private scheduleNext(delayMs?: number): void {
     if (this.stopped) return;
-    const delay = pollDelayMs(this.minIntervalMs, this.maxIntervalMs, this.random);
+    const delay = delayMs ?? pollDelayMs(this.minIntervalMs, this.maxIntervalMs, this.random);
     this.nextRunAt = new Date(Date.now() + delay);
     this.timer = setTimeout(() => void this.tick(), delay);
     (this.timer as { unref?: () => void }).unref?.();
