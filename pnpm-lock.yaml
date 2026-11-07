@@ -503,8 +503,8 @@ importers:
         specifier: ^25.2.3
         version: 25.2.3
       electron:
-        specifier: ^44.9.3
-        version: 44.9.3(supports-color@8.1.1)
+        specifier: ^45.2.3
+        version: 45.2.3(supports-color@8.1.1)
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
@@ -776,6 +776,18 @@ importers:
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/signer:
+    devDependencies:
+      '@rstest/core':
+        specifier: ^0.11.11
+        version: 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1(@noble/hashes@2.4.0))
+      '@types/node':
+        specifier: 25.2.3
+        version: 25.2.3
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1117,27 +1129,37 @@ importers:
 
   rome_apps/briefing:
     dependencies:
+      '@rome-os/app-runtime':
+        specifier: ^0.9.0
+        version: link:../../packages/app-runtime-sdk
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
+    devDependencies:
       '@radix-ui/react-select':
         specifier: ^2.2.6
         version: 2.3.0(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@radix-ui/react-slot':
         specifier: ^1.1.2
         version: 1.2.5(@types/react@19.2.15)(react@19.2.6)
-      '@rome-os/app-runtime':
-        specifier: ^0.9.0
-        version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
+      '@types/react':
+        specifier: 19.2.15
+        version: 19.2.15
+      '@types/react-dom':
+        specifier: 19.2.3
+        version: 19.2.3(@types/react@19.2.15)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
+      drizzle-kit:
+        specifier: ^0.31.9
+        version: 0.31.9(supports-color@8.1.1)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.6)
@@ -1147,16 +1169,6 @@ importers:
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
-    devDependencies:
-      '@types/react':
-        specifier: 19.2.15
-        version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
-      drizzle-kit:
-        specifier: ^0.31.9
-        version: 0.31.9(supports-color@8.1.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1166,41 +1178,41 @@ importers:
       '@rome-os/app-runtime':
         specifier: ^0.9.0
         version: link:../../packages/app-runtime-sdk
+    devDependencies:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-    devDependencies:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
 
   rome_apps/coding:
     dependencies:
       '@rome-os/app-runtime':
         specifier: ^0.9.0
         version: link:../../packages/app-runtime-sdk
+    devDependencies:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
-    devDependencies:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
+      react-dom:
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1219,28 +1231,19 @@ importers:
       '@rome-os/app-runtime':
         specifier: ^0.9.0
         version: link:../../packages/app-runtime-sdk
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
+    devDependencies:
+      '@mozilla/readability':
+        specifier: ^0.6.0
+        version: 0.6.0
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@19.2.6)
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
-    devDependencies:
-      '@mozilla/readability':
-        specifier: ^0.6.0
-        version: 0.6.0
       '@types/jsdom':
         specifier: ^28.0.3
         version: 28.0.3
@@ -1259,18 +1262,37 @@ importers:
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1(@noble/hashes@2.4.0)
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.6)
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
+      react-dom:
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
       turndown:
         specifier: ^7.2.4
         version: 7.2.4
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
 
   rome_apps/dream:
     dependencies:
       '@rome-os/app-runtime':
         specifier: ^0.9.0
         version: link:../../packages/app-runtime-sdk
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
+    devDependencies:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
@@ -1280,28 +1302,6 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.0(react@19.2.6)
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@19.2.6)
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
-      react-markdown:
-        specifier: ^10.1.0
-        version: 10.1.0(@types/react@19.2.15)(react@19.2.6)
-      remark-gfm:
-        specifier: ^4.0.1
-        version: 4.0.1
-      yaml:
-        specifier: ^2.8.2
-        version: 2.8.2
-    devDependencies:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
@@ -1311,43 +1311,6 @@ importers:
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9(supports-color@8.1.1)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
-  rome_apps/inbox:
-    dependencies:
-      '@rome-os/app-runtime':
-        specifier: ^0.9.0
-        version: link:../../packages/app-runtime-sdk
-      '@rome-os/app-web-sdk':
-        specifier: ^0.3.0
-        version: link:../../packages/app-web-sdk
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-    devDependencies:
-      '@types/react':
-        specifier: 19.2.15
-        version: 19.2.15
-
-  rome_apps/showcases:
-    dependencies:
-      '@rome-os/app-runtime':
-        specifier: ^0.9.0
-        version: link:../../packages/app-runtime-sdk
-      '@rome-os/app-web-sdk':
-        specifier: ^0.3.0
-        version: link:../../packages/app-web-sdk
-      '@rome-os/ui':
-        specifier: ^0.3.0
-        version: link:../../packages/ui
-      beautiful-mermaid:
-        specifier: ^1.1.3
-        version: 1.1.3
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.6)
@@ -1363,7 +1326,41 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  rome_apps/inbox:
+    dependencies:
+      '@rome-os/app-runtime':
+        specifier: ^0.9.0
+        version: link:../../packages/app-runtime-sdk
     devDependencies:
+      '@rome-os/app-web-sdk':
+        specifier: ^0.3.0
+        version: link:../../packages/app-web-sdk
+      '@types/react':
+        specifier: 19.2.15
+        version: 19.2.15
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
+
+  rome_apps/showcases:
+    dependencies:
+      '@rome-os/app-runtime':
+        specifier: ^0.9.0
+        version: link:../../packages/app-runtime-sdk
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
+    devDependencies:
+      '@rome-os/app-web-sdk':
+        specifier: ^0.3.0
+        version: link:../../packages/app-web-sdk
+      '@rome-os/ui':
+        specifier: ^0.3.0
+        version: link:../../packages/ui
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.2.2)
@@ -1376,24 +1373,15 @@ importers:
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      beautiful-mermaid:
+        specifier: ^1.1.3
+        version: 1.1.3
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9(supports-color@8.1.1)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
-  rome_apps/skills:
-    dependencies:
-      '@rome-os/app-web-sdk':
-        specifier: ^0.3.0
-        version: link:../../packages/app-web-sdk
-      '@rome-os/ui':
-        specifier: ^0.3.0
-        version: link:../../packages/ui
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.6)
@@ -1403,13 +1391,39 @@ importers:
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.15)(react@19.2.6)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  rome_apps/skills:
     devDependencies:
+      '@rome-os/app-web-sdk':
+        specifier: ^0.3.0
+        version: link:../../packages/app-web-sdk
+      '@rome-os/ui':
+        specifier: ^0.3.0
+        version: link:../../packages/ui
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.6)
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
+      react-dom:
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1419,62 +1433,41 @@ importers:
       '@rome-os/app-runtime':
         specifier: ^0.9.0
         version: link:../../packages/app-runtime-sdk
+      node-edge-tts:
+        specifier: ^1.2.10
+        version: 1.2.10(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+    devDependencies:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
-      node-edge-tts:
-        specifier: ^1.2.10
-        version: 1.2.10(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      '@types/react':
+        specifier: 19.2.15
+        version: 19.2.15
       react:
         specifier: 19.2.6
         version: 19.2.6
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
-    devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
-      '@types/react':
-        specifier: 19.2.15
-        version: 19.2.15
-      better-sqlite3:
-        specifier: ^13.0.3
-        version: 13.0.3
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
 
   rome_apps/welcome-to-rome:
     dependencies:
       '@rome-os/app-runtime':
         specifier: ^0.9.0
         version: link:../../packages/app-runtime-sdk
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
+    devDependencies:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
-      canvas-confetti:
-        specifier: ^1.9.4
-        version: 1.9.4
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@19.2.6)
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
-    devDependencies:
       '@types/canvas-confetti':
         specifier: ^1.9.0
         version: 1.9.0
@@ -1484,34 +1477,45 @@ importers:
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      canvas-confetti:
+        specifier: ^1.9.4
+        version: 1.9.4
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9(supports-color@8.1.1)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
-  rome_apps/workflow-studio:
-    dependencies:
-      '@rome-os/app-web-sdk':
-        specifier: ^0.3.0
-        version: link:../../packages/app-web-sdk
-      '@rome-os/ui':
-        specifier: ^0.3.0
-        version: link:../../packages/ui
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.6)
       react:
         specifier: 19.2.6
         version: 19.2.6
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  rome_apps/workflow-studio:
     devDependencies:
+      '@rome-os/app-web-sdk':
+        specifier: ^0.3.0
+        version: link:../../packages/app-web-sdk
+      '@rome-os/ui':
+        specifier: ^0.3.0
+        version: link:../../packages/ui
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      react:
+        specifier: 19.2.6
+        version: 19.2.6
+      react-dom:
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -9202,8 +9206,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@44.9.3:
-    resolution: {integrity: sha512-Cv9/yMnZxNWsMlIe8T4v//NKHdUvbeyoTJoXE3BIcRxus2meeFaO9h/P3zB5d4cBXum51IgAYrT2QjpIDWKpJA==}
+  electron@45.2.3:
+    resolution: {integrity: sha512-Vurzu5UOA5nTGT4LqIwXD16QFGrOZdiXxF+1UP4KNsAOo/YtDcT3/u0jhP4WSwNJ0iLrLDi85hzBJ0arnGDhyw==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -21919,7 +21923,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@44.9.3(supports-color@8.1.1):
+  electron@45.2.3(supports-color@8.1.1):
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0(supports-color@8.1.1)

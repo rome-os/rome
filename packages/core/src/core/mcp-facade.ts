@@ -8,25 +8,36 @@
 //
 // Adapters wrap these for whichever SDK the provider speaks:
 //
-//   - Anthropic side (`anthropic-mcp-servers.ts`) wraps each into `tool()` +
+//   - Anthropic side (`agent/infrastructure/model/anthropic/mcp-servers.ts`) wraps each into `tool()` +
 //     `createSdkMcpServer()` from `@anthropic-ai/claude-agent-sdk`,
 //     converting the JSON schema to a zod shape because that's what the SDK
 //     accepts.
 //   - Codex side (`codex/rome-dynamic-tools.ts`) flattens them into app-server
 //     `dynamicTools` and calls the same handlers in process.
 //
-// The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
+// The Anthropic MCP-server test (`anthropic/mcp-servers.test.ts`) is the
 // regression gate for this module.
 
 import { isValidTimeZone } from "../lib/timezone.js";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
-import type {
-  ActionMcpDefinition,
-  ModelToolCallContext,
-  ModelToolDefinition,
-  SkillMcpDefinition,
-} from "./agent-runner.js";
+import type { ModelToolCallContext, RomeToolDefinition } from "./agent-runner.js";
+import type { ActionConfig } from "../actions/types.js";
+import type { SkillMcpDefinition } from "./skill-catalog.js";
+
+/** One action as the facade lists and describes it to the model. */
+export interface ActionMcpDefinition {
+  name: string;
+  description: string;
+  type: ActionConfig["type"];
+  complexity: ActionConfig["complexity"];
+  speed: ActionConfig["speed"];
+  reliability: ActionConfig["reliability"];
+  sideEffects: ActionConfig["sideEffects"];
+  requiresApproval: boolean;
+  cancellable: boolean;
+  inputSchema: Record<string, unknown>;
+}
 
 const log = createLogger("mcp-facade");
 
@@ -51,11 +62,8 @@ export type FacadeToolHandler = (
   context?: ModelToolCallContext,
 ) => Promise<FacadeToolResult>;
 
-export interface FacadeToolDef {
-  name: string;
-  description: string;
-  /** JSON Schema for the tool's arguments. Adapters translate as needed. */
-  inputSchema: Record<string, unknown>;
+/** A Rome tool with the handler that runs it. */
+export interface FacadeToolDef extends RomeToolDefinition {
   handler: FacadeToolHandler;
 }
 
@@ -90,7 +98,7 @@ export interface FacadeParams {
    * agents that legitimately have no skills exposed.
    */
   getSkillCatalog: () => SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
+  subagentTools: RomeToolDefinition[];
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
     name: string,
@@ -621,7 +629,7 @@ function buildActionFacadeTools(
 }
 
 function buildSubagentFacadeTools(
-  subagentTools: ModelToolDefinition[],
+  subagentTools: RomeToolDefinition[],
   executeSubagent: (
     name: string,
     input: unknown,
@@ -1026,9 +1034,9 @@ const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
 
 /** Whether a valid `ask_question` call parks the turn on a question card.
- * Otherwise it relays the questions as prose. Providers that tell their
- * runtime a park ends the response read this, so they cannot drift from the
- * handler. */
+ * Otherwise it relays the questions as prose. The tool's `endsTurn` and its
+ * handler both read this one rule, so the fact the model is told cannot
+ * drift from what the handler does. */
 export function askQuestionParksOnCard(
   params: Pick<FacadeParams, "supportsInteractiveSurface" | "interactiveSurfaceDetached">,
 ): boolean {
@@ -1219,6 +1227,9 @@ function buildInteractiveTools(
   const tools: FacadeToolDef[] = [
     {
       name: "ask_question",
+      // On a card the turn parks until the guardian answers; the prose relay
+      // returns and the turn goes on.
+      endsTurn: askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached }),
       description:
         "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
       inputSchema: {

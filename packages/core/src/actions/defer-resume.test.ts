@@ -86,16 +86,13 @@ describe("defer session continuity", () => {
     expect(routineArgs?.args).not.toHaveProperty("channelThreadKey");
     expect(result.status).toBe("ok");
 
-    const deferredSessionId = rome.model.sessions.at(-1)?.sessionId;
-    const deferredSession = deferredSessionId
-      ? await rome.repos.sessions.findById(deferredSessionId)
-      : null;
+    const deferredSession = await rome.repos.sessions.current(webchatKey, "main");
 
     // Regression assertion: the continuation keeps the original runtime ID and
     // its session key instead of opening a second AgentSession.
     expect({
-      sessionId: deferredSessionId,
-      channelThreadKey: deferredSession?.channelThreadKey,
+      sessionId: deferredSession?.id,
+      channelThreadKey: deferredSession?.continuityKey,
     }).toEqual({
       sessionId: initialSessionId,
       channelThreadKey: webchatKey,
@@ -205,7 +202,10 @@ describe("defer session continuity", () => {
     expect(wakeups[0]).toContain("📨 Event arrived: CI on #12");
     expect(wakeups[0]).toContain('"conclusion": "success"');
     expect(wakeups[0]).toContain("[1000 chars omitted]");
-    expect(testRome.model.sessions.at(-1)?.sessionId).toBe(sessionId);
+    // The wakeup continued the deferring session: the chat still has it as its current one.
+    expect((await testRome.repos.sessions.current("webchat:event-chat", "main"))?.id).toBe(
+      sessionId,
+    );
     expect((await routinesRepo.findById(routineId))?.enabled).toBe(false);
     expect(provider.isActive(routineId)).toBe(false);
     provider.stop();

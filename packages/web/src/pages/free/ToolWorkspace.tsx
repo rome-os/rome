@@ -41,13 +41,19 @@ import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { ConciergeTaskPanel } from "@/components/concierge/ConciergeTaskPanel";
 import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
-import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
+import {
+  COMPACT_WIDTH,
+  type ToolView,
+  type WidgetPlacement,
+  type WidgetType,
+} from "./use-free-cells";
+
+export { COMPACT_WIDTH } from "./use-free-cells";
 
 const WIDTH_KEY = "rome:tool-chat-ratio";
 const DEFAULT_RATIO = 0.4;
 const MIN_PANE_WIDTH = 360;
 const SEPARATOR_WIDTH = 1;
-export const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
 // Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
 const TRACE_TAB_ID = "__trace__";
 // Tab value of the Tasks tab, likewise.

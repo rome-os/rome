@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { proveIdentity, type ProveIdentityResult } from "../../lib/instance-identity.js";
+import {
+  getIdentityIssue,
+  proveIdentity,
+  type ProveIdentityResult,
+} from "../../lib/instance-identity.js";
 import { assembleDiagnosticBundle, type DiagnosticsDeps } from "../../lib/diagnostics.js";
 import { readResourceReadings, type ResourceProbes } from "../../lib/resource-readings.js";
 
@@ -45,6 +49,7 @@ export function diagnosisRoutes(deps: DiagnosticsDeps, probes?: ResourceProbes):
       auth: auth.status,
       accountId: auth.status === "ok" ? auth.identity.accountId : null,
       instanceId: auth.status === "ok" ? auth.identity.instanceId : null,
+      issue: getIdentityIssue(),
     };
 
     const healthy =

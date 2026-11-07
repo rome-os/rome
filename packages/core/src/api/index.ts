@@ -26,6 +26,7 @@ import { appsRoutes, subscribeCatalogChanges } from "./routes/apps.js";
 import { agentsRoutes } from "./routes/agents.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
+import { romeCreditsProxyRoutes } from "./routes/rome-credits-proxy.js";
 import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
 import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
@@ -51,12 +52,7 @@ import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
 import { terminalRoutes } from "./routes/terminal.js";
-import {
-  capabilityDiscoveryRoutes,
-  hostCapabilityDiscoverySource,
-} from "./routes/capability-discovery.js";
 import { desktopRoutes } from "./routes/desktop.js";
-import { tailscaleRoutes } from "./routes/tailscale.js";
 import { authRoutes } from "./routes/auth.js";
 import { onboardRoutes } from "./routes/onboard.js";
 import { instanceEnrollRoutes } from "./routes/instance-enroll.js";
@@ -87,6 +83,7 @@ import { ConnectedAccountsRepository } from "../db/repositories/connected-accoun
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
+import { canOpenChat } from "../concierge/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
 const log = createLogger("api");
@@ -113,6 +110,9 @@ export function buildApp(
       config.host,
     ),
   );
+
+  // Codex's loopback route to Rome credits. Outside `/api` for the same reason.
+  app.route("/", romeCreditsProxyRoutes(config.host));
 
   // External webhooks — X-API-Key auth, no /api/ prefix. Intentionally outside
   // sessionActorMiddleware: a machine-credential surface records no session
@@ -171,7 +171,6 @@ export function buildApp(
   api.route("/", appConnectionAccessRoutes(deps));
   api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
-  api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());
   api.route("/", publicAccessRoutes(deps));
   api.route("/", dashboardAccessRoutes(deps));
@@ -203,7 +202,6 @@ export function buildApp(
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
-  api.route("/", tailscaleRoutes(deps));
   api.route("/", memoryFilesRoutes());
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
@@ -343,12 +341,14 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardAccessState,
         {
           subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
-          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          hasChatSession: async (sessionId, owner) =>
+            (await webchatRuntime.hasStoredSession(sessionId)) &&
+            (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
+          subscribeConciergeTasks: (owner, emit) =>
+            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
         },
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);

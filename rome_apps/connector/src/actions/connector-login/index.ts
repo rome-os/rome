@@ -6,7 +6,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 
-import { loadConnectorClient } from "../../shared.js";
+import { loadCredentialClient } from "../../shared.js";
 
 const inputSchema = z.object({});
 
@@ -26,7 +26,9 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
     config,
     schema: inputSchema,
     execute: async () => {
-      const client = await loadConnectorClient();
+      // Sign-in is account-wide, so it is checked before, and apart from,
+      // confirming this Rome's project.
+      const client = await loadCredentialClient();
       if (client) {
         // A saved key is not proof of a valid sign-in: Composio can revoke it.
         // Ping it, so an agent sent here after a 401 gets the card back instead

@@ -12,11 +12,16 @@ import {
   type RomeCloudAccess,
 } from "./reporter.js";
 
-const ACCESS: RomeCloudAccess = { token: "romeinst_test", origin: "https://rome.example" };
+const accessFor = (credentialId: string): RomeCloudAccess => ({
+  credentialId,
+  bearer: async () => credentialId,
+  origin: "https://rome.example",
+});
+const ACCESS = accessFor("romeinst_test");
 // Signing in again mints a new credential, which Rome Cloud treats as a new
 // instance.
-const REENROLLED: RomeCloudAccess = { ...ACCESS, token: "romeinst_reenrolled" };
-const CREDENTIAL = credentialFingerprint(ACCESS.token);
+const REENROLLED = accessFor("romeinst_reenrolled");
+const CREDENTIAL = credentialFingerprint(ACCESS.credentialId);
 const attribution: Pick<UsageAttributionResolver, "forActionRun"> = {
   forActionRun: async (row) =>
     row.initiator?.startsWith("routine:")
@@ -260,7 +265,7 @@ describe("UsageReporter", () => {
     // Re-enrolled between ticks, and a turn ended under the new credential
     // before the next tick saw the change.
     access = REENROLLED;
-    await outbox.enqueue(turn("new-enrollment"), credentialFingerprint(REENROLLED.token));
+    await outbox.enqueue(turn("new-enrollment"), credentialFingerprint(REENROLLED.credentialId));
     await finishedRoot(
       "between-ticks",
       "news.digest",

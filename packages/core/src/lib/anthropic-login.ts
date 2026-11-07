@@ -18,7 +18,7 @@ const log = createLogger("anthropic-login");
 
 //
 // The Claude binary owns token refresh, so a revoked/expired credential only
-// surfaces at request time (a 401, see `anthropic-auth-revoked.ts`), never from
+// surfaces at request time (a 401, see `agent/infrastructure/model/anthropic/auth-revoked.ts`), never from
 // `claude auth status` — which keeps reporting "logged in". When a turn fails
 // that way we drop a Rome-owned marker recording a fingerprint of the OAuth
 // credentials file; the settings reader then downgrades the badge to

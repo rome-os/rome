@@ -192,10 +192,9 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
-  // Fire-and-forget: tailscale-based remote discovery is low-priority, and its
-  // initial `tailscale status` probe blocks ~2s when the daemon isn't running.
-  // Awaiting it here would put that cost on every forked worker's engine-build
-  // critical path (e.g. send_message); let it warm up in the background instead.
+  // Fire-and-forget: discovery is low-priority. Awaiting it here would put its
+  // cost on every forked worker's engine-build critical path (e.g.
+  // send_message); let it warm up in the background instead.
   void capabilityDiscovery.start().catch(() => {
     // Best effort in workers.
   });
@@ -302,7 +301,6 @@ function mainChannel(name: string, service: Pick<ChannelsService, "send">): Chan
       name,
       send: {
         send: (chatId, message) => service.send(name, chatId, message),
-        replies: null,
         direct: null,
       },
       inbound: null,

@@ -1,5 +1,4 @@
-// Chat history as Dream reads it through the chat reads Rome hands apps. A
-// host that predates Chats hands none, and Dream reads Rome's tables as before.
+// Chat history as Dream reads it through the chat reads Rome hands apps.
 import type { RomeAppContext } from "@rome-os/app-runtime";
 import type { ChatLine, ChatReads } from "@rome-os/app-runtime/chats";
 import { ACCOUNT_KINDS } from "./chat-activity.js";
@@ -11,10 +10,13 @@ export interface ChatHistory {
   lines: ChatLine[];
 }
 
-/** The chat reads Rome hands this app, or null when the host offers none. */
-export function chatReadsOf(appContext: Pick<RomeAppContext, "repositories">): ChatReads | null {
+/** The chat reads Rome hands this app. Dream reads chats only through them,
+ *  so a host that offers none fails the run rather than reading nothing. */
+export function chatReadsOf(appContext: Pick<RomeAppContext, "repositories">): ChatReads {
   const chats = appContext.repositories?.chats;
-  if (!chats?.recentChats || !chats.transcript || !chats.traces) return null;
+  if (!chats?.recentChats || !chats.transcript || !chats.traces) {
+    throw new Error("Dream reads chats through Chats, and this host offers no chat reads");
+  }
   return {
     recentChats: chats.recentChats.bind(chats),
     transcript: chats.transcript.bind(chats),

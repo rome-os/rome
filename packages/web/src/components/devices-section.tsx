@@ -107,13 +107,7 @@ export function DevicesSection() {
           locale={i18n.language}
         />
       )}
-      <Section aria-labelledby="devices-title">
-        <SectionHeader>
-          <SectionHeading>
-            <SectionTitle id="devices-title">{t("devices.title")}</SectionTitle>
-            <SectionDescription>{t("devices.description")}</SectionDescription>
-          </SectionHeading>
-        </SectionHeader>
+      <Section aria-label={t("devices.title")}>
         <Card>
           <CardContent>
             <div className="space-y-2">

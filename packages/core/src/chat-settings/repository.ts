@@ -404,9 +404,6 @@ export class ChatSettingsRepository {
           now,
         );
         const placedAt = new Date((startSecond - 1) * 1000);
-        // The legacy source columns are still written for readers that have
-        // not moved to the speaker's chat and account.
-        const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
         tx.insert(romeSessions)
           .values({
             id,
@@ -417,10 +414,6 @@ export class ChatSettingsRepository {
             largeModelSelection: null,
             agentName: null,
             type: "channel",
-            sourceChannel: channel,
-            sourceThreadId: at,
-            sourceThreadName: name,
-            sourceThreadType,
             chatId: chat.id,
             chatPlatform: chat.platform,
             accountId: via.id,
@@ -434,7 +427,6 @@ export class ChatSettingsRepository {
           .set({
             // A placeholder leaves the name the session has.
             ...(placeholder ? {} : { name }),
-            sourceThreadType,
             // The row is this account's speaker in this chat. One stored
             // before it stood in a chat stands here now, and one left by the
             // account the channel was paired as before moves here, as the
@@ -519,11 +511,20 @@ export class ChatSettingsRepository {
   ): void {
     this.db.transaction((tx) => {
       const via = this.accountOn(channel);
-      const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parent = descriptor.parent
         ? this.speakerAt(tx, channel, descriptor.parent.chatId)
         : undefined;
       const parentSessionId = parent?.id ?? null;
+      // A thread whose parent Rome holds no speaker for stands in no chat. The
+      // legacy chats backfill places it later, by these source columns.
+      const legacy = parent?.chatId
+        ? {}
+        : {
+            sourceChannel: channel,
+            sourceThreadId: descriptor.ref.chatId,
+            sourceThreadName: descriptor.displayName,
+            sourceThreadType: descriptor.kind === "dm" ? "private" : descriptor.kind,
+          };
       const now = new Date();
       tx.insert(romeSessions)
         .values({
@@ -535,10 +536,7 @@ export class ChatSettingsRepository {
           largeModelSelection: null,
           agentName: null,
           type: "channel",
-          sourceChannel: channel,
-          sourceThreadId: descriptor.ref.chatId,
-          sourceThreadName: descriptor.displayName,
-          sourceThreadType,
+          ...legacy,
           channelSettings: null,
           parentSessionId,
           chatId: parent?.chatId ?? null,
@@ -565,8 +563,7 @@ export class ChatSettingsRepository {
       tx.update(romeSessions)
         .set({
           name: descriptor.displayName,
-          sourceThreadName: descriptor.displayName,
-          sourceThreadType,
+          ...legacy,
           parentSessionId,
           // As in `mutate`, the row is this account's speaker, in its
           // parent's chat when Rome holds that parent.

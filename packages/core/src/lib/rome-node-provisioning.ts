@@ -1,4 +1,4 @@
-import { authorizeServer } from "@rome-os/node-core/auth";
+import { authorizeServer, configureSignerCaller } from "@rome-os/node-core/auth";
 import {
   nodeConfigFromEnvironment,
   readOptionalCallerCredential,
@@ -6,7 +6,7 @@ import {
 } from "@rome-os/node-core/client";
 import { createLogger } from "../logger.js";
 import { withTracingSuppressed } from "../telemetry.js";
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer, isInstanceLinked, signerSocketPath } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 const log = createLogger("rome-node-provisioning");
@@ -16,17 +16,25 @@ export function createNodeCallerProvisioner(): () => Promise<void> {
   let pending: Promise<void> | undefined;
   return () => {
     if (pending) return pending;
-    const token = getInstanceToken();
-    const origin = getRomeCloudOrigin();
     // Deferring setup also catches synchronous configuration failures without blocking startup.
     pending = Promise.resolve()
       .then(async () => {
+        const origin = getRomeCloudOrigin();
         const config = nodeConfigFromEnvironment(process.env);
-        if (token && origin) {
-          await authorizeServer(origin, token, config);
+        const signerSocket = signerSocketPath();
+        if (signerSocket) {
+          // Until Rome Cloud knows the signer key, the caller could not connect with it.
+          if (!origin || !isInstanceLinked()) return;
+          await configureSignerCaller(origin, signerSocket, config);
           log.info("Node caller authorization ready");
-        } else if (!(await readOptionalCallerCredential(config))) {
-          return;
+        } else {
+          const token = await cloudBearer();
+          if (token && origin) {
+            await authorizeServer(origin, token, config);
+            log.info("Node caller authorization ready");
+          } else if (!(await readOptionalCallerCredential(config))) {
+            return;
+          }
         }
         try {
           // Discovery is refused until the spawned daemon listens. A real

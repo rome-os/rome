@@ -1,6 +1,6 @@
 // Runtime browser config for the SPA shell — pure builder,
-// no fs deps (the container-boot script does the write, mirroring how
-// `gateway-html.ts` builds and `scripts/generate-caddyfile.ts` writes).
+// no fs deps (the container-boot script `scripts/generate-caddyfile.ts` does
+// the write).
 //
 // The SPA bundle is deployment-agnostic; per-deployment browser config rides a
 // tiny classic script, `runtime-config.js`, that `packages/web/index.html`

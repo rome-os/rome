@@ -3,7 +3,7 @@ import { context, propagation, trace } from "@opentelemetry/api";
 import { isTracingSuppressed } from "@opentelemetry/core";
 import { node as nodeTracing } from "@opentelemetry/sdk-node";
 
-const auth = rs.hoisted(() => ({ authorizeServer: rs.fn() }));
+const auth = rs.hoisted(() => ({ authorizeServer: rs.fn(), configureSignerCaller: rs.fn() }));
 const daemon = rs.hoisted(() => ({
   startDaemon: rs.fn(),
   nodeConfigFromEnvironment: rs.fn(() => ({ directory: "/tmp/rome-node-test", port: 12345 })),
@@ -14,14 +14,17 @@ rs.mock("@rome-os/node-core/client", () => daemon);
 
 import { createNodeCallerProvisioner } from "./rome-node-provisioning.js";
 import { createNodeDevicesService } from "./node-devices.js";
-import { setInstanceTokenInMemory } from "./instance-identity.js";
+import { hydrateInstanceToken, setInstanceTokenInMemory } from "./instance-identity.js";
 
 const originalEnv = { ...process.env };
 const token = "romeinst_current";
 let finish: (error: Error | null) => void;
+// The provisioner awaits the Rome Cloud bearer before it calls authorizeServer.
+const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 beforeEach(() => {
   auth.authorizeServer.mockReset();
+  auth.configureSignerCaller.mockReset();
   daemon.startDaemon.mockReset();
   daemon.startDaemon.mockResolvedValue({ pid: 1234 });
   daemon.readOptionalCallerCredential.mockReset();
@@ -47,7 +50,7 @@ describe("Rome Node startup authorization", () => {
     const ensure = createNodeCallerProvisioner();
     const first = ensure();
     const second = ensure();
-    await Promise.resolve();
+    await flush();
     expect(auth.authorizeServer).toHaveBeenCalledTimes(1);
     const [origin, credential] = auth.authorizeServer.mock.calls[0];
     expect(origin).toBe("https://rome-cloud.example");
@@ -86,13 +89,13 @@ describe("Rome Node startup authorization", () => {
   it("does not reject or retry authorization failures and can run again on the next lifecycle trigger", async () => {
     const ensure = createNodeCallerProvisioner();
     const first = ensure();
-    await Promise.resolve();
+    await flush();
     finish(new Error("Authorization failed"));
     await expect(first).resolves.toBeUndefined();
     expect(auth.authorizeServer).toHaveBeenCalledTimes(1);
     expect(daemon.startDaemon).not.toHaveBeenCalled();
     const next = ensure();
-    await Promise.resolve();
+    await flush();
     expect(auth.authorizeServer).toHaveBeenCalledTimes(2);
     finish(null);
     await next;
@@ -103,16 +106,49 @@ describe("Rome Node startup authorization", () => {
     daemon.startDaemon.mockRejectedValueOnce(new Error("Port in use"));
     const ensure = createNodeCallerProvisioner();
     const first = ensure();
-    await Promise.resolve();
+    await flush();
     finish(null);
     await expect(first).resolves.toBeUndefined();
     expect(daemon.startDaemon).toHaveBeenCalledTimes(1);
 
     const next = ensure();
-    await Promise.resolve();
+    await flush();
     finish(null);
     await next;
     expect(daemon.startDaemon).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Rome Node caller in signer mode", () => {
+  const SOCKET = "/run/rome-signer/signer.sock";
+  const store = (initial: Record<string, unknown>) => ({
+    get: async <T>(key: string) => (initial[key] as T) ?? null,
+    set: async () => {},
+    delete: async () => {},
+  });
+
+  beforeEach(() => {
+    process.env.ROME_SIGNER_SOCKET = SOCKET;
+  });
+  afterEach(() => hydrateInstanceToken(store({})));
+
+  it("points the caller at the signer without exchanging the instance token", async () => {
+    await hydrateInstanceToken(store({ instanceKeyId: "jkt-1" }));
+    await createNodeCallerProvisioner()();
+    expect(auth.authorizeServer).not.toHaveBeenCalled();
+    expect(auth.configureSignerCaller).toHaveBeenCalledWith(
+      "https://rome-cloud.example",
+      SOCKET,
+      expect.anything(),
+    );
+    expect(daemon.startDaemon).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits until Rome Cloud holds the signer key", async () => {
+    await hydrateInstanceToken(store({}));
+    await createNodeCallerProvisioner()();
+    expect(auth.configureSignerCaller).not.toHaveBeenCalled();
+    expect(daemon.startDaemon).not.toHaveBeenCalled();
   });
 });
 

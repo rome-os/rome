@@ -22,7 +22,6 @@ import { channelList } from "../../chats/connected-accounts/connected-account-li
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
-import { SessionsRepository } from "../../db/repositories/sessions.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
@@ -38,7 +37,7 @@ import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
-import { SessionManager } from "../../core/session-manager.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
@@ -95,7 +94,7 @@ export interface TestRomeOptions {
 }
 
 export interface TestRomeRepos {
-  sessions: SessionsRepository;
+  sessions: SessionRepository;
   approvals: ApprovalsRepository;
   executionJournal: ExecutionJournalRepository;
   actionExecutions: ActionExecutionsRepository;
@@ -211,9 +210,10 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new SessionsRepository(db),
+    sessions: new DrizzleSessionRepository(db, artifactIdentity),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
@@ -236,7 +236,6 @@ async function buildHarness(
       "utf-8",
     );
   }
-  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const agentLoader = new AgentLoader(artifactIdentity);
   await agentLoader.loadAll(agentsDir);
 
@@ -278,13 +277,11 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
-      sessionManager,
-      sessionsRepo: repos.sessions,
+      sessionRepository: repos.sessions,
       promptBuilder,
       actionRegistry,
       modelResolver,

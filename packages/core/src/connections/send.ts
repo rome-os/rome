@@ -109,6 +109,8 @@ export interface DashboardInbox {
 /** What a message says. Text only, for now. */
 export interface Body {
   text: string;
+  /** Skill for a dashboard turn. Other platforms send only the text. */
+  skillName?: string;
 }
 
 export type RefusedState = Exclude<AccountSendState, "yes">;

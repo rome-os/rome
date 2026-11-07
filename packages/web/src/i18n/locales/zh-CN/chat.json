@@ -68,6 +68,8 @@
       "emptyDescription": "Concierge 正在做、计划做或盯着的任务会显示在这里。"
     },
     "messageDetails": "消息详情",
+    "chooseFolder": "选择文件夹…",
+    "removeFolder": "移除文件夹",
     "composerMenu": "添加文件或切换模型",
     "placeholder": "发消息",
     "empty": {
@@ -78,6 +80,17 @@
         "email": "总结一下我的未读邮件",
         "task": "帮我做一个简单的习惯打卡 app"
       }
+    },
+    "topicEmpty": {
+      "title": "开一个长期话题",
+      "description": "给反复出现的事开个专门的地方，比如日历、某个项目、一次旅行。这里的提醒和任务只出现在这个对话里。",
+      "starters": {
+        "life": "当我的生活小助手：日程、账单、快递这些琐事都放这里",
+        "work": "帮我跟进工作上的事：项目进度、PR、会议都放这里",
+        "trip": "帮我规划下个月的旅行，相关的事都放这里"
+      },
+      "justAsk": "只是问个问题？",
+      "backToMain": "回主对话问 →"
     }
   },
   "reply": {
@@ -97,6 +110,7 @@
   "documentTitle": "{{guardian}} 与 {{agent}} | Rome",
   "sidebar": {
     "newChat": "新对话",
+    "loading": "加载中…",
     "noSessions": "暂无会话",
     "openSidebar": "打开侧边栏"
   },
@@ -375,6 +389,9 @@
   },
   "modelSwitch": {
     "quota": "{{from}} 额度已用完，已切换到 {{to}}",
+    "login": "{{from}} 登录失败，已切换到 {{to}}",
+    "temporary": "{{from}} 暂时无法使用，已切换到 {{to}}",
+    "model_limit": "{{fromModel}} 已达限制，已切换到 {{toModel}}",
     "notice": "已切换到 {{model}}"
   },
   "modelSelector": {

@@ -1,22 +1,35 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Plus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ComposioServiceBadge } from "@/components/brand-icons/composio-glyphs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@rome-os/ui/spinner";
 import {
   COMPOSIO_ACCOUNTS_QUERY_KEY,
   COMPOSIO_CATALOG_QUERY_KEY,
+  COMPOSIO_PROJECTS_QUERY_KEY,
   COMPOSIO_STATUS_QUERY_KEY,
+  COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
   composioServiceRows,
   disconnectComposioService,
   fetchComposioAccounts,
   fetchComposioCatalog,
+  fetchComposioProjects,
   fetchComposioWebhookStatus,
+  fetchComposioWebhookTarget,
   registerComposioWebhook,
+  selectComposioProject,
   startComposioConnect,
   type ComposioCatalogEntry,
   type ComposioServiceRow,
@@ -155,20 +168,51 @@ export function useComposioConnect(onFlash: (message: string) => void) {
   return { connect, busySlug };
 }
 
+/** A Composio service in the Connections grids. `row` sits in Connected and
+ *  shows its status; `tile` sits in Add, names the service, and starts its
+ *  connect. The scope is what a search matches and what the
+ *  tile's title shows on hover. */
 export function ComposioServiceRowButton({
   row,
   connected,
   disabled,
   busy,
   onClick,
+  variant = "row",
 }: {
   row: ComposioServiceRow;
   connected: boolean;
   disabled: boolean;
   busy: boolean;
   onClick: () => void;
+  variant?: "row" | "tile";
 }) {
   const { t } = useTranslation("settings");
+  if (variant === "tile") {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="default"
+        align="between"
+        disabled={disabled || busy}
+        onClick={onClick}
+        title={row.scope || undefined}
+        className="h-auto w-full bg-surface py-2 text-left hover:bg-accent"
+        aria-label={`Connect ${row.name}`}
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <ComposioServiceBadge glyph={row.glyph} />
+          <span className="truncate text-ui text-foreground">{row.name}</span>
+        </span>
+        {busy ? (
+          <Spinner size="sm" label={t("common.connecting")} />
+        ) : (
+          <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        )}
+      </Button>
+    );
+  }
   return (
     <Button
       type="button"
@@ -177,33 +221,18 @@ export function ComposioServiceRowButton({
       align="between"
       disabled={disabled || busy}
       onClick={onClick}
-      className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
+      className="h-auto w-full bg-surface py-2 text-left hover:bg-accent"
       aria-label={`${connected ? "Open" : "Connect"} ${row.name}`}
     >
       <span className="flex min-w-0 items-center gap-3">
         <ComposioServiceBadge glyph={row.glyph} />
-        <span className="flex min-w-0 flex-col">
-          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
-            <span className="truncate text-ui text-foreground">{row.name}</span>
-            {/* On Available the Via Composio heading already says so. */}
-            {connected ? (
-              <span className="text-aux text-muted-foreground">
-                {t("connections.composioServices.via")}
-              </span>
-            ) : null}
-          </span>
-          {!connected && row.scope ? (
-            <span className="truncate text-aux text-muted-foreground">{row.scope}</span>
-          ) : null}
-        </span>
+        <span className="truncate text-ui text-foreground">{row.name}</span>
       </span>
       {connected ? (
         <StatusIndicator status={rowStatus(row)} />
       ) : busy ? (
         <Spinner size="sm" label={t("common.connecting")} />
-      ) : (
-        <span className="shrink-0 text-ui text-primary">{t("connections.connect")}</span>
-      )}
+      ) : null}
     </Button>
   );
 }
@@ -324,7 +353,9 @@ export function ComposioServiceDialog({
 /**
  * Whether connected services can deliver events (new email, new issue) to
  * Rome's routines. Signing in and connecting a service register the webhook
- * on their own; Set up again is the manual repair.
+ * on their own; Set up again is the manual repair. A Composio project has one
+ * webhook, so when another Rome on the same project registered last, events go
+ * there and the row says so.
  */
 export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => void }) {
   const { t } = useTranslation("settings");
@@ -333,17 +364,28 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
     queryKey: COMPOSIO_STATUS_QUERY_KEY,
     queryFn: fetchComposioWebhookStatus,
   });
+  const target = useQuery({
+    queryKey: COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
+    queryFn: fetchComposioWebhookTarget,
+  });
   const register = useMutation({
     mutationFn: registerComposioWebhook,
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: COMPOSIO_STATUS_QUERY_KEY });
+      await client.invalidateQueries({ queryKey: COMPOSIO_WEBHOOK_TARGET_QUERY_KEY });
       toast(t("connections.composioServices.webhook.done"));
     },
     onError: (err) => onFlash(err.message),
   });
   if (!status.data) return null;
   const { relayConfigured, webhookRegistered } = status.data;
-  const state = !relayConfigured ? "unavailable" : webhookRegistered ? "ready" : "notReady";
+  const state = !relayConfigured
+    ? "unavailable"
+    : target.data === "elsewhere"
+      ? "elsewhere"
+      : webhookRegistered
+        ? "ready"
+        : "notReady";
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -365,6 +407,76 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
         >
           {t("connections.composioServices.webhook.setUp")}
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The Composio project this Rome uses, and the others of the account, shown
+ * only when the account has more than one. Each
+ * Rome uses one project, so two Romes on one account each pick their own to
+ * both receive events. Switching moves event delivery to the picked project;
+ * connections stay with the project they were made in.
+ */
+export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => void }) {
+  const { t } = useTranslation("settings");
+  const client = useQueryClient();
+  const [switched, setSwitched] = useState(false);
+  const projects = useQuery({
+    queryKey: COMPOSIO_PROJECTS_QUERY_KEY,
+    queryFn: fetchComposioProjects,
+  });
+  const select = useMutation({
+    mutationFn: selectComposioProject,
+    onSuccess: async (result) => {
+      setSwitched(true);
+      if (result.webhookError) onFlash(result.webhookError);
+      await Promise.all(
+        [
+          COMPOSIO_PROJECTS_QUERY_KEY,
+          COMPOSIO_STATUS_QUERY_KEY,
+          COMPOSIO_WEBHOOK_TARGET_QUERY_KEY,
+          COMPOSIO_ACCOUNTS_QUERY_KEY,
+        ].map((queryKey) => client.invalidateQueries({ queryKey })),
+      );
+    },
+    onError: (err) => onFlash(err.message),
+  });
+  const items = projects.data?.fixed ? [] : (projects.data?.items ?? []);
+  const selected = items.find((p) => p.selected);
+  // Most accounts have one project, so there is nothing to pick and no row,
+  // unless none of them is this Rome's: then the guardian picks one.
+  if (items.length === 0 || (items.length < 2 && selected)) return null;
+  return (
+    <div className="flex flex-col gap-1 rounded-8 border border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-ui">{t("connections.composioServices.project.title")}</span>
+        <Select
+          value={selected?.id}
+          disabled={select.isPending}
+          onValueChange={(id) => {
+            if (id !== selected?.id) select.mutate(id);
+          }}
+        >
+          <SelectTrigger size="sm" aria-label={t("connections.composioServices.project.label")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.isDefault
+                  ? t("connections.composioServices.project.default", { name: project.name })
+                  : project.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {switched ? (
+        <p className="text-aux text-muted-foreground">
+          {t("connections.composioServices.project.switched")}
+        </p>
       ) : null}
     </div>
   );

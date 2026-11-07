@@ -1,8 +1,6 @@
-import { sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
+import { describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
-import { fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
+import { type FakeChat, fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction } from "./index.js";
 
 const actionConfig = {
@@ -15,16 +13,34 @@ const actionConfig = {
   sideEffects: "read-only",
 } as const;
 
-function makeDeps(rows: unknown[]): AppActionRuntimeDeps {
-  return {
-    appContext: {
-      db: {
-        connection: {
-          all: () => rows,
-        },
-      },
-    },
-  } as unknown as AppActionRuntimeDeps;
+// Ten minutes ago, inside every window the tests ask for.
+const T0 = Math.floor(Date.now() / 1000) - 600;
+
+interface Row {
+  session_id: string;
+  session_name: string;
+  role: string;
+  content: string;
+  created_at: number;
+}
+
+/** A host whose dashboard chats hold `rows`, grouped by session. */
+function makeDeps(rows: Row[]): AppActionRuntimeDeps {
+  const chats = new Map<string, FakeChat>();
+  for (const row of rows) {
+    const chat = chats.get(row.session_id) ?? {
+      chat: { sessionId: row.session_id, name: row.session_name },
+      lines: [],
+    };
+    chat.lines.push({
+      role: row.role as FakeChat["lines"][number]["role"],
+      content: row.content,
+      createdAt: new Date(row.created_at * 1000),
+    });
+    chats.set(row.session_id, chat);
+  }
+  const reads = fakeChatReads([...chats.values()]);
+  return { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
 }
 
 describe("get_webchat_conversations", () => {
@@ -35,14 +51,14 @@ describe("get_webchat_conversations", () => {
         session_name: "Chat A",
         role: "user",
         content: "hello",
-        created_at: 1700000000,
+        created_at: T0,
       },
       {
         session_id: "s1",
         session_name: "Chat A",
         role: "assistant",
         content: "hi there",
-        created_at: 1700000010,
+        created_at: T0 + 10,
       },
     ];
 
@@ -76,7 +92,7 @@ describe("get_webchat_conversations", () => {
           { type: "text", text: "Here is the answer" },
           { type: "tool_use", id: "t1", name: "search", input: {} },
         ]),
-        created_at: 1700000000,
+        created_at: T0,
       },
     ];
 
@@ -96,7 +112,7 @@ describe("get_webchat_conversations", () => {
         session_name: "Chat",
         role: "user",
         content: JSON.stringify("a plain string"),
-        created_at: 1700000000,
+        created_at: T0,
       },
     ];
 
@@ -115,7 +131,7 @@ describe("get_webchat_conversations", () => {
         session_name: "Chat",
         role: "user",
         content: "just plain text",
-        created_at: 1700000000,
+        created_at: T0,
       },
     ];
 
@@ -137,7 +153,7 @@ describe("get_webchat_conversations", () => {
           { type: "tool_result", content: "internal stuff" },
           { type: "text", text: "visible answer" },
         ]),
-        created_at: 1700000000,
+        created_at: T0,
       },
     ];
 
@@ -157,14 +173,14 @@ describe("get_webchat_conversations", () => {
         session_name: "Chat A",
         role: "user",
         content: "msg1",
-        created_at: 1700000000,
+        created_at: T0,
       },
       {
         session_id: "s2",
         session_name: "Chat B",
         role: "user",
         content: "msg2",
-        created_at: 1700000010,
+        created_at: T0 + 10,
       },
     ];
 
@@ -178,24 +194,41 @@ describe("get_webchat_conversations", () => {
     expect(data.content).toContain("---");
   });
 
-  it("returns error when DB query fails", async () => {
-    const deps = {
-      appContext: {
-        db: {
-          connection: {
-            all: () => {
-              throw new Error("db locked");
-            },
-          },
-        },
-      },
-    } as unknown as AppActionRuntimeDeps;
+  it("returns error when reading chats fails", async () => {
+    const reads = fakeChatReads([]);
+    reads.recentChats = async () => {
+      throw new Error("db locked");
+    };
+    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
 
     const action = createAction(actionConfig, deps);
     const result = await action.execute({});
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toContain("db locked");
+  });
+
+  it("returns error when the host offers no chat reads", async () => {
+    const deps = { appContext: {} } as unknown as AppActionRuntimeDeps;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toContain("no chat reads");
+  });
+
+  it("scopes to one session", async () => {
+    const deps = makeDeps([
+      { session_id: "a", session_name: "Chat A", role: "user", content: "from a", created_at: T0 },
+      { session_id: "b", session_name: "Chat B", role: "user", content: "from b", created_at: T0 },
+    ]);
+
+    const result = await createAction(actionConfig, deps).execute({ sessionId: "a" });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { content: string };
+    expect(data.content).toContain("from a");
+    expect(data.content).not.toContain("from b");
   });
 
   it("returns no-readable-messages when all content is empty", async () => {
@@ -205,7 +238,7 @@ describe("get_webchat_conversations", () => {
         session_name: "Chat",
         role: "assistant",
         content: JSON.stringify([{ type: "tool_use", id: "t1", name: "x", input: {} }]),
-        created_at: 1700000000,
+        created_at: T0,
       },
     ];
 
@@ -215,118 +248,6 @@ describe("get_webchat_conversations", () => {
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { content: string };
     expect(data.content).toContain("(No readable messages found.)");
-  });
-});
-
-describe("get_webchat_conversations against the system schema", () => {
-  let testDb: TestDb;
-
-  beforeEach(() => {
-    testDb = createTestDb();
-  });
-
-  afterEach(() => {
-    testDb.close();
-  });
-
-  function realDeps(): AppActionRuntimeDeps {
-    return { appContext: { db: { connection: testDb.db } } } as unknown as AppActionRuntimeDeps;
-  }
-
-  function seedSession(id: string, name: string, type: string, createdAt: number): void {
-    testDb.db.run(sql`
-      INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-      VALUES (${id}, ${name}, ${type}, ${createdAt}, ${createdAt})
-    `);
-  }
-
-  function seedMessage(
-    id: string,
-    sessionId: string,
-    role: string,
-    content: string,
-    createdAt: number,
-  ): void {
-    testDb.db.run(sql`
-      INSERT INTO rome_agent_messages (id, session_id, role, content, created_at)
-      VALUES (${id}, ${sessionId}, ${role}, ${content}, ${createdAt})
-    `);
-  }
-
-  // The shape core persists: text parts carry their text in `content`.
-  const text = (value: string) => JSON.stringify([{ type: "text", content: value }]);
-
-  it("reads webchat and handoff conversations, not channels or background runs", async () => {
-    const now = Math.floor(Date.now() / 1000);
-    seedSession("web", "Web chat", "webchat", now - 60);
-    seedSession("handoff", "Handoff chat", "webchat_handoff", now - 60);
-    seedSession("group", "Group chat", "channel", now - 60);
-    seedSession("bg", "Dream run", "action", now - 60);
-    seedMessage("m1", "web", "user", text("web question"), now - 50);
-    seedMessage("m2", "web", "trace", "[]", now - 45);
-    seedMessage(
-      "m4",
-      "web",
-      "assistant",
-      JSON.stringify([{ type: "text", content: "web answer", turnPhase: "final" }]),
-      now - 40,
-    );
-    seedMessage("m5", "handoff", "user", text("handoff question"), now - 35);
-    seedMessage("m6", "group", "user", text("group member message"), now - 30);
-    seedMessage("m7", "bg", "user", text("dream prompt"), now - 20);
-
-    const result = await createAction(actionConfig, realDeps()).execute({ windowHours: 1 });
-
-    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
-    const data = result.data as { messageCount: number; content: string };
-    expect(data.messageCount).toBe(4);
-    expect(data.content).toContain("### Conversation: Web chat");
-    expect(data.content).toContain("**Guardian**: web question");
-    expect(data.content).toContain("**Agent**: web answer");
-    expect(data.content).toContain("### Conversation: Handoff chat");
-    expect(data.content).toContain("**Guardian**: handoff question");
-    expect(data.content).not.toContain("group member message");
-    expect(data.content).not.toContain("dream prompt");
-  });
-
-  it("leaves out chats a visitor owns or wrote in", async () => {
-    const now = Math.floor(Date.now() / 1000);
-    seedSession("mine", "Mine", "webchat", now - 60);
-    seedSession("shared", "Shared", "webchat", now - 60);
-    seedSession("theirs", "Theirs", "webchat", now - 60);
-    testDb.db.run(sql`UPDATE rome_sessions SET owner_key = 'visitor:acc' WHERE id = 'theirs'`);
-    seedMessage("m1", "mine", "user", text("guardian request"), now - 50);
-    seedMessage("m2", "shared", "user", text("guardian start"), now - 50);
-    seedMessage("m3", "shared", "user", text("visitor request"), now - 40);
-    testDb.db.run(
-      sql`UPDATE rome_agent_messages SET actor = '{"kind":"visitor","accountId":"acc","email":"v@example.com"}' WHERE id = 'm3'`,
-    );
-    seedMessage("m4", "theirs", "user", text("owner request"), now - 50);
-
-    const all = await createAction(actionConfig, realDeps()).execute({ windowHours: 1 });
-    const one = await createAction(actionConfig, realDeps()).execute({ sessionId: "shared" });
-
-    const content = (all as { data: { content: string } }).data.content;
-    expect(content).toContain("guardian request");
-    expect(content).not.toContain("guardian start");
-    expect(content).not.toContain("visitor request");
-    expect(content).not.toContain("owner request");
-    expect((one as { data: { messageCount: number } }).data.messageCount).toBe(0);
-  });
-
-  it("scopes to one session", async () => {
-    const now = Math.floor(Date.now() / 1000);
-    seedSession("a", "Chat A", "webchat", now - 60);
-    seedSession("b", "Chat B", "webchat", now - 60);
-    seedMessage("m1", "a", "user", text("from a"), now - 50);
-    seedMessage("m2", "b", "user", text("from b"), now - 50);
-
-    const result = await createAction(actionConfig, realDeps()).execute({ sessionId: "a" });
-
-    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
-    const data = result.data as { content: string };
-    expect(data.content).toContain("from a");
-    expect(data.content).not.toContain("from b");
   });
 });
 

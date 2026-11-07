@@ -48,7 +48,7 @@ async function openAsSpeaker(
   named: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
   // An address that names no parent may be a thread Rome already knows, as
-  // one a streamed reply opened: the session stands in that thread of its
+  // one a reply opened: the session stands in that thread of its
   // chat, not in a chat of its own.
   const thread =
     named.parentThreadId === undefined

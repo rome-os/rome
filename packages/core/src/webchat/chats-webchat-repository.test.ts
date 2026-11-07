@@ -278,6 +278,8 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
+  // A subagent, fork or action run stands in no chat, so its prompts and
+  // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
@@ -285,6 +287,7 @@ describe("ChatsWebChatRepository", () => {
     expect(session("fork-1")?.chatId).toBeNull();
     expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
     expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+    expect(await repo.getMessageCount("fork-1")).toBe(1);
   });
 
   it("moves a promoted fork's lines into its new chat, linked to their turns", async () => {
@@ -485,14 +488,13 @@ describe("ChatsWebChatRepository", () => {
     expect(session("handoff-1")?.chatId).toBeNull();
   });
 
-  it("keeps a chat's notifications in its transcript", async () => {
+  // A dashboard notice is not a message in Chats yet (#1672).
+  it("leaves a dashboard notice out of its chat's transcript", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set"));
 
-    expect((await repo.getMessages("chat-1")).map((line) => [line.id, line.role])).toEqual([
-      ["note-1", "notification"],
-    ]);
-    expect(await repo.getMessageCount("chat-1")).toBe(1);
+    expect(await repo.getMessages("chat-1")).toEqual([]);
+    expect(await repo.getMessageCount("chat-1")).toBe(0);
   });
   it("reads a channel chat's notification once, from Chats, though its old row stays", async () => {
     const telegram = new ChatRepository(testDb.db).start(
@@ -534,7 +536,9 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
   });
 
-  it("reads its own account's copy of a message where each account holds one", async () => {
+  // Each of Rome's accounts records its own copy (#1670), and every message
+  // recorded in the place is a line.
+  it("reads every account's copy of a message where each account holds one", async () => {
     // A Telegram basic group numbers its messages per member account.
     const group = new ChatRepository(testDb.db).start(
       chatKey("telegram", "-42" as ChatId),
@@ -571,8 +575,9 @@ describe("ChatsWebChatRepository", () => {
 
     expect((await repo.getMessages("channel:tg-sales:-42")).map((line) => line.id)).toEqual([
       "111:5",
+      "222:7",
     ]);
-    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(1);
+    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(2);
   });
 
   it("reads a steered input after the card it answers, in the same turn", async () => {
@@ -626,6 +631,7 @@ describe("ChatsWebChatRepository", () => {
       "in-2",
     ]);
   });
+
   it("keeps a promoted fork's inputs where they stand, queued or run", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.recordUserInput("in-1", "fork-1", text("Run"));
@@ -827,14 +833,11 @@ describe("ChatsWebChatRepository", () => {
     expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
   });
 
-  it("finds a chat by a notice it keeps of its own", async () => {
+  it("leaves a dashboard notice out of search, as out of the transcript", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set for the ferry"));
 
-    const matches = await repo.searchSessionMessages("ferry");
-    expect(matches.map((match) => [match.session.id, match.message.id])).toEqual([
-      ["chat-1", "note-1"],
-    ]);
+    expect(await repo.searchSessionMessages("ferry")).toEqual([]);
   });
 
   it("counts the lines from Rome since the chat was last read, up to a cap", async () => {

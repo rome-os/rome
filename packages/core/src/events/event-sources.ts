@@ -57,11 +57,11 @@ export class EventSources {
     return matches[0];
   }
 
-  /** One catalog entry per declared type, so a type is discoverable before
-   * its first emission. */
+  /** One catalog entry per declared type, or the event itself when a source
+   * declares one exact name, so it is discoverable before its first emission. */
   declaredEntries(): EventCatalogEntry[] {
     return this.deps.listSources().flatMap((source) =>
-      source.types.map((type) => ({
+      (source.events.includes("*") ? source.types : [""]).map((type) => ({
         eventType: source.events.replaceAll("*", type),
         appId: source.appId,
         subscribable: true,

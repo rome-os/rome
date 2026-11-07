@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import {
   createEmptyLegacyArtifactBindings,
@@ -14,6 +13,7 @@ import {
 } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
+import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -34,7 +34,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "./model-selector.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -55,23 +55,42 @@ function createProvider(id: ProviderId) {
   const opened: ModelSessionParams[] = [];
   /** How many of the next turns fail before reaching the thread. */
   const failing = { next: 0 };
+  /** Claude names a new thread only after its first assistant message. */
+  const naming = { atOpen: true };
+  /** A completed turn can leave no position to branch at. */
+  const positions = { reported: true };
   const openSession = rs.fn(async (params: ModelSessionParams) => {
     opened.push(params);
     const session = createSessionFromRun(
       id,
-      async function* (input): AsyncIterable<AgentEvent> {
+      async function* (input): AsyncIterable<AgentEvent | ModelSessionEvent> {
         calls.push(input);
         if (failing.next > 0) {
           failing.next -= 1;
           yield { type: "error", error: "quota exhausted" };
           return;
         }
-        yield { type: "result", content: "done" };
+        yield {
+          type: "result",
+          content: "done",
+          ...(positions.reported
+            ? {
+                position: {
+                  provider: id,
+                  modelThreadId: `${id}-thread-1`,
+                  checkpointId: `turn-${calls.length}`,
+                },
+              }
+            : {}),
+        };
       },
       params,
     );
-    session.providerThreadId = params.providerThreadId ?? `${id}-thread-${opened.length}`;
-    return session;
+    const modelThreadId =
+      params.thread.kind === "resume"
+        ? params.thread.modelThreadId
+        : `${id}-thread-${opened.length}`;
+    return { ...session, modelThreadId: naming.atOpen ? modelThreadId : undefined };
   });
   const provider: ModelProvider = {
     id,
@@ -79,7 +98,7 @@ function createProvider(id: ProviderId) {
     builtinTools: new Set<string>(),
     openSession,
   };
-  return { provider, openSession, calls, opened, failing };
+  return { provider, openSession, calls, opened, failing, naming, positions };
 }
 
 function healthyState() {
@@ -97,8 +116,7 @@ describe("continuation notice through AgentSessionManager", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
-  let sessionManager: SessionManager;
-  let sessionsRepo: SessionsRepository;
+  let sessionRepository: SessionRepository;
   let webchatRepo: WebChatRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
@@ -127,8 +145,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager,
-        sessionsRepo,
+        sessionRepository,
         webchatRepo,
         promptBuilder,
         actionRegistry,
@@ -192,8 +209,7 @@ describe("continuation notice through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionsRepo = new SessionsRepository(testDb.db);
-    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");
@@ -234,7 +250,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "Which animal was it, and what was my worry?");
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna"]);
-    expect(openai.opened[0]?.providerThreadId).toBeUndefined();
+    expect(openai.opened[0]?.thread).toEqual({ kind: "new" });
     const prompt = openai.calls[0]?.prompt ?? "";
     const notice = continuationOf(prompt);
     expect(notice).toContain('previous_model="claude-sonnet-5-5"');
@@ -247,10 +263,53 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "Thanks.");
     expect(continuationOf(openai.calls[1]?.prompt)).toBeNull();
     expect(openai.calls[1]?.prompt).not.toContain("<thread_context>");
-    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: "gpt-6-luna",
     });
+  });
+
+  it("has no position to branch at until a turn runs on the new provider's thread", async () => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    openai.naming.atOpen = false;
+    await acquire(manager, "gpt-6-luna");
+
+    const events: AgentEvent[] = [];
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Cannot fork before a turn has left a checkpoint",
+      }),
+    );
+  });
+
+  it.each([
+    ["failed", () => (anthropic.failing.next = 1)],
+    ["left no position", () => (anthropic.positions.reported = false)],
+  ])("never branches at an earlier turn when the latest one %s", async (_label, arrange) => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    arrange();
+    await chatTurn(session, "second");
+
+    const events: AgentEvent[] = [];
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Cannot fork before a turn has left a checkpoint",
+      }),
+    );
   });
 
   it("keeps the notice due until a turn on the new thread returns a result", async () => {
@@ -280,12 +339,12 @@ describe("continuation notice through AgentSessionManager", () => {
       "claude-sonnet-5-5",
       "claude-opus-5-5[1m]",
     ]);
-    expect(anthropic.opened.map((params) => params.providerThreadId)).toEqual([
-      undefined,
-      "anthropic-thread-1",
+    expect(anthropic.opened.map((params) => params.thread)).toEqual([
+      { kind: "new" },
+      { kind: "resume", modelThreadId: "anthropic-thread-1" },
     ]);
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
-    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       model: "claude-opus-5-5[1m]",
     });
   });
@@ -312,7 +371,10 @@ describe("continuation notice through AgentSessionManager", () => {
 
     const resumed = await acquire(createManager(), "claude-sonnet");
     await chatTurn(resumed, "second");
-    expect(anthropic.opened[1]?.providerThreadId).toBe("anthropic-thread-1");
+    expect(anthropic.opened[1]?.thread).toEqual({
+      kind: "resume",
+      modelThreadId: "anthropic-thread-1",
+    });
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
     expect(anthropic.calls[1]?.prompt).not.toContain("<thread_context>");
   });
@@ -323,12 +385,8 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "first");
     await first.shutdown();
 
-    await sessionsRepo.rotateProviderGeneration({
-      agentName: AGENT,
-      channelThreadKey: key.channelThreadKey,
-      newSessionId: randomUUID(),
-      chatId: CHAT,
-    });
+    const retired = (await sessionRepository.current(key.channelThreadKey, AGENT))!;
+    await sessionRepository.replace(retired, retired.replace({ deprecatedChatId: CHAT }));
     await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
   });
@@ -340,12 +398,13 @@ describe("continuation notice through AgentSessionManager", () => {
   });
 
   it.each([
-    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai"],
-    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic"],
-    [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai"],
-    [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic"],
-  ] as const)("cold background resume concierge=%s %s to %s", async (concierge, from, to, source, target) => {
-    const chatId = concierge ? "concierge" : CHAT;
+    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "concierge"],
+    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", "concierge"],
+    // A topic chat is a Concierge chat like the main one.
+    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "topic-1"],
+    [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", CHAT],
+    [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", CHAT],
+  ] as const)("cold background resume concierge=%s %s to %s (%s to %s) in %s", async (concierge, from, to, source, target, chatId) => {
     const agentName = concierge ? "core:concierge" : AGENT;
     if (concierge) {
       await writeFile(
@@ -389,7 +448,7 @@ describe("continuation notice through AgentSessionManager", () => {
       await webchatRepo.updateSessionLargeModelSelection(chatId, from);
       const service = new ConciergeService({
         webchatRepo,
-        sessionManager,
+        sessionRepository,
         agentSessionManager: manager,
         aiToolState: { get: () => raw },
       } as unknown as ConciergeDeps);
@@ -409,7 +468,7 @@ describe("continuation notice through AgentSessionManager", () => {
     expect(continuationOf(prompt)).toEqual(
       concierge ? expect.stringContaining("system:fetch_channel_history") : null,
     );
-    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+    expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: concierge ? target : source,
       model: concierge
         ? to === "claude-sonnet"

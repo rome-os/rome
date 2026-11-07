@@ -1,32 +1,12 @@
-import type { ModelSessionForkOpenParams } from "../agent-runner.js";
+import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../agent/index.js";
 import {
   buildFacadeBundle,
   type FacadeBundle,
   type FacadeParams,
   type FacadeToolDef,
-  type FacadeToolResult,
 } from "../mcp-facade.js";
-import type { ModelToolCallContext } from "../agent-runner.js";
 
-export type RomeMcpGroup = "actions" | "subagents" | "skills" | "ask_user";
-
-export interface RomeMcpToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
-export interface RomeMcpServer {
-  listTools(group: RomeMcpGroup): readonly RomeMcpToolDefinition[];
-  callTool(
-    group: RomeMcpGroup,
-    name: string,
-    input?: Record<string, unknown>,
-    context?: ModelToolCallContext,
-  ): Promise<FacadeToolResult>;
-}
-
-function toolsForGroup(bundle: FacadeBundle, group: RomeMcpGroup): FacadeToolDef[] {
+function toolsForGroup(bundle: FacadeBundle, group: RomeToolGroup): FacadeToolDef[] {
   switch (group) {
     case "actions":
       return bundle.actions;
@@ -39,46 +19,32 @@ function toolsForGroup(bundle: FacadeBundle, group: RomeMcpGroup): FacadeToolDef
   }
 }
 
-/**
- * The single session-params → FacadeParams mapping. Every server built for a
- * model session (fresh open or borrowed exact-fork turn) must go through this
- * so a new facade capability can't be wired into one path and silently
- * dropped from the other.
- */
-export function createRomeMcpServerForSession(params: ModelSessionForkOpenParams): RomeMcpServer {
-  return createRomeMcpServer({
-    getActionCatalog: params.getActionCatalog,
-    getSkillCatalog: params.getSkillCatalog,
-    subagentTools: params.subagentTools,
-    executeAction: params.executeAction,
-    executeSubagent: params.executeSubagent,
-    supportsInteractiveSurface: params.supportsInteractiveSurface,
-    interactiveSurfaceDetached: params.interactiveSurfaceDetached,
-    executeDefer: params.executeDefer,
-    sessionTools: params.sessionTools,
-    routineActivation: params.routineActivation,
-    textPrivate: params.textPrivate,
-  });
+function toDefinition({
+  name,
+  description,
+  inputSchema,
+  endsTurn,
+}: FacadeToolDef): RomeToolDefinition {
+  return { name, description, inputSchema, ...(endsTurn !== undefined ? { endsTurn } : {}) };
 }
 
-export function createRomeMcpServer(params: FacadeParams): RomeMcpServer {
+/**
+ * The Rome tools a model session serves, built once from the run's facade
+ * params. Every model session (a fresh open or an exact fork's turn) gets its
+ * tools from here, so a new facade capability reaches both.
+ */
+export function createRomeTools(params: FacadeParams): RomeTools {
   const bundle = buildFacadeBundle(params);
 
   return {
     listTools(group) {
-      return Object.freeze(
-        toolsForGroup(bundle, group).map(({ name, description, inputSchema }) => ({
-          name,
-          description,
-          inputSchema,
-        })),
-      );
+      return Object.freeze(toolsForGroup(bundle, group).map(toDefinition));
     },
     async callTool(group, name, input = {}, context) {
       const tool = toolsForGroup(bundle, group).find((candidate) => candidate.name === name);
       if (!tool) {
         return {
-          content: [{ type: "text", text: `Unknown MCP tool: ${name}` }],
+          content: [{ type: "text", text: `Unknown tool: ${name}` }],
           isError: true,
         };
       }

@@ -47,6 +47,8 @@ export interface BackendTurnOptions {
   /** The turn is housekeeping for the agent: a chat that draws a typing
    *  indicator for a running turn holds it back until the agent speaks. */
   quiet?: boolean;
+  /** Keeps the turn's input in its saved trace under this label. */
+  inputLabel?: string;
 }
 
 export interface BackendEmitOptions {
@@ -69,8 +71,17 @@ export type BackendSessionTask = (helpers: {
  * timers) and exposes the lower-level `runBackendSessionTask` for callers that
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
+/** Whether a backend turn ran to its end: `failed` when it errored, was
+ *  interrupted, or never ran. */
+export type BackendTurnOutcome = "completed" | "failed";
+
 export interface MainBackendTurnRunner extends BackendTurnRunner {
   runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void>;
+  /** `runAndDeliver`, answering whether the turn ran to its end. */
+  runAndReport(
+    params: BackendTurnParams,
+    options?: BackendTurnOptions,
+  ): Promise<BackendTurnOutcome>;
   setWebchatRuntime(runtime: WebchatSessionStreamHost): void;
   /** Run `task` in the session for (channel, threadId). For webchat it queues
    * behind any in-flight browser turn and its emitted reply rides the SSE push;
@@ -129,6 +140,11 @@ export interface BackendTurnRunnerDeps {
    *  it in Chats as the turn's answer. Absent, a messaging continuation's
    *  reply is refused, since nothing could record it. */
   replies?: Pick<SpeakerReplies, "send">;
+  /** Decides where a turn runs, before anything else: a Concierge turn aimed
+   * at a chat that is archived or gone runs in the main chat. Every backend
+   * turn passes here, so a defer's wake-up, a delivery and a recovery are
+   * routed alike. Absent, the turn runs where its params say. */
+  resolveTurn?: (params: BackendTurnParams) => Promise<BackendTurnParams>;
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
@@ -143,7 +159,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
-    trace: Pick<RunParams, "persistTrace" | "persistTranscript" | "persistAnswer"> = {},
+    trace: Pick<
+      RunParams,
+      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel"
+    > = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -242,62 +261,83 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     runBackendSessionTask,
 
     async runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void> {
-      // Resolve the continued session's project dir up front so the resumed turn
-      // runs where its SDK transcript lives (defer/timer fire on a fresh stack
-      // that never carried it). Undefined ⇒ keep the default-dir fallback.
-      const [workingDir, deviceFolder] = await Promise.all([
-        deps.resolveWorkingDir?.(params.channel, params.threadId),
-        deps.resolveDeviceFolder?.(params.channel, params.threadId),
-      ]);
-
-      if (params.channel === "webchat") {
-        // The turn queues behind any in-flight browser turn and shows live on
-        // the session's stream, but like any channel's turn it saves its own
-        // trace and sends its reply on the channel's `send` port. The chat
-        // keeps its transcript itself, so the runner writes no transcript rows.
-        const send = deps.channel(params.channel)?.send;
-        if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
-        await runBackendSessionTask(
-          params.channel,
-          params.threadId,
-          async ({ emit }) => {
-            await deps.beforeTurn?.(params);
-            let reply = "";
-            let turnId: string | undefined;
-            const trace = { persistTrace: true, persistTranscript: false };
-            for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
-              if (msg.type === "turn_start") turnId = msg.turnId;
-              if (msg.type === "result") reply = msg.content;
-              await emit({ ...msg, agent: params.agentName }, { recorded: true });
-            }
-            if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
-            await send.send(params.threadId as ChatId, {
-              text: reply,
-              ...(turnId ? { turnId } : {}),
-            });
-          },
-          options,
-        );
-        return;
-      }
-
-      // Messaging channels: run the turn here in main, then say the reply
-      // through the session's speaker. Without one the reply could not be
-      // sent, so the turn is not run.
-      assertSpeaker(params.channel);
-      let reply = "";
-      let turnId: string | undefined;
-      // A speaker puts the answer on record as it says it, so the trace keeps
-      // the turn but writes no answer of its own: one that was never sent
-      // must not read as said, and one that was must not be said twice.
-      const trace = { persistAnswer: false };
-      for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
-        if (msg.type === "turn_start") turnId = msg.turnId;
-        if (msg.type === "result") reply = msg.content;
-      }
-      await deliverMessagingReply(params, reply, turnId);
+      await runAndReport(params, options);
     },
+
+    runAndReport,
 
     deliverMessagingReply,
   };
+
+  async function runAndReport(
+    asked: BackendTurnParams,
+    options?: BackendTurnOptions,
+  ): Promise<BackendTurnOutcome> {
+    const params = deps.resolveTurn ? await deps.resolveTurn(asked) : asked;
+    let outcome: BackendTurnOutcome = "failed";
+    // Resolve the continued session's project dir up front so the resumed turn
+    // runs where its SDK transcript lives (defer/timer fire on a fresh stack
+    // that never carried it). Undefined ⇒ keep the default-dir fallback.
+    const [workingDir, deviceFolder] = await Promise.all([
+      deps.resolveWorkingDir?.(params.channel, params.threadId),
+      deps.resolveDeviceFolder?.(params.channel, params.threadId),
+    ]);
+
+    if (params.channel === "webchat") {
+      // The turn queues behind any in-flight browser turn and shows live on
+      // the session's stream, but like any channel's turn it saves its own
+      // trace and sends its reply on the channel's `send` port. The chat
+      // keeps its transcript itself, so the runner writes no transcript rows.
+      const send = deps.channel(params.channel)?.send;
+      if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
+      await runBackendSessionTask(
+        params.channel,
+        params.threadId,
+        async ({ emit }) => {
+          await deps.beforeTurn?.(params);
+          let reply = "";
+          let turnId: string | undefined;
+          const trace = {
+            persistTrace: true,
+            persistTranscript: false,
+            ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+          };
+          for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
+            if (msg.type === "turn_start") turnId = msg.turnId;
+            if (msg.type === "result") reply = msg.content;
+            if (msg.type === "turn_end" && msg.status === "completed") outcome = "completed";
+            await emit({ ...msg, agent: params.agentName }, { recorded: true });
+          }
+          if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
+          await send.send(params.threadId as ChatId, {
+            text: reply,
+            ...(turnId ? { turnId } : {}),
+          });
+        },
+        options,
+      );
+      return outcome;
+    }
+
+    // Messaging channels: run the turn here in main, then say the reply
+    // through the session's speaker. Without one the reply could not be
+    // sent, so the turn is not run.
+    assertSpeaker(params.channel);
+    let reply = "";
+    let turnId: string | undefined;
+    // A speaker puts the answer on record as it says it, so the trace keeps
+    // the turn but writes no answer of its own: one that was never sent
+    // must not read as said, and one that was must not be said twice.
+    const trace = {
+      persistAnswer: false,
+      ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+    };
+    for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
+      if (msg.type === "turn_start") turnId = msg.turnId;
+      if (msg.type === "result") reply = msg.content;
+      if (msg.type === "turn_end" && msg.status === "completed") outcome = "completed";
+    }
+    await deliverMessagingReply(params, reply, turnId);
+    return outcome;
+  }
 }

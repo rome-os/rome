@@ -62,6 +62,104 @@ describe("backend turn delivery", () => {
     });
   });
 
+  it.each([
+    ["completed", "completed"],
+    ["error", "failed"],
+    ["interrupted", "failed"],
+  ] as const)("reports a turn that ended %s as %s", async (status, outcome) => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+        { type: "result", content: "" },
+        { type: "turn_end", turnId: "turn-1", status, durationMs: 5 },
+      ],
+    ]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => undefined });
+      },
+    });
+    const params = {
+      agentName: "core:concierge",
+      sessionId: "s",
+      channel: "webchat",
+      threadId: "concierge",
+      prompt: "<external_events/>",
+    };
+    expect(await runner.runAndReport(params)).toBe(outcome);
+  });
+
+  it("reports a turn that never ran as failed", async () => {
+    const agentRunner = createMockAgentRunner([[]]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+    });
+    // The session queue drops the task without running it.
+    runner.setWebchatRuntime({ enqueueSessionTask: async () => undefined });
+    expect(
+      await runner.runAndReport({
+        agentName: "core:concierge",
+        sessionId: "s",
+        channel: "webchat",
+        threadId: "concierge",
+        prompt: "x",
+      }),
+    ).toBe("failed");
+  });
+
+  it("asks the runner to keep a turn's input only when the caller labels it", async () => {
+    const run = async (options?: { inputLabel?: string }) => {
+      const agentRunner = createMockAgentRunner([
+        [
+          { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+          { type: "result", content: "" },
+        ],
+      ]);
+      const webchat = {
+        name: "webchat",
+        send: { send: rs.fn(), direct: null, activity: null },
+      } as unknown as Channel;
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: (name) => (name === "webchat" ? webchat : null),
+      });
+      runner.setWebchatRuntime({
+        enqueueSessionTask: async (_sessionId, task) => {
+          await task({ emit: async () => undefined });
+        },
+      });
+      await runner.runAndDeliver(
+        {
+          agentName: "core:concierge",
+          sessionId: "s",
+          channel: "webchat",
+          threadId: "concierge",
+          prompt: "<external_events/>",
+        },
+        options,
+      );
+      return agentRunner.calls[0];
+    };
+    expect(await run({ inputLabel: "Following · digest (2)" })).toMatchObject({
+      inputLabel: "Following · digest (2)",
+    });
+    // A task event, a nudge or a defer resume passes no label and keeps no input.
+    expect(await run()).not.toHaveProperty("inputLabel");
+  });
+
   it("passes a quiet turn's option to the webchat runtime, and nothing for an ordinary one", async () => {
     const run = async (options?: { quiet?: boolean }) => {
       const agentRunner = createMockAgentRunner([
@@ -96,6 +194,46 @@ describe("backend turn delivery", () => {
     };
     expect(await run({ quiet: true })).toEqual([{ quiet: true }]);
     expect(await run()).toEqual([undefined]);
+  });
+
+  it("runs every turn where resolveTurn sends it, before it queues", async () => {
+    const queued: string[] = [];
+    const agentRunner = createMockAgentRunner([[{ type: "result", content: "" }]]);
+    const webchat = {
+      name: "webchat",
+      send: {
+        send: async () => ({ messageId: "m", chatId: "concierge" }),
+        direct: null,
+        activity: null,
+      },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+      resolveTurn: async (params) => ({
+        ...params,
+        threadId: "concierge",
+        sessionId: "main-runtime",
+      }),
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (sessionId, task) => {
+        queued.push(sessionId);
+        await task({ emit: async () => {} });
+      },
+    });
+    await runner.runAndDeliver({
+      agentName: "core:concierge",
+      sessionId: "topic-runtime",
+      channel: "webchat",
+      threadId: "archived-topic",
+      prompt: "Wake",
+    });
+    expect(queued).toEqual(["concierge"]);
+    expect(agentRunner.calls[0]).toMatchObject({
+      sessionId: "main-runtime",
+      threadContext: { threadId: "concierge" },
+    });
   });
 
   it("runs beforeTurn when a queued webchat continuation starts, not when it is queued", async () => {

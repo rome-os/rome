@@ -1,5 +1,4 @@
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ChatRow } from "@/components/chat/chat-view";
@@ -163,12 +162,10 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
       if (isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
-        const quota =
-          message.sessionId === CONCIERGE_CHAT_ID
-            ? parseMessageEntries(message).find(
-                (part): part is QuotaSwitchPart => part.type === "quota_switch",
-              )
-            : undefined;
+        // Only a Concierge chat's transcript is grouped here, and any of them may switch.
+        const quota = parseMessageEntries(message).find(
+          (part): part is QuotaSwitchPart => part.type === "quota_switch",
+        );
         if (quota) {
           slots.push({ kind: "notice", key: message.id, model: quota.model, quota });
           automaticModel = quota.model;

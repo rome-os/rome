@@ -9,12 +9,15 @@ import { loadConfig } from "./config.js";
 import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
-  getInstanceToken,
+  cloudBearer,
   hydrateInstanceToken,
+  instanceCredentialId,
+  isInstanceLinked,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
   proveIdentity,
+  onInstanceLinked,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
@@ -36,6 +39,10 @@ import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./us
 import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
+import {
+  AppActionSchemaCache,
+  appActionSchemaCacheBuild,
+} from "./actions/app-action-schema-cache.js";
 import {
   initTelemetry,
   getTracer,
@@ -78,7 +85,6 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PeopleRepository } from "./db/repositories/people.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
@@ -118,9 +124,6 @@ import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.j
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
-import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
-import { ReplyStreams } from "./participation/reply-delivery/streams.js";
-import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
 import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
@@ -142,7 +145,6 @@ import { ExecutionJournalRepository } from "./db/repositories/execution-journal.
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { AgentLoader } from "./core/agent-loader.js";
-import { SessionManager } from "./core/session-manager.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
@@ -156,10 +158,13 @@ import { endInterruptedRuns } from "./actions/restart-recovery.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
-import { AnthropicProvider } from "./core/anthropic-provider.js";
-import { CodexAppServerProvider } from "./core/codex-app-server-provider.js";
-import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
-import { SharedCodexAccountService } from "./core/codex/account-service.js";
+import {
+  AnthropicProvider,
+  CodexAppServerManager,
+  CodexAppServerProvider,
+  DrizzleSessionRepository,
+  SharedCodexAccountService,
+} from "./agent/index.js";
 import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
@@ -169,10 +174,15 @@ import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
+import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { createConciergeOwners } from "./concierge/owners.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
+import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
+import { listConnectionViews } from "./api/routes/connections.js";
+import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -202,7 +212,6 @@ import { HostExecutionService } from "./host-execution/service.js";
 import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
-import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
@@ -227,6 +236,7 @@ import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
 import {
   ensureProfileDevAppsDirInitialized,
+  getProfileAppActionSchemaCachePath,
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
@@ -297,10 +307,7 @@ import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import {
-  syncFavorActionRequirementsForCatalogEvent,
-  syncFavorActionRequirementsFromCatalog,
-} from "./favors/catalog-sync.js";
+import { FavorRequirementSync } from "./favors/catalog-sync.js";
 
 async function main() {
   const config = loadConfig();
@@ -339,7 +346,6 @@ async function main() {
     throw err;
   }
 
-  const sessionsRepo = new SessionsRepository(db);
   // Read on each call, so the registry built below answers it.
   const channelRecords = new ChannelRecordsRepository(db, (kind) =>
     accountLinkOf(connectionRegistry)(kind),
@@ -574,23 +580,6 @@ async function main() {
   // them in Chats. An approval's card goes out on these, so it is on record as
   // the platform shows it.
   const recordedChannels: Channel[] = [];
-  // Reply streaming is off until the guardian turns it on under
-  // Experimental features in Advanced settings. Off, sends go out unpaced and
-  // replies go out whole. On, a channel that can stream paces every write of its
-  // Connection, and the session bridge streams a guardian's direct replies
-  // through the session's speaker.
-  const replyStreamingOn = replyStreamingSwitch(settingsRepo);
-  const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
-  const replyStreams = new ReplyStreams({
-    streaming: replyStreamingOn,
-    clock: systemClock,
-    // A reply is said through its session's speaker, on the platform's own
-    // send port, so it is recorded once.
-    speakers: {
-      channel: (name) => builtChannels?.find((channel) => channel.name === name),
-      replies: chatsWired.replies,
-    },
-  });
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
@@ -599,7 +588,6 @@ async function main() {
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
-    pacing: replyPacing,
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
@@ -788,7 +776,7 @@ async function main() {
   });
   artifactLoadFailuresBooted = true;
   artifactLoadFailureReporter.report("boot");
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
@@ -1065,9 +1053,9 @@ async function main() {
     turnStreams: agentTurnStreamRegistry,
   });
   const romeCloudAccess = (): RomeCloudAccess | null => {
-    const token = getInstanceToken();
+    const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
-    return token && origin ? { token, origin } : null;
+    return credentialId && origin ? { credentialId, bearer: cloudBearer, origin } : null;
   };
   const usageAttribution = new UsageAttributionResolver(
     {
@@ -1095,30 +1083,38 @@ async function main() {
     attribution: usageAttribution,
     credential: () => {
       const access = romeCloudAccess();
-      return access ? credentialFingerprint(access.token) : null;
+      return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
+  // Made here so the Concierge can tell whether a visitor is still served;
+  // it is loaded with the other access settings further down.
+  const dashboardAccessState = new DashboardAccessState();
   const concierge = new ConciergeService({
+    skillCatalog,
     settingsRepo,
+    owners: createConciergeOwners({
+      settingsRepo,
+      visitorProfiles: new VisitorProfilesRepository(db),
+      dashboardAccess: dashboardAccessState,
+    }),
     webchatRepo,
-    sessionManager,
+    sessionRepository,
     aiToolState,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
-    runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
+    runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
   });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
       appCatalog,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       promptBuilder,
       actionRegistry,
       modelResolver,
@@ -1155,7 +1151,6 @@ async function main() {
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
     undefined,
-    replyStreams,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
@@ -1204,6 +1199,7 @@ async function main() {
     resolveWebchatContinuationWorkingDir(channel, threadId, webchatRepo);
 
   const backendTurnRunner = createBackendTurnRunner({
+    resolveTurn: (params) => concierge.resolveTurn(params),
     beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;
@@ -1220,6 +1216,24 @@ async function main() {
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);
+  // The Concierge reaches the connector's watch actions as itself.
+  startConciergeFollowing(concierge, {
+    routines: routinesRepo,
+    routineEngine,
+    actions: actionRegistry,
+    // Every enabled app that declares `watchProvider`, read live so an install
+    // or disable takes effect without a restart. Core names no provider.
+    providers: () =>
+      watchProvidersOf(appCatalog.listResolved(), (name) => actionRegistry.getMetadata(name)),
+    runAction: (name, args, options) =>
+      actionEngine.run(name, args, { initiator: "agent:core:concierge", ...options }),
+    settings: settingsRepo,
+    // The same projection `GET /connections` serves, so both read one model.
+    connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+    items: new ConciergeFollowItemsRepository(db),
+    agentRunner,
+    triageRecord: webchatRepo,
+  });
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -1318,6 +1332,13 @@ async function main() {
     socketPath: config.hostExecutionSocket,
     enabled: config.hostExecutionEnabled,
   });
+  // Importing every app action module costs seconds of CPU on a small VM, and
+  // boot needs only their schemas. A warm-pool VM boots once before a claim, so
+  // the claim boot finds every schema here.
+  const appActionSchemaCache = await AppActionSchemaCache.load(
+    getProfileAppActionSchemaCachePath(),
+    appActionSchemaCacheBuild(getBuildInfo()),
+  );
   const appActionReload = await registerAppActions(
     actionLoader,
     actionRegistry,
@@ -1335,26 +1356,43 @@ async function main() {
       cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
+    { schemaCache: appActionSchemaCache },
   );
 
   appCatalog.subscribe(
-    createAppActionsSubscriber(actionLoader, actionRegistry, appCatalog, appActionDeps, {
-      db,
-      actionEngine,
-      routinesRepo,
-      repositories: appRuntimeRepositories,
-      favorService,
-      appConnections,
-      hostExecution,
-      feedback: feedbackClient,
-      cloudProfile: cloudProfileClient,
-      agentNames: agentNameResolver,
-    }),
+    createAppActionsSubscriber(
+      actionLoader,
+      actionRegistry,
+      appCatalog,
+      appActionDeps,
+      {
+        db,
+        actionEngine,
+        routinesRepo,
+        repositories: appRuntimeRepositories,
+        favorService,
+        appConnections,
+        hostExecution,
+        feedback: feedbackClient,
+        cloudProfile: cloudProfileClient,
+        agentNames: agentNameResolver,
+      },
+      undefined,
+      appActionSchemaCache,
+    ),
   );
-  appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
-    await syncFavorActionRequirementsForCatalogEvent(favorService, event, actionRegistry, appsLog);
+  const favorRequirementSync = new FavorRequirementSync({
+    favorService,
+    appCatalog,
+    actionCatalog: actionRegistry,
+    log: appsLog,
   });
-  await syncFavorActionRequirementsFromCatalog(favorService, appCatalog, actionRegistry, appsLog);
+  appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
+    await favorRequirementSync.sync(event.appId);
+  });
+  // Boot does not wait: each app costs a Rome Cloud round trip, and Rome Cloud
+  // still holds the requirements the previous boot sent.
+  void favorRequirementSync.syncAll();
 
   // Webhook relay drainer: hold a persistent WS to the Cloudflare relay,
   // replaying buffered webhooks into a local app handler in-process via the
@@ -1569,7 +1607,6 @@ async function main() {
       registry: connectionRegistry,
       admit,
       channelOf,
-      pacing: replyPacing,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
       heard: (message) => accountProfiles.heard(message),
@@ -1706,7 +1743,6 @@ async function main() {
         registry: connectionRegistry,
         admit,
         channelOf,
-        pacing: replyPacing,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
         heard: (message) => accountProfiles.heard(message),
@@ -1897,20 +1933,12 @@ async function main() {
   };
   const publicAccessState = new PublicAccessState();
   try {
-    const config = await publicAccessState.load(db);
-    try {
-      await reconcilePublicAccessAtStartup(db, config);
-    } catch (err) {
-      log.warn("Failed to reconcile publicAccess settings with Caddy at startup; continuing", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await publicAccessState.load(db);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessState = new DashboardAccessState();
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
@@ -1970,13 +1998,15 @@ async function main() {
     }
   };
 
+  // Bound once the favor runner exists, below.
+  let provisionAfterLink = async (): Promise<void> => {};
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
-      provisionNodeCaller,
+      provisionAfterLink: () => provisionAfterLink(),
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       nodeDevices,
       channelsService,
@@ -2027,8 +2057,7 @@ async function main() {
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       agentSessionManager,
       conversationTitleGenerator,
       agentRunner,
@@ -2058,12 +2087,33 @@ async function main() {
   const favorDispatchRunner = new FavorDispatchRunner({
     favorService,
     actionEngine,
-    canSync: () => getInstanceToken() !== null,
+    canSync: () => isInstanceLinked(),
   });
 
   await routineEngine.start();
 
   favorDispatchRunner.start();
+
+  // Everything that needs a linked instance: the node caller, the self-provisioned
+  // relay mailbox (re-minted with a full-TTL drain key each time), and the first
+  // favor sync. Run after the boot identity check, after a sign-in links, and
+  // when a background check links an instance that was not linked. Each step is
+  // idempotent and handles a missing credential, so one failing never stops the next.
+  provisionAfterLink = async () => {
+    const steps = [
+      provisionNodeCaller,
+      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
+      () => favorDispatchRunner.runOnce(),
+    ];
+    for (const step of steps) {
+      await step().catch((err) => {
+        log.warn("provisioning after link failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  };
+  const unsubscribeInstanceLinked = onInstanceLinked(() => void provisionAfterLink());
 
   // Rome reserves 3:00–3:30am local for upgrades; the probe runs at the start
   // of that window. There is no bespoke scheduler — the routine cron *is* the
@@ -2172,9 +2222,11 @@ async function main() {
   // It also gates connecting email for a seat created before sign-in connected
   // it: only an enrolled instance can provision an inbox, and a warm-pool
   // instance with no seat has no owner to provision one for.
-  void logInstanceIdentityAtBoot(getBuildInfo().version)
+  void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // Signer mode links the instance during this check, so provisioning waits for it.
+      await provisionAfterLink();
       if (identity.status !== "ok") return;
       if (!(await getGuardianAuthState(db)).exists) return;
       await connectEmailWithoutClick("boot");
@@ -2200,14 +2252,6 @@ async function main() {
     access: romeCloudAccess,
   });
   usageReporter.start();
-
-  // Self-provision the webhook-relay mailbox using the durable instance token
-  //: present it to Rome Cloud, store the returned credential, and point
-  // the live drainer at it. Fire-and-forget and idempotent — it re-mints a
-  // full-TTL drain key on every boot, and no-ops when the instance is not
-  // enrolled (leaving any manually-pasted relay setting untouched).
-  void provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer });
-  void provisionNodeCaller();
 
   process.on("unhandledRejection", (reason) => {
     const shutdownLog = createLogger("shutdown");
@@ -2279,6 +2323,7 @@ async function main() {
 
     unsubscribeCodexAccountChanged();
     unsubscribeInstanceTokenChanged();
+    unsubscribeInstanceLinked();
     romeCreditsPayer.close();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");

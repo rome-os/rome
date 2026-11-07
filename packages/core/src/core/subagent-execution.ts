@@ -131,10 +131,6 @@ export function createSubagentExecutionService(deps: {
           agentName: isCoreMainAgentId(name) ? null : name,
           projectName: parentSession?.projectName,
           projectPath: parentSession?.projectPath,
-          sourceChannel: parentSession?.sourceChannel,
-          sourceThreadId: parentSession?.sourceThreadId,
-          sourceThreadName: parentSession?.sourceThreadName,
-          sourceThreadType: parentSession?.sourceThreadType,
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
         });
@@ -177,6 +173,8 @@ export function createSubagentExecutionService(deps: {
       };
       const stream = deps.turnStreams.register({
         sessionId: child.sessionId,
+        // The subagent's row is saved above, under its own session id.
+        chatId: child.sessionId,
         turnId: handle.turnId,
         agentName: name,
         interrupt,

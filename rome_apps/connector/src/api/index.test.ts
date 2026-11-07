@@ -14,8 +14,11 @@ const mocks = rs.hoisted(() => ({
   ensureWebhookRegistered: rs.fn(),
   readSessionApiKey: rs.fn(),
   completeCliLogin: rs.fn(),
+  readSessionOrgId: rs.fn(),
+  listCliProjects: rs.fn(),
   settings: { get: rs.fn(), set: rs.fn(), delete: rs.fn() },
   client: {
+    defaultProject: rs.fn(),
     ensureAuthConfig: rs.fn(),
     ensureConnection: rs.fn(),
     listConnectedAccounts: rs.fn(),
@@ -28,6 +31,8 @@ rs.mock("./composio-login.js", () => ({
   ...composioLoginModule,
   readSessionApiKey: mocks.readSessionApiKey,
   completeCliLogin: mocks.completeCliLogin,
+  readSessionOrgId: mocks.readSessionOrgId,
+  listCliProjects: mocks.listCliProjects,
 }));
 
 rs.mock("./settings-store.js", () => ({
@@ -87,6 +92,12 @@ describe("connector authentication recovery", () => {
     mocks.completeCliLogin.mockResolvedValue("uak_new");
     mocks.settings.get.mockResolvedValue(null);
     mocks.client.ping.mockResolvedValue({ ok: true });
+    mocks.readSessionOrgId.mockResolvedValue("ok_org");
+    mocks.client.defaultProject.mockResolvedValue({
+      projectId: "pr_default",
+      projectName: "Default",
+      orgId: "org-uuid",
+    });
   });
 
   it("keeps status local and treats hasKey only as credential presence", async () => {
@@ -361,5 +372,178 @@ describe("connector API GitHub webhook outbox", () => {
       ).toEqual({ n: 0 }),
     );
     sqlite.close();
+  });
+});
+
+describe("connector API Composio project pin", () => {
+  const pinned = (projectId: string) =>
+    JSON.stringify({ orgId: "ok_org", projectId, projectName: projectId });
+  let stored: Map<string, string>;
+
+  beforeEach(() => {
+    rs.resetAllMocks();
+    stored = new Map();
+    mocks.settings.get.mockImplementation(async (key: string) => stored.get(key) ?? null);
+    mocks.settings.set.mockImplementation(async (key: string, value: string) => {
+      stored.set(key, value);
+    });
+    mocks.settings.delete.mockImplementation(async (key: string) => {
+      stored.delete(key);
+    });
+    mocks.readSessionApiKey.mockResolvedValue("uak_test");
+    mocks.completeCliLogin.mockResolvedValue("uak_new");
+    mocks.readSessionOrgId.mockResolvedValue("ok_org");
+    mocks.client.ping.mockResolvedValue({ ok: true });
+    mocks.client.defaultProject.mockResolvedValue({
+      projectId: "pr_default",
+      projectName: "Default",
+      orgId: "org-uuid",
+    });
+    mocks.listCliProjects.mockResolvedValue([
+      { id: "pr_default", name: "Default" },
+      { id: "pr_second", name: "Second" },
+    ]);
+  });
+
+  it("pins the key's default project at login, without asking", async () => {
+    const response = await createApiHandler(context()).handle(
+      request("login/complete", "POST", { cliKey: "cli_test_session" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(stored.get("composioProject") ?? "null")).toEqual({
+      orgId: "ok_org",
+      projectId: "pr_default",
+      projectName: "Default",
+    });
+    expect(mocks.listCliProjects).not.toHaveBeenCalled();
+  });
+
+  it("keeps the pinned project at a later login of the same account", async () => {
+    stored.set("composioProject", pinned("pr_second"));
+
+    await createApiHandler(context()).handle(
+      request("login/complete", "POST", { cliKey: "cli_test_session" }),
+    );
+
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_second");
+  });
+
+  it("leaves the webhook alone at a login whose project discovery fails, and sets it up at the next", async () => {
+    stored.set("webhookEndpointId", "ws_1");
+    stored.set("webhookSecret", "whsec_1");
+    mocks.client.webhookSubscriptionExists
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValue(true);
+    const login = () =>
+      createApiHandler(context()).handle(
+        request("login/complete", "POST", { cliKey: "cli_test_session" }),
+      );
+
+    const first = await login();
+    expect(first.status).toBe(200);
+    expect(stored.has("composioProject")).toBe(false);
+    expect(stored.get("webhookSecret")).toBe("whsec_1");
+    expect(mocks.ensureWebhookRegistered).not.toHaveBeenCalled();
+
+    await login();
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_default");
+    expect(mocks.ensureWebhookRegistered).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the pin across logout, so signing in again stays on the same project", async () => {
+    stored.set("composioProject", pinned("pr_second"));
+
+    await createApiHandler(context()).handle(request("logout", "POST"));
+    await createApiHandler(context()).handle(
+      request("login/complete", "POST", { cliKey: "cli_test_session" }),
+    );
+
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_second");
+  });
+
+  it("lists the projects with the pinned one selected and Composio's default marked", async () => {
+    stored.set("composioProject", pinned("pr_second"));
+
+    const response = await createApiHandler(context()).handle(request("projects"));
+
+    await expect(response.json()).resolves.toEqual({
+      fixed: false,
+      items: [
+        { id: "pr_default", name: "Default", selected: false, isDefault: true },
+        { id: "pr_second", name: "Second", selected: true, isDefault: false },
+      ],
+    });
+  });
+
+  it("lists no projects for a project key, which is fixed to one", async () => {
+    mocks.readSessionApiKey.mockResolvedValue("ak_test");
+
+    const response = await createApiHandler(context()).handle(request("projects"));
+
+    await expect(response.json()).resolves.toEqual({ fixed: true, items: [] });
+  });
+
+  it("keeps the pin and its webhook secret when the pinned project was deleted, and selects nothing", async () => {
+    // Pinned to A, then A deleted on Composio's side: only B is left.
+    stored.set("composioProject", pinned("pr_deleted"));
+    stored.set("webhookSecret", "whsec_a");
+    stored.set("webhookEndpointId", "ws_a");
+    mocks.listCliProjects.mockResolvedValue([{ id: "pr_second", name: "Second" }]);
+
+    const response = await createApiHandler(context()).handle(request("projects"));
+
+    await expect(response.json()).resolves.toEqual({
+      fixed: false,
+      items: [{ id: "pr_second", name: "Second", selected: false, isDefault: false }],
+    });
+    expect(JSON.parse(stored.get("composioProject") ?? "null").projectId).toBe("pr_deleted");
+    expect(stored.get("webhookSecret")).toBe("whsec_a");
+    expect(stored.get("webhookEndpointId")).toBe("ws_a");
+  });
+
+  describe("while the project cannot be confirmed", () => {
+    beforeEach(() => {
+      mocks.client.defaultProject.mockRejectedValue(new Error("fetch failed"));
+    });
+
+    it("refuses to list connections, and touches no account", async () => {
+      const response = await createApiHandler(context()).handle(request("connectors"));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "composio_project_unconfirmed",
+        message: "Couldn't confirm this Rome's Composio project; try again.",
+      });
+      expect(mocks.client.listConnectedAccounts).not.toHaveBeenCalled();
+    });
+
+    it("refuses to start a connection instead of carrying on", async () => {
+      const response = await createApiHandler(context()).handle(
+        request("connectors", "POST", { provider: "gmail" }),
+      );
+
+      expect(response.status).toBe(503);
+      expect(mocks.client.ensureConnection).not.toHaveBeenCalled();
+    });
+
+    it("answers unknown for where the webhook goes", async () => {
+      const response = await createApiHandler(context()).handle(request("webhook/target"));
+
+      await expect(response.json()).resolves.toEqual({ target: "unknown" });
+    });
+  });
+
+  it("surfaces an unconfirmed project from webhook setup when a connection starts", async () => {
+    mocks.ensureWebhookRegistered.mockRejectedValue(
+      new composioClientModule.ComposioProjectUnconfirmedError(),
+    );
+
+    const response = await createApiHandler(context()).handle(
+      request("connectors", "POST", { provider: "gmail" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.client.ensureConnection).not.toHaveBeenCalled();
   });
 });

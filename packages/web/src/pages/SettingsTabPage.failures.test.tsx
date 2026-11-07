@@ -38,9 +38,6 @@ function response(ok: boolean, status: number, json: unknown): Response {
 }
 
 function defaultResponse(url: string): Response {
-  if (url === "/api/tailscale/devices") {
-    return response(true, 200, { mode: "oauth", configured: false, devices: [] });
-  }
   if (url === "/api/diagnosis") {
     return response(true, 200, {
       status: "ok",
@@ -58,7 +55,6 @@ function defaultResponse(url: string): Response {
   }
   if (url === "/api/public-access") {
     return response(true, 200, {
-      enableAccessControl: false,
       allowedApps: [],
       cloudEmailAccess: {},
     });
@@ -98,13 +94,11 @@ describe("SettingsPage failures", () => {
     renderSettings();
 
     expect(await screen.findByText("Settings service unavailable")).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 2, name: "Advanced Settings" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "Features" })).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "Advanced Settings" }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 2, name: "Features" })).toBeTruthy();
     expect(settingsLoads).toBe(2);
   });
 
@@ -149,7 +143,9 @@ describe("SettingsPage failures", () => {
     }) as typeof fetch);
 
     renderSettings();
-    await userEvent.click(await screen.findByText("Enable model selector in chat"));
+    await userEvent.click(
+      await screen.findByRole("switch", { name: "Enable model selector in chat" }),
+    );
 
     await waitFor(() =>
       expect(rs.mocked(toast.error)).toHaveBeenCalledWith(
@@ -203,6 +199,6 @@ describe("Agent feedback setting", () => {
     await waitFor(() =>
       expect(toggle.getAttribute("aria-checked")).toBe(String(!(stored ?? true))),
     );
-    expect(screen.getByText(/same instance diagnostics as the Feedback dialog/)).toBeTruthy();
+    expect(screen.getByText(/with instance diagnostics/)).toBeTruthy();
   });
 });

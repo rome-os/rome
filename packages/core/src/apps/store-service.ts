@@ -186,7 +186,7 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
       let upstream: Response;
       try {
         upstream = await fetchImpl(url, {
-          headers: withRomeCloudReadAuth(url, { accept: "application/json" }),
+          headers: await withRomeCloudReadAuth(url, { accept: "application/json" }),
         });
       } catch (err) {
         return {
@@ -256,7 +256,7 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
       let upstream: Response;
       try {
         upstream = await fetchImpl(url, {
-          headers: withRomeCloudReadAuth(url, { accept: "application/json" }),
+          headers: await withRomeCloudReadAuth(url, { accept: "application/json" }),
         });
       } catch (err) {
         return {

@@ -1,5 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 
+export const COMPACT_WIDTH = 721;
+
 export type WidgetType = "chat" | "desktop" | "projects" | "app";
 
 export interface WidgetPlacement {
@@ -43,6 +45,12 @@ let listeners: Array<() => void> = [];
 let snapshot: WidgetPlacement[] = [];
 let activeSessionId: string | null = null;
 const layoutRevisions = new Map<string | null, number>();
+// The active session's layout revision when it became active. A layout that
+// arrives with the first messages page is dropped if the revision moved since.
+let activeSessionRevision: number | undefined;
+// Sessions whose server layout has been received (or found absent) this page
+// lifetime, so a revisit does not wait for it again.
+const layoutLoaded = new Set<string>();
 
 export interface ToolView {
   activeId: string | null;
@@ -54,9 +62,10 @@ let toolView: ToolView = { activeId: null, collapsed: true, unreadIds: [] };
 const VIEW_PREFIX = "rome:tool-view:";
 
 function readToolView(sessionId: string | null, layout: WidgetPlacement[]): ToolView {
+  const compact = window.innerWidth < COMPACT_WIDTH;
   const fallback: ToolView = {
     activeId: [...layout].sort((a, b) => a.order - b.order)[0]?.id ?? null,
-    collapsed: layout.length === 0,
+    collapsed: compact || layout.length === 0,
     unreadIds: [],
   };
   if (!sessionId) return fallback;
@@ -65,7 +74,7 @@ function readToolView(sessionId: string | null, layout: WidgetPlacement[]): Tool
     if (!saved || typeof saved.collapsed !== "boolean") return fallback;
     return {
       activeId: layout.some((p) => p.id === saved.activeId) ? saved.activeId : fallback.activeId,
-      collapsed: saved.collapsed,
+      collapsed: compact || saved.collapsed,
       unreadIds: Array.isArray(saved.unreadIds)
         ? layout.filter((p) => saved.unreadIds.includes(p.id)).map((p) => p.id)
         : [],
@@ -111,6 +120,13 @@ export function setToolsCollapsed(collapsed: boolean) {
     return;
   }
   saveToolView({ ...toolView, collapsed });
+  notify();
+}
+
+/** Collapse a narrow workspace on mount without changing its saved view. */
+export function collapseToolsOnMount() {
+  if (window.innerWidth >= COMPACT_WIDTH || toolView.collapsed) return;
+  toolView = { ...toolView, collapsed: true };
   notify();
 }
 
@@ -598,6 +614,9 @@ export function updateProjectsSelection(placementId: string, selectedPath: strin
 export function setActiveSession(sessionId: string | null) {
   if (activeSessionId === sessionId) return;
   const previousSessionId = activeSessionId;
+  // Taken before any carryover edit below, which must make a late server
+  // layout for this session lose.
+  activeSessionRevision = sessionId === null ? undefined : layoutRevisions.get(sessionId);
   // Carry over draft-mode layout when the user moves from "no session" to
   // a freshly created one. The widgets they placed before hitting send
   // are part of the session they just kicked off — losing them and then
@@ -625,24 +644,70 @@ export function setActiveSession(sessionId: string | null) {
   notify();
 }
 
+// Resends a layout the server has not acknowledged, so a failed save is retried
+// rather than lost. Returns true when the local copy stays authoritative and
+// the server's copy must not be applied.
+function resendUnsyncedLayout(sessionId: string): boolean {
+  if (!hasUnsyncedLayout(sessionId)) return false;
+  // A save still in flight already carries the newest layout.
+  if (layoutSaves.has(sessionId)) return true;
+  const stored = readStoredLayout(sessionId);
+  if (stored) {
+    saveLayout(sessionId, stored, true);
+    return true;
+  }
+  // With no readable stored layout there is nothing to resend, and sending an
+  // empty layout would erase the server's copy.
+  setUnsyncedLayout(sessionId, false);
+  return false;
+}
+
+// Stores the server's copy and, for the active session, shows it. `revision` is
+// the session's layout revision when the request started.
+function applyServerLayout(sessionId: string, layout: unknown, revision: number | undefined) {
+  if (!Array.isArray(layout)) return;
+  // A delayed load must not erase tools opened or closed since it started,
+  // or an edit another tab stored that the server has not acknowledged.
+  if (layoutRevisions.get(sessionId) !== revision || hasUnsyncedLayout(sessionId)) return;
+  writeStorage(sessionId, layout);
+  if (sessionId === activeSessionId) {
+    snapshot = layout as WidgetPlacement[];
+    const nextView = readToolView(sessionId, snapshot);
+    // A narrow chat starts collapsed, but a toggle or chat link can open it
+    // while this load is in flight. Keep that choice when the layout arrives.
+    if (window.innerWidth < COMPACT_WIDTH) nextView.collapsed = toolView.collapsed;
+    toolView = nextView;
+    notify();
+  }
+}
+
 /**
- * Replace the session's cached layout with the server's copy. When the server
- * has not acknowledged the cached layout, keep it and send it again instead,
- * so a failed save is retried rather than lost. Never rejects.
+ * Hands over the layout that rode a session's first messages page (`null` when
+ * the server has none), in the same tick as that page's messages so both paint
+ * together. Replaces the cached layout with the server's copy under the same
+ * guards as `loadLayoutForSession`: an unacknowledged local layout wins and is
+ * sent again, and an edit made since the session became active is kept. Only
+ * the active session is shown.
+ */
+export function applyFirstPageLayout(sessionId: string, layout: unknown): void {
+  layoutLoaded.add(sessionId);
+  if (sessionId !== activeSessionId) return;
+  if (resendUnsyncedLayout(sessionId)) return;
+  applyServerLayout(sessionId, layout, activeSessionRevision);
+}
+
+/** Whether the server's layout for `sessionId` was already handed over. */
+export function isLayoutLoaded(sessionId: string): boolean {
+  return layoutLoaded.has(sessionId);
+}
+
+/**
+ * Fetch the session's layout on its own and apply it as `applyFirstPageLayout`
+ * does. The app takes the layout from the first messages page instead; this
+ * stays for callers that have no page. Never rejects.
  */
 export async function loadLayoutForSession(sessionId: string): Promise<void> {
-  if (hasUnsyncedLayout(sessionId)) {
-    // A save still in flight already carries the newest layout.
-    if (layoutSaves.has(sessionId)) return;
-    const stored = readStoredLayout(sessionId);
-    if (stored) {
-      saveLayout(sessionId, stored, true);
-      return;
-    }
-    // With no readable stored layout there is nothing to resend, and sending an
-    // empty layout would erase the server's copy.
-    setUnsyncedLayout(sessionId, false);
-  }
+  if (resendUnsyncedLayout(sessionId)) return;
   const revision = layoutRevisions.get(sessionId);
   try {
     const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/layout`, {
@@ -650,17 +715,7 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
     });
     if (!res.ok) return;
     const data = (await res.json()) as { layout?: unknown };
-    if (!Array.isArray(data.layout)) return;
-    const layout = data.layout as WidgetPlacement[];
-    // A delayed load must not erase tools opened or closed since it started,
-    // or an edit another tab stored that the server has not acknowledged.
-    if (layoutRevisions.get(sessionId) !== revision || hasUnsyncedLayout(sessionId)) return;
-    writeStorage(sessionId, layout);
-    if (sessionId === activeSessionId) {
-      snapshot = layout;
-      toolView = readToolView(sessionId, layout);
-      notify();
-    }
+    applyServerLayout(sessionId, data.layout, revision);
   } catch {
     // network failed; keep localStorage cache
   }

@@ -106,6 +106,19 @@ export const connectorHandlers = [
     }
     return HttpResponse.json({ ok: true, deleted: before - accounts.length });
   }),
+  http.get("/api/apps/connector/webhook/target", () => HttpResponse.json({ target: "ours" })),
+  http.get("/api/apps/connector/projects", () =>
+    HttpResponse.json({
+      fixed: false,
+      items: [
+        { id: "pr_mock_default", name: "Default project", selected: true, isDefault: true },
+        { id: "pr_mock_second", name: "Second Rome", selected: false, isDefault: false },
+      ],
+    }),
+  ),
+  http.post("/api/apps/connector/projects/select", () =>
+    HttpResponse.json({ ok: true, rearmed: 0, notRearmed: 0 }),
+  ),
   http.post("/api/apps/connector/webhook/register", () =>
     HttpResponse.json({ ok: true, webhookUrl: "https://ingest.example.com/h/mock" }),
   ),

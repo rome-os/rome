@@ -16,8 +16,6 @@ const SESSION_MAX_AGE_SECONDS =
 export const JWT_SECRET = process.env.ROME_JWT_SECRET || "rome-dev-secret-change-me";
 export const COOKIE_NAME = "rome_session";
 export const VISITOR_COOKIE_NAME = "rome_visitor";
-const SESSION_HANDOFF_DURATION_SECONDS = 120;
-const SESSION_HANDOFF_KIND = "session_handoff";
 const VISITOR_SESSION_KIND = "visitor";
 
 interface HeaderAccessor {
@@ -99,7 +97,7 @@ export function createVisitorSession(
  * Mint a guardian session JWT and write it as the session cookie. The single
  * seam every login path goes through, so the cookie attributes (httpOnly,
  * secure, sameSite, path, maxAge) stay identical across `/auth/login`,
- * `/auth/handoff`, `/oauth/redeem`, and `/onboard/create-account`.
+ * `/oauth/redeem`, and `/onboard/create-account`.
  */
 export function issueGuardianSession(c: Context, userId: string): void {
   const session = createGuardianSession(userId);
@@ -131,44 +129,6 @@ export function issueVisitorSession(
       maxAge: SESSION_MAX_AGE_SECONDS,
     },
   );
-}
-
-export interface SessionHandoffClaims {
-  kind: typeof SESSION_HANDOFF_KIND;
-  userId: string;
-  targetHost: string;
-  nonce: string;
-}
-
-export const SESSION_HANDOFF_TTL_MS = SESSION_HANDOFF_DURATION_SECONDS * 1000;
-
-export function createSessionHandoffToken(payload: Omit<SessionHandoffClaims, "kind">): string {
-  return jwt.sign({ kind: SESSION_HANDOFF_KIND, ...payload }, JWT_SECRET, {
-    expiresIn: SESSION_HANDOFF_DURATION_SECONDS,
-  });
-}
-
-export function verifySessionHandoffToken(token: string): SessionHandoffClaims | null {
-  try {
-    const payload = jwt.verify(token, JWT_SECRET) as JwtPayload & Partial<SessionHandoffClaims>;
-    if (
-      payload.kind !== SESSION_HANDOFF_KIND ||
-      typeof payload.userId !== "string" ||
-      typeof payload.targetHost !== "string" ||
-      typeof payload.nonce !== "string"
-    ) {
-      return null;
-    }
-
-    return {
-      kind: SESSION_HANDOFF_KIND,
-      userId: payload.userId,
-      targetHost: payload.targetHost,
-      nonce: payload.nonce,
-    };
-  } catch {
-    return null;
-  }
 }
 
 export function verifySession(token: string): { userId: string } | null {

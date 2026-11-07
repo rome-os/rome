@@ -179,6 +179,18 @@ export const AppManifestSchema = z
     db: DbDeclarationSchema.optional(),
     suggestedChannelBindings: z.array(SuggestedChannelBindingSchema).optional(),
     eventSources: z.array(EventSourceDeclarationSchema).optional(),
+    // The actions by which the app provides watch: core discovers followable
+    // sources from this, never by an app's name. Local names only, so an app
+    // can name nothing but its own actions.
+    watchProvider: z
+      .object({
+        sources: ArtifactLocalNameSchema,
+        ensure: ArtifactLocalNameSchema,
+        normalize: ArtifactLocalNameSchema,
+        release: ArtifactLocalNameSchema,
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((manifest, ctx) => {

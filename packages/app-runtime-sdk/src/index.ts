@@ -209,7 +209,12 @@ export class ActionInvocationEventOverflowError extends Error {
 
 export interface Action {
   config: ActionConfig;
-  /** Present = agent-callable action (tool). Absent = event-only action (workflow). */
+  /**
+   * Present = agent-callable action (tool). Absent = event-only action (workflow).
+   * Must depend only on the action's bundle: Rome caches it across boots and
+   * rebuilds it only when the bundle or Rome changes, never from `deps`,
+   * app keys, or the environment.
+   */
   inputSchema?: Record<string, unknown>;
   execute(args: Record<string, unknown>, context?: ActionExecutionContext): Promise<ActionResult>;
   /**
@@ -553,7 +558,16 @@ export interface AgentTurnOutput {
   /** @deprecated Read `stop.reason`. Provider-specific; see `AgentAccounting.stopReason`. */
   stopReason?: string;
   error?: string;
+  failure?: AgentTurnFailure;
   accounting?: AgentAccounting;
+}
+
+/** Why a turn ended with an error, as far as its provider reported it. */
+export interface AgentTurnFailure
+  extends Pick<TurnErrorEvent, "code" | "reason" | "httpStatus" | "providerError"> {
+  message: string;
+  /** The provider of the model session that ran the turn. */
+  provider: string;
 }
 
 export interface AgentTurnStartedEvent {
@@ -729,11 +743,19 @@ export interface TurnEndEvent {
    * How the host delivered the reply as it was written, for a run started
    * with `streamReply`, and only when the host streamed it. Absent, the host
    * did not stream the reply and its caller sends it.
+   *
+   * @deprecated The host no longer streams replies to external platforms, so
+   * it never sets this. The caller always sends the reply.
    */
   replyDelivery?: ReplyDeliveryReport;
 }
 
-/** A streamed reply's outcome, as `turn_end` reports it. */
+/**
+ * A streamed reply's outcome, as `turn_end` reports it.
+ *
+ * @deprecated The host no longer streams replies to external platforms, so
+ * no `turn_end` carries one.
+ */
 export interface ReplyDeliveryReport {
   /**
    * `delivered`: every message settled. `partial`: some messages were sent
@@ -958,6 +980,12 @@ export interface TurnErrorEvent {
   code?: AgentErrorCode;
   /** HTTP status of the failed provider request, when the provider reports it. */
   httpStatus?: number;
+  /**
+   * The provider's own error kind, as reported and not normalized across
+   * providers: for Claude, the Agent SDK's assistant error such as `rate_limit`.
+   * Best effort. Use `code` and `reason` for provider-independent handling.
+   */
+  providerError?: string;
   /** Provider and cause used by interactive clients to offer recovery UI. */
   provider?: AgentErrorProvider;
   reason?: AgentErrorReason;
@@ -1168,6 +1196,9 @@ export interface RunParams {
    * host records it there in place of the run's transcript. A reply reported
    * `failed` recorded nothing, so the caller sends the reply and records it,
    * as `send_message` does.
+   *
+   * @deprecated The host no longer streams replies to external platforms and
+   * ignores this. The caller always sends the reply.
    */
   streamReply?: boolean;
   /** Explicit session ID to continue */
@@ -3124,6 +3155,9 @@ export interface BackendTurnParams {
   channelUserId?: string;
   /** The text fed to the continued turn as its prompt. */
   prompt: string;
+  /** Whose the thread was when the turn was scheduled, recorded by the host.
+   *  Lets the host route the turn to that owner when the thread is gone. */
+  ownerKey?: string;
 }
 
 /** Runs a backend turn in a session and delivers the reply to its channel.

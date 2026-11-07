@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import type { ChatReads } from "@rome-os/app-runtime/chats";
 import {
@@ -19,33 +18,6 @@ import {
   isShowcaseBundle,
 } from "../trace/portable.js";
 import type { ReplyBlock, ReplyInteractionBlock, TraceEventDto } from "../trace/types.js";
-
-interface SourceSessionRow {
-  id: string;
-  name: string;
-  project_name: string | null;
-  project_path: string | null;
-  agent_name: string | null;
-  created_at: number | string | Date;
-}
-
-interface SourceTraceRow {
-  session_id: string;
-  session_name: string;
-  project_name: string | null;
-  project_path: string | null;
-  agent_name: string | null;
-  session_created_at: number | string | Date;
-  message_id: string;
-  turn_id: string | null;
-  content: string;
-  message_created_at: number | string | Date;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cache_read_tokens: number | null;
-  cache_write_tokens: number | null;
-  cost_usd: number | null;
-}
 
 function json(data: unknown, init?: ResponseInit): Response {
   return Response.json(data, init);
@@ -402,21 +374,22 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     return MOCK_PRESET_CATALOG;
   }
 
-  /** The chat reads Rome hands this app, or null when the host offers none. */
-  private chatReads(): ChatReads | null {
+  /** The chat reads Rome hands this app. Showcases reads chats only through
+   *  them, so a host that offers none is an error. */
+  private chatReads(): ChatReads {
     const chats = this.ctx.repositories?.chats;
-    if (!chats?.recentChats || !chats.transcript || !chats.traces) return null;
+    if (!chats?.recentChats || !chats.transcript || !chats.traces) {
+      throw new Error("Showcases reads chats through Chats, and this host offers no chat reads");
+    }
     return chats as ChatReads;
   }
 
   /** The guardian's dashboard chats, most recently active first, read
-   *  through Chats when the host offers it. Each chat's traces are left
+   *  through Chats. Each chat's traces are left
    *  unread here, since a picker loading every one would read them all; an
    *  import of a chat with none says so. */
   private async listSourceSessions(): Promise<SourceSession[]> {
-    const reads = this.chatReads();
-    if (!reads) return this.legacySourceSessions();
-    const chats = await reads.recentChats({ since: new Date(0), where: "dashboard" });
+    const chats = await this.chatReads().recentChats({ since: new Date(0), where: "dashboard" });
     return chats.slice(0, 100).map((chat) => ({
       id: chat.sessionId,
       name: chat.name,
@@ -427,75 +400,32 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     }));
   }
 
-  private legacySourceSessions(): SourceSession[] {
-    // A host that offers no chat reads keeps no dashboard chats in Chats, so
-    // a guardian chat is told by the columns such a host writes: a webchat
-    // row, or a webchat channel row addressed by its own id.
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT
-        ws.id,
-        ws.name,
-        ws.project_name,
-        ws.project_path,
-        ws.agent_name,
-        ws.created_at
-      FROM rome_sessions ws
-      JOIN rome_agent_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
-      WHERE (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
-      GROUP BY ws.id, ws.name, ws.project_name, ws.project_path, ws.agent_name, ws.created_at
-      ORDER BY max(wm.created_at) DESC
-      LIMIT 100
-    `) as SourceSessionRow[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      projectName: row.project_name,
-      projectPath: row.project_path,
-      agentName: row.agent_name,
-      createdAt: toDate(row.created_at).toISOString(),
-    }));
-  }
-
   /** The session's prompts and answers, each turn's lines together, read
-   *  through Chats when the host offers it. */
+   *  through Chats. */
   private async sourceLines(sessionId: string): Promise<SourceLine[]> {
-    const reads = this.chatReads();
     // Ordered as core's `getMessages()`: by each turn's earliest line, then
     // by line within the turn, since a later turn's prompt can be said
     // before an earlier turn's answer.
-    if (reads) {
-      const lines = await reads.transcript(sessionId);
-      const turnOf = (line: (typeof lines)[number]) => line.turnId ?? line.key;
-      // Each turn's earliest time, and its first line to break a tie, so a
-      // turn's lines stay together.
-      const turns = new Map<string, { at: number; first: number }>();
-      lines.forEach((line, index) => {
-        const at = line.createdAt.getTime();
-        const turn = turns.get(turnOf(line));
-        turns.set(turnOf(line), { at: Math.min(turn?.at ?? at, at), first: turn?.first ?? index });
-      });
-      const turnAt = (line: (typeof lines)[number]) =>
-        turns.get(turnOf(line)) ?? { at: 0, first: 0 };
-      return lines
-        .map((line, index) => ({ line, index }))
-        .sort(
-          (a, b) =>
-            turnAt(a.line).at - turnAt(b.line).at ||
-            turnAt(a.line).first - turnAt(b.line).first ||
-            a.index - b.index,
-        )
-        .map(({ line }) => ({ turnId: line.turnId, role: line.role, content: line.content }));
-    }
-    return this.ctx.db.connection.all(sql`
-      SELECT wm.turn_id AS "turnId", wm.role AS role, wm.content AS content
-      FROM rome_agent_messages wm
-      WHERE wm.session_id = ${sessionId}
-        AND wm.role IN ('assistant', 'user')
-      ORDER BY
-        MIN(wm.created_at) OVER (PARTITION BY COALESCE(wm.turn_id, wm.id)),
-        wm.created_at
-    `) as SourceLine[];
+    const lines = await this.chatReads().transcript(sessionId);
+    const turnOf = (line: (typeof lines)[number]) => line.turnId ?? line.key;
+    // Each turn's earliest time, and its first line to break a tie, so a
+    // turn's lines stay together.
+    const turns = new Map<string, { at: number; first: number }>();
+    lines.forEach((line, index) => {
+      const at = line.createdAt.getTime();
+      const turn = turns.get(turnOf(line));
+      turns.set(turnOf(line), { at: Math.min(turn?.at ?? at, at), first: turn?.first ?? index });
+    });
+    const turnAt = (line: (typeof lines)[number]) => turns.get(turnOf(line)) ?? { at: 0, first: 0 };
+    return lines
+      .map((line, index) => ({ line, index }))
+      .sort(
+        (a, b) =>
+          turnAt(a.line).at - turnAt(b.line).at ||
+          turnAt(a.line).first - turnAt(b.line).first ||
+          a.index - b.index,
+      )
+      .map(({ line }) => ({ turnId: line.turnId, role: line.role, content: line.content }));
   }
 
   private async userPromptsByTurn(sessionId: string): Promise<Map<string, string>> {
@@ -505,36 +435,6 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       if (!row.turnId || map.has(row.turnId)) continue;
       const text = extractUserText(row.content);
       if (text) map.set(row.turnId, text);
-    }
-    return map;
-  }
-
-  // Reassemble each trace message's full block array from the append-only
-  // `rome_agent_trace_blocks` table, keyed by the trace message id.
-  //
-  // Core no longer stores the trace inline: a role='trace' rome_agent_messages row
-  // is a constant `'[]'` stub, and every block (tool_use, thinking, text, …)
-  // lives as its own `rome_agent_trace_blocks` row ordered by seq. Reading
-  // `wm.content` alone yields the empty stub, which is why an imported replay
-  // showed no steps and no final answer. We mirror the repository's
-  // `mergeTraceContent`: concatenate the per-message block JSON back into a
-  // single array (and fall back to the stub for legacy traces with no rows).
-  private traceContentsByMessage(sessionId: string): Map<string, string> {
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT message_id, content
-      FROM rome_agent_trace_blocks
-      WHERE session_id = ${sessionId}
-      ORDER BY message_id ASC, seq ASC
-    `) as Array<{ message_id: string; content: string }>;
-    const blocksByMessage = new Map<string, string[]>();
-    for (const row of rows) {
-      const list = blocksByMessage.get(row.message_id);
-      if (list) list.push(row.content);
-      else blocksByMessage.set(row.message_id, [row.content]);
-    }
-    const map = new Map<string, string>();
-    for (const [messageId, blocks] of blocksByMessage) {
-      map.set(messageId, `[${blocks.join(",")}]`);
     }
     return map;
   }
@@ -641,66 +541,17 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   }
 
   /** The session's name and agent, and its traces oldest first, read
-   *  through Chats when the host offers it. Only a dashboard chat is a
-   *  source. */
+   *  through Chats. Only a dashboard chat is a source. */
   private async sourceTraces(
     sessionId: string,
   ): Promise<{ name: string; agentName: string | null; traces: SourceTrace[] }> {
     const reads = this.chatReads();
-    if (reads) {
-      const session = (await reads.recentChats({ since: new Date(0), where: "dashboard" })).find(
-        (chat) => chat.sessionId === sessionId,
-      );
-      return session
-        ? {
-            name: session.name,
-            agentName: session.agentName,
-            traces: await reads.traces(sessionId),
-          }
-        : { name: "", agentName: null, traces: [] };
-    }
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT
-        ws.id AS session_id,
-        ws.name AS session_name,
-        ws.project_name,
-        ws.project_path,
-        ws.agent_name,
-        ws.created_at AS session_created_at,
-        wm.id AS message_id,
-        wm.turn_id,
-        wm.content,
-        wm.created_at AS message_created_at,
-        wm.input_tokens,
-        wm.output_tokens,
-        wm.cache_read_tokens,
-        wm.cache_write_tokens,
-        wm.cost_usd
-      FROM rome_agent_messages wm
-      JOIN rome_sessions ws ON ws.id = wm.session_id
-      WHERE wm.session_id = ${sessionId}
-        AND wm.role = 'trace'
-        AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
-      ORDER BY wm.created_at ASC
-    `) as SourceTraceRow[];
-    const contents = this.traceContentsByMessage(sessionId);
-    const first = rows[0];
-    return {
-      name: first?.session_name ?? "",
-      agentName: first?.agent_name ?? null,
-      traces: rows.map((row) => ({
-        turnId: row.turn_id,
-        // Prefer the reassembled append-only blocks; fall back to the row's
-        // inline content for legacy traces stored before rome_agent_trace_blocks.
-        content: contents.get(row.message_id) ?? row.content,
-        createdAt: toDate(row.message_created_at),
-        inputTokens: row.input_tokens,
-        outputTokens: row.output_tokens,
-        cacheReadTokens: row.cache_read_tokens,
-        cacheWriteTokens: row.cache_write_tokens,
-        costUsd: row.cost_usd,
-      })),
-    };
+    const session = (await reads.recentChats({ since: new Date(0), where: "dashboard" })).find(
+      (chat) => chat.sessionId === sessionId,
+    );
+    return session
+      ? { name: session.name, agentName: session.agentName, traces: await reads.traces(sessionId) }
+      : { name: "", agentName: null, traces: [] };
   }
 
   private async importWebchatSession(

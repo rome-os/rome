@@ -1,5 +1,5 @@
 import { expect, it } from "@rstest/core";
-import { quotaSwitchTarget, soleExhaustedProvider } from "./quota-switch.js";
+import { quotaSwitchTarget, sameProviderTarget, soleExhaustedProvider } from "./quota-switch.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 
 const state = (): AIToolStateValue => ({
@@ -44,4 +44,39 @@ it("excludes Rome credits by reading raw logged-out Codex, not resolver availabi
   const raw = state();
   raw.codex.loggedIn = false;
   expect(quotaSwitchTarget(raw, "anthropic")).toBeNull();
+});
+
+it.each([
+  ["anthropic", "claude-sonnet-5-5", "claude-opus-5-5"],
+  ["anthropic", "claude-opus-5-5[1m]", "claude-sonnet"],
+  ["anthropic", "claude-fable-5-1[1m]", "claude-sonnet"],
+  ["anthropic", "claude-haiku-5-5", "claude-sonnet"],
+  ["openai", "gpt-6-luna", "gpt-5-6-terra"],
+  ["openai", "gpt-5.6-terra", "gpt-6-luna"],
+  ["openai", "gpt-6.1-sol", "gpt-6-luna"],
+] as const)("keeps %s's thread from %s on %s", (provider, model, target) => {
+  const raw = state();
+  raw.claude.quotaExhausted = false;
+  expect(sameProviderTarget(raw, provider, model)?.selectionId).toBe(target);
+});
+it("requires same-provider availability and model access", () => {
+  const raw = state();
+  raw.claude.quotaExhausted = false;
+  raw.codex.lunaAccess = false;
+  expect(sameProviderTarget(raw, "openai", "gpt-5.6-terra")).toBeNull();
+  expect(sameProviderTarget(raw, "openai", "gpt-6.1-sol")?.selectionId).toBe("gpt-5-6-terra");
+  for (const patch of [
+    { loggedIn: false },
+    { needsReauth: true },
+    { quotaExhausted: true },
+    { authMethod: "environment" },
+  ]) {
+    expect(
+      sameProviderTarget(
+        { ...raw, claude: { ...raw.claude, ...patch } },
+        "anthropic",
+        "claude-sonnet",
+      ),
+    ).toBeNull();
+  }
 });

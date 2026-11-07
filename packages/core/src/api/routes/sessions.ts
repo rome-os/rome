@@ -46,8 +46,8 @@ const ownerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("uninstalled") }).strict(),
 ]);
 const sourceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("internal") }).strict(),
-  z.object({ kind: z.literal("channel"), channel: nonEmptyString }).strict(),
+  z.object({ kind: z.literal("noChat") }).strict(),
+  z.object({ kind: z.literal("platform"), platform: nonEmptyString }).strict(),
 ]);
 const modelSchema = z.discriminatedUnion("kind", [
   z

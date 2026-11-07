@@ -403,6 +403,54 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("uses the page search icon treatment only for the five first-party apps", async () => {
+    const ids = ["briefing", "inbox", "showcases", "skills", "welcome-to-rome"];
+    mockSessionSearch(
+      [],
+      [],
+      [
+        ...ids.map((id) =>
+          installedApp(id, `Icon ${id}`, { origin: "builtin", iconUrl: `/${id}.svg` }),
+        ),
+        installedApp("other-builtin", "Icon Other", {
+          origin: "builtin",
+          iconUrl: "/other.svg",
+        }),
+        installedApp("my-briefing", "Icon Custom", { iconUrl: "/custom.svg" }),
+      ],
+    );
+    renderSearch("/chat", true);
+    const input = await screen.findByRole("combobox");
+    const user = userEvent.setup();
+    await user.type(input, "memory");
+    const pageIcon = (
+      await screen.findByRole("option", { name: "Memory", exact: true })
+    ).querySelector("svg")?.parentElement;
+    expect(pageIcon).toBeTruthy();
+    await user.clear(input);
+    await user.type(input, "icon");
+    for (const id of ids) {
+      const row = await screen.findByRole("option", { name: `Icon ${id}`, exact: true });
+      expect(row.querySelector("svg")?.parentElement?.className).toBe(pageIcon?.className);
+      expect(row.querySelector("svg")?.getAttribute("class")).toContain("size-4");
+      if (id === "welcome-to-rome") {
+        expect(row.querySelector("mask")).toBeTruthy();
+        expect(row.querySelector("svg")?.getAttribute("class")).toContain("scale-80");
+      }
+      expect(row.querySelector("img")).toBeNull();
+    }
+    for (const [name, src] of [
+      ["Icon Other", "/other.svg"],
+      ["Icon Custom", "/custom.svg"],
+    ]) {
+      expect(
+        (await screen.findByRole("option", { name, exact: true }))
+          .querySelector("img")
+          ?.getAttribute("src"),
+      ).toBe(src);
+    }
+  });
+
   it("ranks openable app matches and excludes apps that cannot be opened", async () => {
     mockSessionSearch(
       [],

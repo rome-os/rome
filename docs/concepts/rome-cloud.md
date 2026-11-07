@@ -97,7 +97,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
   - `unknown`: none of the above can be told.
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.
-- A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `handoff`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
+- A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
 - Funding is `rome_credits`, `byok`, `subscription`, or `unknown`, decided by the provider that served the turn.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
 - Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.

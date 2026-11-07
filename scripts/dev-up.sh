@@ -296,6 +296,22 @@ esac
 export PANTHEON_BASE_ORIGIN="$ROME_DEV_PANTHEON_ORIGIN"
 echo "dev-up: Rome Cloud -> ${PANTHEON_BASE_ORIGIN}"
 
+# The signer is on by default, so this stack authenticates to Rome Cloud with
+# signed tokens, as a deployed instance does. ROME_DEV_SIGNER=0 turns it off and
+# keeps the legacy instance token.
+DEV_SIGNER_SERVICE=""
+if [ "${ROME_DEV_SIGNER:-1}" != "0" ]; then
+  DEV_SIGNER_SERVICE="signer"
+  export COMPOSE_PROFILES="signer"
+  export ROME_DEV_SIGNER_SOCKET="/run/rome-signer/signer.sock"
+  echo "dev-up: signer enabled (ROME_DEV_SIGNER=0 turns it off)"
+else
+  echo "dev-up: signer disabled (ROME_DEV_SIGNER=0); using the legacy instance token"
+  # `up -d` ignores a profile service, so a signer left by an earlier run would
+  # keep restarting against a workspace it no longer serves.
+  docker compose -f compose.dev.yml -p "$SLUG" --profile signer rm -sf signer >/dev/null 2>&1 || true
+fi
+
 # This instance's own public origin — the browser-reachable address Rome is
 # served at, which core hands Rome Cloud as the enrollment redirect target. The
 # rome container is NOT reachable at its own loopback (the browser reaches it
@@ -377,6 +393,7 @@ echo "dev-up: syncing node_modules (pnpm install --frozen-lockfile) ..."
 if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T -e CI=true rome pnpm install --frozen-lockfile \
   --filter @rome/core... \
   --filter @rome/discord-cli... \
+  --filter @rome/signer... \
   --filter @rome-os/node... \
   --filter rome-web... \
   --filter @rome-os/app-web-sdk... \
@@ -386,6 +403,24 @@ if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T -e CI=tr
   echo "        If package.json changed intentionally, update pnpm-lock.yaml on the host," >&2
   echo "        then re-run pnpm dev:all." >&2
   exit 1
+fi
+
+# The signer container runs the built packages/signer/dist from this volume, as
+# uid 10001, not the host uid that owns the workspace. The source sync creates
+# owner-only files and directories (and keeps those modes on volumes that
+# already exist), so the build also makes dist, its package.json (Node reads it to treat dist as ESM)
+# and the directories above them readable to others.
+# It builds on every run so dist exists on a fresh clone and follows source edits.
+if [ -n "$DEV_SIGNER_SERVICE" ]; then
+  echo "dev-up: building the signer ..."
+  if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T rome sh -c \
+    'pnpm --filter @rome/signer build &&
+     chmod a+rx /workspace/packages /workspace/packages/signer &&
+     chmod a+r /workspace/packages/signer/package.json &&
+     chmod -R a+rX /workspace/packages/signer/dist'; then
+    echo "dev-up: signer build failed — see the output above." >&2
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -475,7 +510,7 @@ fi
 echo "dev-up: starting worktree stack (project=${SLUG}) ..."
 # Per-worktree stack (project=$SLUG); the reclaim path protects against a wedged
 # rome-edge endpoint.
-ensure_edge_singleton docker compose -f compose.dev.yml -p "$SLUG" up -d rome chrome
+ensure_edge_singleton docker compose -f compose.dev.yml -p "$SLUG" up -d rome chrome ${DEV_SIGNER_SERVICE}
 
 # ---------------------------------------------------------------------------
 # 5b. Wait for /api/health so the readiness banner doesn't print before
@@ -628,8 +663,8 @@ cat <<EOF
 │
 │ In-container  :  ./r pnpm test   (./r <cmd>)
 │ Logs          :  docker compose -f compose.dev.yml -p ${SLUG} logs -f
-│ Stop stack    :  ROME_WORKTREE_SLUG=${SLUG} docker compose -f compose.dev.yml -p ${SLUG} stop
-│ Nuke volumes  :  ROME_WORKTREE_SLUG=${SLUG} docker compose -f compose.dev.yml -p ${SLUG} down -v
+│ Stop stack    :  ROME_WORKTREE_SLUG=${SLUG} docker compose -f compose.dev.yml -p ${SLUG} --profile signer stop
+│ Nuke volumes  :  ROME_WORKTREE_SLUG=${SLUG} docker compose -f compose.dev.yml -p ${SLUG} --profile signer down -v
 │ Reset state   :  rm -rf ${ROME_WORKTREE_HOME}
 │
 │ URL env       :  .obs/env (shell KEY=VALUE)

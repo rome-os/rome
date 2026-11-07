@@ -1,8 +1,17 @@
-import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
-import type { ActionConfig, ActionRegistry } from "../actions/types.js";
-import type { DeferInput } from "./defer.js";
-import type { FacadeToolDef, RoutineActivationGate } from "./mcp-facade.js";
-import type { UsageFunding } from "../usage/events.js";
+import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
+import type { AgentEvent, McpServerConfig } from "../types.js";
+import type { ActionRegistry } from "../actions/types.js";
+import type {
+  ModelReasoningEffort,
+  ModelSession,
+  ModelSessionParams,
+  ModelToolCallContext,
+  RomeToolDefinition,
+  ModelUserInput,
+  ProviderId,
+  RomeTools,
+  ThreadStart,
+} from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
@@ -23,46 +32,22 @@ import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 
 const log = createLogger("agent-runner");
 
-// ModelProvider abstraction. Agent model: docs/concepts/agents.md.
-//
-// The interface only requires what every model needs: an id, a builtin-tool
-// catalog and `openSession`. ModelResolver owns provider priority and concrete
-// model selection. Deliberately excludes mid-session control
-// (setModel/setPermissionMode/setMcpServers/stopTask) — that vocabulary is
-// Claude-SDK-specific and has no place in the provider contract.
+import type { ModelSessionEvent } from "../agent/index.js";
 
-export type ProviderId = "anthropic" | "openai" | "mock";
-export type ModelTier = "large" | "medium" | "small";
-
-export interface ModelToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
-export interface ModelToolCallContext {
-  /** Provider-issued identity of the model tool call. */
-  toolUseId: string;
-}
-
-export interface ActionMcpDefinition {
-  name: string;
-  description: string;
-  type: ActionConfig["type"];
-  complexity: ActionConfig["complexity"];
-  speed: ActionConfig["speed"];
-  reliability: ActionConfig["reliability"];
-  sideEffects: ActionConfig["sideEffects"];
-  requiresApproval: boolean;
-  cancellable: boolean;
-  inputSchema: Record<string, unknown>;
-}
-
-// One definition, owned by the skill catalog that produces it.
-import type { SkillMcpDefinition } from "./skill-catalog.js";
-export type { SkillMcpDefinition };
-
-export type ModelReasoningEffort = ReasoningEffort;
+// The model provider port lives in the agent context; these re-exports keep
+// today's importers compiling until they import it from there.
+export type {
+  ProviderId,
+  ModelTier,
+  RomeToolDefinition,
+  ModelToolCallContext,
+  ModelReasoningEffort,
+  ModelProvider,
+  ModelSessionParams,
+  ModelUserInput,
+  ModelSession,
+  ThreadStart,
+} from "../agent/index.js";
 
 /**
  * Legacy one-turn invocation parameters retained for tests and the
@@ -74,236 +59,15 @@ export interface ModelRunParams {
   model: string;
   systemPrompt: string;
   prompt: string;
-  actionCatalog: ActionMcpDefinition[];
-  skillCatalog: SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
+  /** The Rome tools the session serves; a mock calls them as a provider would. */
+  tools: RomeTools;
   outputSchema?: Record<string, unknown>;
   builtinTools?: string[];
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
-  sessionId?: string;
-  isNewSession?: boolean;
+  thread: ThreadStart;
   workingDir?: string;
   externalMcpServers?: Record<string, McpServerConfig>;
-  executeAction: (name: string, input: unknown) => Promise<unknown>;
-  executeSubagent: (
-    name: string,
-    input: unknown,
-    context: ModelToolCallContext,
-  ) => Promise<unknown>;
-}
-
-export interface ModelProvider {
-  /** Stable id used for telemetry and to look the provider up in the registry. */
-  readonly id: ProviderId;
-  /** Human-readable label for the dashboard. */
-  readonly displayName: string;
-  /**
-   * Names of tools the provider handles natively. These are Rome-canonical
-   * names (Read / Edit / Bash / Glob / Grep / WebSearch / WebFetch / Task) —
-   * the agent loader filters yaml `tools:` entries against this set.
-   */
-  readonly builtinTools: ReadonlySet<string>;
-  /**
-   * Open a long-lived model session. The returned handle owns the underlying
-   * SDK / HTTP client and the input queue. Multiple turns are driven by
-   * repeated `sendUserInput()` calls; the consumer drains `events()` for as
-   * long as the session is open.
-   */
-  openSession(params: ModelSessionParams): Promise<ModelSession>;
-}
-
-export interface ModelSessionParams {
-  model: string;
-  systemPrompt: string;
-  agentName?: string;
-  /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
-  appStoreListingId?: string;
-  /**
-   * Live getter the MCP facade reads on every tool request, so actions added
-   * mid-session (e.g. by `app_management`) become callable in-session. No
-   * static-snapshot fallback exists — every caller must supply a real getter.
-   */
-  getActionCatalog: () => ActionMcpDefinition[];
-  /**
-   * Live getter the MCP facade reads on every tool request, so skills from
-   * apps installed mid-session (e.g. via `app_management`) become
-   * discoverable in-session.
-   */
-  getSkillCatalog: () => SkillMcpDefinition[];
-  subagentTools: ModelToolDefinition[];
-  /** Provider-native final-response JSON Schema for every model turn. */
-  outputSchema?: Record<string, unknown>;
-  builtinTools?: string[];
-  maxTurns?: number;
-  reasoningEffort?: ModelReasoningEffort;
-  workingDir?: string;
-  /** The channel the session's turns are delivered on, from its key. Shell
-   *  tools such as the Discord CLI read it to act as that channel's account. */
-  channel?: string;
-  /**
-   * The agent's text stays in its trace (`policy.finalText: private`), so it
-   * reaches the guardian only through its tools.
-   */
-  textPrivate?: boolean;
-  externalMcpServers?: Record<string, McpServerConfig>;
-  /**
-   * The session identifier, a bare UUID. The Anthropic provider passes a new
-   * session's id to Claude Code as `--session-id`, which rejects anything
-   * else.
-   */
-  sessionId: string;
-  /**
-   * When true, the provider has never seen `sessionId`, so it may use it as
-   * the new conversation's id. When false, the id may already be taken, and
-   * the provider resumes only through `providerThreadId`.
-   */
-  isNewSession?: boolean;
-  /**
-   * Provider-specific thread/session id from a previous session, used for
-   * resume. Codex generates its own opaque thread id that must be passed
-   * back to `resumeThread()`; Anthropic captures the SDK transcript's id.
-   */
-  providerThreadId?: string;
-  /** Provider-owned fork source. Normal application code should not set this. */
-  fork?: ModelSessionForkSource;
-  /** Execute callbacks; the provider invokes these as MCP tools. */
-  executeAction: (name: string, input: unknown) => Promise<unknown>;
-  executeSubagent: (
-    name: string,
-    input: unknown,
-    context: ModelToolCallContext,
-  ) => Promise<unknown>;
-  /** Invoked when the agent calls the `defer` tool: schedules a
-   * one-off wakeup back into this same thread. Absent for sessions with no
-   * live thread to wake. */
-  executeDefer?: (input: DeferInput) => Promise<unknown>;
-  /** See FacadeParams.sessionTools. */
-  sessionTools?: FacadeToolDef[];
-  /** See FacadeParams.routineActivation. */
-  routineActivation?: RoutineActivationGate;
-  /**
-   * Whether the consuming surface can render interactive inline UI
-   * (`propose_routine` cards, app components). True only for webchat-bound
-   * sessions (dashboard + desktop); other channels skip the tools so the model
-   * doesn't dead-end waiting for UI no one will deliver.
-   */
-  supportsInteractiveSurface?: boolean;
-  /**
-   * True when the session must keep advertising the interactive-surface tool
-   * catalog but nothing drains its stream to mount UI — exact-mode forked
-   * turns, whose model-visible prefix (system prompt + tools) must stay
-   * byte-identical to their webchat source while no webchat drain exists to
-   * render cards. The interactive tools' *runtime*
-   * degrades to the non-interactive fallbacks (ask_question relays prose;
-   * propose_routine refuses) instead of claiming UI was
-   * delivered. See FacadeParams.interactiveSurfaceDetached.
-   */
-  interactiveSurfaceDetached?: boolean;
-}
-
-export interface ModelUserInput {
-  /** Stable identity of an independently submitted conversational input. */
-  inputId?: string;
-  text: string;
-  /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
-  images?: string[];
-  reasoningEffort?: ModelReasoningEffort;
-  /** Optional injected tool-result, used for approval continuations. */
-  injectedToolResult?: { toolUseId: string; content: unknown };
-}
-
-export type ModelSessionForkMode = "ephemeral" | "thread";
-
-export interface ModelSessionForkParams {
-  /** Rome session id to assign to the forked provider session. */
-  sessionId: string;
-  /** Ephemeral forks are closed after one use; thread forks may be persisted. */
-  mode?: ModelSessionForkMode;
-  /**
-   * Whether the fork may change the source session's runtime configuration.
-   * Providers can use exact-mode knowledge to preserve provider-specific cache
-   * lineage when the model and prompt configuration are unchanged.
-   */
-  configurationMode?: "isolated" | "exact";
-  /** Provider-native checkpoint to include as the fork's final source turn. */
-  sourceCheckpoint?: string;
-}
-
-export interface ModelSessionForkSource {
-  sourceSessionId: string;
-  sourceProviderThreadId?: string;
-  mode: ModelSessionForkMode;
-  sourceCheckpoint?: string;
-}
-
-export type ModelSessionForkOpenParams = Omit<
-  ModelSessionParams,
-  "sessionId" | "isNewSession" | "providerThreadId" | "fork"
->;
-
-export interface ModelSessionFork {
-  readonly providerId: ProviderId;
-  readonly sessionId: string;
-  readonly sourceSessionId: string;
-  readonly sourceProviderThreadId?: string;
-  readonly mode: ModelSessionForkMode;
-  readonly providerThreadId?: string;
-
-  open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
-}
-
-export interface ModelSession {
-  readonly providerId: ProviderId;
-  readonly model: string;
-  /**
-   * Effort the provider applied to its most recent turn, in the provider's
-   * own terminology (for example `xhigh` for Claude and Codex). A provider
-   * that fixes effort when the session opens may report it before the first
-   * turn. Unset when the provider reports none.
-   */
-  readonly appliedReasoningEffort?: string;
-  /** A disposed provider execution must be reopened before another turn. */
-  readonly isClosed?: boolean;
-  /** Single, lifetime stream of AgentMessages produced by the provider. */
-  readonly events: AsyncIterable<AgentEvent>;
-
-  /**
-   * Provider-specific thread id, set after the first turn for providers that
-   * generate their own (e.g. Codex). Used by the session manager to persist
-   * the id for future resume.
-   */
-  providerThreadId?: string;
-
-  /** Opaque checkpoint for the most recent successfully completed provider turn. */
-  readonly lastCompletedTurnCheckpoint?: string;
-
-  /**
-   * The provider's own id for the most recent turn that reached it, whatever
-   * its outcome. Unset for providers that mint no turn ids of their own.
-   */
-  readonly lastProviderTurnId?: string;
-
-  /** Who pays the model provider for a turn that ends now. Unset when unknown. */
-  readonly funding?: UsageFunding;
-
-  /** Push a new user turn. Resolves once the provider accepts it. */
-  sendUserInput(input: ModelUserInput): Promise<void>;
-
-  /** Append without interrupting. Only `deferred` is safe to submit again. */
-  steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
-
-  /** Create an isolated provider-owned branch from this live session. */
-  fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
-
-  /** Stop the in-flight turn. The provider may dispose of its execution. */
-  interrupt(reason?: string): Promise<void>;
-
-  /**
-   * Close the session. The events iterable terminates. Idempotent. After
-   * close(), sendUserInput() rejects.
-   */
-  close(): Promise<void>;
 }
 
 /**
@@ -314,18 +78,21 @@ export interface ModelSession {
  */
 export function createSessionFromRun(
   providerId: ProviderId,
-  run: (params: ModelRunParams) => AsyncIterable<AgentEvent>,
+  run: (params: ModelRunParams) => AsyncIterable<AgentEvent | ModelSessionEvent>,
   params: ModelSessionParams,
 ): ModelSession {
+  if (params.thread.kind === "branch") {
+    throw new Error("Branching a thread is not supported by this provider");
+  }
   // Standard async-queue: emit() either hands the value to a waiting
   // consumer (resolvers FIFO) or buffers it for the next next() call. Don't
   // share a single `pending` slot — back-to-back emits would clobber each
   // other since the consumer hasn't had a chance to await again yet.
-  const buffer: AgentEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+  const buffer: ModelSessionEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentEvent) => {
+  const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       const r = resolvers.shift()!;
@@ -335,15 +102,15 @@ export function createSessionFromRun(
     }
   };
 
-  const events: AsyncIterable<AgentEvent> = {
+  const events: AsyncIterable<ModelSessionEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentEvent>> {
+        async next(): Promise<IteratorResult<ModelSessionEvent>> {
           if (buffer.length > 0) {
             return { value: buffer.shift()!, done: false };
           }
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -351,43 +118,35 @@ export function createSessionFromRun(
     },
   };
 
-  let appliedReasoningEffort: string | undefined;
-
   return {
     providerId,
-    model: params.model,
+    model: params.config.model,
     events,
-    get appliedReasoningEffort(): string | undefined {
-      return appliedReasoningEffort;
-    },
     async sendUserInput(input: ModelUserInput): Promise<void> {
       // ModelRunParams is a per-turn snapshot for legacy `run()`-based mock
       // providers — call the getters here so each turn sees the current view.
+      const { config } = params;
       const runParams: ModelRunParams = {
-        model: params.model,
-        systemPrompt: params.systemPrompt,
+        model: config.model,
+        systemPrompt: config.systemPrompt,
         prompt: input.text,
-        actionCatalog: params.getActionCatalog(),
-        skillCatalog: params.getSkillCatalog(),
-        subagentTools: params.subagentTools,
-        outputSchema: params.outputSchema,
-        builtinTools: params.builtinTools,
-        maxTurns: params.maxTurns,
-        reasoningEffort: input.reasoningEffort ?? params.reasoningEffort,
-        sessionId: params.sessionId,
-        isNewSession: params.isNewSession,
-        workingDir: params.workingDir,
-        externalMcpServers: params.externalMcpServers,
-        executeAction: params.executeAction,
-        executeSubagent: params.executeSubagent,
+        tools: params.tools,
+        outputSchema: config.outputSchema,
+        builtinTools: config.builtinTools,
+        maxTurns: config.maxTurns,
+        reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
+        thread: params.thread,
+        workingDir: config.workingDir,
+        externalMcpServers: config.externalMcpServers,
       };
-      appliedReasoningEffort = runParams.reasoningEffort;
+      const { reasoningEffort } = runParams;
       for await (const msg of run(runParams)) {
-        emit(msg);
+        emit(
+          msg.type === "result"
+            ? { reasoningEffort: reasoningEffort ?? DEFAULT_REASONING_EFFORT, ...msg }
+            : msg,
+        );
       }
-    },
-    async fork(): Promise<ModelSessionFork> {
-      throw new Error("ModelSession fork is not supported by this provider");
     },
     async interrupt(): Promise<void> {},
     async close(): Promise<void> {
@@ -410,14 +169,14 @@ export function createSessionFromRun(
  * For a correctly-configured code-backed agent a turn middleware short-circuits
  * every turn, so `sendUserInput` is never reached. If it is (no middleware
  * matched — a misconfiguration), the turn is terminated gracefully with a
- * fallback result rather than hanging, so the session never wedges.
+ * fallback error rather than hanging, so the session never wedges.
  */
 export function createNullModelSession(params: ModelSessionParams): ModelSession {
-  const buffer: AgentEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+  const buffer: ModelSessionEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentEvent) => {
+  const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       resolvers.shift()!({ value: msg, done: false });
@@ -426,13 +185,13 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     }
   };
 
-  const events: AsyncIterable<AgentEvent> = {
+  const events: AsyncIterable<ModelSessionEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentEvent>> {
+        async next(): Promise<IteratorResult<ModelSessionEvent>> {
           if (buffer.length > 0) return { value: buffer.shift()!, done: false };
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -445,14 +204,11 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
 
   return {
     providerId: "mock",
-    model: params.model,
+    model: params.config.model,
     events,
     async sendUserInput(): Promise<void> {
       emit({ type: "text", content: FALLBACK });
-      emit({ type: "result", content: FALLBACK });
-    },
-    async fork(): Promise<ModelSessionFork> {
-      throw new Error("a code-backed agent session cannot fork");
+      emit({ type: "error", error: "No handler took this turn" });
     },
     async interrupt(): Promise<void> {},
     async close(): Promise<void> {
@@ -613,6 +369,17 @@ export class AgentRunner {
           turnId: handle.turnId,
           source: "agent-runner",
         });
+        // The turn's input, under the caller's label, right after it starts.
+        if (msg.type === "turn_start" && params.inputLabel) {
+          await recorder
+            .recordSystemInput(params.inputLabel, params.prompt)
+            .catch((error: unknown) =>
+              log.warn("system input not recorded", {
+                turnId: handle.turnId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+        }
       }
       yield msg;
     }
@@ -690,6 +457,9 @@ export class AgentRunner {
               // without risking the source session that owns it.
               liveStream = this.turnStreams.register({
                 sessionId: message.sessionId,
+                // The fork is a chat of its own once its row is saved; one
+                // whose row could not be saved is open to no one.
+                chatId: message.sessionId,
                 turnId: message.turnId,
                 agentName: params.agentName,
               });
@@ -724,9 +494,11 @@ export class AgentRunner {
   }
 
   /**
-   * Register the fork's rome session (with parent lineage) and return a
-   * recorder targeting it. Best-effort: a persistence failure must not break
-   * the forked run, so any error degrades to "no recording" with a warning.
+   * Register the fork's rome session and return a recorder targeting it. A
+   * fork of a chat is that chat's child: it is saved with its parent's owner
+   * and privacy, and when the chat is gone or the row cannot be saved this
+   * throws, so the fork does not run. A fork that names no chat is
+   * best-effort: a persistence failure degrades to "no recording".
    */
   private async createForkTraceRecorder(
     params: ForkRunParams,
@@ -734,22 +506,24 @@ export class AgentRunner {
     sourceChatId?: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
-    try {
-      const thread = params.threadContext;
-      // Prefer the source's conversation while it exists. Read again rather
-      // than trusting the session's cached row, which can outlive a deletion.
-      // The fallbacks cover rows that recorded none, or one since deleted.
-      const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
-      const parentSessionId =
-        recorded?.id ??
-        thread?.romeSessionId ??
-        (thread ? channelChatId(thread.channel, thread.threadId) : null);
-      const parent =
-        recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
-      const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
-      const label = params.label ?? "fork";
-      const trigger = { triggerKind: "fork", triggerName: label };
-      await this.webchatRepo.ensureRomeSession({
+    const thread = params.threadContext;
+    // Prefer the source's conversation while it exists. Read again rather
+    // than trusting the session's cached row, which can outlive a deletion.
+    const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
+    // The chat the fork is of, when the turn names one.
+    const named = recorded?.id ?? thread?.romeSessionId;
+    // A channel thread that recorded no conversation may still have its row.
+    const fallback = thread ? channelChatId(thread.channel, thread.threadId) : null;
+    const parentSessionId =
+      named ?? (fallback && (await this.webchatRepo.getSession(fallback)) ? fallback : null);
+    const parent =
+      recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
+    if (named && !parent) throw new Error(`Parent Rome session "${named}" was not found`);
+    const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
+    const label = params.label ?? "fork";
+    const trigger = { triggerKind: "fork", triggerName: label };
+    const save = async () => {
+      await this.webchatRepo!.ensureRomeSession({
         id: turnStart.sessionId,
         type: "fork",
         name: `${label}: ${parentName}`,
@@ -758,16 +532,12 @@ export class AgentRunner {
         projectPath: thread?.projectPath,
         // Later turns of the side chat read the folder from this row.
         deviceFolder: thread?.deviceFolder ?? null,
-        sourceChannel: thread?.channel ?? null,
-        sourceThreadId: thread?.threadId ?? null,
-        sourceThreadName: thread?.threadName ?? null,
-        sourceThreadType: thread?.threadType ?? null,
         trigger,
-        parentSessionId: parent ? parentSessionId : null,
-        parentTurnId: parent ? (params.parentTurnId ?? null) : null,
+        parentSessionId,
+        parentTurnId: parentSessionId ? (params.parentTurnId ?? null) : null,
       });
       return new AgentTraceRecorder({
-        webchatRepo: this.webchatRepo,
+        webchatRepo: this.webchatRepo!,
         agentName: params.agentName,
         channelThreadKey: params.channelThreadKey,
         turnId: turnStart.turnId,
@@ -776,6 +546,11 @@ export class AgentRunner {
         persistTranscript: true,
         trigger,
       });
+    };
+    // A child must be saved with its parent's owner, or not run at all.
+    if (parentSessionId) return save();
+    try {
+      return await save();
     } catch (err) {
       log.warn("failed to register forked run session; skipping trace persistence", {
         agent: params.agentName,

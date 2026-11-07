@@ -57,31 +57,10 @@
       "placeholder": "Search connections",
       "clear": "Clear search",
       "noMatch": {
-        "connected": "No connected service matches “{{query}}”.",
-        "available": "No available service matches “{{query}}”."
+        "all": "No service matches “{{query}}”."
       }
-    },
-    "tabs": {
-      "label": "Connections",
-      "connected": "Connected",
-      "available": "Available",
-      "empty": {
-        "connected": "Nothing is connected yet.",
-        "available": "Everything here is connected."
-      },
-      "show": {
-        "connected": "Show {{count}} in Connected",
-        "available": "Show {{count}} in Available"
-      }
-    },
-    "groups": {
-      "messaging": "Messaging",
-      "accounts": "Accounts and tools",
-      "other": "Other"
     },
     "composioServices": {
-      "group": "Via Composio",
-      "via": "via Composio",
       "viaLong": "Rome reaches this service through your Composio account.",
       "signInBanner": "Sign in to Composio to connect these services.",
       "signIn": "Sign in",
@@ -100,8 +79,15 @@
         "ready": "Ready",
         "notReady": "Needs setup",
         "unavailable": "Unavailable on this instance",
+        "elsewhere": "Going to another Rome",
         "setUp": "Set up again",
         "done": "Event delivery is set up."
+      },
+      "project": {
+        "title": "Project",
+        "label": "Composio project",
+        "default": "{{name}} (default)",
+        "switched": "Connect your services again in this project, then ask the Concierge to follow them again."
       }
     },
     "loadFailedFallback": "Failed to load connections.",
@@ -298,11 +284,14 @@
           }
         }
       }
+    },
+    "sections": {
+      "connected": "Connected · {{count}}",
+      "add": "Add a connection"
     }
   },
   "appKeys": {
     "title": "App keys",
-    "back": "Connections",
     "openLabel": "Open App keys",
     "keyCount_one": "{{count}} key",
     "keyCount_other": "{{count}} keys",
@@ -318,11 +307,6 @@
     "remove": "Remove",
     "removeTitle": "Remove {{name}}?",
     "removeBody": "Apps will no longer be able to read this value. This can't be undone.",
-    "table": {
-      "key": "Key",
-      "value": "Value",
-      "actions": "Actions"
-    },
     "valueHidden": "Value hidden",
     "form": {
       "titleAdd": "New key",
@@ -355,14 +339,17 @@
         "longValue": "Value exceeds 32,768 characters",
         "name": "Invalid key name"
       },
-      "batchFailed": "{{saved}} saved, {{count}} failed. Only failed entries remain in the form. Retry to save them."
+      "batchFailed": "{{saved}} saved, {{count}} failed. Only failed entries remain in the form. Retry to save them.",
+      "back": "Back to app keys"
     },
     "saved": "Saved. Apps can now read {{name}}.",
     "savedOverridden": "Saved, but a server setting with the same name takes precedence — the value you entered is not in use.",
     "removed": "Removed {{name}}.",
     "batchSaved_one": "Saved {{count}} key for all apps.",
     "batchSaved_other": "Saved {{count}} keys for all apps.",
-    "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use."
+    "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use.",
+    "summary": "Secrets apps can read, like a database password or an API key.",
+    "manage": "Manage"
   },
   "trust": {
     "title": "Bond Level Rules",
@@ -544,86 +531,16 @@
     "decliningApprovalRequest": "Declining approval request",
     "startingPackPurchase": "Starting favor pack purchase"
   },
-  "tailscale": {
-    "title": "Tailscale",
-    "daemonMode": "daemon mode",
-    "status": {
-      "connected": "Connected",
-      "notConnected": "Not connected",
-      "authenticating": "Authenticating",
-      "notConfigured": "Not configured"
-    },
-    "connectButton": "Connect to Tailscale",
-    "connectButtonOauth": "Connect Tailscale",
-    "authPrompt": "Complete authentication in your browser:",
-    "polling": "Polling for completion...",
-    "infoLabels": {
-      "ip": "Tailscale IP",
-      "hostname": "Hostname",
-      "fqdn": "FQDN"
-    },
-    "peersTable": {
-      "hostname": "Hostname",
-      "fqdn": "FQDN",
-      "ip": "IP",
-      "os": "OS",
-      "status": "Status",
-      "thisDevice": "THIS"
-    },
-    "noPeers": "No peers found in your tailnet.",
-    "exitNode": {
-      "title": "Exit Node",
-      "updating": "Updating exit node setting...",
-      "updateFailed": "Failed to update exit node setting.",
-      "termTooltip": "An exit node routes another device's internet traffic through this server."
-    },
-    "downloadBannerPrefix": "Running outside Docker. Download the",
-    "downloadBannerLink": "Tailscale desktop app",
-    "downloadBannerSuffix": "to connect this machine to your tailnet.",
-    "devicesTable": {
-      "name": "Name",
-      "os": "OS",
-      "ipAddresses": "IP Addresses",
-      "version": "Version",
-      "status": "Status",
-      "lastSeen": "Last Seen"
-    },
-    "noDevices": "No devices found in your tailnet.",
-    "modal": {
-      "title": "Connect Tailscale",
-      "introPrefix": "Enter your Tailscale OAuth client credentials. You can create them in the",
-      "introLink": "Tailscale admin console",
-      "introSuffix": ". The client needs at least <code>devices:read</code> scope.",
-      "clientIdLabel": "Client ID",
-      "clientIdPlaceholder": "k1234567890abcdef",
-      "clientSecretLabel": "Client Secret",
-      "clientSecretPlaceholder": "tskey-client-...",
-      "cancel": "Cancel"
-    }
-  },
   "publicAccess": {
-    "title": "Access Control",
-    "description": "Dashboard sign-in is still required under every setting here.",
-    "savedFlash": "Public access settings saved",
-    "saveFailedFallback": "Failed to save public access settings.",
-    "openFirst": "Open your Rome Tailscale URL from this device before turning on access control.",
-    "handoffFailed": "Could not transfer your session to the Tailscale URL.",
-    "toggleLabel": "Restrict to Tailscale host",
-    "restrictedNote": "Public internet access is restricted. Continue using the Tailscale hostname for the dashboard.",
-    "needTailscaleNote": "Connect this machine to Tailscale before restricting the dashboard to the Tailscale host.",
-    "needHttpsNote": "Finish the Tailscale HTTPS setup before turning on access control.",
-    "openTailnetNote": "Open your Rome Tailscale URL from this device first so Rome can verify the connection works.",
-    "checkingSuffix": " Checking...",
-    "publicEnabledNote": "Public host access is enabled. Dashboard sign-in is still required, except for apps with public or Rome Cloud email access.",
+    "title": "Access and privacy",
     "dashboardEmails": {
       "title": "Allowed emails",
-      "description": "Grants the full dashboard, not just individual apps.",
+      "description": "These accounts get the full dashboard.",
       "accountCount_one": "{{count}} account",
       "accountCount_other": "{{count}} accounts",
       "inputLabel": "Add email address",
       "placeholder": "name@example.com",
       "add": "Add",
-      "help": "Press Enter to add. Paste a list and we'll split it on commas, spaces, or new lines.",
       "empty": "No accounts yet. Shared dashboard access stays off until you add one.",
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
@@ -759,34 +676,24 @@
     "reviewed": "Reviewed"
   },
   "advanced": {
-    "title": "Advanced Settings",
     "presentationMode": {
       "title": "Presentation mode",
-      "description": "Hides pinned-agent names, avatars, and the composer chip. Applies to this browser only.",
+      "description": "Hides agent names and avatars in chat. This browser only.",
       "toggleLabel": "Mask agent identity in chat"
     },
+    "features": {
+      "title": "Features"
+    },
     "experimental": {
-      "title": "Experimental features",
-      "description": "Features still being tried out. Each is off until switched on, and may change or be removed.",
-      "replyStreaming": {
-        "title": "Reply streaming",
-        "description": "Applies to the guardian's direct chats on Telegram, Feishu, and Discord. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
-        "toggleLabel": "Stream replies as they are written"
-      },
+      "badge": "Experimental",
       "concierge": {
         "title": "Concierge",
-        "description": "Adds one chat under Chats where your agent texts with you in short messages and hands longer work to task chats you can open.",
+        "description": "One chat where your agent texts you short replies and hands long work to task chats.",
         "toggleLabel": "Show Concierge in Chats"
-      },
-      "feishuStreamingStyle": {
-        "title": "Feishu streaming style",
-        "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",
-        "message": "Messages",
-        "card": "Cards"
       }
     },
     "developerSettings": {
-      "title": "Developer Settings"
+      "title": "Developer settings"
     },
     "tierModelMappings": {
       "title": "Model ID mappings",
@@ -813,7 +720,6 @@
     },
     "aiToolUsage": {
       "title": "AI tool usage",
-      "description": "Usage windows appear on the AI Tools tab.",
       "toggleLabel": "Show Claude and ChatGPT usage"
     },
     "relayHealth": {
@@ -844,7 +750,7 @@
       "copied": "Copied"
     },
     "diagnosis": {
-      "title": "System diagnosis",
+      "title": "Diagnosis",
       "loading": "Running diagnosis…",
       "loadFailed": "Failed to load diagnosis.",
       "refresh": "Refresh",
@@ -889,13 +795,18 @@
       "short": "Short",
       "low": "Low",
       "memoryShortHint": "Memory is short. Queued work waits until memory frees up, and running work may slow down.",
-      "diskLowHint": "Disk is nearly full. Free space before saves start failing."
+      "diskLowHint": "Disk is nearly full. Free space before saves start failing.",
+      "summary": {
+        "ok": "All checks passed",
+        "degraded": "Some checks need attention"
+      },
+      "details": "Details",
+      "close": "Close"
     },
     "uptimePrefix": "running for {{uptime}}",
     "buildPrefix": "build {{sha}} · built {{builtAt}}",
     "computerUse": {
       "title": "Computer Use",
-      "description": "Browsers connected through OpenCLI. Last seen records when a connection was last confirmed.",
       "refresh": "Refresh",
       "loadFailed": "Could not refresh browser connections",
       "loading": "Checking browser connections…",
@@ -915,43 +826,44 @@
       },
       "lastSeen": "Last seen",
       "notReported": "Not reported",
-      "installExtension": "Install OpenCLI extension"
+      "installExtension": "Install OpenCLI extension",
+      "summary_one": "{{count}} browser connected",
+      "summary_other": "{{count}} browsers connected",
+      "details": "Details",
+      "close": "Close"
     },
     "feedback": {
-      "title": "Feedback",
       "agentReports": {
         "title": "Agent platform reports",
-        "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
+        "description": "Lets your agent report Rome problems to the Rome team, with instance diagnostics.",
         "toggleLabel": "Allow agent reports"
       }
     },
     "spokenRecaps": {
       "title": "Spoken recaps",
-      "description": "A short summary after substantial chat turns, with optional audio to listen hands-free. Recaps appear in the chat.",
+      "description": "A short summary after long chat turns. Each uses an extra model call.",
       "enabled": {
         "title": "Create recaps",
         "description": "Each recap uses an extra model call. Off by default. Turning recaps off stops new summaries and audio, but keeps existing recaps."
       },
       "threshold": {
         "title": "Length threshold",
-        "description": "Based on response length and tool activity, not recap length.",
         "short": "Shorter turns",
         "medium": "Substantial turns",
         "long": "Longer turns only"
       },
       "createAudio": {
         "title": "Create audio",
-        "description": "Send recap text to Microsoft Edge Text to Speech to create a playable recording."
+        "description": "Reads recaps aloud with Microsoft Edge Text to Speech."
       },
       "audioSpeed": {
         "title": "Audio speed",
-        "description": "Applies to newly created recordings.",
         "slower": "Slower (−15%)",
         "normal": "Normal",
         "faster": "Faster (+15%)",
         "fastest": "Fastest (+30%)"
       },
-      "loadFailed": "Recap settings could not be saved or loaded. Try again.",
+      "loadFailed": "Recap settings didn’t load or save.",
       "loading": "Loading recap settings…",
       "saving": "Saving…",
       "retry": "Try again"
@@ -971,7 +883,7 @@
     "upgradeAvailable": "Version {{version}} is available.",
     "upgradeButton": "Upgrade to {{version}}",
     "notManaged": "This instance is not managed by Rome Cloud, so upgrades can't be started from the dashboard.",
-    "upgradeUnsupported": "This build has no release version, so upgrades aren't supported. Dev and test builds are updated by recreating the instance.",
+    "upgradeUnsupported": "Dev builds have no release version, so they can't be upgraded here.",
     "unresolvable": "Couldn't determine the latest version — the release registry is unreachable. Try again later.",
     "checkFailed": "Update check failed: {{message}}",
     "checkFailedFallback": "Update check failed.",

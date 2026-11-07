@@ -6,8 +6,11 @@ export interface FakeChat {
   lines: Array<Partial<ChatLine> & Pick<ChatLine, "role" | "content" | "createdAt">>;
 }
 
-/** Chat reads over `chats`, listed as given: a chat with no channel is a
- *  dashboard chat. */
+const lastSaid = (chat: FakeChat): number =>
+  Math.max(0, ...chat.lines.map((line) => line.createdAt.getTime()));
+
+/** Chat reads over `chats`, most recently active first: a chat with no
+ *  channel is a dashboard chat. */
 export function fakeChatReads(chats: FakeChat[]): ChatReads {
   const linesOf = (chat: FakeChat): ChatLine[] =>
     chat.lines.map((line, index) => ({
@@ -26,6 +29,7 @@ export function fakeChatReads(chats: FakeChat[]): ChatReads {
             : chat.chat.channel && where.accountKinds.includes(chat.chat.channel.kind),
         )
         .filter((chat) => chat.lines.some((line) => line.createdAt >= since))
+        .sort((a, b) => lastSaid(b) - lastSaid(a))
         .map(({ chat }) => ({
           chat: { platform: chat.channel ? chat.channel.kind : "webchat", id: 1 },
           name: "Chat",

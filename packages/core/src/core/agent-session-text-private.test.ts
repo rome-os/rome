@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -19,7 +19,6 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
@@ -53,7 +52,6 @@ describe("AgentSessionManager textPrivate", () => {
     const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
-    const sessionsRepo = new SessionsRepository(testDb.db);
     opened = [];
     const provider: ModelProvider = {
       id: "anthropic",
@@ -80,8 +78,7 @@ describe("AgentSessionManager textPrivate", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
-        sessionsRepo,
+        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         webchatRepo: new ChatsWebChatRepository(testDb.db),
         promptBuilder,
         actionRegistry,
@@ -109,12 +106,16 @@ describe("AgentSessionManager textPrivate", () => {
   it.each([
     ["texter", true],
     ["worker", false],
-  ])("opens %s's model session with textPrivate %s", async (agentName, textPrivate) => {
+  ])("opens %s's model session with a defer tool that asks for a confirmation line: %s", async (agentName, textPrivate) => {
     await manager.acquire(
       { agentName, channelThreadKey: `webchat:${agentName}` },
       { workingDir: directory },
     );
     expect(opened).toHaveLength(1);
-    expect(opened[0]!.textPrivate).toBe(textPrivate);
+    // A private-text agent's words never reach the guardian, so `defer` asks
+    // it for no confirmation line.
+    const defer = opened[0]!.tools.listTools("ask_user").find((tool) => tool.name === "defer");
+    expect(defer).toBeDefined();
+    expect(defer!.description.includes("write one short line confirming")).toBe(!textPrivate);
   });
 });

@@ -27,10 +27,9 @@ export type {
   ReasoningEffort,
 } from "@rome-os/app-runtime";
 
-export interface McpServerConfig {
-  command: string;
-  args: string[];
-}
+import type { McpServerConfig } from "./agent/index.js";
+
+export type { McpServerConfig };
 
 export interface AgentConfig {
   name: string;
@@ -75,19 +74,6 @@ export interface AgentConfig {
     autoTitle?: boolean;
     loadMemory?: boolean;
   };
-}
-
-export interface AgentSession {
-  id: string;
-  agentName: string;
-  channelThreadKey: string;
-  /** The Rome conversation this session serves, when the caller named one. */
-  chatId?: string;
-  providerThreadId?: string;
-  workingDir?: string;
-  createdAt: Date;
-  lastActiveAt: Date;
-  status: "active" | "completed" | "error";
 }
 
 export interface Policy {

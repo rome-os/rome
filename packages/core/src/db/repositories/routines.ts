@@ -21,6 +21,7 @@ export function toRoutine(row: RoutineRow): Routine {
     trigger: row.trigger as Trigger,
     actionName: row.actionName,
     args: (row.args ?? {}) as Record<string, unknown>,
+    ...(row.keepTriggerPayload === false ? { keepTriggerPayload: false } : {}),
     createdAt: row.createdAt,
     lastFiredAt: row.lastFiredAt ?? undefined,
     nextRunAt: row.nextRunAt ?? undefined,
@@ -130,6 +131,7 @@ export class RoutinesRepository {
     args: Record<string, unknown>;
     enabled?: boolean;
     nextRunAt?: Date;
+    keepTriggerPayload?: boolean;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
@@ -142,6 +144,7 @@ export class RoutinesRepository {
       trigger: data.trigger as unknown,
       actionName: data.actionName,
       args: data.args as unknown,
+      keepTriggerPayload: data.keepTriggerPayload ?? true,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,
@@ -158,6 +161,7 @@ export class RoutinesRepository {
       actionName: string;
       args: Record<string, unknown>;
       nextRunAt: Date | null;
+      keepTriggerPayload: boolean;
     }>,
   ) {
     const values: Record<string, unknown> = {};
@@ -167,6 +171,7 @@ export class RoutinesRepository {
     if (data.actionName !== undefined) values.actionName = data.actionName;
     if (data.args !== undefined) values.args = data.args;
     if (data.nextRunAt !== undefined) values.nextRunAt = data.nextRunAt;
+    if (data.keepTriggerPayload !== undefined) values.keepTriggerPayload = data.keepTriggerPayload;
 
     await this.db.update(routines).set(values).where(eq(routines.id, id));
   }

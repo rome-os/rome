@@ -62,6 +62,44 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 - The dashboard shows assistants' chats on one Assistants page, one chat at a time: it opens on the chat that moved last, and its header switches to another assistant, each marked with its kind. The page stays off the sidebar until the guardian adds it. Assistants' chats are not in the dashboard's chat list.
 - Another Rome is an assistant, but the dashboard does not list it. Rome can still message it, and its messages still reach Rome.
 
+## Concierge chat
+
+A dashboard chat where its owner talks with their Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat of one owner talks to the same Concierge, with one list of follows and one list of tasks. Memory is one for every owner.
+
+- A Concierge chat is a chat of its own, not a thread. What is said in one does not show in another, and each has its own agent session.
+- The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
+- While the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge. App users have none.
+- A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist. So is a fork or a subagent session of it, or of a task chat it started, from the moment it is made.
+- Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's.
+- A visitor dropped from the dashboard allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
+- Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
+- Digest times, quiet hours and the time zone they are read in are each owner's own.
+- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat.
+
+## Main chat
+
+The one Concierge chat each owner always has.
+
+- The main chat exists while the Concierge is on, and it is never archived or deleted.
+- The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
+- Alerts and tasks whose Concierge chat is archived or deleted come here.
+
+## Topic chat
+
+A Concierge chat its owner starts for one topic, such as the calendar or a project. It stands beside the main chat, not under it.
+
+- A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
+- One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
+- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and tasks to its owner's main chat, and the Concierge says so there.
+- An owner may have any number of topic chats.
+
+## Task chat
+
+A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
+
+- A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
+- A task chat carries one piece of work. It gets no alerts and no digest.
+
 ## Reply rule
 
 A setting on a chat, for each of Rome's accounts in it, saying when that account's agent is woken: on every message, only when mentioned, or when it is needed. The same account can be chatty in one group and quiet in another.
@@ -174,6 +212,11 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **"Agent" for a Dot or Muse.** Agent means one of Rome's own agents, which the guardian defines and runs. A Dot or Muse runs elsewhere and answers to someone else's rules, so one word for both would need context to tell them apart.
 - **Assistants' chats mixed into the dashboard's own chats.** The guardian talks to Rome in one and watches Rome talk to another agent in the other. Mixed together, a chat with Muse reads as a chat with Rome.
 - **The guardian's line in an assistant's chat going to main.** It would put two conversations in one place: the guardian with main, and Rome with the assistant. Talking about an assistant with main belongs in the dashboard's own chat.
+- **"Side chat" for a topic chat.** Muse uses the word, but in Rome a side chat is a fork of a chat from one of its turns, carrying that chat's history. A Concierge chat starts empty and belongs to no other chat.
+- **"Channel" for a topic chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
+- **"Sub chat" for a topic chat.** It reads as a chat under another, which is what a task chat is. A topic chat stands beside the main chat.
+- **A topic chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.
+- **Several Concierges, each with its own memory, follows and tasks.** One event would be triaged and told once per Concierge, and the isolation it promises does not exist inside one Rome. The reasons are in [One Concierge with several chats](../adrs/one-concierge-with-several-chats.md).
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.

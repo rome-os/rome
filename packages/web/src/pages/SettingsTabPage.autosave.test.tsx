@@ -47,17 +47,11 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
       return ok(settings);
     }
     if (url === "/api/sentinel-log") return ok([]);
-    if (url === "/api/tailscale/devices") {
-      return ok({ mode: "oauth", configured: false, devices: [] });
-    }
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+      return ok({ allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       return ok({ cloudEmailAccess: [] });
-    }
-    if (url === "/api/tailnet") {
-      return ok({ tailnetDns: null, httpsEnabled: false, certReady: false });
     }
     if (url === "/api/uptime") return ok({ uptime: 120 });
     if (url === "/api/build-info") return ok({ sha: null, builtAt: null });
@@ -113,7 +107,7 @@ describe("SettingsPage Advanced autosave", () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
-    expect(await screen.findByText("Advanced Settings")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Features" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
@@ -122,7 +116,7 @@ describe("SettingsPage Advanced autosave", () => {
     const user = userEvent.setup();
     renderAdvancedSettings();
 
-    await user.click(await screen.findByText("Enable model selector in chat"));
+    await user.click(await screen.findByRole("switch", { name: "Enable model selector in chat" }));
 
     await waitFor(() =>
       expect(calls).toContainEqual({
@@ -133,84 +127,15 @@ describe("SettingsPage Advanced autosave", () => {
     );
   });
 
-  it("keeps reply streaming off until it is switched on, and autosaves the change", async () => {
-    const calls = mockSettingsBackend();
-    const user = userEvent.setup();
-    renderAdvancedSettings();
-
-    const toggle = await screen.findByRole("switch", {
-      name: "Stream replies as they are written",
-    });
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    await user.click(toggle);
-
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        url: "/api/settings",
-        method: "PUT",
-        body: { enableReplyStreaming: true },
-      }),
-    );
-  });
-
-  it("keeps reply streaming under Experimental features, outside Developer Settings", async () => {
+  it("keeps Concierge under Features, outside Developer Settings", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
-    const toggle = await screen.findByRole("switch", {
-      name: "Stream replies as they are written",
-    });
+    const toggle = await screen.findByRole("switch", { name: "Show Concierge in Chats" });
     const section = toggle.closest("section");
     expect(section).not.toBeNull();
-    expect(
-      within(section as HTMLElement).getByRole("heading", { name: "Experimental features" }),
-    ).toBeTruthy();
+    expect(within(section as HTMLElement).getByRole("heading", { name: "Features" })).toBeTruthy();
     expect(toggle.closest("details")).toBeNull();
-  });
-
-  it("shows reply streaming on when the instance has it on", async () => {
-    mockSettingsBackend({ enableReplyStreaming: true });
-    renderAdvancedSettings();
-
-    const toggle = await screen.findByRole("switch", {
-      name: "Stream replies as they are written",
-    });
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-  });
-
-  it("offers the Feishu streaming style only while reply streaming is on", async () => {
-    const calls = mockSettingsBackend();
-    const user = userEvent.setup();
-    renderAdvancedSettings();
-
-    const style = await screen.findByRole("radiogroup", { name: "Feishu streaming style" });
-    const messages = within(style).getByRole("radio", { name: "Messages" });
-    const cards = within(style).getByRole("radio", { name: "Cards" });
-    expect(cards.getAttribute("aria-checked")).toBe("true");
-    expect(messages.hasAttribute("disabled")).toBe(true);
-
-    await user.click(screen.getByRole("switch", { name: "Stream replies as they are written" }));
-    await waitFor(() => expect(messages.hasAttribute("disabled")).toBe(false));
-    await user.click(messages);
-
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        url: "/api/settings",
-        method: "PUT",
-        body: { feishuReplyStreamingStyle: "message" },
-      }),
-    );
-    expect(messages.getAttribute("aria-checked")).toBe("true");
-  });
-
-  it("shows the Feishu streaming style the instance has", async () => {
-    mockSettingsBackend({ enableReplyStreaming: true, feishuReplyStreamingStyle: "message" });
-    renderAdvancedSettings();
-
-    const style = await screen.findByRole("radiogroup", { name: "Feishu streaming style" });
-    expect(
-      within(style).getByRole("radio", { name: "Messages" }).getAttribute("aria-checked"),
-    ).toBe("true");
   });
 
   it("saves trimmed, per-provider tier model mappings", async () => {

@@ -18,6 +18,6 @@ The shape is deliberately spare — there is no clustering, no leader election, 
 - **Atomicity stops at the lockfile boundary.** Lockfile writes are all-or-nothing (temp-file + rename + fsync, file *and* parent directory). Hot-swap *below* the lockfile is best-effort — no atomic rollback. The recovery model is soft degradation: warnings, "failed" status entries, ignored hooks. No automatic retry.
 
 - **The daemon's exit is the container's exit.** In the production image, when the health-check daemon exits on its own, the container stops with the daemon's exit code, so a restart policy reads a crash as a failure. Nothing inside the container restarts the daemon.
-- **A crashed supporting service leaves the daemon running.** The desktop, the browser, sshd, tailscaled, and Caddy each restart on their own when they exit.
+- **A crashed supporting service leaves the daemon running.** The desktop, the browser, sshd, and Caddy each restart on their own when they exit.
 - **One-time setup finishes before anything reads its output.** A service that reads the synced app code or the generated proxy config starts only after setup succeeds, and a failed setup stops the container with a non-zero exit code.
 - **Boot runs only root-owned code as root.** Every script the container starts as root at boot lives in a path the rome user cannot write.

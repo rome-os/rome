@@ -23,7 +23,7 @@ import { AgentLoader } from "../core/agent-loader.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { createAIToolState } from "../core/ai-tool-state.js";
-import type { CodexAccountService } from "../core/codex/account-service.js";
+import type { CodexAccountService } from "../agent/index.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
@@ -32,7 +32,7 @@ import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registr
 import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { SessionManager } from "../core/session-manager.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
@@ -54,7 +54,6 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { GuardianLinkCodes } from "../people/guardian-link-code.js";
@@ -529,7 +528,7 @@ export interface TestDeps extends ApiDeps {
    *  the list against a different database handle. */
   whatsAppAccounts: WhatsAppAccounts;
   linkedInAccounts: LinkedInAccounts;
-  sessionsRepo: SessionsRepository;
+  sessionRepository: SessionRepository;
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
   /** The platform end of each channel `connections` backs, by channel name. */
@@ -600,7 +599,6 @@ export async function buildTestDeps(
     transports.set(name, new FakeTransport(name));
   }
 
-  const sessionsRepo = new SessionsRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const peopleRepo = new PeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
@@ -687,7 +685,7 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: CodexAccountService = {
@@ -748,8 +746,7 @@ export async function buildTestDeps(
   });
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
+    sessionRepository,
     promptBuilder,
     actionRegistry,
     modelResolver,
@@ -829,7 +826,7 @@ export async function buildTestDeps(
     actionLoader,
     db,
     appConnectionAccessRepo,
-    sessionsRepo,
+    sessionRepository,
     peopleRepo,
     guardianLinkCodes: new GuardianLinkCodes(),
     whatsAppStoreRepo,
@@ -881,7 +878,6 @@ export async function buildTestDeps(
     accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
-    sessionManager,
     agentSessionManager,
     conversationTitleGenerator: {
       async generate(firstMessage) {

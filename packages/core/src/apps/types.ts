@@ -176,6 +176,26 @@ export interface RomeAppManifest {
   suggestedChannelBindings?: RomeAppSuggestedChannelBinding[];
   /** Event types this app delivers. See {@link RomeAppEventSource}. */
   eventSources?: RomeAppEventSource[];
+  /** What this app lets Rome watch. See {@link RomeAppWatchProvider}. */
+  watchProvider?: RomeAppWatchProvider;
+}
+
+/**
+ * Declares that an app provides watch: the sources its connections let Rome
+ * follow, each with kinds and options, and the actions that implement them.
+ * Core discovers providers from this declaration instead of naming an app, so
+ * followers such as the Concierge stay source-neutral. Each value is the name
+ * of one of the app's own actions.
+ */
+export interface RomeAppWatchProvider {
+  /** Lists the app's connectors: connection, whether Rome can act through it, and its watch catalog and status. */
+  sources: string;
+  /** Checks, or creates, the subscription behind the kinds of one target. */
+  ensure: string;
+  /** Puts one raw event in the common shape for a follow, or says why it is dropped. */
+  normalize: string;
+  /** Says a follower no longer needs a target's subscription. */
+  release: string;
 }
 
 export interface RomeAppDefinition extends RomeAppManifest {

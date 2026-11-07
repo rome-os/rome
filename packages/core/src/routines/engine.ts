@@ -22,6 +22,11 @@ function isActionNotFound(err: unknown): boolean {
   return err instanceof Error && err.name === "ActionNotFoundError";
 }
 
+/** What a run of a routine that keeps no trigger payload records instead of it. */
+export function payloadSize(payload: Record<string, unknown>): Record<string, unknown> {
+  return { omitted: true, bytes: JSON.stringify(payload).length };
+}
+
 export class RoutineEngine {
   private providers = new Map<string, TriggerProvider>();
   private retryTimers = new Set<ClockTimer>();
@@ -209,11 +214,13 @@ export class RoutineEngine {
     // provided instead of generating its own.
     const rootExecutionId = uuid();
 
+    const keep = routine.keepTriggerPayload !== false;
     const runId = await this.routineRunsRepo.create({
       routineId: routine.id,
       executionId: rootExecutionId,
       status: "running",
-      payload,
+      // A routine that keeps no payload records only its size.
+      payload: keep ? payload : payloadSize(payload),
       firedBy: opts.manual ? "run_now" : routine.trigger.type,
     });
 
@@ -243,6 +250,7 @@ export class RoutineEngine {
           initiator: `routine:${routine.name}`,
           rootExecutionId,
           whenWorkersBusy: "queue",
+          ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
         };
 
         try {
@@ -353,6 +361,8 @@ export class RoutineEngine {
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
                           whenWorkersBusy: "queue",
+                          // A retry keeps the payload out of its record, as the first try did.
+                          ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
                         }),
                       );
                       if (retryResult.status === "error") {

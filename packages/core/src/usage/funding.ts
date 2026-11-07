@@ -1,5 +1,7 @@
-import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../core/codex/rome-credits-provider.js";
 import type { UsageFunding } from "./events.js";
+
+/** The Codex model provider that bills the account's Rome credits. */
+export const ROME_CREDITS_MODEL_PROVIDER_ID = "rome_credits";
 
 /**
  * Funding for a Claude query. Stored Anthropic-compatible credentials and an

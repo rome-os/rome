@@ -47,7 +47,8 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { ListCollection, ListFooter, ListToolbar } from "@rome-os/ui/layout-list";
 import { Spinner } from "@rome-os/ui/spinner";
-import { Page, PageActions, PageHeader, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { Page } from "@rome-os/ui/page";
+import { ActivityHeader } from "./ActivityHeader";
 import { ToolbarButton } from "@rome-os/ui/toolbar";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import {
@@ -96,12 +97,12 @@ import {
   formatDate,
   formatOutcome,
   SESSION_TYPE_LABELS,
-  sourceLabel,
+  platformLabel,
 } from "./sessions-format";
 
 const PAGE_SIZE = 50;
 const ALL = "__all__";
-const INTERNAL_SOURCE = "__internal__";
+const NO_CHAT = "__no_chat__";
 const NO_OP = () => {};
 
 function sessionAgentLabel(agentName: string | null | undefined): string {
@@ -243,27 +244,27 @@ function useSessionsExplorerState() {
 
 type SessionsExplorerState = ReturnType<typeof useSessionsExplorerState>;
 
-/**
- * The landmark and safe-area frame the shell-less mount needs.
- *
- * `/sessions/*` renders inside `RomeShellLayout`, which owns the one `main`, so
- * a layout that added its own would nest a second one. `/full/apps/sessions/*`
- * routes outside that shell, so there the page owns the landmark, the top inset,
- * and the bounded height — the same frame this page's overview and detail views
- * carry. Without it the inventory is the one full-mode view with no landmark,
- * and its content sits under the notch.
- */
-function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children: ReactNode }) {
-  if (!fullMode) return children;
+/** The shell supplies the landmark in shell mode, so only full mode owns a `main`. */
+function SessionsListFrame({
+  fullMode,
+  header,
+  children,
+}: {
+  fullMode: boolean;
+  header: ReactNode;
+  children: ReactNode;
+}) {
+  const Frame = fullMode ? "main" : "div";
   return (
-    <main
+    <Frame
       data-safe-area-bounded
       className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
     >
+      {header}
       <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
         {children}
       </div>
-    </main>
+    </Frame>
   );
 }
 
@@ -479,7 +480,7 @@ function SessionsIndexPage({
             <div className="mt-2 truncate text-aux text-muted-foreground">
               {session.type === "action"
                 ? (sessionTriggerLabel(session) ?? "Background run")
-                : (session.sourceThreadName ?? sourceLabel(session.sourceChannel))}
+                : (session.placeName ?? platformLabel(session.platform))}
             </div>
           </div>
         ),
@@ -570,9 +571,9 @@ function SessionsIndexPage({
         setType(dimension.value as RomeSessionType);
       } else if (dimension.dimension === "source") {
         setSource(
-          dimension.state === "internal"
-            ? { kind: "internal" }
-            : { kind: "channel", channel: dimension.channel },
+          dimension.state === "noChat"
+            ? { kind: "noChat" }
+            : { kind: "platform", platform: dimension.platform },
         );
       } else if (dimension.dimension === "agent") {
         setAgentName(dimension.name);
@@ -638,7 +639,7 @@ function SessionsIndexPage({
     source
       ? {
           key: "source",
-          label: `Source: ${sourceLabel(source.kind === "internal" ? null : source.channel)}`,
+          label: `Platform: ${platformLabel(source.kind === "noChat" ? null : source.platform)}`,
           clear: () => setSource(undefined),
         }
       : null,
@@ -715,22 +716,14 @@ function SessionsIndexPage({
     </Button>
   );
 
-  // The inventory is a List: the guardian searches it for one session and
-  // leaves. The header carries what the page is — its title and the switch
-  // between this view and the overview — and the toolbar carries what the
-  // reader does to the collection, which is the view switch rule in
-  // docs/ui/layouts.md.
   if (view === "sessions") {
     return (
       <TooltipProvider delayDuration={150}>
-        <SessionsListFrame fullMode={fullMode}>
+        <SessionsListFrame
+          fullMode={fullMode}
+          header={<ActivityHeader title="Sessions" viewSwitch={viewSwitch} />}
+        >
           <Page>
-            <PageHeader align="end">
-              <PageHeading>
-                <PageTitle>Sessions</PageTitle>
-              </PageHeading>
-              <PageActions>{viewSwitch}</PageActions>
-            </PageHeader>
             <PendingApprovalsBanner />
             <ListToolbar aria-label="Filter sessions">
               {/* Search leads and grows: it is the only text control here, and the
@@ -801,36 +794,33 @@ function SessionsIndexPage({
                     </Select>
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor={sourceFieldId}>Source</FieldLabel>
+                    <FieldLabel htmlFor={sourceFieldId}>Platform</FieldLabel>
                     <Select
                       value={
-                        source?.kind === "internal"
-                          ? INTERNAL_SOURCE
-                          : source?.kind === "channel"
-                            ? source.channel
+                        source?.kind === "noChat"
+                          ? NO_CHAT
+                          : source?.kind === "platform"
+                            ? source.platform
                             : ALL
                       }
                       onValueChange={(value) =>
                         setSource(
                           value === ALL
                             ? undefined
-                            : value === INTERNAL_SOURCE
-                              ? { kind: "internal" }
-                              : { kind: "channel", channel: value },
+                            : value === NO_CHAT
+                              ? { kind: "noChat" }
+                              : { kind: "platform", platform: value },
                         )
                       }
                     >
                       <SelectTrigger id={sourceFieldId} className="w-full">
-                        <SelectValue placeholder="Source" />
+                        <SelectValue placeholder="Platform" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={ALL}>All sources</SelectItem>
-                        {(data?.facets.sourceChannels ?? []).map((facet) => (
-                          <SelectItem
-                            key={facet.value ?? INTERNAL_SOURCE}
-                            value={facet.value ?? INTERNAL_SOURCE}
-                          >
-                            {sourceLabel(facet.value)} ({facet.count})
+                        <SelectItem value={ALL}>All platforms</SelectItem>
+                        {(data?.facets.platforms ?? []).map((facet) => (
+                          <SelectItem key={facet.value ?? NO_CHAT} value={facet.value ?? NO_CHAT}>
+                            {platformLabel(facet.value)} ({facet.count})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1048,58 +1038,58 @@ function SessionsIndexPage({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <main
-        data-safe-area-bounded
-        className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
-      >
-        <header className="shrink-0 border-b border-border bg-background px-5 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              {viewSwitch}
-              {activeFilters.length > 0 ? (
+      <SessionsListFrame
+        fullMode={fullMode}
+        header={
+          <ActivityHeader
+            title="Overview"
+            viewSwitch={viewSwitch}
+            actions={
+              <>
+                {rangeSelect}
+                {refreshButton}
+              </>
+            }
+          >
+            {activeFilters.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-3">
                 <Separator className="h-5" orientation="vertical" />
-              ) : null}
-              {activeFilters.map((filter) => (
-                <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
-                  {filter.label}
-                  <span aria-hidden>×</span>
-                </Button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              {rangeSelect}
-              {refreshButton}
-            </div>
-          </div>
-        </header>
-
-        <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
-          <PendingApprovalsBanner className="px-5 pt-4" />
-          <SessionsOverview
-            data={metrics.data}
-            error={metrics.error}
-            loading={metrics.loading}
-            metric={metric}
-            trendBy={trendBy}
-            groupBy={groupBy}
-            recentSessions={recentInventory.data?.sessions ?? []}
-            recentSessionsError={recentInventory.error}
-            recentSessionsLoading={recentInventory.loading}
-            onMetricChange={setMetric}
-            onTrendByChange={setTrendBy}
-            onGroupByChange={setGroupBy}
-            onGroupSelect={groupSelect}
-            onRecentSessionOpen={openSession}
-            onSeriesSelect={seriesSelect}
-            onViewAllSessions={() => {
-              setSort("activity");
-              setSortDirection("desc");
-              setOffset(0);
-              navigate("all", { relative: "path" });
-            }}
-          />
-        </div>
-      </main>
+                {activeFilters.map((filter) => (
+                  <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
+                    {filter.label}
+                    <span aria-hidden>×</span>
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </ActivityHeader>
+        }
+      >
+        <PendingApprovalsBanner className="px-5 pt-4" />
+        <SessionsOverview
+          data={metrics.data}
+          error={metrics.error}
+          loading={metrics.loading}
+          metric={metric}
+          trendBy={trendBy}
+          groupBy={groupBy}
+          recentSessions={recentInventory.data?.sessions ?? []}
+          recentSessionsError={recentInventory.error}
+          recentSessionsLoading={recentInventory.loading}
+          onMetricChange={setMetric}
+          onTrendByChange={setTrendBy}
+          onGroupByChange={setGroupBy}
+          onGroupSelect={groupSelect}
+          onRecentSessionOpen={openSession}
+          onSeriesSelect={seriesSelect}
+          onViewAllSessions={() => {
+            setSort("activity");
+            setSortDirection("desc");
+            setOffset(0);
+            navigate("all", { relative: "path" });
+          }}
+        />
+      </SessionsListFrame>
     </TooltipProvider>
   );
 }
@@ -1125,12 +1115,10 @@ function ReadOnlySessionChat({
   }, [messages]);
   const identity = useMemo<AgentIdentity>(
     () => ({
-      name: session.agentName
-        ? artifactLocalName(session.agentName)
-        : session.sourceChannel || "Rome",
+      name: session.agentName ? artifactLocalName(session.agentName) : session.platform || "Rome",
       iconUrl: null,
     }),
-    [session.agentName, session.sourceChannel],
+    [session.agentName, session.platform],
   );
   const view = useMemo(
     () => buildChatView(messagesBySession, session.id, identity),
@@ -1261,7 +1249,7 @@ function SessionDetailsSheet({
     ["Owner", session.owner.label],
     ["Agent", sessionAgentLabel(session.agentName)],
     ["Type", SESSION_TYPE_LABELS[session.type]],
-    ["Source", sourceLabel(session.sourceChannel)],
+    ["Platform", platformLabel(session.platform)],
     ["Trigger", sessionTriggerLabel(session)],
     ["Project", session.projectPath ?? session.projectName],
     ["Created", formatDate(session.createdAt)],
@@ -1269,7 +1257,7 @@ function SessionDetailsSheet({
   ].filter((row): row is [string, string] => Boolean(row[1]));
   const technicalRows = [
     ["Session ID", session.id],
-    ["Source thread ID", session.sourceThreadId],
+    ["Thread ID", session.threadId],
     ["Trigger execution ID", session.triggerExecutionId],
     ["Root execution ID", session.rootActionExecutionId],
     ["Parent execution ID", session.parentActionExecutionId],
@@ -1591,7 +1579,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           </div>
           <p className="truncate text-aux text-muted-foreground">
             {session
-              ? `${session.owner.label} · ${sessionAgentLabel(session.agentName)} · ${sourceLabel(session.sourceChannel)}`
+              ? `${session.owner.label} · ${sessionAgentLabel(session.agentName)} · ${platformLabel(session.platform)}`
               : sessionId}
           </p>
         </div>
@@ -1683,12 +1671,15 @@ function ActivityEventsRoute() {
   const [params] = useSearchParams();
   const fullMode = useActivityBase() !== "/sessions";
   return (
-    <SessionsListFrame fullMode={fullMode}>
-      <ActivityPage
-        viewSwitch={<ActivityViewSwitch view="events" />}
-        initialFilter={params.get("status") === "pending" ? "pending" : "all"}
-      />
-    </SessionsListFrame>
+    <ActivityPage
+      viewSwitch={<ActivityViewSwitch view="events" />}
+      initialFilter={params.get("status") === "pending" ? "pending" : "all"}
+      renderFrame={(header, children) => (
+        <SessionsListFrame fullMode={fullMode} header={header}>
+          {children}
+        </SessionsListFrame>
+      )}
+    />
   );
 }
 

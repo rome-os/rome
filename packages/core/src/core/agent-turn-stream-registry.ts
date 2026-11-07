@@ -2,6 +2,8 @@ import type { ChatRef, StreamAgentEvent } from "@rome-os/app-runtime";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;
+  /** The conversation (rome session) the turn is recorded in. */
+  chatId: string;
   turnId: string;
   agentName: string;
   conversation?: ChatRef;
@@ -23,6 +25,7 @@ interface MutableAgentTurnStream extends ActiveAgentTurnStream {
 export interface AgentTurnStreamRegistry {
   register(input: {
     sessionId: string;
+    chatId: string;
     turnId: string;
     agentName: string;
     conversation?: ChatRef;
@@ -63,6 +66,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       });
       const stream: MutableAgentTurnStream = {
         sessionId: input.sessionId,
+        chatId: input.chatId,
         turnId: input.turnId,
         agentName: input.agentName,
         conversation: input.conversation,

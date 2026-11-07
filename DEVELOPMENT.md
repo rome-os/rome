@@ -59,6 +59,8 @@ For standalone design pages, run `pnpm storybook`. Startup, source HMR, static b
 - Builds the Rome dev image and brings up the worktree's Compose project.
 - Writes `.obs/env` with discovery URLs and attaches to `docker compose logs`.
 
+`pnpm dev:all` also starts the signer, so the stack authenticates to Rome Cloud with short-lived signed tokens, as a deployed instance does. Rome Cloud accepts only signed tokens from an instance that has registered its key, so a stack without the signer stops working once it is registered. `dev:all` builds `packages/signer` on every run; after you change it, run `pnpm dev:all` again and `docker compose -f compose.dev.yml -p "$(scripts/worktree-slug.sh)" restart signer`. `ROME_DEV_SIGNER=0 pnpm dev:all` leaves the signer out and uses the legacy instance token.
+
 For other flows:
 
 ```bash
@@ -87,7 +89,8 @@ Chrome's CDP listener stays available for login tabs and URL opening in either m
 - Use TanStack Query and [`fetchJson`](packages/web/src/lib/fetch-json.ts) for server state. After a successful write, [invalidate its query key](packages/web/src/hooks/use-apps.ts) to fetch server truth again.
 - Keep local state in React. Use Zustand only for complex, feature-scoped state such as the [file browser store](packages/web/src/components/file-browser/store/).
 - Use [`useLiveEvents`](packages/web/src/hooks/use-live-events.ts) for a stream that has a live-events topic, so it shares the tab's one WebSocket instead of holding an HTTP connection. Use [`useSseEvents`](packages/web/src/hooks/use-sse-events.ts) for other SSE. Validate external data with Zod at the boundary.
-- Keep the backend flow: [Hono route](packages/core/src/api/index.ts) → injected [service or dependency](packages/core/src/api/deps.ts) → Drizzle [repository](packages/core/src/db/repositories/).
+- Keep the backend flow: [Hono route](packages/core/src/api/index.ts) → injected [service or dependency](packages/core/src/api/deps.ts) → Drizzle [repository](packages/core/src/db/repositories/), or the repository in a layered context's `infrastructure/` (next bullet).
+- Lay out a new bounded context as `<context>/<layer>`, as [`packages/core/src/agent/`](packages/core/src/agent/) is starting to: aggregates and the ports they need in `domain/`, use cases in `application/`, adapters that implement the ports in `infrastructure/`, and one `index.ts` as the public module. Code outside the context imports only from `index.ts`. Dependencies point inward: `infrastructure/` imports `domain/`, never the reverse. Older contexts such as [`chats/`](packages/core/src/chats/) keep their ports at the context root until they are next reworked. Biome enforces the `index.ts` rule through the first `noRestrictedImports` override in [`biome.json`](biome.json): a context adopts the layout by adding its three layer globs there. Biome lets the last matching override replace an earlier one's patterns, so a later override of that rule must ban everything the first one bans, as the `apps/packaging/` override does.
 - Validate [configuration with Zod](packages/core/src/config.ts). Log through [`createLogger(component)`](packages/core/src/logger.ts).
 - Use [DnD](packages/web/src/components/ui/sortable.tsx), [Motion](packages/web/src/pages/free/FreeGrid.tsx), [Monaco](packages/web/src/components/monaco-file-editor.tsx), and [Recharts](packages/web/src/pages/SessionsTrendChart.tsx) only when a feature needs them. They are not default abstractions.
 
@@ -142,7 +145,7 @@ sibling worktrees cannot race on shared state.
 Reset a worktree:
 
 ```bash
-docker compose -f compose.dev.yml -p "$(scripts/worktree-slug.sh)" down -v
+docker compose -f compose.dev.yml -p "$(scripts/worktree-slug.sh)" --profile signer down -v
 rm -rf ~/.rome-worktrees/<slug>
 ```
 
@@ -167,6 +170,16 @@ migration from one branch stays applied after a switch. Do not give the pin
 the name of a worktree directory: `pnpm gc:worktrees` names a worktree's
 stack after its directory, and keeps it only while its containers show
 another checkout started it (#1314).
+
+**Gotcha:** while a stack runs, its `rome.db` under `~/.rome-worktrees/<slug>/`
+is the container's database, not a file the host may open. SQLite keeps the
+index of its write-ahead log in shared memory (`rome.db-shm`), and that memory
+is not shared between the host and the container's VM. A host `sqlite3` or
+script that opens the file, even to read it, can corrupt the server's view of
+the database. In one run the server then failed a query with "database disk
+image is malformed" and lost a write it had already answered. Change data
+through the API, or from inside the container with `docker exec`. Open the
+file from the host only after `docker compose ... stop`.
 
 **Gotcha:** bare-metal `pnpm start` (host Node, no container) still
 writes to `~/.rome/<profile>/`, so it does *not* share state with

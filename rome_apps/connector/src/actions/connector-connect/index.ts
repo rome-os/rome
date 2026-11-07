@@ -72,7 +72,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!isSupportedToolkit(toolkit)) {
         return { status: "error", error: unsupportedToolkitHint(toolkit) };
       }
-      const client = await loadConnectorClient();
+      const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         // Not signed in to Composio yet. Sign-in is account-wide (not
         // per-toolkit), so this action does NOT render its own sign-in card:

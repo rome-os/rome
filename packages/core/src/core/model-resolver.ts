@@ -9,7 +9,7 @@ import {
 } from "./ai-tool-state.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
 import { matchesModelAlias } from "./model-alias.js";
-import { stripLegacyReasoningSuffix } from "./codex/common.js";
+import { stripLegacyReasoningSuffix } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 

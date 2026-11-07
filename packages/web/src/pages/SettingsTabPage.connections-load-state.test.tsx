@@ -37,9 +37,6 @@ function mockConnectionsFetch(
     const url = String(input);
     if (url === "/api/approvals") return new Response("[]", { status: 200 });
     if (url === "/api/settings") return ok({});
-    if (url === "/api/tailscale/devices") {
-      return ok({ mode: "oauth", configured: false, devices: [] });
-    }
     if (url === "/api/integrations/composio/status") return ok({});
     if (url === "/api/connections") return loadConnections();
     return ok({});
@@ -65,8 +62,7 @@ describe("Settings connections request states", () => {
 
     renderConnectionsSettings();
 
-    expect(await screen.findByRole("heading", { level: 2, name: "Connections" })).toBeTruthy();
-    expect(screen.getByLabelText("Loading connections")).toBeTruthy();
+    expect(await screen.findByLabelText("Loading connections")).toBeTruthy();
   });
 
   it("shows a failed registry request with a retry that reloads the connections", async () => {
@@ -78,7 +74,8 @@ describe("Settings connections request states", () => {
       return ok({
         connections: [
           {
-            id: "conn-email",
+            id: null,
+            state: null,
             connectionKind: "email",
             label: "Email",
             grants: { inbox: "unauthorized" },

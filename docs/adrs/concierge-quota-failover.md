@@ -1,6 +1,6 @@
 # Concierge changes providers when its subscription quota runs out
 
-- **Status**: Accepted
+- **Status**: Superseded by [Concierge provider failover](concierge-provider-failover.md)
 - **Date**: 2026-11-03
 
 ## Context

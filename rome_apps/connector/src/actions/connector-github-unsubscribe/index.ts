@@ -12,6 +12,7 @@ import { readGithubOAuthToken } from "../../api/github-proxy.js";
 import { resolveInstanceWebhookUrl } from "../../api/github-webhook.js";
 import { resolveRelayDepositUrl } from "../../api/relay-webhook.js";
 import { romeManagedConnectHint } from "../../shared.js";
+import { withGithubHookLock } from "../github-hook-lock.js";
 import {
   createGithubHookClient,
   type GithubHook,
@@ -77,9 +78,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         // List every hook, then keep only exact URL matches for Rome's relay or
         // legacy direct URL — never touch a hook the guardian added by hand or
         // another tool owns.
-        const deleted = await unsubscribeGithubWebhook(
-          createGithubHookClient(octokit, repo ? { repo } : { org: org as string }),
-          urls,
+        const target = repo ? { repo } : { org: org as string };
+        const deleted = await withGithubHookLock(deps.appContext.db, target, () =>
+          unsubscribeGithubWebhook(createGithubHookClient(octokit, target), urls),
         );
 
         // Idempotent teardown: removing zero hooks is success (already gone), not

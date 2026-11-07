@@ -657,10 +657,9 @@ export class ChatSettingsService implements ChatSettingsControl {
       displayName: row.placeName ?? remembered?.displayName ?? row.name,
     };
     if (row.parentSessionId) {
-      const parent = this.deps.repository
-        .listKnown({ channel })
-        .find((candidate) => candidate.id === row.parentSessionId);
-      if (parent?.address) {
+      // A thread's parent speaks for the same account, on the same channel.
+      const parent = this.deps.repository.byId(row.parentSessionId);
+      if (parent?.address && parent.channel === channel) {
         descriptor.parent = {
           connectionId: connections[0]!.id,
           chatId: parent.address,

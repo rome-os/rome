@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { InstalledAppCard } from "@rome/api-types/apps";
+import { getBuiltinAppIcon } from "@/lib/builtin-app-icons";
 import { TileIcon } from "@/components/app-tile-icon";
 import { AgentMentionChip } from "@/components/chat/composer/AgentMentionChip";
 import { RomeLogo } from "@/components/logo";
@@ -55,6 +56,20 @@ import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 import { randomUUID } from "@/lib/random-uuid";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
+
+function SearchPageIcon({ Icon }: { Icon: BuiltinNavEntry["Icon"] }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+        "bg-surface-muted text-muted-foreground",
+        "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+      )}
+    >
+      <Icon className="size-4" aria-hidden />
+    </span>
+  );
+}
 
 const RECENT_CHAT_LIMIT = 10;
 /**
@@ -766,15 +781,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       onSelect={() => openHref(page.href)}
       className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
     >
-      <span
-        className={cn(
-          "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
-          "bg-surface-muted text-muted-foreground",
-          "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
-        )}
-      >
-        <page.Icon className="size-4" aria-hidden />
-      </span>
+      <SearchPageIcon Icon={page.Icon} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-foreground">
           <HighlightedText text={label} terms={queryTerms} />
@@ -786,30 +793,37 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     </CommandItem>
   ));
 
-  const appItems = matchingApps.map((entry) => (
-    <CommandItem
-      key={`app:${entry.app.id}`}
-      value={`app:${entry.app.id}`}
-      aria-label={entry.app.displayName}
-      onSelect={() => openHref(entry.href)}
-      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
-    >
-      <TileIcon
-        kind="image"
-        displayName={entry.app.displayName}
-        iconUrl={entry.app.iconUrl}
-        size="md"
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-ui text-foreground">
-          <HighlightedText text={entry.app.displayName} terms={queryTerms} />
+  const appItems = matchingApps.map((entry) => {
+    const BuiltinIcon = getBuiltinAppIcon(entry.app.id);
+    return (
+      <CommandItem
+        key={`app:${entry.app.id}`}
+        value={`app:${entry.app.id}`}
+        aria-label={entry.app.displayName}
+        onSelect={() => openHref(entry.href)}
+        className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+      >
+        {BuiltinIcon ? (
+          <SearchPageIcon Icon={BuiltinIcon} />
+        ) : (
+          <TileIcon
+            kind="image"
+            displayName={entry.app.displayName}
+            iconUrl={entry.app.iconUrl}
+            size="md"
+          />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-ui text-foreground">
+            <HighlightedText text={entry.app.displayName} terms={queryTerms} />
+          </span>
+          <span aria-hidden className="mt-1 block truncate text-aux text-muted-foreground">
+            <HighlightedText text={entry.app.id} terms={queryTerms} />
+          </span>
         </span>
-        <span aria-hidden className="mt-1 block truncate text-aux text-muted-foreground">
-          <HighlightedText text={entry.app.id} terms={queryTerms} />
-        </span>
-      </span>
-    </CommandItem>
-  ));
+      </CommandItem>
+    );
+  });
 
   const chatItems = visibleEntries.map((entry) => (
     <ChatResultRow

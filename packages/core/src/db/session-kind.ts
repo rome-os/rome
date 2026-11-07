@@ -17,9 +17,8 @@ export function channelChatId(channel: string, threadId: string): string {
 
 /**
  * Whether a row is a guardian chat: its session is a speaker in a dashboard
- * chat. Every chat writer also sets `source_thread_id = id`, and the Dream and
- * Showcases raw SQL matches chats on that, so a writer that breaks it hides
- * the chat from those apps only.
+ * chat. The Dream, Briefing and Showcases raw SQL spells the same rule over
+ * `type` and `chat_platform` by hand, so a change here must be made there too.
  */
 export const isWebchatChat: SQL = webchatChatWhere(romeSessions);
 

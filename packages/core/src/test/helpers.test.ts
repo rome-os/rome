@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
+import { noRomeTools } from "./tool-calls.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   createTestDb,
@@ -102,11 +103,8 @@ describe("Test Helpers", () => {
         model: "test",
         systemPrompt: "test",
         prompt: "test",
-        actionCatalog: [],
-        skillCatalog: [],
-        subagentTools: [],
-        executeAction: async () => ({}),
-        executeSubagent: async () => ({}),
+        tools: noRomeTools(),
+        thread: { kind: "new" },
       })) {
         messages.push(msg);
       }
@@ -122,11 +120,8 @@ describe("Test Helpers", () => {
         model: "test-model",
         systemPrompt: "sys",
         prompt: "user prompt",
-        actionCatalog: [],
-        skillCatalog: [],
-        subagentTools: [],
-        executeAction: async () => ({}),
-        executeSubagent: async () => ({}),
+        tools: noRomeTools(),
+        thread: { kind: "new" as const },
       };
 
       // consume the iterator

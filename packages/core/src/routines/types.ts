@@ -31,6 +31,9 @@ export interface Routine {
 
   actionName: string;
   args: Record<string, unknown>;
+  /** Whether a run's record keeps the trigger payload. True unless set false;
+   * when false, the run and its root action keep only the payload's size. */
+  keepTriggerPayload?: boolean;
 
   createdAt: Date;
   lastFiredAt?: Date;

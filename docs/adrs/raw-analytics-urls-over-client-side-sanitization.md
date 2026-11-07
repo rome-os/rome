@@ -6,7 +6,7 @@
 
 ## Context
 
-Rome counts page visits on the dashboard, on every app, and on the public-access gateway page. The desktop shell runs that same dashboard, so it counts as the dashboard rather than as a fourth surface. Apps have no document of their own — every app surface renders inside the one `rome-web` shell. Instrumentation placed in that shell covers every app, including the ones an agent writes after this decision ships. The goal is raw visit counting. Identity, funnels, and session replay stay out of scope, so the instrumentation earns very little code.
+Rome counts page visits on the dashboard, and on every app. The desktop shell runs that same dashboard, so it counts as the dashboard rather than as a separate surface. Apps have no document of their own — every app surface renders inside the one `rome-web` shell. Instrumentation placed in that shell covers every app, including the ones an agent writes after this decision ships. The goal is raw visit counting. Identity, funnels, and session replay stay out of scope, so the instrumentation earns very little code.
 
 Rome puts meaning in the URL path. `/share/<token>` carries a bearer credential granting access to a shared chat. `/memory/<file>`, `/chat/<sessionId>`, and `/projects/<name>` carry personal metadata, and apps mint arbitrary sub-routes under their own ids. Any page-view report that includes the URL carries those values to Google and into the operator's GA property.
 
@@ -30,7 +30,7 @@ The GA4 tag reports raw page URLs, credentials and personal path segments includ
 - **Lean on GA's "Redact data" setting to strip the sensitive values.** Rejected because redaction operates on enumerated query parameters and emails only. The share token and the personal metadata live in path segments, which the setting cannot reach.
 - **Move share tokens and personal identifiers out of the URL path first.** Rejected because that changes the share-link security posture and the routing contract, which is a far larger change than page counting. It stays the named trigger for revisiting this record.
 - **Instrument each app surface separately so each app controls what it reports.** Rejected because an agent writes apps without analytics knowledge, so every new app would arrive uncounted. It also loads GA inside widget iframes, which counts a widget render as an app visit.
-- **Derive visit counts from the server-side OTEL pipeline and ship no third-party tag.** Rejected because Caddy serves the SPA shell and the gateway page from disk. External visitors on published apps never reach Hono, so the server sees no document request to count.
+- **Derive visit counts from the server-side OTEL pipeline and ship no third-party tag.** Rejected because Caddy serves the SPA shell from disk. External visitors on published apps never reach Hono, so the server sees no document request to count.
 - **Hold all collection until a consent UI ships.** Rejected because consent and GDPR posture are out of scope by product decision, so the gate would defer visit counting with no owner and no date.
 
 ## Consequences

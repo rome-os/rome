@@ -147,6 +147,22 @@ export class AgentTraceRecorder {
     await this.recordBatch([msg], this.seq);
   }
 
+  /** Keeps what a system turn was handed, under its label, as one trace block. */
+  async recordSystemInput(label: string, content: string): Promise<void> {
+    await this.ensureSession();
+    const sessionId = this.romeSessionId();
+    await this.input.webchatRepo.appendTraceBlocks({
+      messageId: this.traceMessageId(sessionId),
+      sessionId,
+      turnId: this.input.turnId,
+      startSeq: this.seq,
+      blocks: [{ type: "system_input", label, content }],
+      trigger: this.triggerMetadata(),
+      transcriptMessages: [],
+    });
+    this.seq += 1;
+  }
+
   async recordBatch(
     messages: (AgentEvent & { agent?: string })[],
     startSeq = this.seq,
@@ -200,6 +216,9 @@ export class AgentTraceRecorder {
       sourceThreadName,
       sourceThreadType: thread?.threadType ?? null,
       trigger: type === "action" ? trigger : undefined,
+      // An agent an action starts from a dashboard chat serves that chat's
+      // turn: it is that chat's owner's, and as private as the chat.
+      servesSessionId: type === "action" ? this.callerChatId() : null,
     });
     this.ensured = true;
   }
@@ -231,6 +250,13 @@ export class AgentTraceRecorder {
       rootActionExecutionId: ctx.rootExecutionId ?? null,
       parentActionExecutionId: ctx.parentExecutionId ?? null,
     };
+  }
+
+  /** The dashboard chat whose turn called the action this run serves, if any. */
+  private callerChatId(): string | null {
+    const caller = this.currentActionContext()?.channelContext;
+    if (caller?.channel !== "webchat") return null;
+    return caller.romeSessionId ?? caller.threadId ?? null;
   }
 
   private currentActionContext(): CurrentActionContext | undefined {
@@ -294,12 +320,12 @@ export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean 
   return threadContext?.channel !== "webchat";
 }
 
-function textMessageContent(content: string): string {
+export function textMessageContent(content: string): string {
   const parts: MessagePart[] = [{ type: "text", content }];
   return JSON.stringify(parts);
 }
 
-function transcriptMessageId(
+export function transcriptMessageId(
   sessionId: string,
   turnId: string,
   role: RomeAgentTranscriptMessageInput["role"],

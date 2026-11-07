@@ -1,5 +1,5 @@
 import type { AssistantKind } from "@rome/api-types/assistants";
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 // Rome Cloud agent messaging (amantru/rome-cloud#137). Cloud gives this
@@ -103,7 +103,7 @@ export function createRomeCloudAgentsClient(
   const fetchImpl = options.fetch ?? globalThis.fetch;
 
   async function request<T>(path: string, body?: unknown): Promise<T> {
-    const token = getInstanceToken();
+    const token = await cloudBearer();
     if (!token) {
       throw new AgentMessagingError(
         "This Rome is not linked to Rome Cloud.",

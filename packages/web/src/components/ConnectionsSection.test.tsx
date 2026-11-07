@@ -160,8 +160,15 @@ function sectionWith(
   );
 }
 
-describe("ConnectionsSection — list of rows", () => {
-  it("renders a row for every connection the registry reports", () => {
+const connectedList = () => screen.getByRole("region", { name: /^Connected/ });
+const addList = () => screen.getByRole("region", { name: "Add a connection" });
+const namesIn = (region: HTMLElement) =>
+  within(region)
+    .queryAllByRole("button", { name: /^(Open|Connect) / })
+    .map((card) => card.getAttribute("aria-label"));
+
+describe("ConnectionsSection — cards", () => {
+  it("renders a card for every connection the registry reports", () => {
     renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
 
     for (const label of ["Telegram", "WhatsApp", "GitHub", "Google"]) {
@@ -185,17 +192,14 @@ describe("ConnectionsSection — list of rows", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("opens services in dialogs and links to app keys", () => {
+  it("opens every service in a dialog, with no links away from the tab", () => {
     renderSection([...minimalConnections(), oauth("github", "authorized")]);
 
-    const links = screen.queryAllByRole("link");
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/settings/connections/app-keys",
-    ]);
-    expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(within(connectedList()).getByRole("button", { name: "Open GitHub" })).toBeTruthy();
   });
 
-  it("clicking a row opens the detail dialog with the connect ceremony", () => {
+  it("clicking a card opens the detail dialog with the connect ceremony", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
     // Dialog is closed initially.
@@ -207,12 +211,12 @@ describe("ConnectionsSection — list of rows", () => {
     expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
   });
 
-  it("a broken OAuth connection reads Broken with an attention-toned dot on the row (#1472)", () => {
+  it("a broken OAuth connection reads Broken with an attention-toned dot on the card (#1472)", () => {
     // The old expired-token case (client-side tokenExpiresAt clock) is now the
     // registry's own health signal: the connection reads broken.
     renderSection([...minimalConnections(), oauth("github", "degraded")]);
 
-    const row = screen.getByRole("button", { name: "Open GitHub" });
+    const row = within(connectedList()).getByRole("button", { name: "Open GitHub" });
     expect(within(row).getByText("Broken")).toBeTruthy();
     const dot = row.querySelector("span[aria-hidden]");
     expect(dot).toBeTruthy();
@@ -243,13 +247,13 @@ describe("ConnectionsSection — list of rows", () => {
       }),
     ]);
 
-    const row = screen.getByRole("button", { name: "Open WeChat" });
+    const row = within(connectedList()).getByRole("button", { name: "Open WeChat" });
     expect(within(row).getByText("Working")).toBeTruthy();
     expect(row.querySelector("span[aria-hidden]")?.className).toContain("bg-warning");
   });
 });
 
-describe("ConnectionsSection — tabs, search and groups", () => {
+describe("ConnectionsSection — Connected and Add", () => {
   function mixed(): ApiConnection[] {
     return [
       telegramBot("authorized", "rome_bot"),
@@ -259,54 +263,43 @@ describe("ConnectionsSection — tabs, search and groups", () => {
       oauth("google"),
     ];
   }
-  const tabRadio = (name: RegExp) => screen.getByRole("radio", { name });
-  const rowNames = () =>
-    screen
-      .queryAllByRole("button", { name: /^Open / })
-      .map((row) => row.getAttribute("aria-label"));
 
-  it("opens on Connected and lists working and broken connections there", () => {
+  it("lists connected services with whatever needs attention first, and the rest under Add", () => {
     renderSection(mixed());
-    expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
-    // A broken connection stays connected and leads its group.
-    expect(rowNames()).toEqual(["Open Telegram", "Open Slack", "Open GitHub"]);
-    expect(within(tabRadio(/Connected/)).getByText("3")).toBeTruthy();
-    expect(within(tabRadio(/Available/)).getByText("2")).toBeTruthy();
+    expect(connectedList().getAttribute("aria-labelledby")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Connected · 3" })).toBeTruthy();
+    // A broken connection stays connected and leads the list.
+    expect(namesIn(connectedList())).toEqual(["Open Slack", "Open Telegram", "Open GitHub"]);
+    expect(namesIn(addList())).toEqual(["Open WhatsApp", "Open Google"]);
   });
 
-  it("opens on Available when nothing is connected", () => {
+  it("shows status on Connected cards and what a service does only on hover under Add", () => {
+    renderSection(mixed());
+    const github = within(connectedList()).getByRole("button", { name: "Open GitHub" });
+    const google = within(addList()).getByRole("button", { name: "Open Google" });
+    expect(within(github).getByText("Working")).toBeTruthy();
+    expect(within(google).queryByText("Connect")).toBeNull();
+    expect(within(google).queryByText("Work across your Google services as you")).toBeNull();
+    expect(google.getAttribute("title")).toBe("Work across your Google services as you");
+  });
+
+  it("opens the connected detail and the unconnected connect ceremony", () => {
+    renderSection(mixed());
+    fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }),
+    ).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Google" }));
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Connect" }),
+    ).toBeTruthy();
+  });
+
+  it("leaves Connected out while nothing is connected", () => {
     renderSection(minimalConnections());
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryAllByRole("link")).toEqual([]);
-  });
-
-  it("shows what an available connection does, under its group", () => {
-    renderSection(mixed());
-    fireEvent.click(tabRadio(/Available/));
-    expect(rowNames()).toEqual(["Open WhatsApp", "Open Google"]);
-    const accounts = screen.getByRole("region", { name: "Accounts and tools" });
-    expect(within(accounts).getByText("Work across your Google services as you")).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Messaging" })).toBeTruthy();
-  });
-
-  it("filters both tabs and offers the other tab when only it matches", () => {
-    renderSection(mixed());
-    fireEvent.change(screen.getByLabelText("Search connections"), {
-      target: { value: "google" },
-    });
-    expect(rowNames()).toEqual([]);
-    expect(screen.getByText("No connected service matches “google”.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Show 1 in Available" }));
-    expect(rowNames()).toEqual(["Open Google"]);
-  });
-
-  it("matches what a connection does, not only its name", () => {
-    renderSection(mixed());
-    fireEvent.click(tabRadio(/Available/));
-    fireEvent.change(screen.getByLabelText("Search connections"), {
-      target: { value: "google services" },
-    });
-    expect(rowNames()).toEqual(["Open Google"]);
+    expect(screen.queryByRole("region", { name: /^Connected/ })).toBeNull();
+    expect(namesIn(addList())).toEqual(["Open Telegram", "Open WhatsApp"]);
   });
 
   it("keeps an offered service the host cannot connect marked Unavailable", () => {
@@ -317,68 +310,35 @@ describe("ConnectionsSection — tabs, search and groups", () => {
         connect: { url: null, available: false, unavailableReason: "Not configured" },
       }),
     ]);
-    const row = screen.getByRole("button", { name: "Open Shopify" });
-    expect(within(row).getByText("Unavailable")).toBeTruthy();
-    expect(within(row).queryByText("Connect")).toBeNull();
+    const row = within(addList()).getByRole("button", { name: "Open Shopify" });
+    expect(within(row).getByText("Unavailable").getAttribute("title")).toBe("Not configured");
   });
 
-  it("says nothing is connected and offers Available, above App keys", () => {
-    renderSection(minimalConnections());
-    fireEvent.click(tabRadio(/Connected/));
-    expect(screen.getByText("Nothing is connected yet.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show 2 in Available" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
+  it("searches both lists, matching what a service does only under Add", () => {
+    renderSection([oauth("google"), oauth("github", "authorized")]);
+    const input = screen.getByLabelText("Search connections");
+    fireEvent.change(input, { target: { value: "google services" } });
+    expect(namesIn(addList())).toEqual(["Open Google"]);
+    expect(screen.queryByRole("region", { name: /^Connected/ })).toBeNull();
+    fireEvent.change(input, { target: { value: "github" } });
+    expect(namesIn(connectedList())).toEqual(["Open GitHub"]);
+    expect(screen.queryByRole("region", { name: "Add a connection" })).toBeNull();
+    // GitHub's description names repositories, but a connected card shows none.
+    fireEvent.change(input, { target: { value: "repositories" } });
+    expect(screen.queryAllByRole("button", { name: /^Open / })).toHaveLength(0);
+    expect(screen.getByText("No service matches “repositories”.")).toBeTruthy();
   });
 
-  it("matches only names on Connected, where descriptions are not shown", () => {
-    renderSection(mixed());
+  it("moves a service to Connected when a refresh connects it during a search", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(sectionWith([oauth("google")], onRefresh));
     fireEvent.change(screen.getByLabelText("Search connections"), {
-      target: { value: "repositories" },
+      target: { value: "google" },
     });
-    expect(rowNames()).toEqual([]);
-  });
-
-  it("stays on Available after the first service connects from it", () => {
-    const onRefresh = rs.fn(async () => null);
-    const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Open WhatsApp" }));
-    rerender(
-      sectionWith(
-        [
-          telegramBot("unauthorized"),
-          connection({ connectionKind: "whatsapp", grants: { session: "authorized" } }),
-        ],
-        onRefresh,
-      ),
-    );
-    // The open dialog hides the page from the accessibility tree.
-    expect(
-      screen.getByRole("radio", { name: /Available/, hidden: true }).getAttribute("aria-checked"),
-    ).toBe("true");
-  });
-
-  it("keeps the opening tab when a refresh brings the first connection", () => {
-    const onRefresh = rs.fn(async () => null);
-    const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-    rerender(
-      sectionWith(
-        [
-          telegramBot("unauthorized"),
-          connection({ connectionKind: "whatsapp", grants: { session: "authorized" } }),
-        ],
-        onRefresh,
-      ),
-    );
-    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
-  });
-
-  it("shows App keys without a no-match message when only App keys matches", () => {
-    renderSection(mixed());
-    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "app" } });
-    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
-    expect(screen.queryByText("No connected service matches “app”.")).toBeNull();
+    expect(namesIn(addList())).toEqual(["Open Google"]);
+    rerender(sectionWith([oauth("google", "authorized")], onRefresh));
+    const google = within(connectedList()).getByRole("button", { name: "Open Google" });
+    expect(within(google).getByText("Working")).toBeTruthy();
   });
 
   it("clears the search on Escape", () => {
@@ -390,15 +350,15 @@ describe("ConnectionsSection — tabs, search and groups", () => {
   });
 });
 
-describe("ConnectionsSection — Telegram fold row status", () => {
+describe("ConnectionsSection — Telegram fold card status", () => {
   function telegramRow(connections: ApiConnection[]): HTMLElement {
     renderSection(connections);
     return screen.getByRole("button", { name: "Open Telegram" });
   }
 
-  it("stays a single Telegram row even when the personal account is present", () => {
+  it("stays a single Telegram card even when the personal account is present", () => {
     telegramRow([telegramBot("authorized", "mybot"), telegramUser("authorized")]);
-    // The personal account never becomes its own row — one Telegram button.
+    // The personal account never becomes its own card — one Telegram button.
     expect(screen.getAllByRole("button", { name: "Open Telegram" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /personal account/i })).toBeNull();
   });
@@ -412,7 +372,7 @@ describe("ConnectionsSection — Telegram fold row status", () => {
     expect(dot?.className).toContain("bg-warning");
   });
 
-  it("opening the Telegram row shows both slot cards (bot + personal account)", () => {
+  it("opening the Telegram card shows both slot cards (bot + personal account)", () => {
     renderSection([telegramBot("authorized", "mybot"), telegramUser("unauthorized")]);
     fireEvent.click(screen.getByRole("button", { name: "Open Telegram" }));
 
@@ -423,28 +383,34 @@ describe("ConnectionsSection — Telegram fold row status", () => {
   });
 });
 
-describe("ConnectionsSection — Composio row", () => {
-  it("shows no Composio row until the CLI is installed", () => {
-    // composio null (default) — the broker row is absent.
+describe("ConnectionsSection — Composio account", () => {
+  it("shows no Composio card until the CLI is installed", () => {
+    // composio null (default) — the broker card is absent.
     renderSection();
     expect(screen.queryByText("Composio")).toBeNull();
   });
 
-  it("offers a Composio sign-in under Available while signed out", () => {
+  it("offers a Composio sign-in under Add while signed out", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
-    // The Via Composio group's banner stands in for the signed-out account row,
-    // even before any Composio service is listed.
+    // The sign-in stands in for the signed-out account card, even before any
+    // Composio service is listed.
     expect(screen.queryByRole("button", { name: "Open Composio" })).toBeNull();
-    const group = screen.getByRole("region", { name: "Via Composio" });
-    expect(within(group).getByRole("button", { name: "Sign in" })).toBeTruthy();
-    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(within(addList()).getByRole("button", { name: "Sign in" })).toBeTruthy();
   });
 
-  it("shows a connected Composio row when signed in", () => {
+  it("keeps the signed-out Composio sign-in when a search names Composio", () => {
+    renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
+    const input = screen.getByLabelText("Search connections");
+    fireEvent.change(input, { target: { value: "composio" } });
+    expect(within(addList()).getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText(/No service matches/)).toBeNull();
+    fireEvent.change(input, { target: { value: "telegram" } });
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+  });
+
+  it("lists the Composio account under Connected when signed in", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
+    fireEvent.click(within(connectedList()).getByRole("button", { name: "Open Composio" }));
     // Connected card: the ✓ enablement bullet and a Disconnect action, no ceremony.
     expect(
       screen.getByText("Act through the third-party apps you connect via Composio"),
@@ -589,12 +555,14 @@ describe("ConnectionsSection — Composio services", () => {
   ];
   let failAccounts = false;
   let gmailGone = false;
+  let linearConnected = false;
   let calls: { url: string; method: string }[] = [];
 
   beforeEach(() => {
     calls = [];
     failAccounts = false;
     gmailGone = false;
+    linearConnected = false;
     rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -604,7 +572,12 @@ describe("ConnectionsSection — Composio services", () => {
         return failAccounts
           ? Response.json({ error: "composio_unavailable" }, { status: 502 })
           : Response.json({
-              items: accounts.filter((account) => !(gmailGone && account.toolkitSlug === "gmail")),
+              items: [
+                ...accounts.filter((account) => !(gmailGone && account.toolkitSlug === "gmail")),
+                ...(linearConnected
+                  ? [{ id: "linear-account", toolkitSlug: "linear", status: "ACTIVE" }]
+                  : []),
+              ],
             });
       if (url === "/api/apps/connector/connectors" && method === "POST")
         return Response.json({ authorizationUrl: "https://composio.example/auth/linear" });
@@ -617,28 +590,138 @@ describe("ConnectionsSection — Composio services", () => {
   const signedIn = () => composioStatus({ installed: true, loggedIn: true });
   const signedOut = () => composioStatus({ installed: true, loggedIn: false });
 
-  it("lists connected services under Accounts, marked via Composio, broken ones leading", async () => {
+  it.each([
+    { query: "gmail", list: "connected", row: "Open Gmail" },
+    { query: "linear", list: "add", row: "Connect Linear" },
+  ])("shows a late Composio match for $query in its list", async ({ query, list, row }) => {
+    let release: () => void = () => {};
+    const loaded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = rs.mocked(globalThis.fetch).getMockImplementation()!;
+    rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/apps/connector/connectors") await loaded;
+      return fetch(input, init);
+    });
     renderSection([oauth("github", "authorized")], signedIn());
-    const accountsGroup = screen.getByRole("region", { name: "Accounts and tools" });
-    await within(accountsGroup).findByRole("button", { name: "Open Gmail" });
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: query } });
+    release();
+    await screen.findByRole("button", { name: row });
+    const region = list === "connected" ? connectedList() : addList();
+    expect(within(region).getByRole("button", { name: row })).toBeTruthy();
+  });
+
+  it("moves a Composio service between the lists as a refresh connects or drops it", async () => {
+    gmailGone = true;
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "gmail" } });
+    await screen.findByRole("button", { name: "Connect Gmail" });
+    expect(screen.queryByRole("region", { name: /^Connected/ })).toBeNull();
+    gmailGone = false;
+    fireEvent(window, new Event("visibilitychange"));
+    const gmail = await screen.findByRole("button", { name: "Open Gmail" });
+    expect(connectedList().contains(gmail)).toBe(true);
+    expect(screen.queryByRole("region", { name: "Add a connection" })).toBeNull();
+  });
+
+  it("lists connected Composio services under Connected and the rest under Add", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    await screen.findByRole("button", { name: "Connect Linear" });
+    expect(namesIn(addList())).toEqual(["Connect Linear"]);
+    const gmail = within(connectedList()).getByRole("button", { name: "Open Gmail" });
+    expect(within(gmail).getByText("Working")).toBeTruthy();
+    expect(within(gmail).queryByText("Reads and sends your email.")).toBeNull();
+    expect(
+      within(addList()).getByRole("button", { name: "Connect Linear" }).getAttribute("title"),
+    ).toBe("Tracks issues and projects.");
+    fireEvent.click(gmail);
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "Rome reaches this service through your Composio account.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("matches Composio scopes only for services under Add", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    await screen.findByRole("button", { name: "Open Gmail" });
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "your email" },
+    });
+    expect(screen.queryByRole("button", { name: "Open Gmail" })).toBeNull();
+    expect(screen.getByText("No service matches “your email”.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "issues" } });
+    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeTruthy();
+  });
+
+  it("moves a Composio card to Connected after connecting during a name search", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    renderSection([oauth("github", "authorized")], signedIn());
+    await screen.findByRole("button", { name: "Connect Linear" });
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "linear" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect Linear" }));
+    await waitFor(() => expect(open).toHaveBeenCalled());
+    linearConnected = true;
+    fireEvent(window, new Event("visibilitychange"));
+    const row = await screen.findByRole("button", { name: "Open Linear" });
+    expect(within(row).getByText("Working")).toBeTruthy();
+    expect(within(row).queryByText("Tracks issues and projects.")).toBeNull();
+    expect(connectedList().contains(row)).toBe(true);
+    fireEvent.click(row);
+    expect(
+      within(screen.getByRole("dialog")).getByText("Tracks issues and projects."),
+    ).toBeTruthy();
+  });
+
+  it("keeps an unconnected Composio card busy until connect resolves", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = rs.mocked(globalThis.fetch).getMockImplementation()!;
+    rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/apps/connector/connectors" && init?.method === "POST")
+        await pending;
+      return fetch(input, init);
+    });
+    renderSection([oauth("github", "authorized")], signedIn());
+    const row = await screen.findByRole("button", { name: "Connect Linear" });
+    fireEvent.click(row);
+    expect(row.hasAttribute("disabled")).toBe(true);
+    release();
+    await waitFor(() => expect(open).toHaveBeenCalled());
+    await waitFor(() => expect(row.hasAttribute("disabled")).toBe(false));
+  });
+
+  it("lists connected Composio services beside Rome's own without route labels, broken ones leading", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    await screen.findByRole("button", { name: "Open Gmail" });
+    const accountsGroup = connectedList();
     const names = within(accountsGroup)
       .getAllByRole("button")
       .map((row) => row.getAttribute("aria-label"));
-    // A broken Composio service leads the group like a broken Rome one, and the
+    // A broken Composio service leads the list like a broken Rome one, and the
     // bridged GitHub account never shows as a Composio row.
     expect(names).toEqual(["Open Notion", "Open GitHub", "Open Composio", "Open Gmail"]);
     const notion = within(accountsGroup).getByRole("button", { name: "Open Notion" });
-    expect(within(notion).getByText("via Composio")).toBeTruthy();
+    expect(within(accountsGroup).queryByText("via Composio")).toBeNull();
     expect(within(notion).getByText("Broken")).toBeTruthy();
+    fireEvent.click(notion);
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "Rome reaches this service through your Composio account.",
+      ),
+    ).toBeTruthy();
   });
 
-  it("offers the rest under Via Composio, and starts a connect in a new tab", async () => {
+  it("offers the rest under Add, and starts a connect in a new tab", async () => {
     const open = rs.spyOn(window, "open").mockReturnValue(null);
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
-    const group = await screen.findByRole("region", { name: "Via Composio" });
+    await screen.findByRole("button", { name: "Connect Linear" });
+    const group = addList();
     expect(within(group).queryByText("Sign in to Composio to connect these services.")).toBeNull();
-    fireEvent.click(await within(group).findByRole("button", { name: "Connect Linear" }));
+    fireEvent.click(within(group).getByRole("button", { name: "Connect Linear" }));
     await waitFor(() =>
       expect(open).toHaveBeenCalledWith(
         "https://composio.example/auth/linear",
@@ -651,8 +734,7 @@ describe("ConnectionsSection — Composio services", () => {
 
   it("asks for a Composio sign-in first, and lists no connected services while signed out", async () => {
     renderSection([oauth("github", "authorized")], signedOut());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
-    const group = await screen.findByRole("region", { name: "Via Composio" });
+    const group = addList();
     expect(within(group).getByText("Sign in to Composio to connect these services.")).toBeTruthy();
     const gmail = await within(group).findByRole("button", { name: "Connect Gmail" });
     expect(gmail.hasAttribute("disabled")).toBe(true);
@@ -668,6 +750,9 @@ describe("ConnectionsSection — Composio services", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Reads and sends your email.")).toBeTruthy();
+    expect(
+      within(dialog).getByText("Rome reaches this service through your Composio account."),
+    ).toBeTruthy();
     // Gmail works, so there is nothing to reconnect.
     expect(within(dialog).queryByRole("button", { name: "Reconnect" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
@@ -681,9 +766,8 @@ describe("ConnectionsSection — Composio services", () => {
     );
   });
 
-  it("finds a Composio service by what it does on Available", async () => {
+  it("finds a Composio service by what it does", async () => {
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
     await screen.findByRole("button", { name: "Connect Linear" });
     fireEvent.change(screen.getByLabelText("Search connections"), {
       target: { value: "issues" },
@@ -692,7 +776,7 @@ describe("ConnectionsSection — Composio services", () => {
     expect(screen.queryByRole("button", { name: "Open Google" })).toBeNull();
   });
 
-  it("shows a Composio load failure on Connected, with a retry", async () => {
+  it("shows a Composio load failure, with a retry", async () => {
     failAccounts = true;
     renderSection([oauth("github", "authorized")], signedIn());
     expect(await screen.findByText("Couldn't load the Composio services.")).toBeTruthy();
@@ -720,7 +804,6 @@ describe("ConnectionsSection — Composio services", () => {
     const open = rs.spyOn(window, "open").mockReturnValue(null);
     rs.mocked(toast).mockClear();
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Connect Linear" }));
     await waitFor(() => expect(toast).toHaveBeenCalled());
     const options = rs.mocked(toast).mock.calls[0]?.[1] as {
@@ -823,7 +906,6 @@ describe("ConnectionsSection — Composio services", () => {
       return new Response(url === "/api/approvals" ? "[]" : "{}", { status: 200 });
     });
     renderSection([oauth("github", "authorized")], signedIn());
-    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
     await waitFor(() =>
       expect(calls.some((call) => call.url === "/api/apps/connector/catalog")).toBe(true),
     );

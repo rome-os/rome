@@ -1,9 +1,13 @@
 // Changes in task chats reach the Concierge as `<task_events>` system turns,
-// coalesced per row (task-events.ts), and a Concierge turn that wrote text
-// without speaking gets one reminder turn.
+// coalesced per row and delivered to the Concierge chat each row came from
+// (task-events.ts), and a Concierge turn that wrote text without speaking gets
+// one reminder turn.
 
-import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
+import type {
+  AgentLifecycleDispatcher,
+  AgentTurnFailedBeforeStart,
+} from "../core/agent-lifecycle.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
@@ -13,13 +17,13 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
-import { type DirtyTask, TaskEventCoalescer } from "./task-events.js";
+import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { openQuestion } from "./transcript.js";
+
+import { failoverReason } from "./failover-reason.js";
 
 const log = createLogger("concierge-events");
 
-/** How much of a task chat's reply a task event carries. */
-const REPLY_EXCERPT_CHARS = 600;
 const DETAIL_EXCERPT_CHARS = 300;
 const SETTLE_POLL_MS = 200;
 const SETTLE_TIMEOUT_MS = 10_000;
@@ -36,6 +40,32 @@ const excerpt = (text: string, max: number) => {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 };
+
+/** A task event carries a reply this long whole, and a longer one's start and end. */
+const REPLY_HEAD_CHARS = 400;
+const REPLY_TAIL_CHARS = 300;
+/** How far a cut moves to land on a space or line break. */
+const CUT_SLACK_CHARS = 30;
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** A long reply keeps its start and its end, where a closing question sits.
+ *  Characters are graphemes, so a cut never splits an emoji. */
+function replyExcerpt(text: string): string {
+  const chars = Array.from(graphemes.segment(text.trim()), (part) => part.segment);
+  if (chars.length <= REPLY_HEAD_CHARS + REPLY_TAIL_CHARS) return chars.join("");
+  const space = (from: number, step: number) => {
+    for (let i = from, n = 0; n < CUT_SLACK_CHARS; i += step, n++) {
+      if (/\s/u.test(chars[i])) return i;
+    }
+    return -1;
+  };
+  const headSpace = space(REPLY_HEAD_CHARS - 1, -1);
+  const end = headSpace < 0 ? REPLY_HEAD_CHARS : headSpace;
+  const tailSpace = space(chars.length - REPLY_TAIL_CHARS, 1);
+  const start = tailSpace < 0 ? chars.length - REPLY_TAIL_CHARS : tailSpace + 1;
+  const note = `[… ${start - end} characters left out; chat_read shows the full reply]`;
+  return `${chars.slice(0, end).join("")}\n${note}\n${chars.slice(start).join("")}`;
+}
 
 /** The text of a stored user message, for the guardian's words in a task event. */
 function userText(content: string): string {
@@ -69,20 +99,30 @@ async function waitForTurnStream(
 }
 
 /**
- * The `<task_events>` payload for these rows, read from the database now:
- * one `<task>` per row that still exists, with what changed and the latest
- * words from the chat.
+ * The `<task_events>` payloads for these rows, read from the database now, one
+ * per Concierge chat the rows came from: one `<task>` per row that still
+ * exists, with what changed and the latest words from the chat.
  */
-async function renderTaskEvents(
+export async function renderTaskEvents(
   service: ConciergeService,
   tasks: DirtyTask[],
-): Promise<string | null> {
+): Promise<TaskEventDelivery[]> {
   const { tasks: store, messages } = service.deps;
-  const blocks: string[] = [];
+  const byChat = new Map<
+    string,
+    { taskIds: string[]; blocks: string[]; quiet: boolean; owner: string }
+  >();
   for (const task of tasks) {
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
     const { row } = found;
+    // The chat the row reports to now: its own while live, else its owner's main chat.
+    const key = found.conciergeChat.id;
+    const group = byChat.get(key) ?? { taskIds: [], blocks: [], quiet: true, owner: found.owner };
+    byChat.set(key, group);
+    group.taskIds.push(task.taskId);
+    group.quiet &&= task.quiet;
+    const blocks = group.blocks;
     const changes = task.changes.map((change) => change.kind);
     const lines: string[] = [];
     // A catch-up carries no event of its own, so it says what the chat holds now:
@@ -100,7 +140,7 @@ async function renderTaskEvents(
         1,
         (message) => message.direction === "fromRome" && hasText(message),
       );
-      if (latest) lines.push(`reply: ${excerpt(latest.body.text, REPLY_EXCERPT_CHARS)}`);
+      if (latest) lines.push(`reply: ${replyExcerpt(latest.body.text)}`);
     }
     for (const change of task.changes) {
       if (change.detail) lines.push(change.detail);
@@ -118,25 +158,37 @@ async function renderTaskEvents(
       .join(" ");
     blocks.push(`<task ${attrs}>\n${lines.join("\n")}\n</task>`);
   }
-  return blocks.length > 0 ? `<task_events>\n${blocks.join("\n")}\n</task_events>` : null;
+  return [...byChat.entries()].map(([chatId, { taskIds, blocks, quiet, owner }]) => ({
+    chatId,
+    owner,
+    taskIds,
+    prompt: `<task_events>\n${blocks.join("\n")}\n</task_events>`,
+    quiet,
+  }));
 }
 
 /** Starts listening. Returns the unsubscribe. */
 export function startConciergeEvents(
   service: ConciergeService,
-  dispatcher: Pick<AgentLifecycleDispatcher, "onFinished">,
+  dispatcher: Pick<AgentLifecycleDispatcher, "onFinished" | "onFailedBeforeStart">,
+  options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
   const remindersRunning = new Set<string>();
-  const recoveriesRunning = new Set<string>();
+  const recoveriesRunning = new Map<string, { finished?: AgentTurnFinishedEvent }>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     isEnabled: () => service.isEnabled(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async (prompt, options) => {
-      const chatId = await service.findChatId();
-      if (chatId) await service.runSystemTurn(chatId, prompt, options);
+    deliver: async ({ chatId: from, owner, prompt, quiet }) => {
+      // A row whose chat is gone or archived reports to the main chat.
+      const chatId = await service.deliveryChat(from, owner);
+      if (!chatId) return false;
+      // A visitor dropped from the dashboard allow-list is told nothing; their
+      // rows wait, and reach them once they are back.
+      if (!(await service.isServed(owner))) return false;
+      return await service.runSystemTurn(chatId, prompt, { quiet });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
@@ -146,24 +198,60 @@ export function startConciergeEvents(
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
     const reminderRunning = remindersRunning.has(chatId);
-    // Snapshot before awaiting settings: a recovery's finish must not recover
-    // again after the running recovery returns and clears its guard.
-    if (recoveriesRunning.has(chatId)) return;
-    if (!(await service.isEnabled())) return;
+    // Finish callbacks run before the backend promise settles. Capture them
+    // synchronously so a recovery cannot start a second chain or a reminder.
+    const active = recoveriesRunning.get(chatId);
+    if (active) {
+      active.finished = event;
+      return;
+    }
     if (event.status === "error") {
-      recoveriesRunning.add(chatId);
+      const failure = event.output.failure;
+      const reason = failoverReason(failure, service.deps.aiToolState.get());
+      if (!reason || !failure) return;
+      const chain: { finished?: AgentTurnFinishedEvent } = {};
+      recoveriesRunning.set(chatId, chain);
       try {
-        const switched = await service.switchIfExhausted(chatId);
-        if (switched)
+        if (!(await service.isEnabled())) return;
+        const recover = async (
+          input: AgentTurnFailure,
+          kind: typeof reason,
+          sameThread: boolean,
+        ): Promise<AgentTurnFinishedEvent | undefined> => {
+          chain.finished = undefined;
           await service.runSystemTurn(
             chatId,
-            quotaRecoveryPrompt(switched.from === "openai" ? "Codex" : "Claude"),
+            quotaRecoveryPrompt(input.provider === "openai" ? "Codex" : "Claude", kind, sameThread),
           );
+          return chain.finished;
+        };
+        let crossed = false;
+        let next: AgentTurnFinishedEvent | undefined;
+        if (reason === "temporary") {
+          await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
+            30_000,
+          );
+          // The wait may have ended Concierge or the subscription that paid for this turn.
+          if (!(await service.isEnabled())) return;
+          if (!failoverReason(failure, service.deps.aiToolState.get())) return;
+          next = await recover(failure, reason, true);
+        } else {
+          const moved = await service.switchForFailure(chatId, failure, reason);
+          if (!moved) return;
+          crossed = moved.from !== moved.to;
+          next = await recover(failure, reason, !crossed);
+        }
+        if (crossed || next?.status !== "error" || !next.output.failure) return;
+        const second = failoverReason(next.output.failure, service.deps.aiToolState.get());
+        if (!second) return;
+        const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
+        if (moved) await recover(next.output.failure, second, false);
       } finally {
         recoveriesRunning.delete(chatId);
       }
       return;
     }
+    if (!(await service.isEnabled())) return;
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,
@@ -213,13 +301,18 @@ export function startConciergeEvents(
       });
       return;
     }
+    // A failed turn says why, so the Concierge can tell the guardian.
+    const { failure, error } = event.output;
+    const cause = event.status === "error" ? (failure?.message ?? error) : undefined;
+    const why = cause ? `error: ${excerpt(cause, DETAIL_EXCERPT_CHARS)}` : null;
+    const detail = [said, why].filter(Boolean);
     coalescer.mark({
       taskId,
       kind: `turn_end:${event.status} by=${by}`,
       // A result the Concierge asked for, or an error, is worth telling now.
       // The guardian's own turns, scheduled ones and a stop wait.
       urgent: event.status === "error" || (event.status === "completed" && started),
-      ...(said ? { detail: said } : {}),
+      ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
   };
 
@@ -261,7 +354,26 @@ export function startConciergeEvents(
     }),
   );
 
+  // A turn that failed before it started fires no turn end, so it is told as a failed turn.
+  const onFailedBeforeStart = ({ turn, error }: AgentTurnFailedBeforeStart) => {
+    const thread = turn.threadContext;
+    if (turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+    if (isConciergeAgent(turn.agentName)) return;
+    const failed: AgentTurnFinishedEvent = {
+      type: "agent-turn-finished",
+      version: 1,
+      turn,
+      status: "error",
+      timing: { startedAt: "", finishedAt: "", durationMs: 0 },
+      output: { text: "", state: "none", error },
+      metrics: { toolCallCount: 0, skillWritten: false },
+    };
+    void guard(`task turn failure (${turn.turnId})`, onTaskChatTurn(failed, thread.threadId));
+  };
+  service.attachFailedBeforeStart(onFailedBeforeStart);
+
   const unsubscribers = [
+    dispatcher.onFailedBeforeStart(onFailedBeforeStart),
     tasks.repo.onChange(({ row }, change) => {
       if (change === "write") coalescer.settle(row.id);
     }),
@@ -282,5 +394,6 @@ export function startConciergeEvents(
     for (const unsubscribe of unsubscribers) unsubscribe();
     coalescer.stop();
     service.attachTaskEvents(null);
+    service.attachFailedBeforeStart(null);
   };
 }
