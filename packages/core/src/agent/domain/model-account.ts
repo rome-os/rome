@@ -1,15 +1,16 @@
 // The model provider account: whose subscription the agent's turns run under
 // when Rome credits is not the payer (the payer is `ModelFunding` in
-// model-port.ts). The guardian authorizes Rome to run models under their
-// subscription, by browser or by device code, may cancel an authorization in
-// progress, and revokes it.
+// model-port.ts). The account reports its own status and usage, and Rome
+// derives neither: a turn the provider refuses is learned by the provider's
+// adapter and shows in the account's next report. The guardian authorizes
+// Rome to run models under their subscription, by browser or by device code,
+// may cancel an authorization in progress, and revokes it.
 //
 // Rome never acts or chats as this account, so it is not a connection
 // (docs/domains/connections.md), and the guardian signing in to Rome is a
 // different act, so the port's operations say authorize and revoke. The one
 // exception is the status field `loggedIn`, which keeps the name the dashboard
-// reads today; renaming it is the application layer's move.
-// docs/domains/agents.md carries the language.
+// reads today. docs/domains/agents.md carries the language.
 
 /** The provider's subscription tier, as the provider reports it. */
 export type ModelPlanType =
@@ -35,6 +36,18 @@ export interface ModelAccountStatus {
   authMethod?: string;
   accountType?: string;
   needsReauth?: boolean;
+  /** The models the plan allows, when the provider limits them. Absent means any. */
+  models?: readonly string[];
+  /**
+   * Whether the provider limits the account's usage, as it does a
+   * subscription and not an account billed per use. Absent reads as limited.
+   */
+  usageLimited?: boolean;
+  /**
+   * The provider refused a turn for usage: until when it said so, or null
+   * when it gave no time. Cleared once a usage read shows capacity again.
+   */
+  usageLimitUntil?: string | null;
 }
 
 /** One of the provider's rolling usage windows. */
@@ -79,19 +92,28 @@ export interface ModelDeviceAuthorization {
 }
 
 /**
- * The model provider account as this context reads and changes it. The
- * dashboard and the composition root call it; the agent run never does. The
- * adapter in infrastructure/ implements it on the provider's own process.
+ * The model provider account as this context reads it. The dashboard and
+ * model availability call it; the agent run never does. The adapter in
+ * infrastructure/ implements it on the provider's own process.
  */
 export interface ModelAccount {
   status(): Promise<ModelAccountStatus>;
   usage(): Promise<ModelAccountUsage | null>;
-  authorizationState(): ModelAuthorizationState;
-  startBrowserAuthorization(): Promise<ModelBrowserAuthorization>;
-  startDeviceAuthorization(): Promise<ModelDeviceAuthorization>;
-  cancelAuthorization(): Promise<void>;
+  /** Takes the authorization back. */
   revoke(): Promise<void>;
   /** Fires when the account's status may have changed; returns the unsubscribe. */
   onChanged(listener: () => void): () => void;
   close(): void;
+}
+
+/**
+ * Authorizing Rome under the account from inside Rome. Only the Codex
+ * adapter implements it: the guardian authorizes Claude outside Rome, with
+ * the Claude CLI.
+ */
+export interface ModelAccountAuthorization {
+  authorizationState(): ModelAuthorizationState;
+  startBrowserAuthorization(): Promise<ModelBrowserAuthorization>;
+  startDeviceAuthorization(): Promise<ModelDeviceAuthorization>;
+  cancelAuthorization(): Promise<void>;
 }

@@ -1,17 +1,19 @@
 import type { ModelProvider, ModelTier, ProviderId } from "./agent-runner.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
-  claudeUsesApiKey,
-  type AIToolProviderId,
-  type AIToolState,
-  type AIToolStateValue,
-  type ProviderState,
-} from "./ai-tool-state.js";
-import {
-  matchesModelAlias,
+  accountAllowsModel,
+  CODEX_LUNA_MODEL,
+  CODEX_SOL_MODEL,
+  CODEX_TERRA_MODEL,
   MODEL_SELECTIONS,
-  type ModelSelectionId,
+  providerAuthorized,
+  providerUsable,
   stripLegacyReasoningSuffix,
+  type AccountedProviderId,
+  type ModelAvailability,
+  type ModelAvailabilityState,
+  type ModelSelectionId,
+  type ProviderAvailability,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { RomeCreditsPayer } from "./rome-credits-payer.js";
@@ -35,21 +37,21 @@ export type ModelResolutionErrorReason =
 export interface ModelResolutionErrorPayload {
   error: string;
   code: ModelResolutionErrorCode;
-  provider?: AIToolProviderId;
+  provider?: AccountedProviderId;
   reason: ModelResolutionErrorReason;
 }
 
 /** A recoverable model-selection failure safe to expose over HTTP/SSE. */
 export class ModelResolutionError extends Error {
   readonly code: ModelResolutionErrorCode;
-  readonly provider?: AIToolProviderId;
+  readonly provider?: AccountedProviderId;
   readonly reason: ModelResolutionErrorReason;
 
   constructor(
     message: string,
     details: {
       code: ModelResolutionErrorCode;
-      provider?: AIToolProviderId;
+      provider?: AccountedProviderId;
       reason: ModelResolutionErrorReason;
     },
   ) {
@@ -109,7 +111,7 @@ export interface ModelResolver {
 }
 
 export interface CreateModelResolverOptions {
-  aiToolState: Pick<AIToolState, "get" | "refresh">;
+  availability: Pick<ModelAvailability, "read" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
   romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits"> &
@@ -128,21 +130,11 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   small: "claude-haiku-5-5",
 };
 
-const CODEX_SOL_MODEL = "gpt-6.1-sol";
-const CODEX_LUNA_MODEL = "gpt-6-luna";
-const CODEX_TERRA_MODEL = "gpt-5.6-terra";
-
-function providerQuotaExhausted(providerId: ProviderId, state: ProviderState): boolean {
-  return state.quotaExhausted && !(providerId === "anthropic" && claudeUsesApiKey(state));
-}
-
-function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
-  return state.loggedIn !== false && !providerQuotaExhausted(providerId, state);
-}
-
-function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
-  if (tier === "small") return state.lunaAccess ? CODEX_LUNA_MODEL : CODEX_TERRA_MODEL;
-  return state.solAccess ? CODEX_SOL_MODEL : CODEX_TERRA_MODEL;
+/** The Codex model for a tier, within what the account's plan allows. An unread account allows any. */
+function codexModel(tier: ModelTier, codex: ProviderAvailability | undefined): string {
+  const allows = (model: string): boolean => !codex || accountAllowsModel(codex.account, model);
+  if (tier === "small") return allows(CODEX_LUNA_MODEL) ? CODEX_LUNA_MODEL : CODEX_TERRA_MODEL;
+  return allows(CODEX_SOL_MODEL) ? CODEX_SOL_MODEL : CODEX_TERRA_MODEL;
 }
 
 /**
@@ -184,70 +176,58 @@ function providerDisplayName(id: ProviderId): string {
 
 // Agents, apps, and logs see only the message, not the reason field, so the
 // message itself names the cause and when a usage limit ends.
-function unavailableCause(provider: ModelProvider, availability: ProviderState): string {
+function unavailableCause(provider: ModelProvider, availability: ProviderAvailability): string {
   const name = providerDisplayName(provider.id);
-  if (availability.loggedIn === false) return `${name} is not signed in`;
-  const until = availability.quotaExhaustedUntil;
+  if (!providerAuthorized(availability)) return `${name} is not signed in`;
+  const until = availability.usageLimitUntil;
   return until
     ? `${name} has reached its usage limit until ${until}`
     : `${name} has reached its usage limit`;
 }
 
-function providerState(state: AIToolStateValue, providerId: ProviderId): ProviderState | null {
-  if (providerId === "openai") return state.codex;
-  if (providerId === "anthropic") return state.claude;
-  return null;
-}
-
 export function createModelResolver(options: CreateModelResolverOptions): ModelResolver {
   const providers = new Map(options.providers.map((provider) => [provider.id, provider]));
 
-  const refreshAfterFailure = (provider?: AIToolProviderId): void => {
-    void options.aiToolState.refresh(provider).catch((error) => {
-      log.warn("AI tool state refresh after model resolution failure failed", {
+  const refreshAfterFailure = (provider?: AccountedProviderId): void => {
+    void options.availability.refresh(provider).catch((error) => {
+      log.warn("model availability refresh after model resolution failure failed", {
         provider: provider ?? "all",
         error: error instanceof Error ? error.message : String(error),
       });
     });
   };
 
-  /** Throws when the provider is definitely logged out or quota-exhausted. */
-  const requireUsableProvider = (provider: ModelProvider, state: AIToolStateValue): void => {
-    const availability = providerState(state, provider.id);
-    if (!availability || providerUsable(provider.id, availability)) return;
-    const providerId = provider.id as AIToolProviderId;
+  /** Throws when the provider is read as unauthorized, expired or at its usage limit. */
+  const requireUsableProvider = (provider: ModelProvider, state: ModelAvailabilityState): void => {
+    const availability = state[provider.id];
+    if (!availability || providerUsable(availability)) return;
+    const providerId = provider.id as AccountedProviderId;
     refreshAfterFailure(providerId);
     throw new ModelResolutionError(
       `Selected model provider is unavailable: ${unavailableCause(provider, availability)}`,
       {
         code: "model_provider_unavailable",
         provider: providerId,
-        reason: availability.loggedIn === false ? "not_logged_in" : "quota_exhausted",
+        reason: providerAuthorized(availability) ? "quota_exhausted" : "not_logged_in",
       },
     );
   };
 
   /**
-   * Throws when the model is entitlement-gated and access is lost. Astra ships
-   * to the same paid plans as Sol, so it rides the Sol entitlement. With a
-   * known `served` list, the Rome credits gateway decides instead: it accepts
-   * only the exact model names it serves.
+   * Throws when the account's plan does not allow the model. With a known
+   * `served` list, the Rome credits gateway decides instead: it accepts only
+   * the exact model names it serves.
    */
   const requireModelAccess = (
     providerId: ProviderId,
     model: string,
-    codex: AIToolStateValue["codex"],
+    codex: ProviderAvailability | undefined,
     served: ReadonlySet<string> | null,
   ): void => {
     if (providerId !== "openai") return;
     const denied = served
       ? !served.has(stripLegacyReasoningSuffix(model))
-      : (model === "gpt-6-astra" && !codex.solAccess) ||
-        (matchesModelAlias(model, CODEX_SOL_MODEL) && !codex.solAccess) ||
-        (matchesModelAlias(model, "gpt-6-sol") && !codex.solAccess) ||
-        (matchesModelAlias(model, CODEX_LUNA_MODEL) && !codex.lunaAccess) ||
-        (model === "gpt-5.6-sol" && !codex.solAccess) ||
-        (model === "gpt-5.6-luna" && !codex.lunaAccess);
+      : codex !== undefined && !accountAllowsModel(codex.account, model);
     if (!denied) return;
     refreshAfterFailure("openai");
     throw new ModelResolutionError(`Selected model is unavailable: ${model}`, {
@@ -269,21 +249,22 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     return served ? new Set(served) : null;
   };
   /**
-   * Account state as seen by resolution. Rome credits are another way to pay
-   * for Codex: while they pay, Codex has Sol and Luna access when the gateway
-   * serves them, without a plan entitlement.
+   * Availability as seen by resolution. Rome credits are another way to pay
+   * for Codex: while they pay, Codex is available and allows the models the
+   * gateway serves, or any when the gateway has not said.
    */
-  const resolutionState = (state = options.aiToolState.get()): AIToolStateValue => {
+  const resolutionState = (state = options.availability.read()): ModelAvailabilityState => {
     if (!usingRomeCredits()) return state;
     const served = creditsServedModels();
     return {
       ...state,
-      codex: {
-        ...state.codex,
-        loggedIn: true,
-        quotaExhausted: false,
-        solAccess: served?.has(CODEX_SOL_MODEL) ?? true,
-        lunaAccess: served?.has(CODEX_LUNA_MODEL) ?? true,
+      openai: {
+        state: "available",
+        account: {
+          loggedIn: true,
+          usageLimited: false,
+          ...(served ? { models: [...served] } : {}),
+        },
       },
     };
   };
@@ -305,7 +286,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(provider.id, model, state.codex, creditsServedModels());
+        requireModelAccess(provider.id, model, state.openai, creditsServedModels());
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
@@ -315,7 +296,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(provider.id, selection.model, state.codex, creditsServedModels());
+        requireModelAccess(provider.id, selection.model, state.openai, creditsServedModels());
         return { modelProvider: provider, model: selection.model };
       }
 
@@ -325,16 +306,16 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       // A tier reaches credits only when no subscription can serve it, and a
       // provider pin ignores the served list.
       if (!request.providerId) {
-        const current = options.aiToolState.get();
+        const current = options.availability.read();
         const subscriptionServes =
-          (providers.has("openai") && providerUsable("openai", current.codex)) ||
-          (providers.has("anthropic") && providerUsable("anthropic", current.claude));
+          (providers.has("openai") && providerUsable(current.openai)) ||
+          (providers.has("anthropic") && providerUsable(current.anthropic));
         if (!subscriptionServes) await settleServedModels();
       }
       // Settings reads can yield while account state changes. Read the payer
       // and provider state after the final await so this resolution sees the
       // current login-selected payer.
-      const accountState = options.aiToolState.get();
+      const accountState = options.availability.read();
       const creditsPay = usingRomeCredits();
       const state = resolutionState(accountState);
       const creditsServed = creditsServedModels();
@@ -348,14 +329,14 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const model =
           configured ??
           (provider.id === "openai"
-            ? codexModel(request.tier, providerState.codex)
+            ? codexModel(request.tier, providerState.openai)
             : provider.id === "anthropic"
               ? CLAUDE_TIER_TO_MODEL[request.tier]
               : TEST_TIER_TO_MODEL[request.tier]);
         // A configured model is intentional, but known Codex entitlement
         // restrictions still fail with the same recoverable error as an exact
         // model selection instead of reaching the provider with a bad request.
-        requireModelAccess(provider.id, model, providerState.codex, served);
+        requireModelAccess(provider.id, model, providerState.openai, served);
         return model;
       };
 
@@ -374,10 +355,10 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
       const claude = providers.get("anthropic");
       const codex = providers.get("openai");
-      if (codex && providerUsable("openai", accountState.codex)) {
+      if (codex && providerUsable(accountState.openai)) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
-      if (claude && providerUsable("anthropic", state.claude)) {
+      if (claude && providerUsable(state.anthropic)) {
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
       // Rome credits pay only when no subscription can serve the tier, and only
@@ -386,7 +367,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const creditsServeTier =
         !creditsServed ||
         configuredTierModel(tierModelMappings, "openai", request.tier) !== null ||
-        creditsServed.has(codexModel(request.tier, state.codex));
+        creditsServed.has(codexModel(request.tier, state.openai));
       if (codex && creditsPay && creditsServeTier) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
@@ -397,16 +378,16 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const mock = providers.get("mock");
       if (mock) return { modelProvider: mock, model: resolveTierModel(mock) };
 
-      const connectedProviders: Array<{ id: AIToolProviderId; state: ProviderState }> = [];
-      if (codex && state.codex.loggedIn !== false) {
-        connectedProviders.push({ id: "openai", state: state.codex });
+      const connectedProviders: ProviderAvailability[] = [];
+      if (codex && providerAuthorized(state.openai) && state.openai) {
+        connectedProviders.push(state.openai);
       }
-      if (claude && state.claude.loggedIn !== false) {
-        connectedProviders.push({ id: "anthropic", state: state.claude });
+      if (claude && providerAuthorized(state.anthropic) && state.anthropic) {
+        connectedProviders.push(state.anthropic);
       }
       const allConnectedProvidersQuotaExhausted =
         connectedProviders.length > 0 &&
-        connectedProviders.every((provider) => providerQuotaExhausted(provider.id, provider.state));
+        connectedProviders.every((provider) => provider.state === "usage_limit_reached");
 
       refreshAfterFailure();
       throw new ModelResolutionError(

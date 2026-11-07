@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "../../../../logger.js";
-import type { AIToolStatusProbeResult } from "../../../../lib/ai-tool-probes.js";
 import {
   getCodexCliStatus,
   markCodexAuthRevoked,
@@ -16,11 +15,16 @@ import {
 } from "../../../../lib/provider-usage.js";
 import type {
   ModelAccount,
+  ModelAccountAuthorization,
+  ModelAccountStatus,
   ModelAuthorizationMode,
   ModelAuthorizationState,
   ModelBrowserAuthorization,
   ModelDeviceAuthorization,
 } from "../../../domain/model-account.js";
+import { CODEX_TERRA_MODEL } from "../../../domain/model-selection.js";
+import { usageShowsCapacity } from "../../../domain/provider-availability.js";
+import type { LearnsRefusedTurns, RefusedTurn } from "../refused-turn.js";
 import { isCodexAuthRevokedError } from "./auth-revoked.js";
 import { Method, Notify } from "./app-server-protocol.js";
 import type {
@@ -81,7 +85,7 @@ export interface SharedCodexAccountServiceOptions {
   markAuthRevoked?: () => Promise<void>;
 }
 
-function statusFromFile(fileStatus: CodexCliStatus): AIToolStatusProbeResult {
+function statusFromFile(fileStatus: CodexCliStatus): ModelAccountStatus {
   return {
     loggedIn: fileStatus.loggedIn,
     authMode: fileStatus.authMode,
@@ -90,6 +94,29 @@ function statusFromFile(fileStatus: CodexCliStatus): AIToolStatusProbeResult {
     email: fileStatus.email,
     needsReauth: fileStatus.needsReauth,
   };
+}
+
+/** The ChatGPT plans that serve every Codex model. The others serve Terra alone. */
+const FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
+  "plus",
+  "pro",
+  "prolite",
+  "team",
+  "self_serve_business_usage_based",
+  "business",
+  "enterprise_cbp_usage_based",
+  "enterprise",
+  "edu",
+]);
+
+/** What the account's plan allows and whether the provider limits its usage. */
+function planFacts(
+  status: ModelAccountStatus,
+): Pick<ModelAccountStatus, "models" | "usageLimited"> {
+  if (!status.loggedIn) return {};
+  if (status.authMode === "apikey") return { usageLimited: false };
+  const full = status.planType !== undefined && FULL_MODEL_ACCESS_PLANS.has(status.planType);
+  return { usageLimited: true, ...(full ? {} : { models: [CODEX_TERRA_MODEL] }) };
 }
 
 function rateLimitsPayload(value: unknown): unknown {
@@ -104,7 +131,9 @@ function rateLimitsPayload(value: unknown): unknown {
   return record.rateLimits ?? value;
 }
 
-export class SharedCodexAccountService implements ModelAccount {
+export class SharedCodexAccountService
+  implements ModelAccount, ModelAccountAuthorization, LearnsRefusedTurns
+{
   private readonly manager: CodexAccountRpc;
   private readonly loginTimeoutMs: number;
   private readonly usageCachePaths: string[];
@@ -118,6 +147,8 @@ export class SharedCodexAccountService implements ModelAccount {
   private cancelPendingLoginStart = false;
   private earlyLoginCompletion: LoginCompletedNotification | null = null;
   private lastLoginError: string | null = null;
+  /** The provider's stated end of a refused turn, null for none stated, undefined when not refused. */
+  private usageLimitUntil: string | null | undefined;
   private closed = false;
 
   constructor(
@@ -145,7 +176,19 @@ export class SharedCodexAccountService implements ModelAccount {
     ];
   }
 
-  async status(): Promise<AIToolStatusProbeResult> {
+  async status(): Promise<ModelAccountStatus> {
+    const read = await this.readStatus();
+    const facts = planFacts(read);
+    return {
+      ...read,
+      ...facts,
+      ...(facts.usageLimited && this.usageLimitUntil !== undefined
+        ? { usageLimitUntil: this.usageLimitUntil }
+        : {}),
+    };
+  }
+
+  private async readStatus(): Promise<ModelAccountStatus> {
     const loginStartEpoch = this.isLoginIdle() ? this.loginStartEpoch : null;
     let response: CodexAccountReadResponse;
     try {
@@ -233,6 +276,12 @@ export class SharedCodexAccountService implements ModelAccount {
   }
 
   async usage(): Promise<AIToolUsageStatus | null> {
+    const usage = await this.readUsage();
+    if (usage && usageShowsCapacity(usage)) this.usageLimitUntil = undefined;
+    return usage;
+  }
+
+  private async readUsage(): Promise<AIToolUsageStatus | null> {
     return await readLiveOrCachedUsage(
       async () => {
         try {
@@ -367,6 +416,13 @@ export class SharedCodexAccountService implements ModelAccount {
   async revoke(): Promise<void> {
     await this.cancelAuthorization();
     await this.manager.request(Method.accountLogout);
+    this.usageLimitUntil = undefined;
+    this.emitAccountChanged();
+  }
+
+  /** The provider adapter saw the provider refuse a turn. A credential refusal is already in auth.json. */
+  refusedTurn(refusal: RefusedTurn): void {
+    if (refusal.kind === "usage") this.usageLimitUntil = refusal.until ?? null;
     this.emitAccountChanged();
   }
 

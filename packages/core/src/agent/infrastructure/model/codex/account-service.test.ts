@@ -89,6 +89,7 @@ describe("SharedCodexAccountService", () => {
       planType: "pro",
       accountType: "pro",
       email: "live@example.com",
+      usageLimited: true,
     });
     await expect(service.usage()).resolves.toMatchObject({
       source: "codex app-server",

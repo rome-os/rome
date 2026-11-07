@@ -1,9 +1,13 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { createRomeCreditsPayer } from "./rome-credits-payer.js";
-import { createAIToolState, type AIToolStateValue } from "./ai-tool-state.js";
-import { SharedCodexAccountService } from "../agent/index.js";
+import {
+  createModelAvailability,
+  SharedCodexAccountService,
+  type ModelAvailabilityState,
+} from "../agent/index.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../usage/funding.js";
+import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
 
 function fakeManager(onSet: (provider: string | null) => void = () => {}, onRestart = () => {}) {
   let provider: string | null = null;
@@ -17,9 +21,9 @@ function fakeManager(onSet: (provider: string | null) => void = () => {}, onRest
   };
 }
 
-const base: AIToolStateValue = {
-  codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-  claude: { loggedIn: false, quotaExhausted: false },
+const base: ModelAvailabilityState = {
+  openai: availabilityOf("available"),
+  anthropic: availabilityOf("unauthorized"),
 };
 
 const view = (overrides: Partial<RomeCreditsView> = {}): RomeCreditsView => ({
@@ -38,7 +42,7 @@ function creditsPayer(
   let token: string | null = "romeinst_123";
   let romeCloud = true;
   const payer = createRomeCreditsPayer({
-    aiToolState: { get: () => value },
+    availability: fakeAvailability(() => value),
     appServerManager: fakeManager(hooks.onSet, hooks.onRestart),
     getCredentialId: () => token,
     hasRomeCloud: () => romeCloud,
@@ -65,19 +69,19 @@ describe("Rome credits payer", () => {
       onRestart: () => restarts++,
     });
     payer.sync();
-    value.codex.quotaExhausted = true;
+    value.openai = availabilityOf("usage_limit_reached");
     payer.sync();
     await payer.settled();
     expect(calls).toEqual([]);
-    value.codex.loggedIn = false;
+    value.openai = availabilityOf("unauthorized");
     payer.sync();
     await payer.settled();
     expect(calls).toEqual(["rome_credits"]);
-    value.codex.quotaExhausted = false;
+    // A sync with nothing changed selects nothing again.
     payer.sync();
     await payer.settled();
     expect(calls).toEqual(["rome_credits"]);
-    value.codex.loggedIn = true;
+    value.openai = availabilityOf("available");
     payer.sync();
     expect(calls).toEqual(["rome_credits", null]);
     setToken("romeinst_456");
@@ -89,7 +93,7 @@ describe("Rome credits payer", () => {
   it("restarts on a token change only while credits pay", async () => {
     let restarts = 0;
     const { payer, value, setToken } = creditsPayer(undefined, { onRestart: () => restarts++ });
-    value.codex.loggedIn = false;
+    value.openai = availabilityOf("unauthorized");
     payer.sync();
     await payer.settled();
     setToken("romeinst_456");
@@ -102,7 +106,7 @@ describe("Rome credits payer", () => {
     const calls: Array<string | null> = [];
     const { payer, value, setRomeCloud } = creditsPayer(fetch, { onSet: (p) => calls.push(p) });
     setRomeCloud(false);
-    value.codex.loggedIn = false;
+    value.openai = availabilityOf("unauthorized");
     payer.sync();
     await payer.settled();
     expect(calls).toEqual([]);
@@ -114,9 +118,8 @@ describe("Rome credits payer", () => {
     const calls: Array<string | null> = [];
     const { payer, value } = creditsPayer(undefined, { onSet: (p) => calls.push(p) });
     payer.sync();
-    // markAuthRevoked's view of a revoked ChatGPT token.
-    value.codex.loggedIn = false;
-    value.codex.needsReauth = true;
+    // The account's view of a revoked ChatGPT token.
+    value.openai = availabilityOf("expired");
     payer.sync();
     await payer.settled();
     expect(calls).toEqual(["rome_credits"]);
@@ -133,7 +136,7 @@ describe("Rome credits payer", () => {
       const { payer, value } = creditsPayer(async () => answer, {
         onSet: (p) => calls.push(p),
       });
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       expect(calls).toEqual([]);
@@ -145,7 +148,7 @@ describe("Rome credits payer", () => {
       const { payer, value } = creditsPayer(
         () => new Promise<RomeCreditsView>((resolve) => (answer = resolve)),
       );
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       expect(payer.isUsingRomeCredits()).toBe(false);
       answer?.(view());
@@ -156,7 +159,7 @@ describe("Rome credits payer", () => {
     it("starts paying on a refresh after a grant arrives", async () => {
       let granted = false;
       const { payer, value } = creditsPayer(async () => (granted ? view() : null));
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       expect(payer.isUsingRomeCredits()).toBe(false);
@@ -171,7 +174,7 @@ describe("Rome credits payer", () => {
       const { payer, value } = creditsPayer(async () => view({ availableMicros: available }), {
         onSet: (p) => calls.push(p),
       });
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       available = "0";
@@ -185,7 +188,7 @@ describe("Rome credits payer", () => {
       const { payer, value } = creditsPayer(async () =>
         rejected ? null : view({ models: ["gpt-5.6-terra"] }),
       );
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       rejected = true;
@@ -200,7 +203,7 @@ describe("Rome credits payer", () => {
         if (fail) throw new Error("down");
         return view({ models: ["gpt-6-luna"] });
       });
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       fail = true;
@@ -214,9 +217,9 @@ describe("Rome credits payer", () => {
       const { payer, value } = creditsPayer(
         () => new Promise<RomeCreditsView>((resolve) => (answer = resolve)),
       );
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
-      value.codex.loggedIn = true;
+      value.openai = availabilityOf("available");
       payer.sync();
       answer?.(view());
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -231,7 +234,7 @@ describe("Rome credits payer", () => {
       payer.sync();
       expect(fetch).not.toHaveBeenCalled();
       expect(payer.servedModels()).toBeNull();
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       expect(fetch).toHaveBeenCalledTimes(1);
       await payer.settled();
@@ -251,7 +254,7 @@ describe("Rome credits payer", () => {
       const { payer, value } = creditsPayer(
         () => new Promise<RomeCreditsView>((resolve) => answers.push(resolve)),
       );
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       answers[0]?.(view());
       await payer.settled();
@@ -265,18 +268,18 @@ describe("Rome credits payer", () => {
 
     it("drops the snapshot when ChatGPT starts paying", async () => {
       const { payer, value } = creditsPayer(async () => view({ models: ["gpt-5.6-terra"] }));
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       expect(payer.servedModels()).toEqual(["gpt-5.6-terra"]);
-      value.codex.loggedIn = true;
+      value.openai = availabilityOf("available");
       payer.sync();
       expect(payer.servedModels()).toBeNull();
     });
 
     it("treats a gateway that reports no list as unknown", async () => {
       const { payer, value } = creditsPayer(async () => view());
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       await payer.settled();
       expect(payer.isUsingRomeCredits()).toBe(true);
@@ -287,7 +290,7 @@ describe("Rome credits payer", () => {
       const answers: Array<(v: RomeCreditsView) => void> = [];
       const fetch = rs.fn(() => new Promise<RomeCreditsView>((resolve) => answers.push(resolve)));
       const { payer, value, setToken } = creditsPayer(fetch);
-      value.codex.loggedIn = false;
+      value.openai = availabilityOf("unauthorized");
       payer.sync();
       answers[0]?.(view({ models: ["gpt-6.1-sol"] }));
       await payer.settled();
@@ -337,17 +340,17 @@ describe("Rome credits payer", () => {
           : { loggedIn: true, authMode: "chatgpt" },
     });
     let creditsRead: Promise<void> = Promise.resolve();
-    const aiToolState = createAIToolState({
-      probes: { codexStatus: () => accounts.status(), codexUsage: async () => null },
+    const availability = createModelAvailability({
+      accounts: { openai: accounts },
       refreshIntervalMs: null,
       startRefresh: false,
-      onCodexLoginChanged: () => payer.sync(),
-      onCodexRefreshed: () => {
-        creditsRead = payer.refresh();
-      },
+    });
+    availability.onChanged((_provider, change) => {
+      if (change === "authorization") payer.sync();
+      else creditsRead = payer.refresh();
     });
     const payer = createRomeCreditsPayer({
-      aiToolState,
+      availability,
       appServerManager: {
         getDefaultProvider: () => provider,
         setDefaultProvider,
@@ -360,14 +363,14 @@ describe("Rome credits payer", () => {
     payer.sync();
 
     for (let hour = 0; hour < 3; hour++) {
-      await aiToolState.refresh("openai");
+      await availability.refresh("openai");
       await payer.settled();
       await creditsRead;
     }
 
     expect(setDefaultProvider.mock.calls).toEqual([[ROME_CREDITS_MODEL_PROVIDER_ID]]);
-    expect(aiToolState.get().codex).toMatchObject({ loggedIn: false, needsReauth: true });
+    expect(availability.read().openai).toMatchObject({ state: "expired" });
     accounts.close();
-    aiToolState.close();
+    availability.close();
   });
 });

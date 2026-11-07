@@ -18,6 +18,7 @@ import { SkillCatalog } from "./skill-catalog.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
 
 const AGENT = "worker";
 
@@ -63,8 +64,8 @@ describe("AgentSessionManager working dirs", () => {
         ),
     };
     const state = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: true, quotaExhausted: false },
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -79,7 +80,7 @@ describe("AgentSessionManager working dirs", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          availability: fakeAvailability(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
