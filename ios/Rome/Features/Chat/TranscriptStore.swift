@@ -289,8 +289,8 @@ final class TranscriptStore {
 
     @discardableResult
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
-    /// message too.
-    func send(_ text: String, images: [ComposerImage] = []) -> Bool {
+    /// message too. `fromComposer`: the composer's content, cleared as it goes.
+    func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return false }
         let inputId = UUID().uuidString.lowercased()
@@ -299,7 +299,7 @@ final class TranscriptStore {
             markRunning()
             visibleTurn = true
         }
-        deliver(inputId: inputId, text: trimmed, images: images)
+        deliver(inputId: inputId, text: trimmed, images: images, fromComposer: fromComposer)
         return true
     }
 
@@ -309,9 +309,9 @@ final class TranscriptStore {
         deliver(inputId: id, text: pending[index].text, images: pending[index].images)
     }
 
-    private func deliver(inputId: String, text: String, images: [ComposerImage]) {
+    private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false) {
         // Kept as the chat's draft until the server takes it.
-        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images) }
+        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer) }
         Task {
             do {
                 let turn = try await backend.send(

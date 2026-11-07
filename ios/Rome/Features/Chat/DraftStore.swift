@@ -8,7 +8,8 @@ struct Draft: Equatable, Sendable {
 }
 
 /// A message the guardian has in a chat's transcript, to tell whether an
-/// unsent slot in fact got through.
+/// unsent slot in fact got through. The server stores a message under the
+/// `inputId` it was sent with, so the ids match.
 struct SentMessage: Sendable {
     let id: String
     let text: String
@@ -20,9 +21,9 @@ struct SentMessage: Sendable {
 /// Each chat has a live slot, saved a moment after each edit, and a slot per
 /// message being sent, removed once the server takes it. A send that fails,
 /// or is cut off when the app is killed, comes back into the composer the
-/// next time the chat opens: unsent slots merge into the live one, oldest
-/// first, and from then on the live slot is the only draft. Photos are JPEG
-/// files beside the text, in Application Support, not backed up.
+/// next time the chat opens: unsent slots always merge into the live one,
+/// oldest first, and from then on the live slot is the only draft. Photos are
+/// JPEG files beside the text, in Application Support, not backed up.
 ///
 /// All disk work runs on one serial queue, in the order it was asked for, so
 /// a late save can never bring back a draft that was sent or discarded.
@@ -87,12 +88,42 @@ final class DraftStore {
         await disk.value {}
     }
 
-    /// A message is going out: kept until `delivered`.
-    func sending(chat: String, inputId: String, text: String, photos: [ComposerImage]) {
+    /// A message is going out: kept until `delivered`. `fromComposer`: it
+    /// came out of the composer just now, so the live slot is gone at once,
+    /// with no debounce in between that a kill could cut off.
+    func sending(chat: String, inputId: String, text: String, photos: [ComposerImage], fromComposer: Bool = false) {
         unsettled.insert(inputId)
-        let slot = folder(chat).appending(path: "sending-\(Self.safe(inputId))", directoryHint: .isDirectory)
+        let folder = folder(chat)
+        let slot = folder.appending(path: "sending-\(Self.safe(inputId))", directoryHint: .isDirectory)
+        let live = folder.appending(path: "live", directoryHint: .isDirectory)
+        if fromComposer {
+            debounce[chat]?.cancel()
+            debounce[chat] = nil
+            pending[chat] = nil
+        }
         let root = root
-        disk.run { Self.write(slot, text: text, photos: photos, root: root) }
+        disk.run {
+            if fromComposer { try? FileManager.default.removeItem(at: live) }
+            Self.write(slot, text: text, photos: photos, root: root)
+        }
+    }
+
+    /// A blank chat's start failed: its message goes back into the chat's
+    /// live slot, never deleted. If the guardian has left the chat, the next
+    /// blank chat takes it in.
+    func takeBack(chat: String, inputId: String) {
+        unsettled.remove(inputId)
+        let folder = folder(chat)
+        let slot = folder.appending(path: "sending-\(Self.safe(inputId))", directoryHint: .isDirectory)
+        let root = root
+        disk.run {
+            guard let message = Self.read(slot) else { return }
+            let live = folder.appending(path: "live", directoryHint: .isDirectory)
+            let draft = Self.merged([Self.read(live), message].compactMap { $0 })
+            Self.write(live, text: draft.text, photos: Array(draft.photos.prefix(Self.photoLimit)), root: root)
+            FileManager.default.createFile(atPath: folder.appending(path: Self.adoptMarker).path(percentEncoded: false), contents: nil)
+            try? FileManager.default.removeItem(at: slot)
+        }
     }
 
     /// The server took the message, or the composer took it back.
@@ -121,7 +152,7 @@ final class DraftStore {
     func discardBlankChats() {
         let folders = blankFolders(except: nil)
         disk.run {
-            for folder in folders {
+            for folder in folders where !Self.adoptable(folder) {
                 try? FileManager.default.removeItem(at: folder.appending(path: "live", directoryHint: .isDirectory))
                 Self.removeIfEmpty(folder)
             }
@@ -192,30 +223,49 @@ final class DraftStore {
         var photos: [UUID]
     }
 
-    /// Reads the live draft, or makes one from the unsent slots.
+    /// A blank chat's folder holding a failed start's message for the next one.
+    nonisolated private static let adoptMarker = "adopt"
+
+    nonisolated private static func adoptable(_ folder: URL) -> Bool {
+        FileManager.default.fileExists(atPath: folder.appending(path: adoptMarker).path(percentEncoded: false))
+    }
+
+    /// Texts joined by a blank line, photos in order.
+    nonisolated private static func merged(_ drafts: [Draft]) -> Draft {
+        let texts = drafts.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return Draft(text: texts.joined(separator: "\n\n"), photos: drafts.flatMap(\.photos))
+    }
+
+    /// The live draft with every unsent slot merged in, oldest first.
     nonisolated private static func restore(into folder: URL, adopting others: [URL], skip: Set<String>, transcript: [SentMessage], root: URL) -> Draft? {
         let live = folder.appending(path: "live", directoryHint: .isDirectory)
-        if let draft = read(live) { return draft }
-        let slots = ([folder] + others)
+        let own = read(live)
+        // Another blank chat's failed start, left for this one.
+        let adopted = others.filter(adoptable).map { $0.appending(path: "live", directoryHint: .isDirectory) }
+        let slots = (([folder] + others)
             .flatMap { (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] }
             .filter { $0.lastPathComponent.hasPrefix("sending-") }
-            .filter { !skip.contains(String($0.lastPathComponent.dropFirst(8))) }
+            .filter { !skip.contains(String($0.lastPathComponent.dropFirst(8))) } + adopted)
             .sorted { modified($0) < modified($1) }
-        var texts: [String] = []
-        var photos: [ComposerImage] = []
+        guard !slots.isEmpty else { return own }
+        var drafts = own.map { [$0] } ?? []
         for slot in slots {
             defer { try? FileManager.default.removeItem(at: slot) }
-            guard let draft = read(slot), !gotThrough(slot, draft: draft, transcript: transcript) else { continue }
-            let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { texts.append(text) }
-            photos += draft.photos
+            guard let draft = read(slot), !gotThrough(slot, transcript: transcript) else { continue }
+            drafts.append(draft)
         }
-        for other in others { removeIfEmpty(other) }
-        guard !texts.isEmpty || !photos.isEmpty else {
+        for other in others {
+            if adoptable(other) { try? FileManager.default.removeItem(at: other.appending(path: adoptMarker)) }
+            removeIfEmpty(other)
+        }
+        let all = merged(drafts)
+        let photos = all.photos
+        guard !all.text.isEmpty || !photos.isEmpty else {
+            try? FileManager.default.removeItem(at: live)
             removeIfEmpty(folder)
             return nil
         }
-        let draft = Draft(text: texts.joined(separator: "\n\n"), photos: Array(photos.prefix(photoLimit)))
+        let draft = Draft(text: all.text, photos: Array(photos.prefix(photoLimit)))
         write(live, text: draft.text, photos: draft.photos, root: root)
         // Photos past four wait in their own slot for the next draft.
         if photos.count > photoLimit {
@@ -225,15 +275,12 @@ final class DraftStore {
         return draft
     }
 
-    /// The server has the message already: its id, or the same text from the
-    /// guardian since the slot was written (the reply to the POST got lost).
-    nonisolated private static func gotThrough(_ slot: URL, draft: Draft, transcript: [SentMessage]) -> Bool {
+    /// The server has the message already (the reply to the POST got lost):
+    /// it stores the message under the slot's `inputId`.
+    nonisolated private static func gotThrough(_ slot: URL, transcript: [SentMessage]) -> Bool {
+        guard slot.lastPathComponent.hasPrefix("sending-") else { return false }
         let id = String(slot.lastPathComponent.dropFirst(8))
-        if transcript.contains(where: { $0.id == id }) { return true }
-        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return false }
-        let since = modified(slot).addingTimeInterval(-5)
-        return transcript.contains { $0.date >= since && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == text }
+        return transcript.contains { $0.id == id }
     }
 
     nonisolated private static func write(_ slot: URL, text: String, photos: [ComposerImage], root: URL) {
@@ -347,6 +394,8 @@ private struct ComposerDraft: ViewModifier {
                 guard ready, !restored else { return }
                 if text.isEmpty && attachments.images.isEmpty,
                    let draft = await store.load(chat: chat, transcript: transcript?.sentMessages ?? []) {
+                    // The chat changed or closed while it loaded: this draft is not its.
+                    guard !Task.isCancelled else { return }
                     // Typed into while it loaded: what was typed wins.
                     if text.isEmpty && attachments.images.isEmpty {
                         text = draft.text

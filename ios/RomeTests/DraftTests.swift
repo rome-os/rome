@@ -136,10 +136,48 @@ import Testing
         let byId = await store().load(chat: "c", transcript: [SentMessage(id: "in-1", text: "By id", date: .now)])
         #expect(byId == nil)
 
+        // The same text under another id is a second message: it comes back.
         failed.sending(chat: "c", inputId: "in-2", text: "Same text", photos: [])
         await failed.flush()
         let byText = await store().load(chat: "c", transcript: [SentMessage(id: "other", text: "Same text", date: .now)])
-        #expect(byText == nil)
+        #expect(byText?.text == "Same text")
+        cleanUp()
+    }
+
+    /// Review 3: a live draft never hides an unsent message.
+    @Test func theLiveDraftAndAnUnsentSendAlwaysMerge() async {
+        let first = store()
+        first.save(chat: "c", text: "Typed later", photos: [])
+        first.sending(chat: "c", inputId: "in-1", text: "Lost send", photos: [])
+        await first.flush()
+        let next = store()
+        #expect(await next.load(chat: "c")?.text == "Typed later\n\nLost send")
+        // Merged once: the unsent slot is gone.
+        #expect(await store().load(chat: "c")?.text == "Typed later\n\nLost send")
+        cleanUp()
+    }
+
+    /// Review 3: a kill right after a send does not keep the sent text in the composer too.
+    @Test func aComposerSendClearsTheLiveDraftAtOnce() async {
+        let drafts = store()
+        drafts.save(chat: "c", text: "Hello", photos: [])
+        await drafts.flush()
+        drafts.save(chat: "c", text: "Hello", photos: [])
+        drafts.sending(chat: "c", inputId: "in-1", text: "Hello", photos: [], fromComposer: true)
+        await drafts.flush()
+        #expect(await store().load(chat: "c")?.text == "Hello")
+        cleanUp()
+    }
+
+    /// Review 3: a starter does not wipe what the composer holds.
+    @Test func aStarterSendKeepsTheComposersDraft() async {
+        let drafts = store()
+        drafts.save(chat: "c", text: "Half typed", photos: [])
+        await drafts.flush()
+        drafts.sending(chat: "c", inputId: "in-1", text: "Starter", photos: [])
+        drafts.delivered(chat: "c", inputId: "in-1")
+        await drafts.flush()
+        #expect(await store().load(chat: "c")?.text == "Half typed")
         cleanUp()
     }
 
@@ -165,11 +203,30 @@ import Testing
         let drafts = store()
         let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
         let blank = DraftStore.blankChat(UUID())
-        let id = await workspace.startTopicChat(firstMessage: "Plan it", images: [photo(1)], blankKey: blank)
+        let id = await workspace.startTopicChat(firstMessage: "Plan it", images: [photo(1)], blankKey: blank, fromComposer: true)
         #expect(id == nil)
         await drafts.flush()
-        // Nothing is left apart: the composer takes it back and saves it as the draft.
-        #expect(await store().load(chat: blank) == nil)
+        // Back in the blank chat's draft, once.
+        let draft = await store().load(chat: blank)
+        #expect(draft?.text == "Plan it")
+        #expect(draft?.photos.count == 1)
+        cleanUp()
+    }
+
+    /// …even when the guardian left the chat while it was starting: the next blank chat has it.
+    @Test func aFailedStartAfterLeavingComesBackInTheNextBlankChat() async {
+        let backend = FakeBackend()
+        backend.startFails = true
+        let drafts = store()
+        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
+        let blank = DraftStore.blankChat(UUID())
+        _ = await workspace.startTopicChat(firstMessage: "Left behind", blankKey: blank, fromComposer: true)
+        await drafts.flush()
+        let relaunched = store()
+        relaunched.discardBlankChats()
+        #expect(await relaunched.load(chat: DraftStore.blankChat(UUID()))?.text == "Left behind")
+        // Taken once.
+        #expect(await store().load(chat: DraftStore.blankChat(UUID())) == nil)
         cleanUp()
     }
 

@@ -10,7 +10,9 @@ struct TaskChatScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @State private var store: TranscriptStore?
+    /// Kept on the workspace, so a failed send's bubble and Retry are still
+    /// there when the guardian comes back, and the draft waits for it to load.
+    private var store: TranscriptStore { workspace.taskStore(chatId) }
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -19,19 +21,15 @@ struct TaskChatScreen: View {
 
     /// The header shows a spinner only while this chat runs a turn. The
     /// task's own state is left out: it is not reported accurately enough.
-    private var spinning: Bool { store?.running == true }
+    private var spinning: Bool { store.running }
 
     var body: some View {
         VStack(spacing: 0) {
-            if let store {
-                if store.loaded {
-                    transcript(store)
-                } else {
-                    Spacer()
-                    Spinner(size: 22, color: Palette.sub)
-                    Spacer()
-                }
+            if store.loaded {
+                transcript(store)
             } else {
+                Spacer()
+                Spinner(size: 22, color: Palette.sub)
                 Spacer()
             }
         }
@@ -41,40 +39,33 @@ struct TaskChatScreen: View {
         .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments, transcript: store)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let store {
-                Composer(
-                    text: $draft,
-                    placeholder: String(localized: "Reply to this task"),
-                    stopVisible: store.running,
-                    stopping: store.stopping,
-                    focused: $composerFocused,
-                    attachments: attachments,
-                    onSend: {
-                        guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images) {
-                            draft = ""
-                            _ = attachments.take()
-                        }
-                    },
-                    onStop: { store.stopTurn() }
-                )
-                .padding(.horizontal, Metrics.pagePadding)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
-            }
+            Composer(
+                text: $draft,
+                placeholder: String(localized: "Reply to this task"),
+                stopVisible: store.running,
+                stopping: store.stopping,
+                focused: $composerFocused,
+                attachments: attachments,
+                onSend: {
+                    guard !attachments.isPreparing else { return }
+                    if store.send(draft, images: attachments.images, fromComposer: true) {
+                        draft = ""
+                        _ = attachments.take()
+                    }
+                },
+                onStop: { store.stopTurn() }
+            )
+            .padding(.horizontal, Metrics.pagePadding)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
         }
         .onAppear {
-            if store == nil {
-                // Kept on the workspace, so a failed send's bubble and Retry
-                // are still there when the guardian comes back.
-                store = workspace.taskStore(chatId)
-            }
             // Starting again after a return reloads and resubscribes; it is a no-op while running.
-            store?.start()
+            store.start()
         }
         .onDisappear {
-            store?.markRead()
-            store?.stop()
+            store.markRead()
+            store.stop()
         }
         // Keep the swipe-back gesture with a hidden navigation bar.
         .background(SwipeBackEnabler())
@@ -190,7 +181,7 @@ struct TaskChatScreen: View {
         if case .separator = row { return 20 }
         if case .separator(let id, _) = previous {
             // Directly under a hidden separator: the brief starts the page.
-            return id == "sep-\(store?.brief?.id ?? "")" ? 4 : 14
+            return id == "sep-\(store.brief?.id ?? "")" ? 4 : 14
         }
         if case .agentText = row, case .agentText = previous { return 3 }
         return 12

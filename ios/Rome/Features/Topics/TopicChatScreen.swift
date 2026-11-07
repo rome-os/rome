@@ -145,7 +145,7 @@ struct TopicChatScreen: View {
         guard !attachments.isPreparing else { return }
         let images = attachments.images
         if let store {
-            if store.send(draft, images: images) {
+            if store.send(draft, images: images, fromComposer: true) {
                 draft = ""
                 _ = attachments.take()
             }
@@ -155,20 +155,20 @@ struct TopicChatScreen: View {
         guard !text.isEmpty || !images.isEmpty else { return }
         draft = ""
         _ = attachments.take()
-        send(text: text, images: images)
+        send(text: text, images: images, fromComposer: true)
     }
 
     /// Sends `text`, starting the chat first when this one is blank.
-    private func send(text: String, images: [ComposerImage] = []) {
+    private func send(text: String, images: [ComposerImage] = [], fromComposer: Bool = false) {
         if let store {
-            store.send(text, images: images)
+            store.send(text, images: images, fromComposer: fromComposer)
             return
         }
         starting = text
         startingImages = images
         startFailed = false
         Task {
-            if let id = await workspace.startTopicChat(firstMessage: text, images: images, blankKey: draftKey) {
+            if let id = await workspace.startTopicChat(firstMessage: text, images: images, blankKey: draftKey, fromComposer: fromComposer) {
                 starting = nil
                 onCreated(id)
             } else {

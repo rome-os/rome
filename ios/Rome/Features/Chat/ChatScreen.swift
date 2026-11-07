@@ -51,7 +51,7 @@ struct ChatScreen: View {
                     Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images) {
+                        if store.send(draft, images: attachments.images, fromComposer: true) {
                             draft = ""
                             _ = attachments.take()
                         }

@@ -113,12 +113,13 @@ final class Workspace {
     /// Starts a topic chat, then sends it its first message, in that order.
     /// Until the chat exists, the message is kept under the blank chat's
     /// draft key: a failed start or a kill does not lose it.
-    func startTopicChat(firstMessage text: String, images: [ComposerImage] = [], blankKey: String? = nil) async -> String? {
+    func startTopicChat(firstMessage text: String, images: [ComposerImage] = [], blankKey: String? = nil, fromComposer: Bool = false) async -> String? {
         let startId = "start-\(UUID().uuidString)"
-        if let blankKey { drafts.sending(chat: blankKey, inputId: startId, text: text, photos: images) }
+        if let blankKey { drafts.sending(chat: blankKey, inputId: startId, text: text, photos: images, fromComposer: fromComposer) }
         guard let chat = try? await backend.startTopicChat() else {
-            // The composer takes it back.
-            if let blankKey { drafts.delivered(chat: blankKey, inputId: startId) }
+            // Back into the blank chat's draft: its composer shows it, or,
+            // if the guardian has left, the next blank chat does.
+            if let blankKey { drafts.takeBack(chat: blankKey, inputId: startId) }
             return nil
         }
         topics.add(chat)
@@ -127,7 +128,10 @@ final class Workspace {
         store.start()
         // The send keeps it under the new chat first, then the blank slot goes.
         store.send(text, images: images)
-        if let blankKey { drafts.discard(chat: blankKey) }
+        if let blankKey {
+            drafts.delivered(chat: blankKey, inputId: startId)
+            drafts.discard(chat: blankKey)
+        }
         return chat.id
     }
 
