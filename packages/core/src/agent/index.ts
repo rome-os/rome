@@ -44,6 +44,12 @@ export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
 export { catchUpPrompt } from "./domain/catch-up.js";
+export { restoresSavedSelection, type SessionSettings } from "./domain/session-settings.js";
+export {
+  evaluateProviderSessionReset,
+  type ProviderSessionGenerationFreshness,
+  type ProviderSessionResetDecision,
+} from "./domain/session-reset.js";
 export { projectPath, type AgentFolders } from "./domain/agent-folders.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
@@ -183,6 +189,10 @@ export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repos
 export { SkillLoader } from "./infrastructure/skill-loader.js";
 export { AgentLoader } from "./infrastructure/agent-loader.js";
 export { readAnswerShape } from "./infrastructure/answer-shape.js";
+export {
+  ChatSessionSettings,
+  type ChatSessionSettingsDeps,
+} from "./infrastructure/chat-session-settings.js";
 export {
   TurnUsageReporter,
   type TurnUsageReporterDeps,
