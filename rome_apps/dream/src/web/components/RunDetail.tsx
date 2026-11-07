@@ -16,6 +16,7 @@ import {
 } from "../lib/api";
 import { splitFrontmatter, stripLeadingTitle } from "../lib/diff";
 import { KIND_LABEL, formatDuration } from "../lib/format";
+import { dreamAppChangeGroups } from "../lib/run-detail-files";
 import {
   ChangeBody,
   FileChangeCard,
@@ -228,7 +229,7 @@ function NoResult({ children }: { children: ReactNode }) {
 function DreamResults({ run }: { run: Run }) {
   const journals = run.files.filter((f) => f.area === "journal");
   const memory = run.files.filter((f) => f.area === "memory");
-  const other = run.files.filter((f) => f.area === "skill" || f.area === "other");
+  const { touchedByPractice, sourceUnknown, other } = dreamAppChangeGroups(run.files);
 
   if (run.files.length === 0) {
     return run.status === "completed" ? <NoResult>No file changes were recorded.</NoResult> : null;
@@ -242,6 +243,29 @@ function DreamResults({ run }: { run: Run }) {
       {memory.length > 0 ? (
         <ResultSection title="Memory updates" count={filesCount(memory.length)}>
           {memory.map((file) => (
+            <FileChangeCard key={file.path} file={file} />
+          ))}
+        </ResultSection>
+      ) : null}
+      {touchedByPractice.length > 0 ? (
+        <ResultSection
+          title="Files observed as touched by practice"
+          count={filesCount(touchedByPractice.length)}
+        >
+          {touchedByPractice.map((file) => (
+            <FileChangeCard key={file.path} file={file} />
+          ))}
+        </ResultSection>
+      ) : null}
+      {sourceUnknown.length > 0 ? (
+        <ResultSection
+          title="App files changed during practice (source unknown)"
+          count={filesCount(sourceUnknown.length)}
+        >
+          <p className="text-ui text-muted-foreground">
+            These may include changes made by practice through shell commands or delegated agents.
+          </p>
+          {sourceUnknown.map((file) => (
             <FileChangeCard key={file.path} file={file} />
           ))}
         </ResultSection>

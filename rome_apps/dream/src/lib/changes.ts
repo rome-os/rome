@@ -12,7 +12,13 @@
  * unified diff. Both land here as the same `FileChange` rows.
  */
 
+import { realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+
 export type ChangeOp = "write" | "edit";
+
+/** Observed provenance. `practice` means practice touched the path, not sole authorship. */
+export type ChangeAttribution = "practice" | "unattributed";
 
 export interface FileChange {
   op: ChangeOp;
@@ -27,6 +33,8 @@ export interface FileChange {
    */
   previous: string | null;
   truncated: boolean;
+  /** Observed provenance for filesystem changes; older agent records may omit it. */
+  attribution?: ChangeAttribution | null;
 }
 
 /** `.env` files can hold secrets, so only their path is recorded. `.env.example` is source. */
@@ -34,7 +42,36 @@ const SECRET_FILE = /(?:^|\/)\.env(?!\.example$)[^/]*$/;
 export const SECRET_PLACEHOLDER = "(contents not recorded)";
 
 export function isSecretFile(path: string): boolean {
-  return SECRET_FILE.test(path);
+  return SECRET_FILE.test(path.replaceAll("\\", "/"));
+}
+
+/**
+ * Compares paths using the filesystem's spelling when the path exists. For
+ * deleted files, normalize the nearest existing parent and retain the tail.
+ */
+export function normalizePath(path: string): string {
+  const resolved = resolve(path);
+  let current = resolved;
+  const tail: string[] = [];
+  while (true) {
+    try {
+      const canonical = realpathSync.native(current);
+      return tail.length === 0 ? canonical : resolve(canonical, ...tail.reverse());
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolved;
+      tail.push(current.slice(parent.length + 1));
+      current = parent;
+    }
+  }
+}
+
+export function isWithin(path: string, root: string): boolean {
+  const fromRoot = relative(normalizePath(root), normalizePath(path));
+  return (
+    fromRoot === "" ||
+    (!isAbsolute(fromRoot) && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`))
+  );
 }
 
 /** Caps one stored change, so a full-file rewrite of a large memory file
@@ -111,29 +148,54 @@ function regionsOf(diff: string): Region[] {
   return regions;
 }
 
-/**
- * The file changes in a Codex `fileChange` item. An `add` is the whole new
- * file, so it records as a write. An `update` records one edit per run of
- * changed lines, so the page shows the same diff Codex applied; an update
- * that also renames the file records under the new path, the one that exists
- * after the run. A `delete` leaves nothing to show and records nothing.
- */
-function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
+type CodexFileChangeKind = "add" | "update" | "delete";
+
+interface CodexFileChangeItem {
+  path: string;
+  kind: CodexFileChangeKind;
+  movePath: string | null;
+  diff: string | null;
+}
+
+/** Extracts valid paths and kinds even when an item has no diff. */
+function codexFileChangeItems(record: Record<string, unknown>): CodexFileChangeItem[] {
   if (!Array.isArray(record.changes)) return [];
-  return record.changes.flatMap((item): FileChange[] => {
+  return record.changes.flatMap((item): CodexFileChangeItem[] => {
     if (!item || typeof item !== "object") return [];
-    const { path, kind, diff } = item as Record<string, unknown>;
-    const file = str(path);
-    const text = str(diff);
-    if (!file || text === null) return [];
-    const kindRecord = kind && typeof kind === "object" ? (kind as Record<string, unknown>) : null;
-    switch (kindRecord ? str(kindRecord.type) : null) {
+    const itemRecord = item as Record<string, unknown>;
+    const path = str(itemRecord.path);
+    const kindRecord =
+      itemRecord.kind && typeof itemRecord.kind === "object"
+        ? (itemRecord.kind as Record<string, unknown>)
+        : null;
+    const kind = kindRecord ? str(kindRecord.type) : null;
+    if (!path || (kind !== "add" && kind !== "update" && kind !== "delete")) return [];
+    return [
+      {
+        path,
+        kind,
+        movePath: kind === "update" ? str(kindRecord?.move_path) : null,
+        diff: str(itemRecord.diff),
+      },
+    ];
+  });
+}
+
+/**
+ * An add records the whole file, an update records each changed region under
+ * its final path, and a delete has no rendered change.
+ */
+function changesFromFileChange(items: CodexFileChangeItem[]): FileChange[] {
+  return items.flatMap((item): FileChange[] => {
+    const text = item.diff;
+    if (text === null) return [];
+    switch (item.kind) {
       case "add": {
         const content = clip(text);
         return [
           {
             op: "write",
-            path: file,
+            path: item.path,
             content: content.text,
             previous: null,
             truncated: content.truncated,
@@ -141,7 +203,7 @@ function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
         ];
       }
       case "update": {
-        const target = str(kindRecord?.move_path) || file;
+        const target = item.movePath || item.path;
         return regionsOf(text).map(({ before, after }) => {
           const content = clip(after);
           const previous = clip(before);
@@ -154,10 +216,106 @@ function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
           };
         });
       }
-      default:
+      case "delete":
         return [];
     }
   });
+}
+
+/**
+ * Collects the changes and paths from one tool call. A delete or rename's old
+ * path is tracked for practice-touch attribution even when it has no rendered diff.
+ */
+export function fileChangesFromToolUse(
+  tool: string,
+  input: unknown,
+): { paths: string[]; changes: FileChange[] } {
+  if (!input || typeof input !== "object") return { paths: [], changes: [] };
+  const memoryWrite = memoryFileCall(tool, input as Record<string, unknown>);
+  if (memoryWrite) return fileChangesFromToolUse(memoryWrite.tool, memoryWrite.input);
+
+  const record = input as Record<string, unknown>;
+  if (record.type === "fileChange") {
+    const items = codexFileChangeItems(record);
+    return {
+      paths: items.flatMap(({ path, kind, movePath }) =>
+        kind === "update" && movePath ? [path, movePath] : [path],
+      ),
+      changes: changesFromFileChange(items),
+    };
+  }
+
+  const path = str(record.file_path);
+  if (!path || !["Write", "Edit", "MultiEdit"].includes(tool)) {
+    return { paths: [], changes: [] };
+  }
+
+  if (isSecretFile(path)) {
+    const op: ChangeOp = tool === "Write" ? "write" : "edit";
+    return {
+      paths: [path],
+      changes: [
+        {
+          op,
+          path,
+          content: SECRET_PLACEHOLDER,
+          previous: op === "edit" ? "" : null,
+          truncated: false,
+        },
+      ],
+    };
+  }
+
+  const edit = (oldText: unknown, newText: unknown): FileChange | null => {
+    const next = str(newText);
+    if (next === null) return null;
+    const content = clip(next);
+    const previous = clip(str(oldText) ?? "");
+    return {
+      op: "edit",
+      path,
+      content: content.text,
+      previous: previous.text,
+      truncated: content.truncated || previous.truncated,
+    };
+  };
+
+  let changes: FileChange[] = [];
+  switch (tool) {
+    case "Write": {
+      const text = str(record.content);
+      if (text !== null) {
+        const content = clip(text);
+        changes = [
+          {
+            op: "write",
+            path,
+            content: content.text,
+            previous: null,
+            truncated: content.truncated,
+          },
+        ];
+      }
+      break;
+    }
+    case "Edit": {
+      const change = edit(record.old_string, record.new_string);
+      changes = change ? [change] : [];
+      break;
+    }
+    case "MultiEdit": {
+      if (!Array.isArray(record.edits)) break;
+      changes = record.edits.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const { old_string, new_string } = item as Record<string, unknown>;
+        const change = edit(old_string, new_string);
+        return change ? [change] : [];
+      });
+      break;
+    }
+  }
+
+  return { paths: [path], changes };
 }
 
 /**
@@ -177,74 +335,6 @@ function memoryFileCall(
   if (name === "write_memory_file") return { tool: "Write", input: { file_path: path, ...rest } };
   if (name === "edit_memory_file") return { tool: "Edit", input: { file_path: path, ...rest } };
   return null;
-}
-
-/**
- * The file changes one tool call makes. Covers Claude's `Write`, `Edit`, and
- * `MultiEdit`, and the Codex `fileChange` item the provider reports as `Edit`;
- * any other tool returns nothing.
- */
-export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
-  if (!input || typeof input !== "object") return [];
-  const memoryWrite = memoryFileCall(tool, input as Record<string, unknown>);
-  if (memoryWrite) return changesFromToolUse(memoryWrite.tool, memoryWrite.input);
-  const record = input as Record<string, unknown>;
-  if (record.type === "fileChange") return changesFromFileChange(record);
-  const path = str(record.file_path);
-  if (!path) return [];
-  if (isSecretFile(path)) {
-    const op: ChangeOp = tool === "Write" ? "write" : "edit";
-    if (!["Write", "Edit", "MultiEdit"].includes(tool)) return [];
-    return [
-      {
-        op,
-        path,
-        content: SECRET_PLACEHOLDER,
-        previous: op === "edit" ? "" : null,
-        truncated: false,
-      },
-    ];
-  }
-
-  const edit = (oldText: unknown, newText: unknown): FileChange | null => {
-    const next = str(newText);
-    if (next === null) return null;
-    const content = clip(next);
-    const previous = clip(str(oldText) ?? "");
-    return {
-      op: "edit",
-      path,
-      content: content.text,
-      previous: previous.text,
-      truncated: content.truncated || previous.truncated,
-    };
-  };
-
-  switch (tool) {
-    case "Write": {
-      const text = str(record.content);
-      if (text === null) return [];
-      const content = clip(text);
-      return [
-        { op: "write", path, content: content.text, previous: null, truncated: content.truncated },
-      ];
-    }
-    case "Edit": {
-      const change = edit(record.old_string, record.new_string);
-      return change ? [change] : [];
-    }
-    case "MultiEdit": {
-      if (!Array.isArray(record.edits)) return [];
-      return record.edits.flatMap((item) => {
-        if (!item || typeof item !== "object") return [];
-        const { old_string, new_string } = item as Record<string, unknown>;
-        const change = edit(old_string, new_string);
-        return change ? [change] : [];
-      });
-    }
-    default:
-      return [];
-  }
 }
 
 type FileArea = "journal" | "memory" | "skill" | "other";
@@ -319,6 +409,8 @@ function shortPath(path: string): string {
 export interface ChangedFile extends ClassifiedPath {
   path: string;
   changes: Array<Omit<FileChange, "path">>;
+  /** Conservative provenance from the changes recorded for this file. */
+  attribution: ChangeAttribution | null;
 }
 
 /** Groups changes by file, in the order each file was first touched. */
@@ -327,10 +419,14 @@ export function groupByFile(changes: FileChange[]): ChangedFile[] {
   for (const { path, ...change } of changes) {
     let file = files.get(path);
     if (!file) {
-      file = { path, ...classifyPath(path), changes: [] };
+      file = { path, ...classifyPath(path), changes: [], attribution: null };
       files.set(path, file);
     }
     file.changes.push(change);
+    if (change.attribution === "unattributed") file.attribution = "unattributed";
+    else if (change.attribution === "practice" && file.attribution === null) {
+      file.attribution = "practice";
+    }
   }
   return [...files.values()];
 }

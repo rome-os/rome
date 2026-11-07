@@ -8,7 +8,10 @@ import { createAction as createList } from "../actions/list-memory-files/index.j
 import { createAction as createRead } from "../actions/read-memory-file/index.js";
 import { createAction as createWrite } from "../actions/write-memory-file/index.js";
 import type { MemoryFileDeps } from "../actions/write-memory-file/index.js";
-import { changesFromToolUse } from "./changes.js";
+import { fileChangesFromToolUse } from "./changes.js";
+
+const changesFromToolUse = (...args: Parameters<typeof fileChangesFromToolUse>) =>
+  fileChangesFromToolUse(...args).changes;
 
 const config = {
   name: "write_memory_file",

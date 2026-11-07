@@ -1,6 +1,6 @@
 import type { AgentEvent } from "@rome-os/app-runtime";
 import type { RunsRepository } from "../db/repositories/runs.js";
-import { changesFromToolUse, type FileChange } from "./changes.js";
+import { fileChangesFromToolUse, isWithin, type FileChange } from "./changes.js";
 import { HEARTBEAT_MS } from "./run-view.js";
 
 type RunOutcome = Parameters<RunsRepository["finish"]>[1];
@@ -22,6 +22,9 @@ function resultText(output: unknown): string {
  * result, without the error flag, so its output has to be read.
  */
 function reportsActionError(output: unknown): boolean {
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    if ((output as Record<string, unknown>).status === "error") return true;
+  }
   const text = resultText(output).trim();
   if (!text.startsWith("{")) return false;
   try {
@@ -41,20 +44,27 @@ function reportsActionError(output: unknown): boolean {
  * status wins, so the stream has to be read to its end before classifying.
  */
 export class RunRecorder {
-  private readonly pending = new Map<string, FileChange[]>();
+  private readonly pending = new Map<string, { changes: FileChange[]; knownPaths: string[] }>();
+  private readonly knownAppPaths = new Set<string>();
   summary = "";
   error: string | null = null;
   private interrupted = false;
 
   /**
-   * @param ignoredDir Changes under it are not recorded: the action records
-   *   the authoritative version of what the agent writes there.
+   * @param appsRoot Changes under it are not recorded directly. The action
+   *   records the final filesystem version; paths here mark files the practice
+   *   agent explicitly targeted.
    */
   constructor(
-    private readonly repo: RunsRepository,
+    private readonly repo: Pick<RunsRepository, "addChanges">,
     private readonly runId: string,
-    private readonly ignoredDir?: string,
+    private readonly appsRoot?: string,
   ) {}
+
+  /** App paths the practice agent demonstrably touched. */
+  knownPaths(): ReadonlySet<string> {
+    return this.knownAppPaths;
+  }
 
   observe(event: AgentEvent): void {
     if (event.type === "result") {
@@ -70,19 +80,29 @@ export class RunRecorder {
       return;
     }
     if (event.type === "tool_use") {
-      const ignored = this.ignoredDir ? `${this.ignoredDir}/` : null;
-      const changes = changesFromToolUse(event.tool, event.input).filter(
-        (change) => !ignored || !change.path.startsWith(ignored),
-      );
-      if (changes.length > 0) this.pending.set(event.id, changes);
+      const { changes: allChanges, paths } = fileChangesFromToolUse(event.tool, event.input);
+      const knownPaths = this.appsRoot
+        ? [...new Set(paths)].filter((path) => isWithin(path, this.appsRoot!))
+        : [];
+      const changes = this.appsRoot
+        ? allChanges.filter((change) => !isWithin(change.path, this.appsRoot!))
+        : allChanges;
+      if (changes.length > 0 || knownPaths.length > 0) {
+        this.pending.set(event.id, { changes, knownPaths });
+      }
       return;
     }
     if (event.type === "tool_result") {
-      const changes = this.pending.get(event.toolUseId);
-      if (!changes) return;
+      const pending = this.pending.get(event.toolUseId);
+      if (!pending) return;
       this.pending.delete(event.toolUseId);
       if (event.isError || reportsActionError(event.output)) return;
-      this.repo.addChanges(this.runId, changes);
+      for (const path of pending.knownPaths) {
+        this.knownAppPaths.add(path);
+      }
+      if (pending.changes.length > 0) {
+        this.repo.addChanges(this.runId, pending.changes);
+      }
     }
   }
 
