@@ -47,9 +47,10 @@ struct DrawerView: View {
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button(action: onNewTopic) {
+                    // Muted like the header beside it, so it does not outweigh the list.
                     Image(systemName: "plus")
-                        .romeFont(16, .semibold)
-                        .foregroundStyle(Palette.fg)
+                        .romeFont(15, .regular)
+                        .foregroundStyle(Palette.sub)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
