@@ -91,6 +91,10 @@ Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pa
 
 - [x] (189 Mac Catalyst tests pass; momentum tap checked on the Simulator; screenshots in notes folder `back-to-bottom/`. Follow-up sent: the button and the composer are too see-through in light mode) A round glass down-arrow button above the composer once the guardian is more than two screens above the bottom; tapping scrolls to the newest row, also while the list is still gliding (user, 2026-11-06). Queued after images.
 
+## Later
+
+- [ ] Server thumbnails: the instance serves a resized image (e.g. `/api/projects/asset?path=…&w=600`), and the app fetches that for bubbles instead of the full original. Today the app downloads the original and decodes a 600/900 px thumbnail into a 64 MB memory cache; the asset route sends `Cache-Control: no-store`, so nothing survives a relaunch. The user chose this over an on-device disk cache (2026-11-06). Needs an instance change and release.
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
