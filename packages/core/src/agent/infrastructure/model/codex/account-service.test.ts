@@ -158,15 +158,29 @@ describe("SharedCodexAccountService", () => {
       userCode: "ABCD-EFGH",
       verificationUrl: "https://auth.openai.com/codex/device",
     });
-    rpc.queue("account/read", { account: { type: "chatgpt", planType: "pro" } });
-    rpc.queue("account/rateLimits/read", {
-      rateLimits: { primary: { usedPercent: 10 }, secondary: { usedPercent: 10 } },
-    });
+    rpc.queue("account/read", ...Array(2).fill({ account: { type: "chatgpt", planType: "pro" } }));
+    const inThreeDays = new Date(Date.now() + 3 * 24 * 3_600_000).toISOString();
+    rpc.queue(
+      "account/rateLimits/read",
+      {
+        rateLimits: {
+          primary: { usedPercent: 10 },
+          secondary: { usedPercent: 100, resetsAt: Date.parse(inThreeDays) / 1000 },
+        },
+      },
+      new Error("app-server restarting"),
+    );
     const service = createService(rpc);
     service.refusedTurn({ kind: "usage" });
+    await expect(service.availability()).resolves.toMatchObject({ state: "usage_limit_reached" });
     await service.startDeviceAuthorization();
     rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
-    await expect(service.availability()).resolves.toMatchObject({ state: "available" });
+    // The first read of the new account fails its usage read; the old
+    // account's limit does not carry over to it.
+    await expect(service.availability()).resolves.toMatchObject({
+      state: "available",
+      usage: { error: "app-server restarting" },
+    });
     service.close();
   });
 

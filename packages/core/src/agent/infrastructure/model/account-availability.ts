@@ -39,17 +39,6 @@ function ahead(until: string | undefined, now: number): string | undefined {
 }
 
 /**
- * The availability read at `now` off the account's status, its usage (null
- * or an error when it could not be read) and the usage refusal it holds. The
- * exhausted windows say when a limit ends better than a refusal's assumed end
- * does: a weekly window outlasts it, a five-hour window may reset before it.
- * A window without a reset time is assumed to end the fallback after the
- * usage was checked, so reading the same usage again never moves the end.
- * Usage that could not be read (null, or an error) proves neither capacity
- * nor a limit, so a limit still ahead carries over from `previous`, the
- * account's last report.
- */
-/**
  * The refusal as the account should keep holding it after it reported
  * `availability`: ending when the exhausted window resets, when that comes
  * first, so a usage read that fails later cannot bring the limit back past a
@@ -64,6 +53,17 @@ export function refusalAfterReport(
   return { ...refusal, until };
 }
 
+/**
+ * The availability read at `now` off the account's status, its usage (null
+ * or an error when it could not be read) and the usage refusal it holds. The
+ * exhausted windows say when a limit ends better than a refusal's assumed end
+ * does: a weekly window outlasts it, a five-hour window may reset before it.
+ * A window without a reset time is assumed to end the fallback after the
+ * usage was checked, so reading the same usage again never moves the end.
+ * Usage that could not be read (null, or an error) proves neither capacity
+ * nor a limit, so a limit still ahead carries over from `previous`, the
+ * account's last report.
+ */
 export function accountAvailability(
   status: ModelAccountStatus,
   usage: ModelAccountUsage | null,

@@ -472,6 +472,7 @@ export class SharedCodexAccountService
     await this.cancelAuthorization();
     await this.manager.request(Method.accountLogout);
     this.refusal = undefined;
+    this.last = undefined;
     this.emitAccountChanged();
   }
 
@@ -544,8 +545,10 @@ export class SharedCodexAccountService
     if (active) this.takeActiveLogin();
     if (notification.success === true) {
       this.lastLoginError = null;
-      // The authorization may name another account; a refusal was the old one's.
+      // The authorization may name another account; a refusal and a remembered
+      // limit were the old one's.
       this.refusal = undefined;
+      this.last = undefined;
     } else {
       this.lastLoginError =
         typeof notification.error === "string" && notification.error.trim()
