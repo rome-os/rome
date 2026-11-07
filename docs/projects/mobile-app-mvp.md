@@ -85,6 +85,10 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 - [ ] Tap any photo to open it full screen (zoom, swipe down to close, swipe between a message's images, share); Markdown images in replies show in the bubble (internal ones through the asset endpoints, external https without credentials). Plain links to image files stay links, like the web (user, 2026-11-06: the simpler option). Queued after the draft fixes.
 
+## Scroll to bottom
+
+- [ ] A round glass down-arrow button above the composer once the guardian is more than two screens above the bottom; tapping scrolls to the newest row, also while the list is still gliding (user, 2026-11-06). Queued after images.
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
