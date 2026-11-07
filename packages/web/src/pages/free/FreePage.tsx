@@ -17,8 +17,6 @@ export default function FreePage() {
   const onMainChat = location.pathname === MAIN_CHAT_PATH;
   const main = useConciergeChat();
   if (onMainChat && main.loading) return null;
-  // Concierge is off, so there is no main chat to open.
-  if (onMainChat && !main.chatId) return <Navigate to="/chat" replace />;
 
   return (
     // Plain div: RomeShellLayout owns the `main` landmark. `hideSidebar` drops

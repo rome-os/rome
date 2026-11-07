@@ -561,7 +561,6 @@ export function startConciergeFollowing(
 
   const delivery = new ImportantDelivery({
     now,
-    isEnabled: () => service.isEnabled(),
     isServed: (owner) => service.isServed(owner),
     quietUntil,
     owed: () => deps.items.owedToConcierge(),
@@ -604,7 +603,6 @@ export function startConciergeFollowing(
    * person's follows, what they were told and their time zone.
    */
   const triageBatch = async (events: FollowEvent[]) => {
-    if (!(await service.isEnabled())) return;
     const byOwner = new Map<ConciergeOwner, FollowEvent[]>();
     for (const event of events) {
       const owner = event.owner ?? GUARDIAN_OWNER;
@@ -724,7 +722,6 @@ export function startConciergeFollowing(
   /** Hands the owed digest to the Concierge as one turn, an empty one included. */
   /** Hands an owner's owed digest to their main chat as one turn, an empty one included. */
   const deliverDigest = async (owner: ConciergeOwner): Promise<{ items: number }> => {
-    if (!(await service.isEnabled())) return { items: 0 };
     if (!(await service.isServed(owner))) return { items: 0 };
     // An empty digest still runs, with count="0", so the person hears that
     // nothing new came in.
@@ -780,8 +777,7 @@ export function startConciergeFollowing(
    */
   const syncDigestRoutines = async () => {
     const stored = await readStored();
-    const enabled = await service.isEnabled();
-    const owners = enabled ? [...new Set(stored.follows.map(ownerOfFollow))] : [];
+    const owners = [...new Set(stored.follows.map(ownerOfFollow))];
     const wanted = new Map<string, { owner: ConciergeOwner; localTime: string }>();
     for (const owner of owners) {
       for (const localTime of rulesOf(stored, owner).digestTimes) {
@@ -1246,7 +1242,6 @@ export function startConciergeFollowing(
     async reconcile() {
       await syncDigest();
       await keepNoPayloads();
-      if (!(await service.isEnabled())) return;
       const { follows } = await readStored();
       if (follows.length === 0) return;
       const sources = await readSources(true);
@@ -1282,9 +1277,6 @@ export function startConciergeFollowing(
       "write",
     ),
     execute: async (args) => {
-      if (!(await service.isEnabled())) {
-        return { status: "ok", data: { ignored: "concierge off" } };
-      }
       const payload = args.__triggerPayload;
       const { source, target, eventName } = args as Record<string, unknown>;
       if (

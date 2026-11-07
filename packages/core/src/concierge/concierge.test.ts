@@ -108,7 +108,6 @@ const ACKNOWLEDGEMENT: Row = {
 
 function setup(
   options: {
-    enabled?: boolean;
     settingsDelayMs?: number;
     delay?: (ms: number) => Promise<void>;
     startEvents?: boolean;
@@ -230,7 +229,7 @@ function setup(
       get: async () => {
         if (options.settingsDelayMs)
           await new Promise((resolve) => setTimeout(resolve, options.settingsDelayMs));
-        return options.enabled ?? true;
+        return null;
       },
       set: async (key: string, value: unknown) => {
         settingsWrites.push([key, value]);
@@ -464,7 +463,7 @@ function setup(
 }
 
 describe("Concierge tools", () => {
-  it("register only for the Concierge agent while the setting is on", async () => {
+  it("register only for the Concierge agent", async () => {
     const on = setup();
     expect((await buildConciergeTools(on.service, on.context())).map((t) => t.name)).toEqual([
       "say",
@@ -481,8 +480,6 @@ describe("Concierge tools", () => {
       "connect_card",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
-    const off = setup({ enabled: false });
-    expect(await buildConciergeTools(off.service, off.context())).toEqual([]);
   });
 
   it("say posts one message under the running turn", async () => {
@@ -1788,15 +1785,6 @@ describe("Concierge events", () => {
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
   });
 
-  it("says nothing while the setting is off", async () => {
-    const s = setup({ enabled: false });
-    await s.taskRepo.upsertMany([{ title: "Row" }]);
-    s.fakeTimers();
-    await s.finish({ turnId: "t", agentName: "core:main", chatId: "task-1", text: "x" });
-    await rs.advanceTimersByTimeAsync(120_000);
-    expect(s.backendTurns).toEqual([]);
-  });
-
   it("does not report a task chat the list does not know", async () => {
     const s = setup();
     s.deps.webchatRepo.getSession = (async (id: string) => ({
@@ -2120,7 +2108,7 @@ describe("Concierge chat", () => {
     const createSession = rs.fn(async () => {});
     const update = rs.fn(async () => {});
     const service = new ConciergeService({
-      settingsRepo: { get: async () => true },
+      settingsRepo: { get: async () => null },
       webchatRepo: {
         getSession: async (id: string) =>
           exists && id === CONCIERGE_CHAT_ID ? { id, largeModelSelection: stored } : null,
@@ -2537,22 +2525,6 @@ describe("Concierge provider recovery", () => {
     await finish(s, failure("Selected model is busy: API Error: 503", "openai"));
     expect(delay).toHaveBeenCalledTimes(1);
     raw.openai = reportOf("unauthorized");
-    release();
-    await s.settle();
-    expect(s.backendTurns).toHaveLength(0);
-  });
-  it("drops a pending retry when Concierge is turned off during the wait", async () => {
-    let release!: () => void;
-    const delay = rs.fn(
-      (_ms: number) =>
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-    );
-    const { s } = await prepared({ delay });
-    await finish(s, failure("Repeated 529 Overloaded errors"));
-    expect(delay).toHaveBeenCalledTimes(1);
-    s.deps.settingsRepo.get = rs.fn(async () => false) as never;
     release();
     await s.settle();
     expect(s.backendTurns).toHaveLength(0);

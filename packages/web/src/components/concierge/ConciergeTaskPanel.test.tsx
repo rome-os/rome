@@ -382,7 +382,6 @@ describe("ConciergeTaskPanel", () => {
 
   it("lists the main chat's rows at /message, which names no chat", async () => {
     const topic = { id: "topic-1", name: "Calendar", main: false };
-    server.settings = { experimentalConcierge: true };
     server.recent = [
       row("doing", { title: "Main work" }),
       row("doing", { title: "Agenda", conciergeChat: topic }),

@@ -90,15 +90,14 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
 
 /**
  * The Concierge tools for one session, or none when the session is not
- * Concierge's or the setting is off. Each handler acts on the session's
- * running turn and fails when none runs.
+ * Concierge's. Each handler acts on the session's running turn and fails
+ * when none runs.
  */
 export async function buildConciergeTools(
   service: ConciergeService,
   context: SessionToolContext,
 ): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
-  if (!(await service.isEnabled())) return [];
   const { webchatRepo, messages, tasks } = service.deps;
 
   const currentTurn = (): { chatId: string; turnId: string } => {
