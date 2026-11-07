@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { AgentAccounting, AgentTurnStatus, RomeSessionType } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
-import type { LoginMethod, TurnUsageEvent, UsageEvent, UsageFunding } from "./events.js";
+import type { ModelLoginKind } from "../agent/index.js";
+import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
 
 const log = createLogger("usage-recorder");
 
@@ -16,7 +17,7 @@ export interface TurnUsageFacts {
   /** The model session that served the turn. Accounting, when present, wins. */
   provider: string;
   model: string;
-  funding: UsageFunding | undefined;
+  loginKind: ModelLoginKind | undefined;
   providerTurnId: string | undefined;
   accounting: AgentAccounting | undefined;
   durationMs: number | undefined;
@@ -114,7 +115,7 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
       status: facts.status,
       provider: accounting?.provider ?? facts.provider,
       model: accounting?.model ?? facts.model,
-      funding: facts.funding ?? "unknown",
+      funding: fundingOf(facts.loginKind),
       providerTurnId: facts.providerTurnId ?? null,
       inputTokens: tokenCount(usage?.inputTokens),
       outputTokens: tokenCount(usage?.outputTokens),
@@ -126,6 +127,11 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
     };
     await this.deps.outbox.enqueue(event, credential);
   }
+}
+
+function fundingOf(kind: ModelLoginKind | undefined): TurnUsageEvent["funding"] {
+  if (kind === "api_credential") return "byok";
+  return kind ?? "unknown";
 }
 
 function tokenCount(value: number | undefined): number {

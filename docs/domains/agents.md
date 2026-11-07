@@ -82,7 +82,7 @@ Whether a run can use a model provider now, read from the [login](#model-provide
 
 How Rome is let in to a model provider. A login has one of three kinds, named by what it is to the guardian and how it bills: a **subscription login** (the guardian's ChatGPT login, or the Claude CLI's login), an **API credential** (stored, or from the environment), or **Rome credits**. Each provider offers some of them. The [account](#model-provider-account) is who, the login is how. A provider has at most one login in effect. A login leads to at most one account, and Rome credits lead to none.
 
-- The provider reports what the login allows, the models and whether it is usage limited. Who is billed follows from the login, and `ModelFunding` on the model port is each turn's report of that.
+- The provider reports what the login allows, the models and whether it is usage limited. Who is billed follows from the login. A model session reports the kind of login each turn ran on, unset when Rome cannot tell.
 - Getting a login and using one are two acts. The guardian authorizes a ChatGPT login. Rome's setup picks which login Codex runs on.
 - For Codex, Rome credits are used only while the ChatGPT account is unauthorized or expired, the instance is linked to Rome Cloud, and the credits can be spent. A usage limit alone, or an account not read yet, keeps the subscription login. This is one choice for the whole instance, and it can change while Rome runs ([Rome Cloud](../concepts/rome-cloud.md#rome-credits)).
 - For Claude, Rome's setup picks nothing. A stored credential wins over an environment credential, which wins over the Claude CLI's login, so the guardian chooses by what they store. Where Rome found a credential is a detail of the login, not a kind.

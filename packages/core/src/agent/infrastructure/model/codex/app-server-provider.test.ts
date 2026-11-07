@@ -1,5 +1,5 @@
+import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { UsageFunding } from "../../../../usage/events.js";
 import { CodexAppServerProvider } from "./app-server-provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { FacadeParams } from "../../../../core/mcp-facade.js";
@@ -2847,9 +2847,9 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
-    let funding: UsageFunding = "byok";
-    const provider = new CodexAppServerProvider({ funding: () => funding });
+  it("reports a failed turn's Codex turn id and reads login kind when asked", async () => {
+    let loginKind: ModelLoginKind = "api_credential";
+    const provider = new CodexAppServerProvider({ loginKind: () => loginKind });
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
@@ -2874,9 +2874,9 @@ describe("CodexAppServerProvider", () => {
     const terminal = events.at(-1);
     expect(terminal).toMatchObject({ type: "error" });
     expect(terminal).not.toHaveProperty("position");
-    expect(session.funding).toBe("byok");
-    funding = "rome_credits";
-    expect(session.funding).toBe("rome_credits");
+    expect(session.loginKind).toBe("api_credential");
+    loginKind = "rome_credits";
+    expect(session.loginKind).toBe("rome_credits");
     await session.close();
   });
 

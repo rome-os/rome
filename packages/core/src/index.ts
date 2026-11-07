@@ -169,7 +169,7 @@ import {
   CodexAppServerProvider,
   createModelAccounts,
   DrizzleSessionRepository,
-  codexFunding,
+  codexLoginKind,
   SharedCodexAccountService,
   SkillLoader,
   romeCreditsProxyRoutes,
@@ -896,14 +896,7 @@ async function main() {
     appServerManager: codexAppServerManager,
     account: codexAccountService,
     warmup: false,
-    funding: () => {
-      const codex = modelAccounts.read().openai;
-      return codexFunding({
-        login: codexAccountService.login(),
-        accountType: codex?.account.accountType,
-        loggedIn: codex ? codex.state !== "unauthorized" && codex.state !== "expired" : undefined,
-      });
-    },
+    loginKind: () => codexLoginKind(codexAccountService.login(), modelAccounts.read().openai),
   });
   const modelResolver = createModelResolver({
     accounts: modelAccounts,

@@ -8,7 +8,7 @@ import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
-import type { UsageFunding } from "../usage/events.js";
+import type { ModelLoginKind } from "../agent/index.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -54,7 +54,8 @@ describe("AgentSession turn usage", () => {
   // Each run decides whether it reaches the provider. One that does mints a
   // provider turn id, like Codex does on turn/start.
   let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
-  let funding: UsageFunding;
+  let loginKind: ModelLoginKind | undefined;
+  let forkLoginKind: ModelLoginKind | undefined;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
   // Whether middleware ends the turn without reaching the model.
   let shortCircuit: boolean;
@@ -85,7 +86,8 @@ describe("AgentSession turn usage", () => {
     testDb = createTestDb();
     recorded = [];
     recordMetrics.mockClear();
-    funding = "byok";
+    loginKind = "api_credential";
+    forkLoginKind = "api_credential";
     beforeModelDispatch = undefined;
     shortCircuit = false;
     onSend = undefined;
@@ -96,10 +98,12 @@ describe("AgentSession turn usage", () => {
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         if (params.thread.kind === "branch") {
-          return createSessionFromRun("openai", () => nextRun(), {
+          const fork = createSessionFromRun("openai", () => nextRun(), {
             ...params,
             thread: { kind: "new" },
           });
+          Object.defineProperty(fork, "loginKind", { get: () => forkLoginKind });
+          return fork;
         }
         const session = createSessionFromRun(
           "openai",
@@ -109,7 +113,7 @@ describe("AgentSession turn usage", () => {
           },
           params,
         );
-        Object.defineProperty(session, "funding", { get: () => funding });
+        Object.defineProperty(session, "loginKind", { get: () => loginKind });
         const send = session.sendUserInput.bind(session);
         // Like a real provider, it resolves once it accepts the input, not when
         // the turn ends.
@@ -165,7 +169,7 @@ describe("AgentSession turn usage", () => {
     rs.restoreAllMocks();
   });
 
-  it("records each finished turn once with its accounting, funding, and provider turn id", async () => {
+  it("records each finished turn once with its accounting, login kind, and provider turn id", async () => {
     nextRun = async function* () {
       yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
       yield {
@@ -188,7 +192,7 @@ describe("AgentSession turn usage", () => {
       agentName: `core:${AGENT}`,
       status: "completed",
       provider: "openai",
-      funding: "byok",
+      loginKind: "api_credential",
       providerTurnId: "provider-turn-1",
       accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
     });
@@ -243,7 +247,7 @@ describe("AgentSession turn usage", () => {
     ]);
   });
 
-  it("keeps funding from the turn's login when the login changes during it", async () => {
+  it("keeps the login kind from the turn's login when the login changes during it", async () => {
     let releaseFirst!: () => void;
     const firstRelease = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -262,7 +266,7 @@ describe("AgentSession turn usage", () => {
     const first = session.sendTurn({ prompt: "ChatGPT-funded" });
     await firstStartedPromise;
     await turnUnderway();
-    funding = "rome_credits";
+    loginKind = "rome_credits";
     resolverUsesRomeCredits = true;
     releaseFirst();
     await drain(first.events);
@@ -284,25 +288,25 @@ describe("AgentSession turn usage", () => {
     const second = session.sendTurn({ prompt: "Credit-funded" });
     await secondStartedPromise;
     await turnUnderway();
-    funding = "subscription";
+    loginKind = "subscription";
     releaseSecond();
     await drain(second.events);
 
-    expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
+    expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential", "rome_credits"]);
   });
 
-  it("records the funding of the query that took the input", async () => {
+  it("records the login kind of the query that took the input", async () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
     };
-    funding = "subscription";
+    loginKind = "subscription";
     onSend = () => {
-      funding = "byok";
+      loginKind = "api_credential";
     };
     const session = await manager.acquire(key);
     await drain(session.sendTurn({ prompt: "after a reopen" }).events);
 
-    expect(recorded.map((facts) => facts.funding)).toEqual(["byok"]);
+    expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential"]);
   });
 
   it("leaves no position to branch at after a turn that never reached the model", async () => {
@@ -330,7 +334,7 @@ describe("AgentSession turn usage", () => {
     );
   });
 
-  it("dispatches a turn whose funding label resolves without a login change", async () => {
+  it("dispatches a turn whose login kind resolves without a login change", async () => {
     let releasePreparation!: () => void;
     const preparationGate = new Promise<void>((resolve) => {
       releasePreparation = resolve;
@@ -346,18 +350,18 @@ describe("AgentSession turn usage", () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
     };
-    funding = "unknown";
+    loginKind = undefined;
 
     const session = await manager.acquire(key);
     const turn = session.sendTurn({ prompt: "boot-time turn" });
     await preparationStartedPromise;
     // The first status probe lands; Codex's login is still ChatGPT.
-    funding = "subscription";
+    loginKind = "subscription";
     releasePreparation();
     await drain(turn.events);
 
     expect(providerCalls).toBe(1);
-    expect(recorded.map((facts) => facts.funding)).toEqual(["subscription"]);
+    expect(recorded.map((facts) => facts.loginKind)).toEqual(["subscription"]);
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
@@ -396,6 +400,24 @@ describe("AgentSession turn usage", () => {
     );
   });
 
+  it("does not give a fork its source's login kind when Rome cannot tell the fork's", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.acquire(key);
+    const events = session.runForkedTurn!({
+      prompt: "side question",
+      sourceCheckpoint: SOURCE_CHECKPOINT,
+    });
+    forkLoginKind = undefined;
+    for await (const _event of events) {
+      // Runs the fork to its end.
+    }
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.loginKind).toBeUndefined();
+  });
+
   it("records a forked turn under its fork session", async () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
@@ -415,7 +437,7 @@ describe("AgentSession turn usage", () => {
       romeSessionId: forkSessionId,
       romeSessionType: "fork",
       status: "completed",
-      funding: "byok",
+      loginKind: "api_credential",
     });
   });
 });
