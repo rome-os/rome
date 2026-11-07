@@ -1,8 +1,8 @@
 // What Rome Cloud's signup survey hands to a new instance. Rome Cloud asks the
 // questions before the instance exists and returns the answers on the whoami
 // account as `survey`; the first Cloud sign-in turns them into the guardian's
-// and the agent's names, a short background note in memory, and the Concierge's
-// first turn. Everything here is a pure read of that record: a missing or
+// and the agent's names, a short background note in memory, and, when they asked
+// Rome to follow a service, one message to the Concierge. Everything here is a pure read of that record: a missing or
 // partial survey (an older Cloud, an old row) reads as nothing, never an error.
 
 import { readCloudProfile, type CloudProfile } from "./cloud-profile.js";
@@ -85,24 +85,16 @@ export function backgroundNote(survey: OnboardingSurvey | null): string | null {
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-function attr(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
+/** The services the signup survey can ask Rome to follow, by watch flag. */
+const WATCHED_SERVICES = { gmail: "Gmail", github: "GitHub" } as const;
 
 /**
- * The Concierge's first input: who just signed up and which services they
- * asked it to follow. What to do with it is the Concierge's `<onboarding>`
- * rule, so the input carries facts only.
+ * The one message the guardian's first sign-in sends into the Concierge's main
+ * chat, as if they had typed it: "Help me follow Gmail and GitHub." Null when
+ * the survey asked for no service, or there is no survey, so nothing is sent.
  */
-export function onboardingInput(survey: OnboardingSurvey | null, guardianName: string): string {
-  const fields = [
-    `guardian="${attr(guardianName)}"`,
-    ...(survey?.profession ? [`profession="${attr(survey.profession)}"`] : []),
-    ...(survey && survey.watch.length > 0 ? [`follow="${survey.watch.join(", ")}"`] : []),
-  ];
-  return `<onboarding ${fields.join(" ")}/>`;
+export function followRequest(survey: OnboardingSurvey | null): string | null {
+  const names = (survey?.watch ?? []).map((flag) => WATCHED_SERVICES[flag]);
+  if (names.length === 0) return null;
+  return `Help me follow ${names.join(" and ")}.`;
 }

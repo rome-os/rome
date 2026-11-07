@@ -17,7 +17,7 @@ import {
 } from "../../lib/guardian-auth-state.js";
 import {
   backgroundNote,
-  onboardingInput,
+  followRequest,
   readOnboardingSurvey,
   type OnboardingSurvey,
 } from "../../lib/cloud-onboarding.js";
@@ -74,11 +74,13 @@ const OAUTH_CLIENT_ID = "rome-instance";
 // never anything derived from the request — so the callback can't be turned into
 // an open redirector. Success bounces to the dashboard root (a hard navigation so
 // the SPA re-bootstraps with the new session). A sign-in that creates the seat
-// lands in the Concierge's main chat instead: setup is already complete, and the
-// Concierge has spoken first there. Failures return to /login, the cloud-default
+// lands in the Concierge's main chat instead: setup is already complete, and
+// that chat is where it asks the Concierge to follow the services they chose.
+// Failures return to /login, the cloud-default
 // sign-in entry: whatever the instance state, the retry affordance and the error
 // banner live there.
 const SUCCESS_PATH = "/";
+const MAIN_CHAT_PATH = "/message";
 const LOGIN_PATH = "/login";
 // How long the first sign-in waits for the signup survey before going on without it.
 const DEFAULT_SURVEY_TIMEOUT_MS = 5_000;
@@ -557,9 +559,10 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   // the guardian seat is created from the consenting cloud account, and setup
   // finishes right here: the names the guardian gave Rome Cloud's signup survey,
   // else the display name from the identity assertion and a preset agent
-  // identity. Then the Concierge is turned on and speaks first in the main chat,
-  // so the onboarding page is never shown on this path. Returns that chat's
-  // path, or null when the Concierge could not be started.
+  // identity. Then the Concierge is turned on, and when the survey asked Rome to
+  // follow a service, the guardian's request for it goes into the main chat, so
+  // the onboarding page is never shown on this path. Returns that chat's path,
+  // or null when the Concierge could not be started.
   async function createGuardianSeat(identity: CloudIdentity): Promise<string | null> {
     await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
     const survey = await readSurvey();
@@ -579,10 +582,10 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     // the guardian lands in the chat without waiting for it.
     void deps.autoConnectEmail?.();
     try {
-      const chatId = await deps.concierge?.startOnboarding(onboardingInput(survey, guardianName));
-      return chatId ? `/chat/${encodeURIComponent(chatId)}` : null;
+      const started = await deps.concierge?.startMainChat(followRequest(survey));
+      return started ? MAIN_CHAT_PATH : null;
     } catch (err) {
-      log.warn("could not start the Concierge's onboarding", {
+      log.warn("could not start the Concierge's main chat", {
         error: err instanceof Error ? err.message : String(err),
       });
       return null;

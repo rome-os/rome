@@ -761,6 +761,8 @@ export interface WebchatRuntime {
   startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
+  /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -4501,6 +4503,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
       );
       return opened.sessionId;
+    },
+    async sendAsGuardian(chatId, text) {
+      const inputId = randomUUID();
+      const sent = await handleChatSend(chatId, { inputId, text });
+      if (sent.status < 400) return;
+      // Once the input is recorded it is said, even when the agent could not be woken on it.
+      if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
+        throw new Error(routeError(sent));
+      }
+      log.warn("guardian message recorded but its agent was not woken", {
+        chatId,
+        inputId,
+        error: routeError(sent),
+      });
     },
     isRunning: isSessionRunning,
     activeTurns: (sessionId) =>

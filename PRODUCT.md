@@ -49,7 +49,7 @@ Rome is open source (MIT), self-hostable or run on Rome Cloud, and exportable, s
 - **Inspection.** Agent traces, replays, projects and memory file browsers, local changes and sync, and settings let the guardian check what happened.
 - **Shared apps.** Guardians set each app to private, public, or a Rome Cloud email list, and visitors open it through the hosted app shell and sign-in gate.
 - **Devices.** Keyboard-heavy desktop use, compact phone and tablet use through the browser or mobile shell, and hybrid touch-and-pointer devices.
-- **First run.** On Rome Cloud the signup survey runs before the instance exists. The first sign-in hands its answers to the Concierge, which greets the guardian by name in its main chat and sets up what they asked it to follow.
+- **First run.** On Rome Cloud the signup survey runs before the instance exists. The first sign-in uses its answers for the guardian's and the agent's names and background, and when they asked Rome to follow a service, sends the Concierge one message for it, such as "Help me follow Gmail."
 
 ## Capabilities and Constraints
 

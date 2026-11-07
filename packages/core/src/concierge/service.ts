@@ -120,6 +120,8 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): string[];
   interruptTurn(turnId: string): Promise<void>;
@@ -292,23 +294,24 @@ export class ConciergeService {
   }
 
   /**
-   * The guardian's first sign-in: turns the Concierge on, makes sure their main
-   * chat exists and has the Concierge speak first, from `input`. Answers the
-   * main chat's id. The turn is not awaited, and a failure of it (no model
-   * signed in yet) is logged, so the sign-in that calls this never fails on it.
+   * The guardian's first sign-in: turns the Concierge on and makes sure their
+   * main chat exists. With a `message`, it goes into that chat as the guardian's
+   * own, the way the composer sends it, and the Concierge answers it as any
+   * other. Answers the main chat's id. The message is not awaited, and a failure
+   * to send it (no model signed in yet) is logged, so the sign-in that calls
+   * this never fails on it.
    */
-  async startOnboarding(input: string): Promise<string> {
+  async startMainChat(message: string | null): Promise<string> {
     await this.deps.settingsRepo.set(EXPERIMENTAL_CONCIERGE_SETTING_KEY, true);
     const chatId = await this.ensureChatId();
-    this.runSystemTurn(chatId, input, { inputLabel: "Onboarding" })
-      .then((ran) => {
-        if (!ran) log.warn("onboarding turn did not run to its end", { chatId });
-      })
-      .catch((error: unknown) =>
-        log.warn("onboarding turn failed", {
+    if (message) {
+      this.dashboard.chats.sendAsGuardian(chatId, message).catch((error: unknown) =>
+        log.warn("first message to the Concierge was not sent", {
+          chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+    }
     return chatId;
   }
 

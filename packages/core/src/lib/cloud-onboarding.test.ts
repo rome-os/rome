@@ -5,7 +5,7 @@
  * carries facts only, with every value escaped.
  */
 import { describe, expect, it } from "@rstest/core";
-import { backgroundNote, onboardingInput, readOnboardingSurvey } from "./cloud-onboarding.js";
+import { backgroundNote, followRequest, readOnboardingSurvey } from "./cloud-onboarding.js";
 
 const FULL = {
   professionalBackground: "design",
@@ -113,20 +113,34 @@ describe("backgroundNote", () => {
   });
 });
 
-describe("onboardingInput", () => {
-  it("carries the guardian, the profession and what to follow", () => {
-    expect(onboardingInput(readOnboardingSurvey({ survey: FULL }), "Mei")).toBe(
-      '<onboarding guardian="Mei" profession="Design" follow="gmail"/>',
-    );
+describe("followRequest", () => {
+  const watching = (watch: unknown) =>
+    readOnboardingSurvey({ survey: { guardianName: "Mei", watch } });
+
+  it.each([
+    [{ gmail: true, github: true }, "Help me follow Gmail and GitHub."],
+    [{ gmail: true }, "Help me follow Gmail."],
+    [{ github: true }, "Help me follow GitHub."],
+    [{ gmail: true, github: false }, "Help me follow Gmail."],
+  ])("asks for %j as one plain sentence", (watch, text) => {
+    expect(followRequest(watching(watch))).toBe(text);
   });
 
-  it("carries only the guardian without a survey", () => {
-    expect(onboardingInput(null, "Mei")).toBe('<onboarding guardian="Mei"/>');
+  it.each([
+    ["no flag set", { gmail: false, github: false }],
+    ["an empty watch", {}],
+    ["a null watch, as an old row has", null],
+    ["flags that are not exactly true", { gmail: "yes", github: 1 }],
+  ])("sends nothing for %s", (_, watch) => {
+    expect(followRequest(watching(watch))).toBeNull();
   });
 
-  it("escapes what a person typed", () => {
-    expect(onboardingInput(null, 'Mei "><evil/>')).toBe(
-      '<onboarding guardian="Mei &quot;&gt;&lt;evil/&gt;"/>',
-    );
+  it("sends nothing without a survey", () => {
+    expect(followRequest(null)).toBeNull();
+    expect(followRequest(readOnboardingSurvey({}))).toBeNull();
+  });
+
+  it("carries nothing but the services: no name, profession or goals", () => {
+    expect(followRequest(readOnboardingSurvey({ survey: FULL }))).toBe("Help me follow Gmail.");
   });
 });

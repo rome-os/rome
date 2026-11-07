@@ -15,7 +15,7 @@
  *     guardian seat exists it is created from the cloud account, setup finishes
  *     (the guardian and agent names from the signup survey, else the `name` claim or
  *     the email local part and a preset agent), the survey's background lands in
- *     GUARDIAN.md once, the Concierge is turned on and speaks first, and the
+ *     GUARDIAN.md once, the Concierge is turned on, a request to follow the chosen services goes into its main chat, and the
  *     browser lands in its main chat. A missing or failing survey keeps the
  *     fallback names, and a Concierge that cannot start never fails the sign-in.
  *     Creating the seat also starts the email auto-connect; signing in to an
@@ -682,10 +682,10 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
 
   async function signInFresh(options: {
     profile?: () => Promise<Outcome>;
-    startOnboarding?: (input: string) => Promise<string>;
+    startMainChat?: (message: string | null) => Promise<string>;
     surveyTimeoutMs?: number;
   }) {
-    const startOnboarding = rs.fn(options.startOnboarding ?? (async () => "concierge"));
+    const startMainChat = rs.fn(options.startMainChat ?? (async () => "concierge"));
     const get = rs.fn(
       options.profile ?? (async (): Promise<Outcome> => ({ kind: "unavailable", reason: "none" })),
     );
@@ -693,7 +693,7 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
       ...(await buildTestDeps(testDb.db)),
       isCloudAuthEnabled: async () => true,
       cloudProfile: { get },
-      concierge: { startOnboarding } as unknown as ConciergeService,
+      concierge: { startMainChat } as unknown as ConciergeService,
     };
     const romeCloud = fakeRomeCloud((nonce) => ({
       id_token: signIdToken({ sub: "A", nonce, name: "Claim Name", email: "claim@example.com" }),
@@ -711,7 +711,7 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
     const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
-    return { res, deps, get, startOnboarding };
+    return { res, deps, get, startMainChat };
   }
 
   const guardianNotes = () => readFileSync(`${memory.dir}/relationship/GUARDIAN.md`, "utf-8");
@@ -733,22 +733,20 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
     // The free text stays on one line, so it cannot open a section of its own.
     expect(notes).toContain("- In their words: A reader that ## Tasks summarises my feeds");
     expect(notes.match(/## Background/g)).toHaveLength(1);
-    expect(res.headers.get("location")).toBe("/chat/concierge");
+    expect(res.headers.get("location")).toBe("/message");
   });
 
-  it("starts the Concierge with the survey's facts and nothing else", async () => {
-    const { startOnboarding } = await signInFresh({
+  it("asks the Concierge, as the guardian, to follow the services the survey chose", async () => {
+    const { startMainChat } = await signInFresh({
       profile: async () => ({ kind: "ok", profile: { survey: SURVEY } }),
     });
 
-    expect(startOnboarding).toHaveBeenCalledTimes(1);
-    expect(startOnboarding).toHaveBeenCalledWith(
-      '<onboarding guardian="Ada Lovelace" profession="Technical" follow="gmail, github"/>',
-    );
+    expect(startMainChat).toHaveBeenCalledTimes(1);
+    expect(startMainChat).toHaveBeenCalledWith("Help me follow Gmail and GitHub.");
   });
 
-  it("uses the other-profession text in place of the label", async () => {
-    const { startOnboarding } = await signInFresh({
+  it("asks for only the services chosen, and uses the other-profession text in the background", async () => {
+    const { startMainChat } = await signInFresh({
       profile: async () => ({
         kind: "ok",
         profile: {
@@ -763,13 +761,11 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
     });
 
     expect(guardianNotes()).toContain("- Profession: Beekeeper");
-    expect(startOnboarding).toHaveBeenCalledWith(
-      '<onboarding guardian="Ada Lovelace" profession="Beekeeper" follow="gmail"/>',
-    );
+    expect(startMainChat).toHaveBeenCalledWith("Help me follow Gmail.");
   });
 
   it("keeps the fallback names for an old row with no names and no watch", async () => {
-    const { deps, startOnboarding } = await signInFresh({
+    const { deps, startMainChat } = await signInFresh({
       profile: async () => ({
         kind: "ok",
         profile: {
@@ -781,9 +777,8 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Claim Name");
     const agentName = await deps.settingsRepo.get<string>("agentName");
     expect(AGENT_PRESETS.some((p) => p.name === agentName)).toBe(true);
-    expect(startOnboarding).toHaveBeenCalledWith(
-      '<onboarding guardian="Claim Name" profession="Technical"/>',
-    );
+    // An old row asked for no service, so the Concierge is turned on but told nothing.
+    expect(startMainChat).toHaveBeenCalledWith(null);
   });
 
   it("writes no background when the survey told nothing", async () => {
@@ -818,8 +813,8 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
         throw new Error("boom");
       },
     ],
-  ])("falls back to today's setup with %s, and still starts the Concierge", async (_, profile) => {
-    const { res, deps, startOnboarding } = await signInFresh({ profile });
+  ])("falls back to today's setup with %s, and sends the Concierge nothing", async (_, profile) => {
+    const { res, deps, startMainChat } = await signInFresh({ profile });
 
     expect(res.status).toBe(302);
     expect(sessionUserId(res)).toBe("A");
@@ -827,8 +822,8 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
     const agentName = await deps.settingsRepo.get<string>("agentName");
     expect(AGENT_PRESETS.some((p) => p.name === agentName)).toBe(true);
     expect(guardianNotes()).not.toContain("## Background");
-    expect(startOnboarding).toHaveBeenCalledWith('<onboarding guardian="Claim Name"/>');
-    expect(res.headers.get("location")).toBe("/chat/concierge");
+    expect(startMainChat).toHaveBeenCalledWith(null);
+    expect(res.headers.get("location")).toBe("/message");
   });
 
   it("goes on without the survey when whoami does not answer in time", async () => {
@@ -844,7 +839,7 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
   it("signs in and lands at the root when the Concierge cannot start", async () => {
     const { res, deps } = await signInFresh({
       profile: async () => ({ kind: "ok", profile: { survey: SURVEY } }),
-      startOnboarding: async () => {
+      startMainChat: async () => {
         throw new Error("no model");
       },
     });
@@ -857,13 +852,13 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
   it("leaves an existing seat alone: no survey read, no Concierge turn", async () => {
     insertGuardian({ accountId: "A" });
     setInstanceTokenInMemory("romeinst_existing");
-    const startOnboarding = rs.fn(async () => "concierge");
+    const startMainChat = rs.fn(async () => "concierge");
     const get = rs.fn(async (): Promise<Outcome> => ({ kind: "ok", profile: { survey: SURVEY } }));
     const deps = {
       ...(await buildTestDeps(testDb.db)),
       isCloudAuthEnabled: async () => true,
       cloudProfile: { get },
-      concierge: { startOnboarding } as unknown as ConciergeService,
+      concierge: { startMainChat } as unknown as ConciergeService,
     };
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
     const app = new Hono();
@@ -874,7 +869,7 @@ describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
 
     expect(res.headers.get("location")).toBe("/?cloud=success");
     expect(get).not.toHaveBeenCalled();
-    expect(startOnboarding).not.toHaveBeenCalled();
+    expect(startMainChat).not.toHaveBeenCalled();
   });
 });
 

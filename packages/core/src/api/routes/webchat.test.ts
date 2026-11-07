@@ -863,6 +863,21 @@ describe("Webchat API", () => {
       expect(
         (await deps.webchatRepo.getMessages(id)).filter((message) => message.role === "user"),
       ).toHaveLength(2);
+
+      // The guardian's own message, as their composer sends it: said by no agent.
+      await runtime.sendAsGuardian(id, "Help me follow Gmail.");
+      const inputs3 = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      expect(inputs3).toHaveLength(3);
+      const said = inputs3.find((m) => m.content.includes("Help me follow Gmail."));
+      expect(said).toBeDefined();
+      const [{ sender_account_id: sender }] = testDb.db.all<{ sender_account_id: string | null }>(
+        sql`SELECT sender_account_id FROM chat_messages WHERE key = ${said!.id}`,
+      );
+      // Recorded before the agent failed to wake, so it counts as said.
+      expect(sender ?? "").not.toMatch(/^agent:/);
+      await expect(runtime.sendAsGuardian("no-such-chat", "hi")).rejects.toThrow(
+        "Session not found",
+      );
     } finally {
       for (const finish of finishers) finish();
     }

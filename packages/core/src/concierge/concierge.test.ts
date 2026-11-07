@@ -197,6 +197,7 @@ function setup(
       return id;
     }),
     openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
+    sendAsGuardian: rs.fn(async () => {}),
     isRunning: rs.fn(() => false),
     activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
@@ -3024,32 +3025,36 @@ describe("Concierge connect_card", () => {
   });
 });
 
-describe("Concierge onboarding and connection notices", () => {
-  it("turns the Concierge on, then speaks first in the main chat, in a turn the guardian can see", async () => {
+describe("Concierge first sign-in and connection notices", () => {
+  it("turns the Concierge on, makes its main chat, and sends the guardian's message into it", async () => {
     const s = setup({ startEvents: false });
 
-    const chatId = await s.service.startOnboarding('<onboarding guardian="Ada"/>');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const chatId = await s.service.startMainChat("Help me follow Gmail.");
 
     expect(chatId).toBe(CONCIERGE_CHAT);
     expect(s.settingsWrites).toEqual([["experimentalConcierge", true]]);
-    expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0]).toMatchObject({ threadId: CONCIERGE_CHAT });
-    expect(s.backendTurns[0].prompt).toContain('<onboarding guardian="Ada"/>');
-    expect(s.turnOptions[0]).toEqual({ inputLabel: "Onboarding" });
-    expect(s.quietFlags).toEqual([false]);
+    expect(s.chats.sendAsGuardian).toHaveBeenCalledTimes(1);
+    expect(s.chats.sendAsGuardian).toHaveBeenCalledWith(CONCIERGE_CHAT, "Help me follow Gmail.");
+    // The message is the guardian's own, so no system turn or input is made for it.
+    expect(s.backendTurns).toEqual([]);
   });
 
-  it("answers the chat even when the turn fails or throws", async () => {
-    const failed = setup({ startEvents: false });
-    failed.onBackendTurn(() => "failed");
-    expect(await failed.service.startOnboarding("<onboarding/>")).toBe(CONCIERGE_CHAT);
+  it("only turns the Concierge on when there is no message to send", async () => {
+    const s = setup({ startEvents: false });
 
-    const thrown = setup({ startEvents: false });
-    thrown.onBackendTurn(() => {
+    expect(await s.service.startMainChat(null)).toBe(CONCIERGE_CHAT);
+
+    expect(s.settingsWrites).toEqual([["experimentalConcierge", true]]);
+    expect(s.chats.sendAsGuardian).not.toHaveBeenCalled();
+  });
+
+  it("answers the chat even when the message cannot be sent", async () => {
+    const s = setup({ startEvents: false });
+    s.chats.sendAsGuardian = rs.fn(async () => {
       throw new Error("no model");
     });
-    expect(await thrown.service.startOnboarding("<onboarding/>")).toBe(CONCIERGE_CHAT);
+
+    expect(await s.service.startMainChat("Help me follow Gmail.")).toBe(CONCIERGE_CHAT);
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 
