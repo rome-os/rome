@@ -367,16 +367,6 @@
         }
       }
     },
-    "Could not load routines" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没能读取 Routines"
-          }
-        }
-      }
-    },
     "Could not reach Rome Cloud" : {
       "localizations" : {
         "zh-Hans" : {
@@ -467,16 +457,6 @@
         }
       }
     },
-    "Daily" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每天"
-          }
-        }
-      }
-    },
     "Dark" : {
       "localizations" : {
         "zh-Hans" : {
@@ -537,127 +517,12 @@
         }
       }
     },
-    "Every %lld days" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Every %lld day"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Every %lld days"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 %lld 天"
-          }
-        }
-      }
-    },
-    "Every %lld hours" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Every %lld hour"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Every %lld hours"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 %lld 小时"
-          }
-        }
-      }
-    },
-    "Every %lld weeks" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Every %lld week"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Every %lld weeks"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 %lld 周"
-          }
-        }
-      }
-    },
     "Failed" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "失败"
-          }
-        }
-      }
-    },
-    "Fri" : {
-      "comment" : "Friday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "五"
-          }
-        }
-      }
-    },
-    "Fridays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周五"
-          }
-        }
-      }
-    },
-    "From Chat" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来自 Chat"
           }
         }
       }
@@ -678,16 +543,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome 有消息给你时通知你"
-          }
-        }
-      }
-    },
-    "Hourly" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每小时"
           }
         }
       }
@@ -790,16 +645,6 @@
         }
       }
     },
-    "Last run failed" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上次运行失败"
-          }
-        }
-      }
-    },
     "Light" : {
       "localizations" : {
         "zh-Hans" : {
@@ -856,37 +701,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发消息"
-          }
-        }
-      }
-    },
-    "Mon" : {
-      "comment" : "Monday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一"
-          }
-        }
-      }
-    },
-    "Mondays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周一"
-          }
-        }
-      }
-    },
-    "Monthly" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每月"
           }
         }
       }
@@ -971,16 +785,6 @@
         }
       }
     },
-    "Next: %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下次 %@"
-          }
-        }
-      }
-    },
     "No Rome to open yet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1017,16 +821,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有网络连接。"
-          }
-        }
-      }
-    },
-    "No routines yet" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没有 Routine"
           }
         }
       }
@@ -1117,26 +911,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通知"
-          }
-        }
-      }
-    },
-    "On a schedule" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按计划"
-          }
-        }
-      }
-    },
-    "On an event" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "事件触发"
           }
         }
       }
@@ -1267,16 +1041,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其他"
-          }
-        }
-      }
-    },
-    "Paused" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已暂停"
           }
         }
       }
@@ -1495,16 +1259,6 @@
         }
       }
     },
-    "Routines" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Routines"
-          }
-        }
-      }
-    },
     "Run action" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1531,27 +1285,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行中…"
-          }
-        }
-      }
-    },
-    "Sat" : {
-      "comment" : "Saturday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "六"
-          }
-        }
-      }
-    },
-    "Saturdays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周六"
           }
         }
       }
@@ -1874,27 +1607,6 @@
         }
       }
     },
-    "Sun" : {
-      "comment" : "Sunday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "日"
-          }
-        }
-      }
-    },
-    "Sundays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周日"
-          }
-        }
-      }
-    },
     "Switch instance" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1911,16 +1623,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换实例"
-          }
-        }
-      }
-    },
-    "System" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系统"
           }
         }
       }
@@ -2055,37 +1757,6 @@
         }
       }
     },
-    "Thu" : {
-      "comment" : "Thursday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "四"
-          }
-        }
-      }
-    },
-    "Thursdays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周四"
-          }
-        }
-      }
-    },
-    "To add or change one, ask in Chat." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "想新增或修改，在 Chat 里说一声"
-          }
-        }
-      }
-    },
     "Today %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2142,27 +1813,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重试"
-          }
-        }
-      }
-    },
-    "Tue" : {
-      "comment" : "Tuesday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "二"
-          }
-        }
-      }
-    },
-    "Tuesdays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周二"
           }
         }
       }
@@ -2325,67 +1975,6 @@
         }
       }
     },
-    "Wed" : {
-      "comment" : "Wednesday in a weekly schedule",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "三"
-          }
-        }
-      }
-    },
-    "Wednesdays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周三"
-          }
-        }
-      }
-    },
-    "Weekdays" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "工作日"
-          }
-        }
-      }
-    },
-    "Weekends" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "周末"
-          }
-        }
-      }
-    },
-    "Weekly" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周"
-          }
-        }
-      }
-    },
-    "Weekly on %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周%@"
-          }
-        }
-      }
-    },
     "What can you watch for me?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2422,16 +2011,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Chat 里交代的事，开成任务后会出现在这里。"
-          }
-        }
-      }
-    },
-    "When something new arrives" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "有新动态时"
           }
         }
       }
@@ -2482,33 +2061,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 已停止"
-          }
-        }
-      }
-    },
-    "Yours" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的"
-          }
-        }
-      }
-    },
-    "routine.weekdaySeparator" : {
-      "comment" : "Between weekdays in a weekly schedule",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : ", "
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "、"
           }
         }
       }

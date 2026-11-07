@@ -222,30 +222,6 @@ struct AIToolsStatus: Codable, Sendable {
     var codex: Provider?
 }
 
-// MARK: - Routines
-
-/// One row of `GET /routines`.
-struct Routine: Codable, Identifiable, Hashable, Sendable {
-    /// The latest run, which `GET /routines` adds to each row.
-    struct LastRun: Codable, Hashable, Sendable {
-        /// `success`, `error`, `running`, `pending_approval` or `cancelled`.
-        var status: String
-    }
-
-    let id: String
-    var name: String
-    var enabled: Bool
-    var trigger: JSONValue?
-    var nextRunAt: String?
-    var managedBy: String?
-    /// Set by core for the routines it keeps itself, such as `concierge-digest:…`.
-    var key: String? = nil
-    var actionName: String?
-    /// When it last fired; its type is not relied on, only whether it is set.
-    var lastFiredAt: JSONValue?
-    var lastRun: LastRun?
-}
-
 // MARK: - Trace
 
 /// `GET /chat/messages/:id/content`: a turn's trace, used to list its tool calls.

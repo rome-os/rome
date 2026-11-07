@@ -128,49 +128,6 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
     }
 }
 
-@Suite struct RoutineTextTests {
-    @Test func describesSchedules() {
-        #expect(RoutineText.frequency("FREQ=DAILY") == "Daily")
-        #expect(RoutineText.frequency("FREQ=DAILY;INTERVAL=3") == "Every 3 days")
-        #expect(RoutineText.frequency("FREQ=WEEKLY;BYDAY=MO,FR") == "Weekly on Mon, Fri")
-        #expect(RoutineText.frequency("FREQ=HOURLY;INTERVAL=2") == "Every 2 hours")
-        #expect(RoutineText.title("price_watch") == "Price watch")
-        #expect(RoutineText.title("每日简报") == "每日简报")
-        #expect(RoutineText.frequency("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR") == "Weekdays")
-        #expect(RoutineText.frequency("FREQ=WEEKLY;BYDAY=SA,SU") == "Weekends")
-        #expect(RoutineText.frequency("FREQ=WEEKLY;BYDAY=MO") == "Mondays")
-    }
-
-    private func routine(_ rule: String?, next: TimeInterval?, enabled: Bool = true, type: String = "schedule") -> Routine {
-        var trigger: [String: JSONValue] = ["type": .string(type), "localTime": .string("09:00")]
-        if let rule { trigger["rrule"] = .string(rule) }
-        return Routine(id: "r", name: "r", enabled: enabled, trigger: .object(trigger),
-                       nextRunAt: next.map { RomeDate.string(now.addingTimeInterval($0)) },
-                       managedBy: nil, actionName: nil, lastFiredAt: nil, lastRun: nil)
-    }
-
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
-
-    /// "Next" only where the schedule does not already say it.
-    @Test func showsNextOnlyWhenNotObvious() {
-        // Every day or weekday, next within a day: the schedule tells.
-        #expect(!RoutineText.showsNext(routine("FREQ=DAILY", next: 3600 * 5), now: now))
-        #expect(!RoutineText.showsNext(routine("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", next: 3600 * 20), now: now))
-        #expect(!RoutineText.showsNext(routine("FREQ=HOURLY", next: 600), now: now))
-        // Weekdays on a Friday night: Monday is not obvious.
-        #expect(RoutineText.showsNext(routine("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", next: 3600 * 60), now: now))
-        // Weekly, monthly, every few days and one-off always say it.
-        #expect(RoutineText.showsNext(routine("FREQ=WEEKLY;BYDAY=MO", next: 3600 * 5), now: now))
-        #expect(RoutineText.showsNext(routine("FREQ=MONTHLY", next: 3600 * 5), now: now))
-        #expect(RoutineText.showsNext(routine("FREQ=DAILY;INTERVAL=3", next: 3600 * 5), now: now))
-        #expect(RoutineText.showsNext(routine(nil, next: 3600 * 5), now: now))
-        // Paused, or no next run: nothing.
-        #expect(!RoutineText.showsNext(routine("FREQ=MONTHLY", next: 3600, enabled: false), now: now))
-        #expect(!RoutineText.showsNext(routine("FREQ=MONTHLY", next: nil), now: now))
-        #expect(RoutineText.schedule(routine("FREQ=DAILY", next: 3600 * 5), now: now) == "Daily 09:00")
-    }
-}
-
 @Suite struct AuthTests {
     let issuer = URL(string: "https://romeos.cc")!
 
@@ -254,8 +211,6 @@ final class StubBackend: RomeBackend {
     func setConciergeEnabled(_ enabled: Bool) async throws {}
     func search(_ query: String) async throws -> [SearchHit] { [] }
     func me() async throws -> String? { nil }
-    func routines() async throws -> [Routine] { [] }
-    func setRoutine(_ id: String, enabled: Bool) async throws {}
     func sendFeedback(_ text: String) async throws {}
     func upgradeCheck() async throws -> UpgradeCheck { throw APIError.network }
     func startUpgrade(target: String) async throws -> UpgradeStarted { throw APIError.network }

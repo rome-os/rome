@@ -57,8 +57,6 @@ protocol RomeBackend: AnyObject, Sendable {
     func isGuardian() async -> Bool
     /// The language the server writes in for the guardian: "en" or "zh-CN".
     func setGuardianLanguage(_ code: String) async throws
-    func routines() async throws -> [Routine]
-    func setRoutine(_ id: String, enabled: Bool) async throws
     func sendFeedback(_ text: String) async throws
     func upgradeCheck() async throws -> UpgradeCheck
     func startUpgrade(target: String) async throws -> UpgradeStarted
@@ -194,14 +192,6 @@ final class LiveBackend: RomeBackend {
 
     func setGuardianLanguage(_ code: String) async throws {
         try await client.put("/settings", json: .object(["guardianLanguage": .string(code)]))
-    }
-
-    func routines() async throws -> [Routine] {
-        try await client.get("/routines")
-    }
-
-    func setRoutine(_ id: String, enabled: Bool) async throws {
-        try await client.patch("/routines/\(escape(id))", json: .object(["enabled": .bool(enabled)]))
     }
 
     func sendFeedback(_ text: String) async throws {

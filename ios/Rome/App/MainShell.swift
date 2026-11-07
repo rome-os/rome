@@ -9,7 +9,6 @@ enum Route: Hashable {
 /// so picking one in the drawer shows it in place, never pushed over Chat.
 enum MainSection: Hashable {
     case chat
-    case routines
     case search
     /// A Concierge topic chat.
     case topic(String)
@@ -244,8 +243,6 @@ struct MainShell: View {
             switch section {
             case .chat:
                 EmptyView()
-            case .routines:
-                RoutinesScreen(onMenu: { openDrawer() })
             case .topic(let chatId):
                 topicScreen(chatId: chatId, draftKey: chatId)
                     .id(startedTopics[chatId]?.uuidString ?? chatId)

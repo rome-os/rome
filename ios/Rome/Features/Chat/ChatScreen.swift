@@ -292,7 +292,7 @@ struct ChatHeader: View {
     }
 }
 
-/// A drawer page's header (Routines, Search): the drawer button at the left
+/// A drawer page's header (Search): the drawer button at the left
 /// and a plain title in the middle, as a topic chat has it.
 struct DrawerPageHeader: View {
     let title: Text

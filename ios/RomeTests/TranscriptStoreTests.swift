@@ -111,8 +111,6 @@ final class FakeBackend: RomeBackend {
     func setConciergeEnabled(_ enabled: Bool) async throws {}
     func search(_ query: String) async throws -> [SearchHit] { [] }
     func me() async throws -> String? { nil }
-    func routines() async throws -> [Routine] { [] }
-    func setRoutine(_ id: String, enabled: Bool) async throws {}
     func sendFeedback(_ text: String) async throws {}
 
     var check: Result<UpgradeCheck, Error> = .success(UpgradeCheck(current: .init(version: "1.0.0"), latest: .init(version: "1.0.0"), upgradeAvailable: false))

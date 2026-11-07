@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Board 2: search, Chat and Routines, the topic chats, and the account row.
+/// Board 2: search, Chat, the topic chats, and the account row.
 struct DrawerView: View {
     let workspace: Workspace
     let section: MainSection
@@ -27,9 +27,6 @@ struct DrawerView: View {
             VStack(spacing: 2) {
                 DrawerItem(title: "Chat", selected: section == .chat, action: { onSection(.chat) }) {
                     Image(systemName: "bubble.left")
-                }
-                DrawerItem(title: "Routines", selected: section == .routines, action: { onSection(.routines) }) {
-                    Image(systemName: "calendar")
                 }
             }
             .padding(.top, 22)

@@ -47,7 +47,6 @@ struct LiveIntegrationTests {
         _ = try await backend.activeTurns(sessionId: concierge.id)
         let tools = try await backend.aiTools()
         #expect(tools.claude != nil || tools.codex != nil)
-        _ = try await backend.routines()
         #expect(try await backend.me() != nil)
         _ = try await backend.search("hello")
     }

@@ -93,7 +93,6 @@ enum SnapshotRunner {
             // (it does on a phone): open the demo afresh, with nothing pushed.
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
-            await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.routines) }
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.search) }
             await capture("24-topic-chat", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-trip")) }
             // The drawer over a topic chat: its row selected.

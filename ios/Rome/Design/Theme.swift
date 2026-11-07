@@ -30,9 +30,6 @@ enum Palette {
     static let primaryIcon = dynamic(0xD86F4C, 0xE07C5A)
     static let primarySoft = dynamic(rgba: (0xD86F4C, 0.14), (0xD86F4C, 0.2))
     static let primaryText = dynamic(0xB4532F, 0xEE9A7C)
-    /// A switch that is on: the primary toned down, 4.5:1 on a card in light
-    /// and 4.9:1 in dark, with the white knob at 4.5:1 and 3.7:1.
-    static let switchOn = dynamic(0xA9654D, 0xB57560)
 
     static let destructive = dynamic(0xE0232B, 0xFF6056)
     static let dangerSoft = dynamic(rgba: (0xE0232B, 0.09), (0xFF6056, 0.14))
