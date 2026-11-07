@@ -49,10 +49,11 @@ describe("generateCaddyfile app document routes", () => {
     const fallbackAt = caddyfile.lastIndexOf("try_files {path} /index.html");
     expect(appDocsAt).toBeGreaterThan(missingAssetsAt);
     expect(appDocsAt).toBeLessThan(fallbackAt);
-    const body = caddyfile.split("handle @appDocs {")[1].split("}")[0];
+    const body = caddyfile.split("handle @appDocs {")[1].split("\n\t}\n\thandle {")[0];
     expect(body).toContain("reverse_proxy 127.0.0.1:");
     expect(body).toContain("encode zstd gzip");
-    expect(body).not.toContain("forward_auth");
+    expect(body).toContain("forward_auth 127.0.0.1:");
+    expect(body.indexOf("forward_auth")).toBeLessThan(body.indexOf("reverse_proxy"));
   });
 });
 

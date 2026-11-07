@@ -139,6 +139,37 @@ describe("AuthGate on an embedded app route", () => {
     );
   });
 
+  it("probes the actual page path without marking sibling pages public", async () => {
+    stubAuth("needs-signin", false);
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input), "https://example.test");
+      if (url.pathname === "/api/health") return new Response(JSON.stringify({ status: "ok" }));
+      if (url.pathname === "/api/bootstrap")
+        return new Response(JSON.stringify({ phase: "needs-signin" }));
+      if (url.pathname.endsWith("/manifest")) {
+        const isPublic = url.searchParams.get("path") === "pr/rome-os/rome/1804";
+        return new Response(JSON.stringify({ isPublic }), { status: isPublic ? 200 : 401 });
+      }
+      return new Response("{}");
+    });
+    renderAt("/apps/jev-tracker/pr/rome-os/rome/1804?tab=reviews");
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(
+        "/full/apps/jev-tracker/pr/rome-os/rome/1804?tab=reviews",
+      ),
+    );
+    const manifestCalls = fetchSpy.mock.calls.filter(([input]) =>
+      String(input).includes("/manifest?"),
+    );
+    expect(manifestCalls.length).toBeGreaterThan(0);
+    expect(
+      new URL(String(manifestCalls[0][0]), "https://example.test").searchParams.get("path"),
+    ).toBe("pr/rome-os/rome/1804");
+    cleanup();
+    renderAt("/apps/jev-tracker/settings");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("/login"));
+  });
+
   it("keeps the guardian in the shell", async () => {
     stubAuth("ready", true);
     renderAt("/apps/jev-tracker");

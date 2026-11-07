@@ -96,15 +96,14 @@ handle @nonCanonicalPath {
   //     own X-API-Key; app bundles, social card images and home-screen
   //     manifests/icons are public) get a 204, so this is a pass-through
   //     for them.
-  //   - SPA routes / static assets are public anyway (verify 204s every
-  //     non-`/api/*` path), so serving them from Caddy drops a pointless
-  //     double round-trip to Hono with zero change to the auth posture.
+  //   - Other SPA routes and static assets are public. Serving them from
+  //     Caddy avoids a round-trip to Hono.
   //     Unknown paths fall back to `index.html` for the client router.
   //     Hono keeps its own copy for loopback callers that reach
   //     `:4141` without going via Caddy.
   //   - `@appDocs` (`/apps/*`, `/full/apps/*`) is the shell too, but served
-  //     by Hono so the social meta can be swapped per app. Public, no
-  //     forward_auth: the shell was public from disk already.
+  //     by Hono so the social meta can be swapped per app. The probe gates
+  //     these documents on app access or a matching public page declaration.
   //
   // WebSocket-bearing paths (`/ws/*`, `/desktop-proxy*`) are split out
   // because \`forward_auth\` forwards Upgrade/Connection headers verbatim
@@ -144,6 +143,7 @@ handle @missingSpaAssets {
 }
 @appDocs path /apps /apps/* /full/apps /full/apps/*
 handle @appDocs {
+${indent(forwardAuth, 1)}
 \tencode zstd gzip
 \t${proxy}
 }

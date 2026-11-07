@@ -51,9 +51,14 @@ const NamespacedArtifactEntrySchema = z.union([
     .strict(),
 ]);
 
+const PublicPathPatternsSchema = z
+  .array(z.string().min(1).startsWith("/", "public path patterns must start with /"))
+  .min(1);
+
 const WebDeclarationSchema = z
   .object({
     manifest: z.string().min(1),
+    publicPaths: PublicPathPatternsSchema.optional(),
     displayName: z.string().min(1).optional(),
     navLabel: z.string().min(1).optional(),
     entry: z.string().min(1).optional(),
@@ -63,12 +68,7 @@ const WebDeclarationSchema = z
 const ApiDeclarationSchema = z
   .object({
     entry: z.string().min(1).optional(),
-    noAuth: z
-      .union([
-        z.boolean(),
-        z.array(z.string().min(1).startsWith("/", "noAuth path patterns must start with /")).min(1),
-      ])
-      .optional(),
+    noAuth: z.union([z.boolean(), PublicPathPatternsSchema]).optional(),
     relayWebhook: z.string().min(1).optional(),
   })
   .strict();

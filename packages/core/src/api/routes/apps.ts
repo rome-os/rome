@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
+import { isAppPagePublic } from "../../apps/public-pages.js";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   AppInstallResponse,
@@ -504,6 +505,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
       loadPublicAccessConfig(deps),
       resolveGuardianSession(c, deps.db),
     ]);
+    const publicPage = isAppPagePublic(view, path);
     const cloudAllowedEmails = publicAccess.cloudEmailAccess[appId] ?? [];
     const accessMode: AppAccessMode = publicAccess.allowedApps.includes(appId)
       ? "public"
@@ -515,6 +517,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const dashboardAccessAllowed =
       viewer !== null && deps.dashboardAccessState.isCloudEmailAllowed(viewer.email);
     const callerAccessAllowed =
+      publicPage ||
       accessMode !== "cloud-email" ||
       guardianAccessAllowed ||
       dashboardAccessAllowed ||
@@ -532,7 +535,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     return c.json({
       appId,
       appName: view.web.displayName,
-      isPublic: accessMode !== "private",
+      isPublic: publicPage || accessMode !== "private",
       accessMode,
       guardianAccessAllowed,
       dashboardAccessAllowed,

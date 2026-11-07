@@ -36,7 +36,7 @@ import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 function buildResolvedApp(
   appId: string,
   noAuth: boolean | string[],
-  options: { web?: boolean } = {},
+  options: { web?: boolean; publicPaths?: string[] } = {},
 ): ResolvedApp {
   return {
     appId,
@@ -52,6 +52,9 @@ function buildResolvedApp(
       id: appId,
       version: "0.0.1",
       description: "",
+      ...(options.web
+        ? { web: { manifest: "web/manifest.json", publicPaths: options.publicPaths } }
+        : {}),
       agents: [],
       actions: [],
       skills: [],
@@ -158,6 +161,138 @@ function validVisitorCookieHeader(email: string): Record<string, string> {
 }
 
 describe("/api/auth/verify", () => {
+  it("allows only declared public pages and their path-specific rendering manifests", async () => {
+    const host = buildHost(
+      await stubDeps([
+        buildResolvedApp("code-review", ["/pr-history"], { web: true, publicPaths: ["/pr/*"] }),
+        buildResolvedApp("other-app", false, { web: true }),
+        buildResolvedApp("@foo/history", false, { web: true, publicPaths: ["/about"] }),
+      ]),
+    );
+    for (const uri of [
+      "/apps/code-review/pr/rome-os/rome/1804",
+      "/full/apps/code-review/pr/rome-os/rome/1804",
+      "/apps/%40foo%2Fhistory/about",
+      "/api/apps/%40foo%2Fhistory/manifest?path=about",
+      "/api/apps/code-review/manifest?mode=embedded&path=pr%2Frome-os%2Frome%2F1804",
+      "/api/apps/code-review/manifest?mode=full&path=pr/rome-os/rome/1804",
+      "/api/app-api/code-review/pr-history?repo=rome-os/rome&number=1804",
+      "/api/bootstrap",
+      "/api/health",
+      "/assets/index.js",
+      "/app-assets/code-review/version/entry.js",
+    ])
+      expect((await verifyRequest(host, uri)).status, uri).toBe(204);
+    for (const uri of [
+      "/apps/code-review",
+      "/apps/code-review/settings",
+      "/full/apps/code-review/settings",
+      "/apps/other-app/pr/rome-os/rome/1804",
+      "/api/apps/code-review/manifest",
+      "/api/apps/code-review/manifest?path=settings",
+      "/api/apps/other-app/manifest?path=pr/rome-os/rome/1804",
+      "/api/apps/code-review/dashboard",
+      "/api/apps/code-review/dashboard?path=pr/public",
+      "/api/apps/code-review/pr-history?repo=rome-os/rome&number=1804",
+      "/api/apps/code-review/pr-reviews",
+      "/api/apps/code-review/project-memory",
+      "/api/apps/code-review",
+      "/api/app-api/code-review/dashboard",
+    ]) {
+      expect((await verifyRequest(host, uri)).status, uri).toBe(401);
+      expect((await verifyRequest(host, uri, validCookieHeader())).status, uri).toBe(204);
+    }
+    const manifest = await host.request(
+      "/api/apps/code-review/manifest?mode=full&path=pr/rome-os/rome/1804",
+      {
+        headers: { origin: "https://example.test" },
+      },
+    );
+    const body = await manifest.json();
+    expect(body.isPublic).toBe(true);
+    expect(body.accessMode).toBe("private");
+    expect(body.bootstrap.routePath).toBe("pr/rome-os/rome/1804");
+    expect(body.bootstrap.caller).toEqual({ kind: "anonymous" });
+    expect(body.bootstrap.apiBase).toBe("/api/apps/code-review");
+    const privateManifest = await host.request("/api/apps/code-review/manifest?path=settings");
+    expect((await privateManifest.json()).isPublic).toBe(false);
+  });
+
+  it("grants only document and manifest reads, never a dashboard dispatcher write", async () => {
+    const host = buildHost(
+      await stubDeps([
+        buildResolvedApp("code-review", ["/pr-history"], { web: true, publicPaths: ["/pr/*"] }),
+      ]),
+    );
+    for (const uri of [
+      "/apps/code-review/pr/public",
+      "/api/apps/code-review/manifest?path=pr/public",
+    ]) {
+      for (const method of ["GET", "HEAD"]) {
+        expect((await verifyRequest(host, uri, { "X-Forwarded-Method": method })).status).toBe(204);
+      }
+      for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+        expect((await verifyRequest(host, uri, { "X-Forwarded-Method": method })).status).toBe(401);
+      }
+    }
+  });
+
+  it("rejects traversal, encoded separators, double encoding and ambiguous manifest queries", async () => {
+    const host = buildHost(
+      await stubDeps([
+        buildResolvedApp("code-review", false, { web: true, publicPaths: ["/pr/*"] }),
+      ]),
+    );
+    for (const uri of [
+      "/apps/code-review/pr/../settings",
+      "/apps/code-review/pr/%2e%2e/settings",
+      "/apps/code-review/pr/%252e%252e/settings",
+      "/apps/code-review/pr%2f../settings",
+      "/apps/code-review/pr%2fpublic",
+      "/apps/code-review/pr/%5c../settings",
+      "/apps/code-review/pr//settings",
+      "/apps/code-review//pr/public",
+      "/apps/code-review/pr/%00",
+      "/api/apps/code-review/manifest?path=pr/../settings",
+      "/api/apps/code-review/manifest?path=pr/public?other",
+      "/api/apps/code-review/manifest?path=pr%2F%252e%252e%2Fsettings",
+      "/api/apps/code-review/manifest?path=pr%2F%2Fsettings",
+      "/api/apps/code-review/manifest?path=pr%2Fpublic&path=settings",
+      "/api/apps/code-review/manifest?mode=full&mode=embedded&path=pr/public",
+      "/api/apps/code-review/manifest?mode=unknown&path=pr/public",
+      "/api/apps/code-review/manifest/extra?path=pr/public",
+    ])
+      expect([400, 401]).toContain((await verifyRequest(host, uri)).status);
+  });
+
+  it("preserves app-wide sharing and opens only static bundles for public pages in restricted apps", async () => {
+    const host = buildHost(
+      await stubDeps(
+        [
+          buildResolvedApp("public-app", false, { web: true }),
+          buildResolvedApp("restricted", false, { web: true, publicPaths: ["/about"] }),
+        ],
+        { allowedApps: ["public-app"], cloudEmailAccess: { restricted: ["ada@example.com"] } },
+      ),
+    );
+    for (const uri of [
+      "/apps/public-app/settings",
+      "/api/apps/public-app/dashboard",
+      "/apps/restricted/settings",
+      "/app-assets/restricted/hash/entry.js",
+    ]) {
+      expect((await verifyRequest(host, uri)).status, uri).toBe(204);
+    }
+    expect((await verifyRequest(host, "/api/apps/restricted/dashboard")).status).toBe(401);
+    const res = await host.request("/api/apps/restricted/manifest?path=about", {
+      headers: { origin: "https://example.test" },
+    });
+    const body = await res.json();
+    expect(body.isPublic).toBe(true);
+    expect(body.callerAccessAllowed).toBe(true);
+    expect(body.bootstrap.caller.kind).toBe("anonymous");
+  });
+
   it("returns 204 for static public paths without a cookie", async () => {
     const host = buildHost(await stubDeps([]));
     const res = await verifyRequest(host, "/api/health");

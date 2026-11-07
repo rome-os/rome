@@ -23,6 +23,9 @@ export interface RomeAppArtifactEntry {
 
 export interface RomeAppWebDeclaration {
   manifest: string;
+  /** Public page paths relative to the app route. Uses api.noAuth path patterns,
+   * but grants only page and matching manifest access, never data API access. */
+  publicPaths?: string[];
 }
 
 export interface RomeAppApiDeclaration {

@@ -46,9 +46,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     async function refresh() {
       const mode = location.pathname.startsWith("/full/apps/") ? "full" : "embedded";
-      const query = new URLSearchParams({ mode, path: "" });
-
       try {
+        const path = decodeURIComponent(
+          location.pathname.replace(/^\/(?:full\/)?apps\/[^/]+\/?/, ""),
+        );
+        const query = new URLSearchParams({ mode, path });
         const response = await fetch(
           `/api/apps/${encodeURIComponent(routedAppId)}/manifest?${query}`,
           {

@@ -13,6 +13,8 @@ import {
   verifySession,
 } from "../../lib/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../lib/guardian-auth-state.js";
+import { isAppPagePublic } from "../../apps/public-pages.js";
+import { isResolvedApp } from "../../apps/state.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { resolveVisitorSession, type RomeAppViewer } from "../../lib/visitor-session.js";
@@ -89,7 +91,8 @@ export function resolveRoutedUri(forwardedUri: string): string | null {
  * Decide whether the original request (carried in `X-Forwarded-Uri`) is
  * reachable from the public edge without a session cookie.
  *
- * Non-`/api/*` paths — SPA routes (`/dashboard`, `/login`, …), Vite
+ * App documents follow app access and public page declarations. Other
+ * non-`/api/*` paths — SPA routes (`/dashboard`, `/login`, …), Vite
  * assets, root-mounted surfaces like `/webhooks/*` (X-API-Key auth) and
  * `/app-assets/*` (static) — are all public. The SPA itself handles
  * redirect-to-login on the client when it sees no session.
@@ -99,6 +102,7 @@ export function resolveRoutedUri(forwardedUri: string): string | null {
  */
 function isPublicPath(forwardedUri: string): boolean {
   const path = forwardedUri.split("?")[0];
+  if (/^\/(?:full\/)?apps(?:\/|$)/.test(path)) return false;
   if (!path.startsWith("/api/")) return true;
   for (const pattern of PUBLIC_API_PATHS) {
     if (pattern.endsWith("/*")) {
@@ -129,7 +133,8 @@ function isResolvedApiApp(
  * return true so the verify handler can short-circuit to 204 without a
  * cookie. This is the public surface intended for third-party webhooks
  * and callbacks; the dashboard-side `/api/apps/<appId>/*` is intentionally
- * not consulted here — those endpoints always require a session.
+ * not consulted here. Public page declarations open only the matching
+ * rendering manifest, never dashboard-side data endpoints.
  *
  * Returns false for anything that doesn't match the `/api/app-api/` shape
  * or for malformed paths (which fall through to the normal cookie check).
@@ -173,6 +178,50 @@ function isAppApiPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
 function isAppDashboardPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
   const appId = decodeDashboardAppId(forwardedUri);
   return appId !== null && deps.publicAccessState.allowedApps().has(appId);
+}
+
+function hasPublicAppPages(app: ReturnType<ApiDeps["appCatalog"]["get"]>): boolean {
+  return isResolvedApp(app) && !!app.web && app.enabled && !!app.manifest.web?.publicPaths?.length;
+}
+
+function isAppPageRequestPublic(forwardedUri: string, deps: ApiDeps): boolean {
+  const path = forwardedUri.split("?")[0];
+  const match = path.match(/^\/(?:full\/)?apps\/([^/]+)(?:\/(.*))?$/);
+  if (!match) return false;
+  try {
+    const appId = decodeAppIdPathSegment(match[1]);
+    // Keep app-wide sharing and its visitor sign-in shell unchanged.
+    if (
+      deps.publicAccessState.allowedApps().has(appId) ||
+      deps.publicAccessState.isCloudEmailApp(appId)
+    )
+      return true;
+    const subPath = decodeAppApiPath(match[2]).join("/");
+    // Empty internal segments must not normalize into a different page.
+    if (match[2]?.startsWith("/") || match[2]?.includes("//")) return false;
+    return isAppPagePublic(deps.appCatalog.get(appId), subPath);
+  } catch (err) {
+    if (err instanceof InvalidAppApiPathError) return false;
+    throw err;
+  }
+}
+
+function isPublicPageManifest(forwardedUri: string, deps: ApiDeps): boolean {
+  const queryAt = forwardedUri.indexOf("?");
+  const path = queryAt === -1 ? forwardedUri : forwardedUri.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : forwardedUri.slice(queryAt + 1);
+  const match = path.match(/^\/api\/apps\/([^/]+)\/manifest$/);
+  if (!match) return false;
+  const params = new URLSearchParams(query);
+  if (params.getAll("path").length > 1 || params.getAll("mode").length > 1) return false;
+  if (params.has("mode") && !["full", "embedded"].includes(params.get("mode")!)) return false;
+  try {
+    const appId = decodeAppIdPathSegment(match[1]);
+    return isAppPagePublic(deps.appCatalog.get(appId), params.get("path") ?? "");
+  } catch (err) {
+    if (err instanceof InvalidAppApiPathError) return false;
+    throw err;
+  }
 }
 
 function decodeDashboardAppId(forwardedUri: string): string | null {
@@ -426,7 +475,8 @@ export function authRoutes(deps: ApiDeps): Hono {
       if (
         assetAppId &&
         !deps.publicAccessState.allowedApps().has(assetAppId) &&
-        deps.publicAccessState.isCloudEmailApp(assetAppId)
+        deps.publicAccessState.isCloudEmailApp(assetAppId) &&
+        !hasPublicAppPages(deps.appCatalog.get(assetAppId))
       ) {
         if (allowFullDashboardSession()) return c.body(null, 204);
         const viewer = getVisitorSession();
@@ -440,6 +490,14 @@ export function authRoutes(deps: ApiDeps): Hono {
           return c.json({ error: "Visitor authentication required" }, 401);
         }
       }
+    }
+
+    if (
+      forwardedUri &&
+      ["GET", "HEAD"].includes(c.req.header("X-Forwarded-Method") ?? "GET") &&
+      (isAppPageRequestPublic(forwardedUri, deps) || isPublicPageManifest(forwardedUri, deps))
+    ) {
+      return c.body(null, 204);
     }
 
     if (forwardedUri && isPublicPath(forwardedUri)) {

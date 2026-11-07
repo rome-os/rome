@@ -14,6 +14,23 @@ Apps are the extension system. An app bundles related [agents](agents.md), [acti
 - **[Action](actions.md) / [Skill](skills.md)** — these are artifacts an app owns, not apps themselves.
 - **[Listing](#app-store)** — the store identity of a published app. The app is the installed package.
 
+## Public app pages
+
+A public app page is an app-owned view that an anonymous visitor can open without sharing the rest of the app.
+
+**Contracts:**
+
+- `app.yaml#web.publicPaths` lists app-relative page paths for both `/apps/<id>` and `/full/apps/<id>`. An omitted list grants no public pages.
+- The list uses the `api.noAuth` path syntax. Entries start with `/`. Exact entries match one path. A trailing `/*` matches the base and its descendants.
+- A public page grants access only to its document, its path-specific rendering manifest, and static assets. It never grants dashboard or app data API access.
+- Public data endpoints need their own `api.noAuth` declaration and server-side authorization. Caller identity stays anonymous until the visitor signs in.
+- The app-wide access setting stays unchanged. Sharing an entire app and declaring public pages are separate grants.
+- Manifest readers must support the field before an app declares it. Strict readers reject unknown fields.
+
+**Not to be confused with:**
+
+- **App access** — sharing an entire app grants its full HTTP surface. A public page grants only the declared view and its rendering metadata.
+
 ## App ids
 
 An app id is the runtime identity declared by `app.yaml#id`. A local app may use an unscoped lowercase slug of at most 64 characters — letters, digits, and hyphens, starting with a letter. An app published under a scoped App Store listing uses the complete `@<handle>/<slug>` listing id as its app id. The lifecycle, the [lockfile](#lockfile), the dashboard, and artifact namespaces all key on this exact value.
