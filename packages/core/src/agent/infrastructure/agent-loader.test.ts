@@ -214,6 +214,11 @@ describe("AgentLoader", () => {
       }
     });
 
+    it("gives the shipped Concierge a saved model that outranks its session's pinned one", async () => {
+      await loader.loadAll(join(import.meta.dirname, "..", "..", "..", "agents"));
+      expect(byId(loader).get("core:concierge")?.definition.savedSelectionOutranksPin).toBe(true);
+    });
+
     it("lets only the Concierge's saved model outrank its session's pinned one", async () => {
       const root = await mkdtemp(join(tmpdir(), "rome-concierge-"));
       const agentYaml = (name: string) =>

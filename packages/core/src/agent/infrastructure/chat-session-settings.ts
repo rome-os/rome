@@ -2,9 +2,12 @@
 // and the model a web chat saved from the web chat repository.
 
 import type { ChatRef, ProviderSessionResetPolicy } from "@rome-os/app-runtime";
-import { resolveWebchatLargeModelSelection } from "../../core/model-selector.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
-import type { ModelSelection } from "../domain/model-selection.js";
+import {
+  isModelSelectionId,
+  MODEL_SELECTIONS,
+  type ModelSelection,
+} from "../domain/model-selection.js";
 import type { SessionSettings } from "../domain/session-settings.js";
 
 export interface ChatSessionSettingsDeps {
@@ -22,7 +25,8 @@ export class ChatSessionSettings implements SessionSettings {
   }
 
   async savedModelSelection(chatId: string): Promise<ModelSelection | null> {
-    const chat = await this.deps.webchatRepo?.getSession(chatId);
-    return resolveWebchatLargeModelSelection(chat?.largeModelSelection);
+    const saved = (await this.deps.webchatRepo?.getSession(chatId))?.largeModelSelection;
+    // Anything else, "auto" included, leaves the choice to Rome.
+    return isModelSelectionId(saved) ? MODEL_SELECTIONS[saved] : null;
   }
 }
