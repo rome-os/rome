@@ -164,6 +164,53 @@ describe("HealthCheckDaemon", () => {
     }
   });
 
+  it("reports the spawn before Rome is healthy and sees its first healthy answer within a second", async () => {
+    const events: string[] = [];
+    let refusals = 3;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => {
+        if (refusals > 0) {
+          refusals -= 1;
+          events.push("refused");
+          throw new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:4141");
+        }
+        events.push("healthy");
+        return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+      }),
+    );
+
+    const { HealthCheckDaemon } = await import("./index.js");
+    const { HostFilesystemManager } = await import("./host-filesystem.js");
+    rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
+
+    const daemon = new HealthCheckDaemon({
+      appDir: "/tmp/rome",
+      healthCheckIntervalMs: 60_000,
+      healthRetryDelayMs: 100,
+      healthTimeoutMs: 1_000,
+      actionHost: "127.0.0.1",
+      actionPort: 0,
+      romePort: 4141,
+    });
+
+    const startedAt = Date.now();
+    await daemon.start({
+      onRomeSpawned: () => {
+        events.push(spawnMock.mock.calls.length === 1 ? "spawned" : "not spawned");
+      },
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    try {
+      expect(events).toEqual(["spawned", "refused", "refused", "refused", "healthy"]);
+      // Three refusals cost three polls. A 2 s poll would take 6 s.
+      expect(elapsedMs).toBeLessThan(1_500);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
   describe("health probe tracing", () => {
     // Registers a real context manager, so a suppressed context survives the
     // awaits between the caller and fetch.

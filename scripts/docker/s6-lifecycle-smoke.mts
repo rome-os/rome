@@ -153,6 +153,43 @@ for pair in chrome:chrome-cdp openbox:openbox novnc:novnc xtigervnc:xtigervnc; d
   grep -q service-output "$log"
 done
 echo 'PASS: service logs open as rome and cannot append through symlinks to root-owned files'
+
+# The wait-for-rome oneshot gates the desktop on Rome's health and never fails.
+cp /repo/rome-wait-for-rome.sh /etc/s6-overlay/scripts/rome-wait-for-rome
+chmod +x /etc/s6-overlay/scripts/rome-wait-for-rome
+wait_up="$(cat /repo/s6-rc.d/wait-for-rome/up)"
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 2
+mkdir -p /tmp/unready-bin
+printf '#!/bin/sh\nexit 7\n' > /tmp/unready-bin/curl
+chmod +x /tmp/unready-bin/curl
+printf '%s' "/tmp/unready-bin:$PATH" > /run/s6/container_environment/PATH
+printf 1 > /run/s6/container_environment/ROME_DEFER_UNTIL_HEALTHY_SECONDS
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 5
+printf 120 > /run/s6/container_environment/ROME_DEFER_UNTIL_HEALTHY_SECONDS
+# A daemon that crashed before it ever listened: its finish keeps it down.
+mkdir -p /run/service/rome-daemon
+printf '#!/bin/sh\nexit 1\n' > /run/service/rome-daemon/run
+printf '#!/bin/sh\nexit 125\n' > /run/service/rome-daemon/finish
+chmod +x /run/service/rome-daemon/run /run/service/rome-daemon/finish
+s6-supervise /run/service/rome-daemon &
+crashed_supervisor=$!
+for i in $(seq 1 50); do
+  if [ "$(s6-svstat -o up /run/service/rome-daemon 2>/dev/null)" = false ]; then break; fi
+  sleep 0.1
+done
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 3
+kill "$crashed_supervisor"
+printf true > /run/s6/container_environment/ROME_ENABLE_CDP_AUTOMATION
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 1
+echo 'PASS: wait-for-rome returns on health, at its cap, on a crashed daemon, and at once for CDP discovery'
 `,
   },
 );

@@ -11,6 +11,7 @@ import {
 import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
+import { bothAvailable, fakeAvailability } from "./kit/model-availability.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
@@ -96,16 +97,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
 
   const modelResolver = createModelResolver({
     providers: [options.modelProvider],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    availability: fakeAvailability(bothAvailable()),
   });
   const manager = createAgentSessionManager({
     agentLoader,
@@ -213,7 +205,6 @@ export function makeSingleActionProvider(
   };
   return {
     id: "mock",
-    displayName: "mock-single-action",
     builtinTools: new Set<string>(),
     openSession: async (params) => createSessionFromRun("mock", runImpl, params),
   };

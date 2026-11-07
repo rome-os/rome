@@ -47,7 +47,8 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { ListCollection, ListFooter, ListToolbar } from "@rome-os/ui/layout-list";
 import { Spinner } from "@rome-os/ui/spinner";
-import { Page, PageActions, PageHeader, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { Page } from "@rome-os/ui/page";
+import { ActivityHeader } from "./ActivityHeader";
 import { ToolbarButton } from "@rome-os/ui/toolbar";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import {
@@ -243,27 +244,27 @@ function useSessionsExplorerState() {
 
 type SessionsExplorerState = ReturnType<typeof useSessionsExplorerState>;
 
-/**
- * The landmark and safe-area frame the shell-less mount needs.
- *
- * `/sessions/*` renders inside `RomeShellLayout`, which owns the one `main`, so
- * a layout that added its own would nest a second one. `/full/apps/sessions/*`
- * routes outside that shell, so there the page owns the landmark, the top inset,
- * and the bounded height — the same frame this page's overview and detail views
- * carry. Without it the inventory is the one full-mode view with no landmark,
- * and its content sits under the notch.
- */
-function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children: ReactNode }) {
-  if (!fullMode) return children;
+/** The shell supplies the landmark in shell mode, so only full mode owns a `main`. */
+function SessionsListFrame({
+  fullMode,
+  header,
+  children,
+}: {
+  fullMode: boolean;
+  header: ReactNode;
+  children: ReactNode;
+}) {
+  const Frame = fullMode ? "main" : "div";
   return (
-    <main
+    <Frame
       data-safe-area-bounded
       className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
     >
+      {header}
       <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
         {children}
       </div>
-    </main>
+    </Frame>
   );
 }
 
@@ -715,22 +716,14 @@ function SessionsIndexPage({
     </Button>
   );
 
-  // The inventory is a List: the guardian searches it for one session and
-  // leaves. The header carries what the page is — its title and the switch
-  // between this view and the overview — and the toolbar carries what the
-  // reader does to the collection, which is the view switch rule in
-  // docs/ui/layouts.md.
   if (view === "sessions") {
     return (
       <TooltipProvider delayDuration={150}>
-        <SessionsListFrame fullMode={fullMode}>
+        <SessionsListFrame
+          fullMode={fullMode}
+          header={<ActivityHeader title="Sessions" viewSwitch={viewSwitch} />}
+        >
           <Page>
-            <PageHeader align="end">
-              <PageHeading>
-                <PageTitle>Sessions</PageTitle>
-              </PageHeading>
-              <PageActions>{viewSwitch}</PageActions>
-            </PageHeader>
             <PendingApprovalsBanner />
             <ListToolbar aria-label="Filter sessions">
               {/* Search leads and grows: it is the only text control here, and the
@@ -1045,58 +1038,58 @@ function SessionsIndexPage({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <main
-        data-safe-area-bounded
-        className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
-      >
-        <header className="shrink-0 border-b border-border bg-background px-5 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              {viewSwitch}
-              {activeFilters.length > 0 ? (
+      <SessionsListFrame
+        fullMode={fullMode}
+        header={
+          <ActivityHeader
+            title="Overview"
+            viewSwitch={viewSwitch}
+            actions={
+              <>
+                {rangeSelect}
+                {refreshButton}
+              </>
+            }
+          >
+            {activeFilters.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-3">
                 <Separator className="h-5" orientation="vertical" />
-              ) : null}
-              {activeFilters.map((filter) => (
-                <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
-                  {filter.label}
-                  <span aria-hidden>×</span>
-                </Button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              {rangeSelect}
-              {refreshButton}
-            </div>
-          </div>
-        </header>
-
-        <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
-          <PendingApprovalsBanner className="px-5 pt-4" />
-          <SessionsOverview
-            data={metrics.data}
-            error={metrics.error}
-            loading={metrics.loading}
-            metric={metric}
-            trendBy={trendBy}
-            groupBy={groupBy}
-            recentSessions={recentInventory.data?.sessions ?? []}
-            recentSessionsError={recentInventory.error}
-            recentSessionsLoading={recentInventory.loading}
-            onMetricChange={setMetric}
-            onTrendByChange={setTrendBy}
-            onGroupByChange={setGroupBy}
-            onGroupSelect={groupSelect}
-            onRecentSessionOpen={openSession}
-            onSeriesSelect={seriesSelect}
-            onViewAllSessions={() => {
-              setSort("activity");
-              setSortDirection("desc");
-              setOffset(0);
-              navigate("all", { relative: "path" });
-            }}
-          />
-        </div>
-      </main>
+                {activeFilters.map((filter) => (
+                  <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
+                    {filter.label}
+                    <span aria-hidden>×</span>
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </ActivityHeader>
+        }
+      >
+        <PendingApprovalsBanner className="px-5 pt-4" />
+        <SessionsOverview
+          data={metrics.data}
+          error={metrics.error}
+          loading={metrics.loading}
+          metric={metric}
+          trendBy={trendBy}
+          groupBy={groupBy}
+          recentSessions={recentInventory.data?.sessions ?? []}
+          recentSessionsError={recentInventory.error}
+          recentSessionsLoading={recentInventory.loading}
+          onMetricChange={setMetric}
+          onTrendByChange={setTrendBy}
+          onGroupByChange={setGroupBy}
+          onGroupSelect={groupSelect}
+          onRecentSessionOpen={openSession}
+          onSeriesSelect={seriesSelect}
+          onViewAllSessions={() => {
+            setSort("activity");
+            setSortDirection("desc");
+            setOffset(0);
+            navigate("all", { relative: "path" });
+          }}
+        />
+      </SessionsListFrame>
     </TooltipProvider>
   );
 }
@@ -1678,12 +1671,15 @@ function ActivityEventsRoute() {
   const [params] = useSearchParams();
   const fullMode = useActivityBase() !== "/sessions";
   return (
-    <SessionsListFrame fullMode={fullMode}>
-      <ActivityPage
-        viewSwitch={<ActivityViewSwitch view="events" />}
-        initialFilter={params.get("status") === "pending" ? "pending" : "all"}
-      />
-    </SessionsListFrame>
+    <ActivityPage
+      viewSwitch={<ActivityViewSwitch view="events" />}
+      initialFilter={params.get("status") === "pending" ? "pending" : "all"}
+      renderFrame={(header, children) => (
+        <SessionsListFrame fullMode={fullMode} header={header}>
+          {children}
+        </SessionsListFrame>
+      )}
+    />
   );
 }
 

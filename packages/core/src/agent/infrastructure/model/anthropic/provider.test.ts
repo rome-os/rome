@@ -477,8 +477,10 @@ describe("AnthropicProvider", () => {
         };
       });
       const session = await new AnthropicProvider({
-        onQuotaExhausted: () => {
-          quotaMarked = true;
+        account: {
+          refusedTurn: () => {
+            quotaMarked = true;
+          },
         },
       }).openSession(buildParams());
       const events: ModelSessionEvent[] = [];
@@ -1313,8 +1315,10 @@ describe("AnthropicProvider", () => {
     let quotaMarked = false;
     const provider = new AnthropicProvider({
       env: { PATH: "/usr/bin" },
-      onQuotaExhausted: () => {
-        quotaMarked = true;
+      account: {
+        refusedTurn: () => {
+          quotaMarked = true;
+        },
       },
     });
     const session = await provider.openSession(buildParams());
@@ -1340,16 +1344,19 @@ describe("AnthropicProvider", () => {
           duration_ms: 1,
         },
       ]);
-      const onQuotaExhausted = rs.fn();
+      const refusedTurn = rs.fn();
       const session = await new AnthropicProvider({
         env: { PATH: "/usr/bin" },
-        onQuotaExhausted,
+        account: { refusedTurn },
       }).openSession(buildParams());
       expect((await session.events[Symbol.asyncIterator]().next()).value).toMatchObject({
         type: "error",
         code: "usage_limit",
       });
-      expect(onQuotaExhausted).toHaveBeenCalledWith("2026-11-03T05:10:00.000Z");
+      expect(refusedTurn).toHaveBeenCalledWith({
+        kind: "usage",
+        until: "2026-11-03T05:10:00.000Z",
+      });
       await session.close();
     } finally {
       rs.useRealTimers();
@@ -1501,8 +1508,10 @@ describe("AnthropicProvider", () => {
       let quotaMarked = false;
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin" },
-        onQuotaExhausted: () => {
-          quotaMarked = true;
+        account: {
+          refusedTurn: () => {
+            quotaMarked = true;
+          },
         },
       });
       const session = await provider.openSession(buildParams());
@@ -1546,8 +1555,10 @@ describe("AnthropicProvider", () => {
       let authStateMarked = false;
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin" },
-        onAuthRevoked: () => {
-          authStateMarked = true;
+        account: {
+          refusedTurn: () => {
+            authStateMarked = true;
+          },
         },
       });
       const session = await provider.openSession(buildParams());

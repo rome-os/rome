@@ -173,6 +173,8 @@ export function createSubagentExecutionService(deps: {
       };
       const stream = deps.turnStreams.register({
         sessionId: child.sessionId,
+        // The subagent's row is saved above, under its own session id.
+        chatId: child.sessionId,
         turnId: handle.turnId,
         agentName: name,
         interrupt,

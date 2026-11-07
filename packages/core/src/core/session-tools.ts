@@ -1,4 +1,5 @@
 import type { FacadeToolDef } from "./mcp-facade.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
 import type { ThreadContext } from "./types.js";
 
 /** What a session-tools provider sees of the session it equips. */
@@ -13,6 +14,9 @@ export interface SessionToolContext {
   getTurnId(): string | undefined;
   /** The running turn's thread, else the session's. */
   getThreadContext(): ThreadContext | undefined;
+  /** The level the running turn pushes its first said message at, or
+   *  undefined when it pushes nothing. */
+  getTurnPushLevel(): NotifyLevel | undefined;
 }
 
 /**

@@ -7,12 +7,12 @@ import { buildAnthropicMcpServers } from "./mcp-servers.js";
 import { AnthropicProvider, CLAUDE_AGENT_SDK_ENV, CLAUDE_AGENT_SDK_SETTINGS } from "./provider.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { RomeToolGroup } from "../../../domain/rome-tools.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "../../../../core/model-selector.js";
+import { MODEL_SELECTIONS } from "../../../domain/model-selection.js";
 
 // Every Rome tool group, so a group the builder stops registering still counts.
 const ROME_TOOL_GROUPS: readonly RomeToolGroup[] = ["actions", "subagents", "skills", "ask_user"];
 
-const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
+const claudeModels = Object.values(MODEL_SELECTIONS)
   .filter((selection) => selection.providerId === "anthropic")
   .map((selection) => selection.model);
 

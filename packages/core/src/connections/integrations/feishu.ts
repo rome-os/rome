@@ -19,13 +19,11 @@
 // `channel.connect()` at start rejects out of `adapter.start()`, routed the same
 // way; ongoing `error` events route through the adapter's `onFault` seam.
 
-import {
-  createLarkChannel,
-  type CardActionEvent,
+import type {
+  CardActionEvent,
   Domain,
-  type LarkChannel,
-  LoggerLevel,
-  type NormalizedMessage as LarkMessage,
+  LarkChannel,
+  NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
@@ -50,6 +48,11 @@ import type {
 } from "../types.js";
 import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
 import { createLogger } from "../../logger.js";
+import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+
+// The Lark SDK loads when a Feishu connection first needs it, not with every boot.
+const larkSdk =
+  requireOnFirstUse<typeof import("@larksuiteoapi/node-sdk")>("@larksuiteoapi/node-sdk");
 
 const log = createLogger("feishu-setup");
 
@@ -475,14 +478,14 @@ export async function registerFeishuAgentApp(opts: {
 /** Default LarkChannel factory (mirrors the FeishuAdapter default) parameterized
  *  by the pasted `app` material so `validate` can mint a token from it. */
 function defaultCreateChannel(config: FeishuConfig): LarkChannel {
-  return createLarkChannel({
+  return larkSdk().createLarkChannel({
     appId: config.appId,
     appSecret: config.appSecret,
-    domain: config.domain === "lark" ? Domain.Lark : Domain.Feishu,
+    domain: config.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
     transport: "websocket",
     outbound: { markdownConverter: "builtin" },
     includeRawEvent: true,
-    loggerLevel: LoggerLevel.warn,
+    loggerLevel: larkSdk().LoggerLevel.warn,
   });
 }
 

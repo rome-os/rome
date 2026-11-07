@@ -1,5 +1,2 @@
 # Known agent-context boundary crossings, one `<file> → <specifier>` per line, paths relative to packages/core/src.
 # boundary.test.ts fails on a crossing not listed here and on a line that no longer occurs, so this list only shrinks.
-api/deps.ts → ../agent/index.js
-api/routes/rome-credits-proxy.ts → ../../agent/index.js
-core/model-resolver.ts → ../agent/index.js

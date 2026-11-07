@@ -1,4 +1,3 @@
-import { isJidGroup, jidNormalizedUser } from "@whiskeysockets/baileys";
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import {
@@ -10,6 +9,11 @@ import {
 import { channelMessageDetail, queryPage, readQueryWindow, type Messages } from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 import { whatsAppHistoryMessage } from "./whatsapp-history.js";
+import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+
+// Baileys loads when WhatsApp is first used, not with every boot.
+const baileys =
+  requireOnFirstUse<typeof import("@whiskeysockets/baileys")>("@whiskeysockets/baileys");
 
 /**
  * `Messages` over the WhatsApp message mirror (`wa_messages`) — the thread as
@@ -82,5 +86,5 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
  *  folds the guardian's own `@lid` onto their phone JID, which takes the live
  *  connection, so a chat with yourself is found by the phone JID only. */
 function canonicalChat(jid: string): string {
-  return isJidGroup(jid) ? jid : jidNormalizedUser(jid);
+  return baileys().isJidGroup(jid) ? jid : baileys().jidNormalizedUser(jid);
 }

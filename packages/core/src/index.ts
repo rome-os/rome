@@ -39,6 +39,11 @@ import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./us
 import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
+import { containerUptimeMs } from "./lib/runtime.js";
+import {
+  AppActionSchemaCache,
+  appActionSchemaCacheBuild,
+} from "./actions/app-action-schema-cache.js";
 import {
   initTelemetry,
   getTracer,
@@ -156,20 +161,24 @@ import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js"
 import { AgentRunner } from "./core/agent-runner.js";
 import {
   AnthropicProvider,
+  ClaudeAccount,
   CodexAppServerManager,
   CodexAppServerProvider,
+  createModelAvailability,
   DrizzleSessionRepository,
   SharedCodexAccountService,
+  romeCreditsProxyRoutes,
+  resolveAgentPolicy,
 } from "./agent/index.js";
-import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
-import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
+import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { createConciergeOwners } from "./concierge/owners.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -230,6 +239,7 @@ import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
 import {
   ensureProfileDevAppsDirInitialized,
+  getProfileAppActionSchemaCachePath,
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
@@ -865,54 +875,46 @@ async function main() {
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
-  let syncRomeCreditsPayer = (): void => {};
-  let refreshRomeCredits = (): void => {};
-  const aiToolState = createAIToolState({
-    settingsRepo,
-    probes: {
-      codexStatus: () => codexAccountService.getStatus(),
-      codexUsage: () => codexAccountService.getUsage(),
-    },
-    onCodexLoginChanged: () => syncRomeCreditsPayer(),
-    onCodexRefreshed: () => refreshRomeCredits(),
+  const claudeAccount = new ClaudeAccount({ settingsRepo });
+  const modelAvailability = createModelAvailability({
+    accounts: { openai: codexAccountService, anthropic: claudeAccount },
+    // The first read spawns the Codex app-server, which competes with boot
+    // for CPU on a small VM. It runs once Rome has started, with the warmup.
+    startRefresh: false,
+    log: createLogger("model-availability"),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
-    aiToolState,
+    availability: modelAvailability,
     appServerManager: codexAppServerManager,
   });
-  syncRomeCreditsPayer = () => romeCreditsPayer.sync();
-  refreshRomeCredits = () => void romeCreditsPayer.refresh();
+  const syncRomeCreditsPayer = (): void => romeCreditsPayer.sync();
   const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
   romeCreditsPayer.sync();
-  const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
-    void aiToolState.refresh("openai").catch((err) => {
-      log.warn("Codex account change refresh failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+  // The Codex authorization drives the payer, and each settled read of the
+  // account re-reads the credits.
+  const unsubscribeAvailabilityChanged = modelAvailability.onChanged((provider, change) => {
+    if (provider !== "openai") return;
+    if (change === "authorization") syncRomeCreditsPayer();
+    else void romeCreditsPayer.refresh();
   });
-  const anthropicProvider = new AnthropicProvider({
-    settingsRepo,
-    onAuthRevoked: () => aiToolState.markAuthRevoked("anthropic"),
-    onQuotaExhausted: (until) => aiToolState.markQuotaExhausted("anthropic", until),
-  });
+  const anthropicProvider = new AnthropicProvider({ settingsRepo, account: claudeAccount });
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
-    onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
-    onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
+    account: codexAccountService,
+    warmup: false,
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
     onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
-      const account = aiToolState.get().codex;
+      const codex = modelAvailability.read().openai;
       return codexFunding({
         defaultProvider: codexAppServerManager.getDefaultProvider(),
-        accountType: account.accountType,
-        loggedIn: account.loggedIn,
+        accountType: codex?.account.accountType,
+        loggedIn: codex ? codex.state !== "unauthorized" && codex.state !== "expired" : undefined,
       });
     },
   });
   const modelResolver = createModelResolver({
-    aiToolState,
+    availability: modelAvailability,
     providers: [anthropicProvider, codexProvider],
     settingsRepo,
     romeCreditsPayer,
@@ -1079,21 +1081,34 @@ async function main() {
       return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
+  // Real push sender in the main process (holds the durable instance token);
+  // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
+  // `notify.send` back to this same instance. The Concierge pushes through it too.
+  const notifyClient = new NotifyClient();
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
+  // Made here so the Concierge can tell whether a visitor is still served;
+  // it is loaded with the other access settings further down.
+  const dashboardAccessState = new DashboardAccessState();
   const concierge = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    owners: createConciergeOwners({
+      settingsRepo,
+      visitorProfiles: new VisitorProfilesRepository(db),
+      dashboardAccess: dashboardAccessState,
+    }),
     webchatRepo,
     sessionRepository,
-    aiToolState,
+    availability: modelAvailability,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
+    notify: notifyClient,
   });
   const agentSessionManager = createAgentSessionManager(
     {
@@ -1197,7 +1212,7 @@ async function main() {
     replies: chatsWired.replies,
     isTextPrivate: (agentName) =>
       agentLoader.has(agentName) &&
-      resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
+      resolveAgentPolicy(agentLoader.get(agentName)).finalText === "private",
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);
@@ -1230,10 +1245,6 @@ async function main() {
     appConnections,
   );
 
-  // Real push sender in the main process (holds the durable instance token);
-  // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
-  // `notify.send` back to this same instance.
-  const notifyClient = new NotifyClient();
   // Learn whether this boot's release version differs from the last completed
   // boot's — the dashboard reads the result via /api/build-info. The stored
   // version is committed after "Rome started" below.
@@ -1303,12 +1314,12 @@ async function main() {
     notify: notifyClient,
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its availability reads
-    // the same AiToolState the model resolver gates on.
+    // the same model availability the model resolver gates on.
     imageGeneration: createImageGenerationService({
       providers: [
         createCodexImageGenerationProvider({
           agentRunner,
-          getCodexState: () => aiToolState.get().codex,
+          getCodexAvailability: () => modelAvailability.read().openai,
         }),
       ],
     }),
@@ -1317,6 +1328,13 @@ async function main() {
     socketPath: config.hostExecutionSocket,
     enabled: config.hostExecutionEnabled,
   });
+  // Importing every app action module costs seconds of CPU on a small VM, and
+  // boot needs only their schemas. A warm-pool VM boots once before a claim, so
+  // the claim boot finds every schema here.
+  const appActionSchemaCache = await AppActionSchemaCache.load(
+    getProfileAppActionSchemaCachePath(),
+    appActionSchemaCacheBuild(getBuildInfo()),
+  );
   const appActionReload = await registerAppActions(
     actionLoader,
     actionRegistry,
@@ -1334,21 +1352,30 @@ async function main() {
       cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
+    { schemaCache: appActionSchemaCache },
   );
 
   appCatalog.subscribe(
-    createAppActionsSubscriber(actionLoader, actionRegistry, appCatalog, appActionDeps, {
-      db,
-      actionEngine,
-      routinesRepo,
-      repositories: appRuntimeRepositories,
-      favorService,
-      appConnections,
-      hostExecution,
-      feedback: feedbackClient,
-      cloudProfile: cloudProfileClient,
-      agentNames: agentNameResolver,
-    }),
+    createAppActionsSubscriber(
+      actionLoader,
+      actionRegistry,
+      appCatalog,
+      appActionDeps,
+      {
+        db,
+        actionEngine,
+        routinesRepo,
+        repositories: appRuntimeRepositories,
+        favorService,
+        appConnections,
+        hostExecution,
+        feedback: feedbackClient,
+        cloudProfile: cloudProfileClient,
+        agentNames: agentNameResolver,
+      },
+      undefined,
+      appActionSchemaCache,
+    ),
   );
   const favorRequirementSync = new FavorRequirementSync({
     favorService,
@@ -1908,7 +1935,6 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessState = new DashboardAccessState();
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
@@ -2033,8 +2059,10 @@ async function main() {
       agentRunner,
       activeSubagentRegistry,
       agentTurnStreamRegistry,
-      aiToolState,
+      modelAvailability,
       codexAccountService,
+      claudeAccount,
+      romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       publicAccessState,
       dashboardAccessState,
       relayDrainer,
@@ -2168,6 +2196,8 @@ async function main() {
   await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
 
   log.info("Rome started", {
+    processUptimeMs: Math.round(process.uptime() * 1000),
+    containerUptimeMs: containerUptimeMs(),
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],
     agents: agentNames,
@@ -2177,6 +2207,17 @@ async function main() {
     appActionFailures: appActionReload.failed,
     routines: allRoutines.length,
     discoveredCdpServers: discoveredServers.length > 0 ? discoveredServers : ["none"],
+  });
+
+  void codexAppServerManager.warmup().catch((err) => {
+    log.warn("codex app-server warmup failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  void modelAvailability.refresh().catch((err) => {
+    log.warn("initial model availability refresh failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   });
 
   // Startup is known-good: record this version as the last completed boot so
@@ -2291,15 +2332,15 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
-    unsubscribeCodexAccountChanged();
+    unsubscribeAvailabilityChanged();
     unsubscribeInstanceTokenChanged();
     unsubscribeInstanceLinked();
     romeCreditsPayer.close();
+    modelAvailability.close();
+    shutdownLog.info("model availability stopped");
     codexAccountService.close();
-    shutdownLog.info("Codex account service stopped");
-
-    aiToolState.close();
-    shutdownLog.info("AI tool state stopped");
+    claudeAccount.close();
+    shutdownLog.info("model accounts stopped");
 
     codexProvider.close();
     shutdownLog.info("Codex app-server stopped");

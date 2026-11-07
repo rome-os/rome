@@ -25,6 +25,7 @@ import type { BackendTurnParams, BackendTurnRunner, ChatId } from "@rome-os/app-
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
 
@@ -49,6 +50,9 @@ export interface BackendTurnOptions {
   quiet?: boolean;
   /** Keeps the turn's input in its saved trace under this label. */
   inputLabel?: string;
+  /** Pushes the first message the agent says in the turn at this level
+   *  (RunParams.pushLevel). Absent, the turn pushes nothing. */
+  pushLevel?: NotifyLevel;
 }
 
 export interface BackendEmitOptions {
@@ -64,6 +68,8 @@ export interface BackendEmitOptions {
  * awaits it can deliver its reply after them. */
 export type BackendSessionTask = (helpers: {
   emit: (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => Promise<void>;
+  /** Whether a Stop request reached this task's turn. */
+  stopRequested?: () => boolean;
 }) => Promise<void>;
 
 /** The main-process runner. Beyond the worker-facing `runAndDeliver`, it owns
@@ -71,9 +77,13 @@ export type BackendSessionTask = (helpers: {
  * timers) and exposes the lower-level `runBackendSessionTask` for callers that
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
-/** Whether a backend turn ran to its end: `failed` when it errored, was
- *  interrupted, or never ran. */
-export type BackendTurnOutcome = "completed" | "failed";
+/** How a backend turn ended: `stopped` when a Stop request cut it short,
+ *  `interrupted` when something else did, such as a newer input, and
+ *  `failed` when it errored or never ran. */
+export type BackendTurnOutcome = "completed" | "stopped" | "interrupted" | "failed";
+
+const endOutcome = (status: string): BackendTurnOutcome =>
+  status === "completed" ? "completed" : status === "interrupted" ? "interrupted" : "failed";
 
 export interface MainBackendTurnRunner extends BackendTurnRunner {
   runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void>;
@@ -148,7 +158,7 @@ export interface BackendTurnRunnerDeps {
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
-  /** Whether the agent's session policy keeps its text private, so its turn
+  /** Whether the agent's policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
 }
@@ -161,7 +171,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     workingDir: string | undefined,
     trace: Pick<
       RunParams,
-      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel"
+      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel" | "pushLevel"
     > = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
@@ -293,7 +303,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       await runBackendSessionTask(
         params.channel,
         params.threadId,
-        async ({ emit }) => {
+        async ({ emit, stopRequested }) => {
           await deps.beforeTurn?.(params);
           let reply = "";
           let turnId: string | undefined;
@@ -301,13 +311,15 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             persistTrace: true,
             persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+            ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
           };
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;
             if (msg.type === "result") reply = msg.content;
-            if (msg.type === "turn_end" && msg.status === "completed") outcome = "completed";
+            if (msg.type === "turn_end") outcome = endOutcome(msg.status);
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
+          if (outcome === "interrupted" && stopRequested?.()) outcome = "stopped";
           if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
           await send.send(params.threadId as ChatId, {
             text: reply,
@@ -335,7 +347,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
       if (msg.type === "turn_start") turnId = msg.turnId;
       if (msg.type === "result") reply = msg.content;
-      if (msg.type === "turn_end" && msg.status === "completed") outcome = "completed";
+      if (msg.type === "turn_end") outcome = endOutcome(msg.status);
     }
     await deliverMessagingReply(params, reply, turnId);
     return outcome;

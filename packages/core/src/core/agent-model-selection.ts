@@ -2,7 +2,7 @@
 
 import type { AgentConfig } from "../types.js";
 import type { ExactModelResolutionRequest, ModelResolutionRequest } from "./model-resolver.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
+import { MODEL_SELECTIONS, type ModelSelectionId } from "../agent/index.js";
 
 /** Shared by session open and turn-boundary resolution. Never supplies an implicit tier. */
 export function resolveAgentModelRequest(
@@ -11,7 +11,7 @@ export function resolveAgentModelRequest(
   sessionPin?: ExactModelResolutionRequest["exact"],
 ): ModelResolutionRequest {
   if (selectionId) {
-    const { providerId, model } = WEBCHAT_LARGE_MODEL_SELECTIONS[selectionId];
+    const { providerId, model } = MODEL_SELECTIONS[selectionId];
     return { exact: { providerId, model } };
   }
   if (sessionPin) return { exact: sessionPin };

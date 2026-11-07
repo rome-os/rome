@@ -76,7 +76,7 @@ async function main() {
       "set -eu",
       'for path in /app/packages/desktop /app/packages/pantheon /app/packages/cdp-client /opt/rome/packages/desktop /opt/rome/packages/pantheon /opt/rome/packages/cdp-client; do [ ! -e "$path" ] || { echo "Forbidden path present: $path" >&2; exit 1; }; done',
       'for name in rome-desktop rome-pantheon rome-cdp-client @rome-os/pantheon-cli; do ! find /app/node_modules /opt/rome/node_modules -path "*$name*" -print -quit 2>/dev/null | grep -q . || { echo "Forbidden dependency present: $name" >&2; exit 1; }; done',
-      // rome-init.sh silently skips opencli plugin registration when the
+      // rome-init-tools.sh silently skips opencli plugin registration when the
       // dir is absent, so assert it shipped rather than trusting the boot path.
       '[ -f /opt/rome/opencli-plugins/twitter/opencli-plugin.json ] || { echo "Missing /opt/rome/opencli-plugins/twitter (opencli plugins absent from image)" >&2; exit 1; }',
       // The main agent's prompt names the docs only when they exist, so a missing

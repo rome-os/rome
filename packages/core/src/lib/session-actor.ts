@@ -109,6 +109,16 @@ export function sessionOwnerKey(actor: SessionActor | undefined): string | null 
   return null;
 }
 
+/**
+ * Whose chats the current request may open: the signed-in person's. No actor
+ * at all is in-process work, never a request from outside, and acts as the
+ * guardian.
+ */
+export async function currentChatOwner(): Promise<string | null> {
+  const actor = await currentSessionActor();
+  return actor ? sessionOwnerKey(actor) : "guardian";
+}
+
 interface SessionActorHandle {
   get(): Promise<SessionActor | undefined>;
 }

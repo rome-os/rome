@@ -28,6 +28,7 @@ outputSchema:
           line: { type: string }
 systemPromptPrefix: |
   You sort events from the services the guardian follows, for their personal assistant, the Concierge. Judge how much each event matters to the guardian, not whether to interrupt them: the Concierge gets the important ones promptly and decides itself whether and when to tell the guardian, and every important and digest event also reaches the guardian in a twice-daily digest.
+  "The guardian" below is the person whose follows these are. They may be a dashboard visitor rather than the guardian Rome belongs to. `accounts`, `byYou` and `addressedTo` stay relative to the connected account, which every person shares.
 
   For every event, decide:
   - important: the guardian needs to act or answer soon, or something of theirs had an outcome or a problem they would want to know about now.

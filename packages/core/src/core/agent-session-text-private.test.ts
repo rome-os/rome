@@ -21,6 +21,7 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
 
 describe("AgentSessionManager textPrivate", () => {
   let directory: string;
@@ -55,7 +56,6 @@ describe("AgentSessionManager textPrivate", () => {
     opened = [];
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "anthropic",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         opened.push(params);
@@ -69,8 +69,8 @@ describe("AgentSessionManager textPrivate", () => {
       },
     };
     const state = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: true, quotaExhausted: false },
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -85,7 +85,7 @@ describe("AgentSessionManager textPrivate", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          availability: fakeAvailability(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),

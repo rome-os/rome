@@ -1,28 +1,35 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider } from "./agent-runner.js";
 import {
-  createAIToolState,
-  type AIToolStateProbes,
-  type AIToolStateValue,
-} from "./ai-tool-state.js";
+  ClaudeAccount,
+  createModelAvailability,
+  type ModelAccount,
+  type ModelAccountUsage,
+  type ModelAvailabilityState,
+} from "../agent/index.js";
 import { createModelResolver, TIER_MODEL_MAPPINGS_SETTING_KEY } from "./model-resolver.js";
+import {
+  availabilityOf,
+  fakeAvailability,
+  RESTRICTED_PLAN,
+} from "../test/kit/model-availability.js";
 
-const codex = { id: "openai", displayName: "Codex" } as ModelProvider;
-const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
+const codex = { id: "openai" } as ModelProvider;
+const claude = { id: "anthropic" } as ModelProvider;
 
 function resolver(
-  overrides: Partial<AIToolStateValue> = {},
+  overrides: Partial<ModelAvailabilityState> = {},
   settings: { tierModelMappings?: unknown } = {},
   usingRomeCredits = false,
   servedModels: readonly string[] | null = null,
 ) {
-  const value: AIToolStateValue = {
-    codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-    claude: { loggedIn: true, quotaExhausted: false },
+  const value: ModelAvailabilityState = {
+    openai: availabilityOf("available"),
+    anthropic: availabilityOf("available"),
     ...overrides,
   };
   return createModelResolver({
-    aiToolState: { get: () => value, refresh: async () => value },
+    availability: fakeAvailability(() => value),
     providers: [claude, codex],
     settingsRepo: {
       get: async <T = unknown>(key: string): Promise<T | null> =>
@@ -53,8 +60,8 @@ describe("ModelResolver", () => {
 
   it("resolves Codex models the same way while Rome credits pay and the served list is unknown", async () => {
     const loggedOut = {
-      codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("unauthorized"),
     };
     const r = resolver(
       loggedOut,
@@ -75,8 +82,8 @@ describe("ModelResolver", () => {
 
   describe("while Rome credits pay with a reported served list", () => {
     const loggedOut = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("unauthorized"),
     };
 
     it("falls a tier back to a model the gateway serves", async () => {
@@ -117,12 +124,7 @@ describe("ModelResolver", () => {
     });
 
     it("prefers a connected Claude login over a tier the gateway cannot serve", async () => {
-      const r = resolver(
-        { ...loggedOut, claude: { loggedIn: true, quotaExhausted: false } },
-        {},
-        true,
-        [],
-      );
+      const r = resolver({ ...loggedOut, anthropic: availabilityOf("available") }, {}, true, []);
       await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
         modelProvider: claude,
       });
@@ -173,12 +175,12 @@ describe("ModelResolver", () => {
           resolve();
         };
       });
-      const value: AIToolStateValue = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+      const value: ModelAvailabilityState = {
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("unauthorized"),
       };
       const r = createModelResolver({
-        aiToolState: { get: () => value, refresh: async () => value },
+        availability: fakeAvailability(() => value),
         providers: [claude, codex],
         romeCreditsPayer: {
           isUsingRomeCredits: () => true,
@@ -200,12 +202,12 @@ describe("ModelResolver", () => {
           resolve();
         };
       });
-      const value: AIToolStateValue = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+      const value: ModelAvailabilityState = {
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("unauthorized"),
       };
       const r = createModelResolver({
-        aiToolState: { get: () => value, refresh: async () => value },
+        availability: fakeAvailability(() => value),
         providers: [claude, codex],
         romeCreditsPayer: {
           isUsingRomeCredits: () => paying,
@@ -223,12 +225,12 @@ describe("ModelResolver", () => {
     });
 
     it("does not wait for the served list when Claude serves the turn", async () => {
-      const value: AIToolStateValue = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+      const value: ModelAvailabilityState = {
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("available"),
       };
       const r = createModelResolver({
-        aiToolState: { get: () => value, refresh: async () => value },
+        availability: fakeAvailability(() => value),
         providers: [claude, codex],
         romeCreditsPayer: {
           isUsingRomeCredits: () => true,
@@ -259,8 +261,8 @@ describe("ModelResolver", () => {
   it("keeps a Codex provider pin by tier on the ChatGPT login while Rome credits pay", async () => {
     const r = resolver(
       {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("unauthorized"),
       },
       {},
       true,
@@ -275,13 +277,13 @@ describe("ModelResolver", () => {
   });
 
   it("fails a tier with no usable provider when credits do not pay", async () => {
-    const state: AIToolStateValue = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: false, quotaExhausted: false },
+    const state: ModelAvailabilityState = {
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("unauthorized"),
     };
     const r = createModelResolver({
       // Production returns a fresh copy on every read.
-      aiToolState: { get: () => structuredClone(state), refresh: async () => state },
+      availability: { read: () => structuredClone(state), refresh: async () => {} },
       providers: [claude, codex],
       romeCreditsPayer: { isUsingRomeCredits: () => false },
     });
@@ -293,8 +295,8 @@ describe("ModelResolver", () => {
   it("prefers a connected Claude login over spending Rome credits", async () => {
     const r = resolver(
       {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("available"),
       },
       {},
       true,
@@ -314,12 +316,12 @@ describe("ModelResolver", () => {
       settingsRead = resolve;
     });
     let usingRomeCredits = false;
-    const state: AIToolStateValue = {
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-      claude: { loggedIn: false, quotaExhausted: false },
+    const state: ModelAvailabilityState = {
+      openai: availabilityOf("available"),
+      anthropic: availabilityOf("unauthorized"),
     };
     const r = createModelResolver({
-      aiToolState: { get: () => state, refresh: async () => state },
+      availability: fakeAvailability(() => state),
       providers: [claude, codex],
       settingsRepo: {
         get: async () => {
@@ -335,8 +337,8 @@ describe("ModelResolver", () => {
 
     const resolution = r.getModelProvider({ tier: "large" });
     await settingsStarted;
-    state.codex.loggedIn = false;
-    state.claude.loggedIn = true;
+    state.openai = availabilityOf("unauthorized");
+    state.anthropic = availabilityOf("available");
     usingRomeCredits = true;
     releaseSettings();
 
@@ -345,12 +347,7 @@ describe("ModelResolver", () => {
 
   it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {
     const r = resolver({
-      codex: {
-        loggedIn: true,
-        quotaExhausted: false,
-        solAccess: false,
-        lunaAccess: false,
-      },
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
@@ -419,22 +416,12 @@ describe("ModelResolver", () => {
     });
     await expect(
       resolver({
-        codex: {
-          loggedIn: false,
-          quotaExhausted: false,
-          solAccess: true,
-          lunaAccess: true,
-        },
+        openai: availabilityOf("unauthorized"),
       }).getModelProvider({ tier: "large" }),
     ).resolves.toMatchObject({ modelProvider: claude });
     await expect(
       resolver({
-        codex: {
-          loggedIn: true,
-          quotaExhausted: true,
-          solAccess: true,
-          lunaAccess: true,
-        },
+        openai: availabilityOf("usage_limit_reached"),
       }).getModelProvider({ tier: "large" }),
     ).resolves.toMatchObject({ modelProvider: claude });
   });
@@ -481,10 +468,10 @@ describe("ModelResolver", () => {
     });
     await expect(
       resolver({
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        openai: availabilityOf("unauthorized"),
       }).getModelProvider({ tier: "small", providerId: "openai" }),
     ).rejects.toMatchObject({
-      message: "Selected model provider is unavailable: Codex is not signed in",
+      message: "Selected model provider is unavailable: Codex (ChatGPT) is not signed in",
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
@@ -494,25 +481,22 @@ describe("ModelResolver", () => {
   it("names the usage limit and when it ends for a pinned provider", async () => {
     // Summoned agents and apps receive only the message, so the cause has to
     // survive without the structured reason.
-    const codexState = {
-      loggedIn: true,
-      quotaExhausted: true,
-      solAccess: true,
-      lunaAccess: true,
-    };
     await expect(
       resolver({
-        codex: { ...codexState, quotaExhaustedUntil: "2026-10-21T14:59:00.000Z" },
+        openai: availabilityOf("usage_limit_reached", {}, "2026-10-21T14:59:00.000Z"),
       }).getModelProvider({ tier: "large", providerId: "openai" }),
     ).rejects.toMatchObject({
       message:
-        "Selected model provider is unavailable: Codex has reached its usage limit until 2026-10-21T14:59:00.000Z",
+        "Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit until 2026-10-21T14:59:00.000Z",
       reason: "quota_exhausted",
     });
     await expect(
-      resolver({ codex: codexState }).getModelProvider({ tier: "large", providerId: "openai" }),
+      resolver({
+        openai: { state: "usage_limit_reached", account: { loggedIn: true } },
+      }).getModelProvider({ tier: "large", providerId: "openai" }),
     ).rejects.toMatchObject({
-      message: "Selected model provider is unavailable: Codex has reached its usage limit",
+      message:
+        "Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit",
       reason: "quota_exhausted",
     });
   });
@@ -529,7 +513,7 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-sol" });
 
     const unavailable = resolver({
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
       unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
@@ -561,12 +545,7 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-luna" });
 
     const unavailable = resolver({
-      codex: {
-        loggedIn: true,
-        quotaExhausted: false,
-        solAccess: false,
-        lunaAccess: false,
-      },
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
       unavailable.getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
@@ -577,25 +556,20 @@ describe("ModelResolver", () => {
   });
 
   it("classifies an unavailable explicit provider and refreshes it asynchronously", async () => {
-    const value: AIToolStateValue = {
-      codex: {
-        loggedIn: false,
-        quotaExhausted: false,
-        solAccess: true,
-        lunaAccess: true,
-      },
-      claude: { loggedIn: true, quotaExhausted: false },
+    const value: ModelAvailabilityState = {
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("available"),
     };
     let finishRefresh!: () => void;
     const refresh = rs.fn(
       () =>
-        new Promise<AIToolStateValue>((resolve) => {
-          finishRefresh = () => resolve(value);
+        new Promise<void>((resolve) => {
+          finishRefresh = () => resolve();
         }),
     );
     const r = createModelResolver({
       providers: [claude, codex],
-      aiToolState: { get: () => value, refresh },
+      availability: { read: () => value, refresh },
     });
 
     await expect(
@@ -610,13 +584,13 @@ describe("ModelResolver", () => {
   });
 
   it("distinguishes quota exhaustion from a missing login", async () => {
-    const value: AIToolStateValue = {
-      codex: { loggedIn: true, quotaExhausted: true, solAccess: true, lunaAccess: true },
-      claude: { loggedIn: true, quotaExhausted: false },
+    const value: ModelAvailabilityState = {
+      openai: availabilityOf("usage_limit_reached"),
+      anthropic: availabilityOf("available"),
     };
     const r = createModelResolver({
       providers: [claude, codex],
-      aiToolState: { get: () => value, refresh: async () => value },
+      availability: fakeAvailability(() => value),
     });
 
     await expect(
@@ -630,13 +604,8 @@ describe("ModelResolver", () => {
 
   it("reports quota exhaustion when every connected provider is exhausted", async () => {
     const r = resolver({
-      codex: {
-        loggedIn: true,
-        quotaExhausted: true,
-        solAccess: true,
-        lunaAccess: true,
-      },
-      claude: { loggedIn: true, quotaExhausted: true },
+      openai: availabilityOf("usage_limit_reached"),
+      anthropic: availabilityOf("usage_limit_reached"),
     });
     await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
       message: "All connected model providers have reached their usage limits",
@@ -648,17 +617,11 @@ describe("ModelResolver", () => {
   it("keeps Claude API-key-backed providers available despite stale quota state", async () => {
     await expect(
       resolver({
-        codex: {
-          loggedIn: false,
-          quotaExhausted: false,
-          solAccess: false,
-          lunaAccess: false,
-        },
-        claude: {
-          loggedIn: true,
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("available", {
           authMethod: "stored-compatible",
-          quotaExhausted: true,
-        },
+          usageLimited: false,
+        }),
       }).getModelProvider({ tier: "large" }),
     ).resolves.toMatchObject({ modelProvider: claude });
   });
@@ -687,15 +650,15 @@ describe("ModelResolver", () => {
   });
 
   it("fails an exact request closed when its provider is logged out, and refreshes it", async () => {
-    const value: AIToolStateValue = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    const value: ModelAvailabilityState = {
+      openai: availabilityOf("unauthorized"),
       // The other provider is fully usable — an exact request must not substitute it.
-      claude: { loggedIn: true, quotaExhausted: false },
+      anthropic: availabilityOf("available"),
     };
-    const refresh = rs.fn(async () => value);
+    const refresh = rs.fn(async () => {});
     const r = createModelResolver({
       providers: [claude, codex],
-      aiToolState: { get: () => value, refresh },
+      availability: { read: () => value, refresh },
     });
 
     await expect(
@@ -711,7 +674,7 @@ describe("ModelResolver", () => {
   it("fails an exact request closed on quota exhaustion", async () => {
     await expect(
       resolver({
-        claude: { loggedIn: true, quotaExhausted: true },
+        anthropic: availabilityOf("usage_limit_reached"),
       }).getModelProvider({ exact: { providerId: "anthropic", model: "claude-sonnet-5" } }),
     ).rejects.toMatchObject({
       code: "model_provider_unavailable",
@@ -726,7 +689,7 @@ describe("ModelResolver", () => {
     rs.useFakeTimers({ shouldAdvanceTime: false });
     rs.setSystemTime(now);
     try {
-      const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => ({
+      const claudeUsage = rs.fn<() => Promise<ModelAccountUsage | null>>(async () => ({
         checkedAt: new Date().toISOString(),
         source: "test",
         error: "Claude usage request failed with HTTP 429",
@@ -736,23 +699,29 @@ describe("ModelResolver", () => {
         source: "test",
         fiveHour: { usedPercent: 100, resetsAt },
       });
-      const aiToolState = createAIToolState({
-        probes: {
-          codexStatus: async () => ({ loggedIn: false }),
-          codexUsage: async () => null,
-          claudeStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
-          claudeUsage,
-        },
+      const codexAccount: ModelAccount = {
+        availability: async () => ({ state: "unauthorized", account: { loggedIn: false } }),
+        revoke: async () => {},
+        onChanged: () => () => {},
+        close: () => {},
+      };
+      const claudeAccount = new ClaudeAccount({
+        env: {},
+        readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+        readUsage: claudeUsage,
+      });
+      const availability = createModelAvailability({
+        accounts: { openai: codexAccount, anthropic: claudeAccount },
         startRefresh: false,
         refreshIntervalMs: null,
       });
-      await aiToolState.refresh("anthropic");
-      let failureRefresh: Promise<AIToolStateValue> | undefined;
+      await availability.refresh("anthropic");
+      let failureRefresh: Promise<void> | undefined;
       const r = createModelResolver({
         providers: [claude, codex],
-        aiToolState: {
-          get: aiToolState.get,
-          refresh: (provider) => (failureRefresh = aiToolState.refresh(provider)),
+        availability: {
+          read: availability.read,
+          refresh: (provider) => (failureRefresh = availability.refresh(provider)),
         },
       });
       const request = { exact: { providerId: "anthropic" as const, model: "claude-sonnet-5-5" } };
@@ -782,7 +751,7 @@ describe("ModelResolver", () => {
 
   it("denies an exact request for a model whose access was lost", async () => {
     const noEntitlements = resolver({
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
       noEntitlements.getModelProvider({ exact: { providerId: "anthropic", model: "gpt-6-sol" } }),
@@ -864,13 +833,8 @@ describe("ModelResolver", () => {
 
   it("reports no available provider when every provider is logged out", async () => {
     const r = resolver({
-      codex: {
-        loggedIn: false,
-        quotaExhausted: false,
-        solAccess: true,
-        lunaAccess: true,
-      },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: availabilityOf("unauthorized"),
+      anthropic: availabilityOf("unauthorized"),
     });
     await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
       message: "No model provider is available",

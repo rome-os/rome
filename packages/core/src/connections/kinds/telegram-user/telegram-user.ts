@@ -1,12 +1,12 @@
-import { Api, TelegramClient } from "telegram";
+import type { Api, TelegramClient } from "telegram";
 import {
   ALL_ATTACHMENT_TYPES,
   attachmentsToSend,
   numericReplyTo,
   textToSend,
 } from "../../outbound/send-refusals.js";
-import { NewMessage, type NewMessageEvent } from "telegram/events/NewMessage.js";
-import { StringSession } from "telegram/sessions/StringSession.js";
+import type { NewMessageEvent } from "telegram/events/NewMessage.js";
+import type { StringSession } from "telegram/sessions/StringSession.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
@@ -17,6 +17,24 @@ import {
   MAX_ATTACHMENT_BYTES,
   saveIncomingAttachmentPayloads,
 } from "../../inbound/attachment-files.js";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+
+// GramJS loads when a Telegram account first connects, not with every boot.
+const telegram = requireOnFirstUse<typeof import("telegram")>("telegram");
+const newMessageModule = requireOnFirstUse<typeof import("telegram/events/NewMessage.js")>(
+  "telegram/events/NewMessage.js",
+);
+
+// GramJS modules import each other in a cycle that only resolves when the
+// package root loads first, so a submodule never loads ahead of it.
+function newMessageEvents(): typeof import("telegram/events/NewMessage.js") {
+  telegram();
+  return newMessageModule();
+}
+
+function stringSessions(): typeof import("telegram").sessions {
+  return telegram().sessions;
+}
 
 const log = createLogger("telegram-user");
 type SimpleEntity = string | number;
@@ -166,7 +184,7 @@ export class TelegramUserAdapter {
           });
         });
       },
-      new NewMessage({ incoming: true }),
+      new (newMessageEvents().NewMessage)({ incoming: true }),
     );
     log.info("telegram user adapter started", { userId: this.settings.userId });
   }
@@ -236,7 +254,7 @@ export class TelegramUserAdapter {
    *  GramJS message carries one media payload. */
   async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
     const event = message.raw;
-    if (message.attachments.length === 0 || !(event instanceof Api.Message)) {
+    if (message.attachments.length === 0 || !(event instanceof telegram().Api.Message)) {
       return message.attachments;
     }
 
@@ -388,21 +406,21 @@ class TelegramUserLogin implements TelegramUserLoginHandle {
   async submitCode(code: string): Promise<TelegramUserLoginOutcome> {
     try {
       const result = await this.client.invoke(
-        new Api.auth.SignIn({
+        new (telegram().Api.auth.SignIn)({
           phoneNumber: this.phoneNumber,
           phoneCodeHash: this.phoneCodeHash,
           phoneCode: code,
         }),
       );
 
-      if (result instanceof Api.auth.AuthorizationSignUpRequired) {
+      if (result instanceof telegram().Api.auth.AuthorizationSignUpRequired) {
         throw new TelegramUserAuthError("Telegram signup is not supported by Rome", 400);
       }
 
       return { status: "connected", account: this.finalize(result.user) };
     } catch (err) {
       if (isTelegramError(err, "SESSION_PASSWORD_NEEDED")) {
-        const password = await this.client.invoke(new Api.account.GetPassword());
+        const password = await this.client.invoke(new (telegram().Api.account.GetPassword)());
         return { status: "password_required", passwordHint: password.hint ?? null };
       }
       throw toTelegramUserAuthError(err, "Failed to complete Telegram user login");
@@ -445,7 +463,7 @@ class TelegramUserLogin implements TelegramUserLoginHandle {
   /** Serialize the authorized client + session into the connected-account payload
    *  the terminal grant records (credential material + profile). */
   private finalize(user: Api.TypeUser): TelegramUserSettings {
-    if (!(user instanceof Api.User)) {
+    if (!(user instanceof telegram().Api.User)) {
       throw new TelegramUserAuthError("Telegram login did not return a user account");
     }
     const names = [user.firstName, user.lastName].filter(Boolean);
@@ -485,8 +503,8 @@ function createTelegramClientWithSession(
   apiHash: string,
   sessionString: string,
 ): { client: TelegramClient; session: StringSession } {
-  const session = new StringSession(sessionString);
-  const client = new TelegramClient(session, apiId, apiHash, {
+  const session = new (stringSessions().StringSession)(sessionString);
+  const client = new (telegram().TelegramClient)(session, apiId, apiHash, {
     connectionRetries: 5,
   });
   return { client, session };
@@ -501,13 +519,13 @@ function entityFromThreadId(threadId: string): SimpleEntity {
 }
 
 function peerToThreadId(peer: Api.TypePeer | undefined): string {
-  if (peer instanceof Api.PeerUser) {
+  if (peer instanceof telegram().Api.PeerUser) {
     return peer.userId.toString();
   }
-  if (peer instanceof Api.PeerChat) {
+  if (peer instanceof telegram().Api.PeerChat) {
     return `-${peer.chatId.toString()}`;
   }
-  if (peer instanceof Api.PeerChannel) {
+  if (peer instanceof telegram().Api.PeerChannel) {
     return `-100${peer.channelId.toString()}`;
   }
   return "unknown";
@@ -515,18 +533,21 @@ function peerToThreadId(peer: Api.TypePeer | undefined): string {
 
 function extractTelegramAttachments(media: Api.TypeMessageMedia | undefined): Attachment[] {
   if (!media) return [];
-  if (media instanceof Api.MessageMediaPhoto) {
+  if (media instanceof telegram().Api.MessageMediaPhoto) {
     return [{ type: "image" }];
   }
-  if (media instanceof Api.MessageMediaDocument) {
+  if (media instanceof telegram().Api.MessageMediaDocument) {
     if (media.video || media.round) return [{ type: "video" }];
     if (media.voice) return [{ type: "audio" }];
     return [{ type: "document" }];
   }
-  if (media instanceof Api.MessageMediaGeo || media instanceof Api.MessageMediaGeoLive) {
+  if (
+    media instanceof telegram().Api.MessageMediaGeo ||
+    media instanceof telegram().Api.MessageMediaGeoLive
+  ) {
     return [{ type: "location" }];
   }
-  if (media instanceof Api.MessageMediaContact) {
+  if (media instanceof telegram().Api.MessageMediaContact) {
     return [{ type: "contact" }];
   }
   return [];
@@ -534,7 +555,10 @@ function extractTelegramAttachments(media: Api.TypeMessageMedia | undefined): At
 
 function telegramUserMediaMimeType(message: Api.Message): string | undefined {
   const media = message.media;
-  if (media instanceof Api.MessageMediaDocument && media.document instanceof Api.Document) {
+  if (
+    media instanceof telegram().Api.MessageMediaDocument &&
+    media.document instanceof telegram().Api.Document
+  ) {
     return media.document.mimeType;
   }
   return undefined;
@@ -542,22 +566,31 @@ function telegramUserMediaMimeType(message: Api.Message): string | undefined {
 
 function telegramUserMediaFileName(message: Api.Message): string | undefined {
   const media = message.media;
-  if (!(media instanceof Api.MessageMediaDocument) || !(media.document instanceof Api.Document)) {
+  if (
+    !(media instanceof telegram().Api.MessageMediaDocument) ||
+    !(media.document instanceof telegram().Api.Document)
+  ) {
     return undefined;
   }
   const attr = media.document.attributes.find(
     (value): value is Api.DocumentAttributeFilename =>
-      value instanceof Api.DocumentAttributeFilename,
+      value instanceof telegram().Api.DocumentAttributeFilename,
   );
   return attr?.fileName;
 }
 
 function telegramUserMediaSizeBytes(message: Api.Message): number | undefined {
   const media = message.media;
-  if (media instanceof Api.MessageMediaDocument && media.document instanceof Api.Document) {
+  if (
+    media instanceof telegram().Api.MessageMediaDocument &&
+    media.document instanceof telegram().Api.Document
+  ) {
     return numericTelegramSize(media.document.size);
   }
-  if (media instanceof Api.MessageMediaPhoto && media.photo instanceof Api.Photo) {
+  if (
+    media instanceof telegram().Api.MessageMediaPhoto &&
+    media.photo instanceof telegram().Api.Photo
+  ) {
     return maxTelegramPhotoSize(media.photo.sizes);
   }
   return undefined;

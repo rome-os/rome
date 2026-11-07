@@ -6,6 +6,7 @@ import type {
   ImageProviderAvailability,
   ImageProviderGenerateResult,
 } from "@rome-os/app-runtime";
+import type { ProviderAvailability } from "../../agent/index.js";
 import { adhocSessionKey } from "../../core/agent-session-key.js";
 import { createLogger } from "../../logger.js";
 
@@ -93,14 +94,14 @@ function runFailureResult(message: string, code?: string): ImageProviderGenerate
 export interface CodexImageProviderDeps {
   agentRunner: AgentRunnerInterface;
   /**
-   * Snapshot of the Codex account state (`AiToolState.get().codex`) — the same
-   * source of truth the model resolver gates on, so availability never needs a
-   * separate probe. Optional: action workers have no AiToolState, so their
-   * provider reports available and relies on `generate` failing closed via the
-   * pinned agent's model resolution, whose error streams back over RPC with a
-   * machine-readable code.
+   * The Codex provider's availability, the same the model resolver gates on,
+   * so this never needs a read of its own. Undefined while unread, which is
+   * treated as available. Optional: action workers have no availability, so
+   * their provider reports available and relies on `generate` failing closed
+   * via the pinned agent's model resolution, whose error streams back over
+   * RPC with a machine-readable code.
    */
-  getCodexState?: () => { loggedIn?: boolean; quotaExhausted: boolean };
+  getCodexAvailability?: () => ProviderAvailability | undefined;
 }
 
 /**
@@ -116,26 +117,23 @@ export function createCodexImageGenerationProvider(
     displayName: "Codex (ChatGPT)",
 
     async availability(): Promise<ImageProviderAvailability> {
-      const state = deps.getCodexState?.();
-      if (!state) return { available: true };
-      // Reads the ChatGPT login, not the resolver's Rome credits view: the
-      // credits gateway rejects hosted image generation. An undefined
-      // loggedIn means "not probed yet" and is treated optimistically.
-      if (state.loggedIn === false) {
+      const codex = deps.getCodexAvailability?.();
+      // Reads the ChatGPT account, not the resolver's Rome credits view: the
+      // credits gateway rejects hosted image generation. An unread account is
+      // treated as available.
+      if (!codex || codex.state === "available") return { available: true };
+      if (codex.state !== "usage_limit_reached") {
         return {
           available: false,
           reason: "the Codex (ChatGPT) account is not connected",
           remedy: CONNECT_REMEDY,
         };
       }
-      if (state.quotaExhausted) {
-        return {
-          available: false,
-          reason: "the Codex (ChatGPT) account has hit its usage limit",
-          remedy: "Wait for the Codex usage limit to reset, then retry.",
-        };
-      }
-      return { available: true };
+      return {
+        available: false,
+        reason: "the Codex (ChatGPT) account has hit its usage limit",
+        remedy: "Wait for the Codex usage limit to reset, then retry.",
+      };
     },
 
     async generate(

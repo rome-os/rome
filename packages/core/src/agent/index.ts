@@ -15,8 +15,53 @@ export {
   type TurnCheckpoint,
   type TurnRun,
 } from "./domain/session.js";
+export type {
+  ModelAccount,
+  ModelAccountAuthorization,
+  ModelAccountStatus,
+  ModelAccountUsage,
+  ModelAuthorizationMode,
+  ModelAuthorizationState,
+  ModelBrowserAuthorization,
+  ModelDeviceAuthorization,
+  ModelPlanType,
+  ModelUsageWindow,
+} from "./domain/model-account.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
+export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export type { ModelTier } from "./domain/model-tier.js";
+export { matchesModelAlias, stripLegacyReasoningSuffix } from "./domain/model-alias.js";
+export {
+  CODEX_LUNA_MODEL,
+  CODEX_SOL_MODEL,
+  CODEX_TERRA_MODEL,
+  isModelSelectionId,
+  MODEL_SELECTIONS,
+  type ModelSelection,
+  type ModelSelectionId,
+} from "./domain/model-selection.js";
+export {
+  accountAllowsModel,
+  currentAvailability,
+  providerAuthorized,
+  providerUsable,
+  type AccountedProviderId,
+  type ModelAvailabilityState,
+  type ProviderAvailability,
+  type ProviderAvailabilityState,
+} from "./domain/provider-availability.js";
+export {
+  sameProviderTarget,
+  soleProviderAtUsageLimit,
+  usageSwitchTarget,
+  type UsageSwitchTarget,
+} from "./domain/usage-switch.js";
+export {
+  createModelAvailability,
+  type CreateModelAvailabilityOptions,
+  type ModelAvailability,
+  type ModelAvailabilityChange,
+} from "./application/model-availability.js";
 export type {
   McpServerConfig,
   ModelFunding,
@@ -43,18 +88,11 @@ export type {
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 
-// The model port's adapters, as the composition root wires them. The Codex
-// account and credits-proxy members below are what callers outside the
-// context reach for today; they narrow as the port is reshaped.
+// The model port's adapters, for the composition root alone. Everything else
+// reaches the context through the ports above.
 export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js";
+export { ClaudeAccount } from "./infrastructure/model/anthropic/account.js";
 export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
-export {
-  SharedCodexAccountService,
-  type CodexAccountService,
-} from "./infrastructure/model/codex/account-service.js";
-export {
-  ROME_CREDITS_PROXY_KEY,
-  ROME_CREDITS_PROXY_PATH,
-} from "./infrastructure/model/codex/rome-credits-provider.js";
-export { stripLegacyReasoningSuffix } from "./infrastructure/model/codex/common.js";
+export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";
+export { romeCreditsProxyRoutes } from "./infrastructure/model/codex/rome-credits-proxy-route.js";

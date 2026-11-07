@@ -12,6 +12,7 @@ import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import * as anthropicLoginModule from "../../lib/anthropic-login.js" with {
   rstest: "importActual",
 };
+import { availabilityOf } from "../../test/kit/model-availability.js";
 
 const {
   isAnthropicAuthRevokedMock,
@@ -72,21 +73,20 @@ describe("AI tools status API", () => {
     try {
       const deps = await buildTestDeps(testDb.db);
       const refreshed = {
-        codex: {
-          loggedIn: true,
-          quotaExhausted: false,
-          solAccess: true,
-          lunaAccess: false,
-        },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("unauthorized"),
       };
-      const refresh = rs.spyOn(deps.aiToolState, "refresh").mockResolvedValue(refreshed);
+      const refresh = rs.spyOn(deps.modelAvailability, "refresh").mockResolvedValue(undefined);
+      rs.spyOn(deps.modelAvailability, "read").mockReturnValue(refreshed);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const res = await app.request("/ai-tools/refresh", { method: "POST" });
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual(refreshed);
+      expect(await res.json()).toEqual({
+        claude: { loggedIn: false, quotaExhausted: false, anthropicCompatible: null },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      });
       // No `?provider` → a full refresh (undefined is the "all providers" case).
       expect(refresh).toHaveBeenCalledWith(undefined);
     } finally {
@@ -98,9 +98,7 @@ describe("AI tools status API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const refresh = rs
-        .spyOn(deps.aiToolState, "refresh")
-        .mockResolvedValue(deps.aiToolState.get());
+      const refresh = rs.spyOn(deps.modelAvailability, "refresh").mockResolvedValue(undefined);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       await app.request("/ai-tools/refresh?provider=anthropic", { method: "POST" });
@@ -151,7 +149,7 @@ describe("AI tools status API", () => {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
       const deps = await buildTestDeps(testDb.db);
-      await deps.aiToolState.refresh();
+      await deps.modelAvailability.refresh();
       await fs.writeFile(logPath, "");
       const app = new Hono().route("/", aiToolsRoutes(deps));
       const res = await app.request("/ai-tools/status");
@@ -210,7 +208,7 @@ describe("AI tools status API", () => {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
       const deps = await buildTestDeps(testDb.db);
-      await deps.aiToolState.refresh();
+      await deps.modelAvailability.refresh();
       const app = new Hono().route("/", aiToolsRoutes(deps));
       const res = await app.request("/ai-tools/status");
       expect(res.status).toBe(200);
@@ -274,7 +272,7 @@ describe("AI tools status API", () => {
       process.env.ROME_CODEX_BIN = join(dir, "codex");
 
       const deps = await buildTestDeps(testDb.db);
-      await deps.aiToolState.refresh();
+      await deps.modelAvailability.refresh();
       const app = new Hono().route("/", aiToolsRoutes(deps));
       const res = await app.request("/ai-tools/status");
       expect(res.status).toBe(200);
@@ -306,9 +304,12 @@ describe("Codex device-code login API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const startDeviceLogin = rs.spyOn(deps.codexAccountService, "startDeviceLogin");
-      const cancelLogin = rs.spyOn(deps.codexAccountService, "cancelLogin");
-      rs.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
+      const startDeviceAuthorization = rs.spyOn(
+        deps.codexAccountService,
+        "startDeviceAuthorization",
+      );
+      const cancelAuthorization = rs.spyOn(deps.codexAccountService, "cancelAuthorization");
+      rs.spyOn(deps.codexAccountService, "authorizationState").mockReturnValue({
         running: true,
         mode: "device",
         userCode: "TEST-CODE",
@@ -323,7 +324,7 @@ describe("Codex device-code login API", () => {
         userCode: "TEST-CODE",
         verificationUrl: "https://auth.openai.com/codex/device",
       });
-      expect(startDeviceLogin).toHaveBeenCalledTimes(1);
+      expect(startDeviceAuthorization).toHaveBeenCalledTimes(1);
 
       const status = await app.request("/ai-tools/status");
       expect(status.status).toBe(200);
@@ -336,7 +337,7 @@ describe("Codex device-code login API", () => {
       const cancel = await app.request("/ai-tools/codex/device-login/cancel", { method: "POST" });
       expect(cancel.status).toBe(200);
       expect(await cancel.json()).toEqual({ ok: true });
-      expect(cancelLogin).toHaveBeenCalledTimes(1);
+      expect(cancelAuthorization).toHaveBeenCalledTimes(1);
     } finally {
       testDb.close();
     }
@@ -348,7 +349,7 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      rs.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
+      rs.spyOn(deps.codexAccountService, "authorizationState").mockReturnValue({
         running: false,
         mode: null,
         userCode: null,
@@ -375,7 +376,10 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const startBrowserLogin = rs.spyOn(deps.codexAccountService, "startBrowserLogin");
+      const startBrowserAuthorization = rs.spyOn(
+        deps.codexAccountService,
+        "startBrowserAuthorization",
+      );
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = await app.request("/ai-tools/codex/login/start", { method: "POST" });
@@ -383,7 +387,7 @@ describe("Codex shared account routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ started: true });
       expect(closeAuthTabsMock).toHaveBeenCalledTimes(1);
-      expect(startBrowserLogin).toHaveBeenCalledTimes(1);
+      expect(startBrowserAuthorization).toHaveBeenCalledTimes(1);
       expect(openServerBrowserTabMock).toHaveBeenCalledWith("https://auth.openai.com/test");
     } finally {
       testDb.close();
@@ -394,10 +398,8 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const logout = rs.spyOn(deps.codexAccountService, "logout");
-      const refresh = rs
-        .spyOn(deps.aiToolState, "refresh")
-        .mockResolvedValue(deps.aiToolState.get());
+      const logout = rs.spyOn(deps.codexAccountService, "revoke");
+      const refresh = rs.spyOn(deps.modelAvailability, "refresh").mockResolvedValue(undefined);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = await app.request("/ai-tools/codex/logout", { method: "POST" });
@@ -560,11 +562,10 @@ describe("AI tools Anthropic-compatible credentials API", () => {
     const gate = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
-    rs.spyOn(deps.aiToolState, "refresh").mockImplementation(async (provider) => {
+    rs.spyOn(deps.modelAvailability, "refresh").mockImplementation(async (provider) => {
       expect(provider).toBe("anthropic");
       refreshStarted();
       await gate;
-      return deps.aiToolState.get();
     });
 
     const response = Promise.resolve(
@@ -635,10 +636,11 @@ describe("Claude logout API", () => {
       const refreshGate = new Promise<void>((resolve) => {
         releaseRefresh = resolve;
       });
-      const refreshSpy = rs.spyOn(deps.aiToolState, "refresh").mockImplementation(async () => {
-        await refreshGate;
-        return deps.aiToolState.get();
-      });
+      const refreshSpy = rs
+        .spyOn(deps.modelAvailability, "refresh")
+        .mockImplementation(async () => {
+          await refreshGate;
+        });
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = Promise.resolve(app.request("/ai-tools/claude/logout", { method: "POST" }));

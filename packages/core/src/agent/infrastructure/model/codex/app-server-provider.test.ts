@@ -207,6 +207,18 @@ async function collectUntilTerminal(session: ModelSession): Promise<ModelSession
 }
 
 describe("CodexAppServerProvider", () => {
+  it("warms its app-server on construction unless told not to", () => {
+    const manager = new CodexAppServerManager();
+    const warmup = rs.spyOn(manager, "warmup").mockResolvedValue(undefined);
+
+    new CodexAppServerProvider({ appServerManager: manager, warmup: false });
+    expect(warmup).not.toHaveBeenCalled();
+
+    new CodexAppServerProvider({ appServerManager: manager });
+    expect(warmup).toHaveBeenCalledTimes(1);
+    manager.close();
+  });
+
   it("steers the owned native turn, correlating consumption separately from RPC acceptance", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };
@@ -2694,8 +2706,8 @@ describe("CodexAppServerProvider", () => {
   });
 
   it("tags a usage-limit turn failure with code:usage_limit (structured codexErrorInfo)", async () => {
-    const onQuotaExhausted = rs.fn();
-    const provider = new CodexAppServerProvider({ onQuotaExhausted });
+    const refusedTurn = rs.fn();
+    const provider = new CodexAppServerProvider({ account: { refusedTurn } });
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
@@ -2729,7 +2741,7 @@ describe("CodexAppServerProvider", () => {
       error: "You've hit your usage limit. Try again in 3 hours.",
       code: "usage_limit",
     });
-    expect(onQuotaExhausted).toHaveBeenCalledTimes(1);
+    expect(refusedTurn).toHaveBeenCalledWith({ kind: "usage" });
     await session.close();
   });
 
@@ -2907,9 +2919,11 @@ describe("CodexAppServerProvider", () => {
       markerPersisted = true;
     });
     const provider = new CodexAppServerProvider({
-      onAuthRevoked: async () => {
-        expect(markerPersisted).toBe(true);
-        authStateMarked = true;
+      account: {
+        refusedTurn: () => {
+          expect(markerPersisted).toBe(true);
+          authStateMarked = true;
+        },
       },
     });
     requestMock.mockImplementation(async (method: string) => {
@@ -2952,10 +2966,14 @@ describe("CodexAppServerProvider", () => {
 
   it("finishes marking revoked credentials before reporting them after turn/start fails", async () => {
     let authStateMarked = false;
+    markCodexAuthRevokedMock.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
     const provider = new CodexAppServerProvider({
-      onAuthRevoked: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        authStateMarked = true;
+      account: {
+        refusedTurn: () => {
+          authStateMarked = true;
+        },
       },
     });
     requestMock.mockImplementation(async (method: string) => {
@@ -3013,26 +3031,26 @@ describe("CodexAppServerProvider", () => {
     }
 
     it("flags the login for re-login while ChatGPT pays", async () => {
-      const onAuthRevoked = rs.fn(async () => {});
+      const refusedTurn = rs.fn();
       const error = await runFailedTurn(
-        new CodexAppServerProvider({ onAuthRevoked, isUsingRomeCredits: () => false }),
+        new CodexAppServerProvider({ account: { refusedTurn }, isUsingRomeCredits: () => false }),
       );
 
       expect(error).toMatchObject({ type: "error", error: WORKSPACE_401, code: "auth_revoked" });
       expect(markCodexAuthRevokedMock).toHaveBeenCalledTimes(1);
-      expect(onAuthRevoked).toHaveBeenCalledTimes(1);
+      expect(refusedTurn).toHaveBeenCalledWith({ kind: "credential" });
     });
 
     it("leaves the login alone while Rome credits pay", async () => {
-      const onAuthRevoked = rs.fn(async () => {});
+      const refusedTurn = rs.fn();
       const error = await runFailedTurn(
-        new CodexAppServerProvider({ onAuthRevoked, isUsingRomeCredits: () => true }),
+        new CodexAppServerProvider({ account: { refusedTurn }, isUsingRomeCredits: () => true }),
       );
 
       expect(error).toMatchObject({ type: "error", error: WORKSPACE_401 });
       expect(error).not.toMatchObject({ code: "auth_revoked" });
       expect(markCodexAuthRevokedMock).not.toHaveBeenCalled();
-      expect(onAuthRevoked).not.toHaveBeenCalled();
+      expect(refusedTurn).not.toHaveBeenCalled();
     });
   });
 

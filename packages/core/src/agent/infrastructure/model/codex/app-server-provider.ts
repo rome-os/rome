@@ -79,12 +79,9 @@ import {
   type DynamicToolCallResponse,
 } from "./app-server-protocol.js";
 import { buildTurnInput } from "./turn-input.js";
-import {
-  buildOpenAiAccounting,
-  calculateOpenAiCostUsd,
-  stripLegacyReasoningSuffix,
-  type Usage,
-} from "./common.js";
+import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
+import type { LearnsRefusedTurns } from "../refused-turn.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -440,10 +437,14 @@ interface ActiveTurn {
 
 interface CodexAppServerProviderOptions {
   appServerManager?: CodexAppServerManager;
-  /** Update runtime auth state before an auth-revoked terminal is exposed. */
-  onAuthRevoked?: () => Promise<void> | void;
-  /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
-  onQuotaExhausted?: () => void;
+  /** The account this provider runs under, told of each turn the provider refuses. */
+  account?: LearnsRefusedTurns;
+  /**
+   * Starts the app-server on construction so the first turn finds it ready.
+   * Defaults to true. Rome's boot passes false and warms the shared manager
+   * once it has started, so the spawn does not compete with boot for CPU.
+   */
+  warmup?: boolean;
   /** Only the Rome credits payer may classify its 402 as exhausted credits, and
    *  only the ChatGPT payer may mark the saved login as needing re-login. */
   isUsingRomeCredits?: () => boolean;
@@ -506,9 +507,7 @@ function turnErrorInfo(
   };
 }
 
-async function persistCodexAuthRevoked(
-  onAuthRevoked: CodexAppServerProviderOptions["onAuthRevoked"],
-): Promise<void> {
+async function persistCodexAuthRevoked(account: LearnsRefusedTurns | undefined): Promise<void> {
   try {
     await markCodexAuthRevoked();
   } catch (err) {
@@ -516,13 +515,7 @@ async function persistCodexAuthRevoked(
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  try {
-    await onAuthRevoked?.();
-  } catch (err) {
-    log.warn("failed to update AI tool state after codex auth revocation", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  account?.refusedTurn({ kind: "credential" });
 }
 
 /**
@@ -578,13 +571,13 @@ function classifyCodexFailure(
     return { code: "transient" };
   }
   if (isCodexUsageLimitError(turnError)) {
-    options.onQuotaExhausted?.();
+    options.account?.refusedTurn({ kind: "usage" });
     return { code: "usage_limit" };
   }
   if (!options.isUsingRomeCredits?.() && isCodexAuthRevokedError(turnError)) {
     return {
       code: CODEX_AUTH_REVOKED_CODE,
-      pending: persistCodexAuthRevoked(options.onAuthRevoked),
+      pending: persistCodexAuthRevoked(options.account),
     };
   }
   const info = classifyCodexErrorInfo(turnError);
@@ -597,7 +590,6 @@ function classifyCodexFailure(
 export class CodexAppServerProvider implements ModelProvider {
   readonly id: ProviderId = "openai";
   private readonly liveThreads = new Set<LiveCodexThread>();
-  readonly displayName = "Codex (ChatGPT)";
   // Anthropic's set, so agent yamls stay provider-agnostic, plus ImageGeneration,
   // which only Codex provides.
   readonly builtinTools: ReadonlySet<string> = new Set([
@@ -618,11 +610,13 @@ export class CodexAppServerProvider implements ModelProvider {
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.appServerManager = options.appServerManager ?? new CodexAppServerManager();
-    void this.appServerManager.warmup().catch((err) => {
-      log.warn("codex app-server warmup failed", {
-        error: err instanceof Error ? err.message : String(err),
+    if (options.warmup !== false) {
+      void this.appServerManager.warmup().catch((err) => {
+        log.warn("codex app-server warmup failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
+    }
   }
 
   close(): void {
