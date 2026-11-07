@@ -388,14 +388,14 @@ final class DemoBackend: RomeBackend {
             "chat-research": ChatSession(id: "chat-research", name: "竞品定价调研", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: true),
             "chat-site": ChatSession(id: "chat-site", name: "官网首页双语文案", triggerKind: "concierge", running: true, lastTurnFailed: false, awaitingGuardian: false),
             "chat-notes": ChatSession(id: "chat-notes", name: "整理本周会议纪要", triggerKind: "concierge", running: true, lastTurnFailed: false, awaitingGuardian: false),
-            "chat-notion": ChatSession(id: "chat-notion", name: "同步 Notion 数据库", triggerKind: "concierge", running: false, lastTurnFailed: true, awaitingGuardian: false),
+            "chat-notion": ChatSession(id: "chat-notion", name: "同步 Notion 数据库：把客户、订单和每周报告三张表合到一起", triggerKind: "concierge", running: false, lastTurnFailed: true, awaitingGuardian: false),
             "chat-login": ChatSession(id: "chat-login", name: "修复登录页样式", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: false),
         ]
         running = ["chat-site": "turn-site", "chat-notes": "turn-notes"]
 
         topicChats = [
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
-            ConciergeChat(id: "topic-home", name: "家里装修", main: false, unread: 0),
+            ConciergeChat(id: "topic-home", name: "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
