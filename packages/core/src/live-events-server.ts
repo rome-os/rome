@@ -174,11 +174,18 @@ export function attachLiveEventsServer(
 
     const subscribe = (name: string) => {
       if (subscriptions.has(name)) return;
-      if (subscriptions.size >= MAX_SUBSCRIPTIONS_PER_SOCKET) {
+      const topic = parseTopic(name);
+      if (topic?.kind === "chat.watch") {
+        // A phone shows one chat, so its watch sits outside the cap: a new
+        // watch replaces the one before, and the cap never refuses it.
+        const held = [...subscriptions.keys()].find((key) =>
+          key.startsWith(CHAT_WATCH_TOPIC_PREFIX),
+        );
+        if (held) unsubscribe(held);
+      } else if (dataSubscriptions() >= MAX_SUBSCRIPTIONS_PER_SOCKET) {
         sendError("Too many subscriptions", name);
         return;
       }
-      const topic = parseTopic(name);
       if (!topic) {
         sendError("Unknown topic", name);
         return;
@@ -209,6 +216,9 @@ export function attachLiveEventsServer(
           sendError("Subscribe failed", name);
         });
     };
+
+    const dataSubscriptions = () =>
+      [...subscriptions.keys()].filter((key) => !key.startsWith(CHAT_WATCH_TOPIC_PREFIX)).length;
 
     const unsubscribe = (name: string) => {
       const entry = subscriptions.get(name);

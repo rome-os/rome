@@ -477,6 +477,34 @@ describe("live events WebSocket", () => {
     expect(activeSubscriptions).toBe(MAX_SUBSCRIPTIONS_PER_SOCKET);
   });
 
+  it("holds the phone's watch past the cap, one per socket", async () => {
+    const phone = await connect({ "x-rome-client": "phone" });
+    for (let i = 0; i < MAX_SUBSCRIPTIONS_PER_SOCKET; i++) {
+      await deps.webchatRepo.createSession(`sess-${i}`, `Chat ${i}`);
+      phone.send({ type: "subscribe", topic: `chat.session:sess-${i}` });
+    }
+    await phone.next((m) => m.type === "subscribed" && m.topic === "chat.session:sess-31");
+    await phone.subscribe("chat.watch:sess-0");
+    expect(phoneWatching.isWatching("sess-0")).toBe(true);
+
+    // A second watch replaces the first rather than adding to it.
+    await phone.subscribe("chat.watch:sess-1");
+    expect(phoneWatching.isWatching("sess-0")).toBe(false);
+    expect(phoneWatching.isWatching("sess-1")).toBe(true);
+    expect(phone.messages.some((m) => m.type === "error")).toBe(false);
+  });
+
+  it("never counts a watch unsubscribed before its check resolves", async () => {
+    await deps.webchatRepo.createSession("sess-a", "A");
+    const phone = await connect({ "x-rome-client": "phone" });
+    phone.send({ type: "subscribe", topic: "chat.watch:sess-a" });
+    phone.send({ type: "unsubscribe", topic: "chat.watch:sess-a" });
+    // Frames run in order, so this one resolving means the watch's check has too.
+    await phone.subscribe("chat.session:sess-a");
+    expect(phoneWatching.isWatching("sess-a")).toBe(false);
+    expect(phone.messages.some((m) => m.topic === "chat.watch:sess-a")).toBe(false);
+  });
+
   it("releases every source listener when the socket closes", async () => {
     await deps.webchatRepo.createSession("sess-a", "A");
     const client = await connect();
