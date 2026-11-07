@@ -12,5 +12,9 @@ or {
   JsModuleSource() as $s where {
     $s <: r"[\"'](?:\./\.\..*|.*/\./.*|(?:.*/)?(?:[^./\"'][^/]*|\.[^./][^/]*)/\.\.(?:/.*)?)[\"']",
     register_diagnostic(span=$s, message="Write this import path without `.` or `name/..` segments, so the boundary rules in biome.json can check it.")
+  },
+  `import($spec)` as $t where {
+    $spec <: r"[\"'](?:\./\.\..*|.*/\./.*|(?:.*/)?(?:[^./\"'][^/]*|\.[^./][^/]*)/\.\.(?:/.*)?)[\"']",
+    register_diagnostic(span=$spec, message="Write this import path without `.` or `name/..` segments, so the boundary rules in biome.json can check it.")
   }
 }

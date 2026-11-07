@@ -411,14 +411,7 @@
     },
     {
       "includes": ["packages/core/src/agent/**"],
-      "plugins": ["./biome-plugins/no-inline-import-type.grit"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noUnusedTemplateLiteral": "error"
-          }
-        }
-      }
+      "plugins": ["./biome-plugins/agent-internal-import-forms.grit"]
     }
   ]
 }
