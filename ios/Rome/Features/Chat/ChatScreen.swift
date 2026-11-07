@@ -510,16 +510,21 @@ struct TranscriptList<Row: View>: View {
                     Button {
                         scrollToBottom(proxy)
                     } label: {
+                        // Near-opaque like the composer, so a bubble behind
+                        // never reads through it.
                         Image(systemName: "arrow.down")
                             .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .frame(width: 40, height: 40)
-                            .glassSurface(Circle(), interactive: true)
+                            .background(Palette.elevated, in: Circle())
+                            .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                            .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
                     }
                     .buttonStyle(PressScaleStyle(scale: 0.9))
-                    .padding(.bottom, 8)
+                    // About 12 pt above the composer, with the list's own inset.
+                    .padding(.bottom, 4)
                     .accessibilityLabel("Scroll to the latest message")
                     .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }

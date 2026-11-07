@@ -21,13 +21,16 @@ struct GlassCircleButton<Label: View>: View {
 
 extension View {
     /// The system glass behind a floating control: Liquid Glass on iOS 26 and
-    /// later, a thin material with a hairline before it.
+    /// later, a thin material with a hairline before it. `frost` tints it with
+    /// the page's color, so text scrolling behind blurs out.
     @ViewBuilder
-    func glassSurface<S: InsettableShape>(_ shape: S, interactive: Bool = false) -> some View {
+    func glassSurface<S: InsettableShape>(_ shape: S, interactive: Bool = false, frost: Double = 0) -> some View {
         if #available(iOS 26, *) {
-            glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            let glass: Glass = frost > 0 ? .regular.tint(Palette.bg.opacity(frost)) : .regular
+            glassEffect(interactive ? glass.interactive() : glass, in: shape)
         } else {
-            background(.ultraThinMaterial, in: shape)
+            background(Palette.bg.opacity(frost), in: shape)
+                .background(frost > 0 ? .regularMaterial : .ultraThinMaterial, in: shape)
                 .overlay(shape.strokeBorder(Palette.hair, lineWidth: 0.5))
                 .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
         }
