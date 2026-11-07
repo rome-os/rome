@@ -76,7 +76,8 @@ A turn is one request to an agent plus the agent work that follows until the age
 **Contracts:**
 
 - Usage reporting counts the user inputs, assistant output, and trace evidence of one turn once, not once per input. A turn can consume more than one user input.
-- Failed and interrupted turns still count as turns.
+- A turn ends completed, failed, stopped or abandoned. A Rome stop (the user's Stop, or a `now` input superseding the turn) decides first, and the turn is stopped. Otherwise the terminal event decides: an error event fails the turn and a result completes it. A turn whose stream ends with no terminal event and no Rome stop is abandoned. On the wire these are `completed`, `error`, `interrupted` and `stopped`. The rule is `turnStatus` in [`packages/core/src/agent/domain/turn-end.ts`](../../packages/core/src/agent/domain/turn-end.ts).
+- Failed and stopped turns still count as turns.
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
 - A turn that a backend restart cuts off fails when Rome starts again, with an error that names the restart. Each subagent call the turn was still waiting on fails with the same error. The turn is not resumed. A turn that started more than a day before the most recent turn stays open.
@@ -124,7 +125,7 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 **Contracts:**
 
 - A turn's stream opens with its start event and closes with its end event.
-- A turn's stream carries exactly one terminal event, the result or error, before its end event. A turn that is interrupted, for example stopped by the user, can end with no terminal event, and the end event then reports how it ended.
+- A turn's stream carries exactly one terminal event, the result or error, before its end event. A turn that is stopped, for example by the user, can end with no terminal event, and the end event then reports how it ended.
 - The durable trace keeps every event of a turn except delta events and input-status events.
 - Delta events never open, close, or reorder a turn.
 

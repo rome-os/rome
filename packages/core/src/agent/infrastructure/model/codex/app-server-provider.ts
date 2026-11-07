@@ -97,7 +97,7 @@ import {
 } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./tool-result-error.js";
 import type { RomeToolResult } from "../../../domain/rome-tools.js";
-import { codexStop } from "../../../../core/stop-reason.js";
+import { codexStop } from "./stop.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
 import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
 import { CODEX_SHELL_ENV_EXCLUDE } from "./rome-credits-provider.js";
