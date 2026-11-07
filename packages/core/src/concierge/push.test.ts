@@ -52,9 +52,9 @@ describe("pushBody", () => {
 describe("ConciergePush", () => {
   it("pushes the first message of a turn with a level, once", async () => {
     const { push, sent } = pushWith();
-    push.said({ turnId: "t1", chatId: "c", text: "first", level: "active" });
-    push.said({ turnId: "t1", chatId: "c", text: "second", level: "active" });
-    push.said({ turnId: "t2", chatId: "c", text: "next turn", level: "passive" });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "second", level: "active" });
+    push.said({ turnId: "t2", chatId: "c", ownWords: "next turn", level: "passive" });
     await settle();
     expect(sent).toEqual([
       { body: "first", level: "active", chatId: "c" },
@@ -64,14 +64,14 @@ describe("ConciergePush", () => {
 
   it("pushes nothing for a turn without a level", async () => {
     const { push, sent } = pushWith();
-    push.said({ turnId: "t1", chatId: "c", text: "hi", level: undefined });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "hi", level: undefined });
     await settle();
     expect(sent).toEqual([]);
   });
 
   it("pushes nothing in quiet hours", async () => {
     const { push, sent } = pushWith({ quietUntil: Date.now() + 60_000 });
-    push.said({ turnId: "t1", chatId: "c", text: "hi", level: "active" });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "hi", level: "active" });
     await settle();
     expect(sent).toEqual([]);
   });
@@ -86,7 +86,7 @@ describe("ConciergePush", () => {
       },
     ]) {
       const { push } = pushWith({ outcome });
-      push.said({ turnId: "t1", chatId: "c", text: secret, level: "active" });
+      push.said({ turnId: "t1", chatId: "c", ownWords: secret, level: "active" });
       await settle();
     }
     expect(logged).toHaveBeenCalled();

@@ -79,7 +79,11 @@ export interface ConciergePushDeps {
 export interface SaidInTurn {
   turnId: string;
   chatId: string;
-  text: string;
+  /**
+   * The message in the Concierge's own words: what it wrote itself, never
+   * content it forwarded or quoted, which may hold a secret it would not repeat.
+   */
+  ownWords: string;
   /** The turn's push level; undefined for a turn the guardian started. */
   level: NotifyLevel | undefined;
 }
@@ -113,12 +117,12 @@ export class ConciergePush {
     );
   }
 
-  private async send({ turnId, chatId, text }: SaidInTurn, level: NotifyLevel): Promise<void> {
+  private async send({ turnId, chatId, ownWords }: SaidInTurn, level: NotifyLevel): Promise<void> {
     if ((await this.deps.quietUntil(this.now())) !== null) {
       log.info("concierge push held back by quiet hours", { turnId, chatId });
       return;
     }
-    const outcome = await this.deps.notify.send({ body: pushBody(text), level, chatId });
+    const outcome = await this.deps.notify.send({ body: pushBody(ownWords), level, chatId });
     // The outcome only: the body never reaches a log.
     log.info("concierge push", { turnId, chatId, level, outcome: outcome.kind });
   }
