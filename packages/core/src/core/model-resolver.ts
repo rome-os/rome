@@ -174,7 +174,7 @@ const PROVIDER_DISPLAY_NAMES: Record<ProviderId, string> = {
   mock: "Mock",
 };
 
-export function providerDisplayName(id: ProviderId): string {
+function providerDisplayName(id: ProviderId): string {
   return PROVIDER_DISPLAY_NAMES[id];
 }
 
