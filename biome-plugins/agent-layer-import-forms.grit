@@ -8,5 +8,9 @@ or {
   `import($spec)` as $t where {
     $spec <: r"`.*agent/(?:domain|application|infrastructure)/.*`",
     register_diagnostic(span=$t, message="Write this dynamic import's path as a string literal, so the boundary rules in biome.json can check it.")
+  },
+  JsModuleSource() as $s where {
+    $s <: r"[\"'](?:\./\.\..*|.*/\./.*|(?:.*/)?(?:[^./\"'][^/]*|\.[^./][^/]*)/\.\.(?:/.*)?)[\"']",
+    register_diagnostic(span=$s, message="Write this import path without `.` or `name/..` segments, so the boundary rules in biome.json can check it.")
   }
 }

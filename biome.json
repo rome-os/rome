@@ -265,7 +265,10 @@
                       "../application/**",
                       "@/agent/index",
                       "@/agent/index.*",
-                      "@/agent/application/**"
+                      "@/agent/application/**",
+                      "**/agent/index",
+                      "**/agent/index.*",
+                      "**/agent/application/**"
                     ],
                     "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
                   }
@@ -292,7 +295,10 @@
                       "../../application/**",
                       "@/agent/index",
                       "@/agent/index.*",
-                      "@/agent/application/**"
+                      "@/agent/application/**",
+                      "**/agent/index",
+                      "**/agent/index.*",
+                      "**/agent/application/**"
                     ],
                     "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
                   }
@@ -319,7 +325,10 @@
                       "../../../application/**",
                       "@/agent/index",
                       "@/agent/index.*",
-                      "@/agent/application/**"
+                      "@/agent/application/**",
+                      "**/agent/index",
+                      "**/agent/index.*",
+                      "**/agent/application/**"
                     ],
                     "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
                   }
@@ -346,7 +355,10 @@
                       "../../../../application/**",
                       "@/agent/index",
                       "@/agent/index.*",
-                      "@/agent/application/**"
+                      "@/agent/application/**",
+                      "**/agent/index",
+                      "**/agent/index.*",
+                      "**/agent/application/**"
                     ],
                     "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
                   }
