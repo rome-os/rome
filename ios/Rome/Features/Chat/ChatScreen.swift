@@ -1,4 +1,8 @@
+import os
 import SwiftUI
+
+/// The transcript's scroll, for reading on a device: `log stream --predicate 'category == "TranscriptScroll"'`.
+let transcriptScrollLog = Logger(subsystem: "cc.romeos.mobile", category: "TranscriptScroll")
 
 /// Board 4: the Concierge chat, the app's home screen.
 struct ChatScreen: View {
@@ -381,6 +385,10 @@ struct TranscriptList<Row: View>: View {
     /// The guardian is far above the newest rows: the back-to-bottom button shows.
     @State private var showsBackToBottom = false
     @State private var legacyScroll = LegacyScrollMonitor()
+    @State private var scrollHandle = ScrollHandle()
+    /// A scroll to the bottom is on its way. An older page waits for it to
+    /// land: rows added under the animation would stop it short.
+    @State private var jumping = false
     /// The bottom was on screen when the app left the foreground.
     @State private var leftAtBottom = false
     /// Until then, new last rows scroll into view: the refetch after a return
@@ -423,12 +431,13 @@ struct TranscriptList<Row: View>: View {
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .frame(minHeight: alignTop ? visibleHeight : nil, alignment: .top)
+                .background(ScrollViewFinder(handle: scrollHandle))
                 .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace))
             }
             .coordinateSpace(.named(Self.scrollSpace))
-            .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest, legacy: legacyScroll))
-            .onAppear { legacyScroll.attach(following: $following, atRest: $atRest, bottomVisible: $bottomVisible) }
-            .onChange(of: store.olderPage != nil && atRest) { _, ready in
+            .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest, jumping: $jumping, legacy: legacyScroll, handle: scrollHandle))
+            .onAppear { legacyScroll.attach(following: $following, atRest: $atRest, bottomVisible: $bottomVisible, jumping: $jumping) }
+            .onChange(of: store.olderPage != nil && atRest && !jumping) { _, ready in
                 if ready { Task { await store.placeOlderPage() } }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -508,6 +517,7 @@ struct TranscriptList<Row: View>: View {
                 } else if showsBackToBottom {
                     // Outside the scroll's content, so a tap mid-glide reaches it.
                     Button {
+                        transcriptScrollLog.notice("back-to-bottom tapped, phase \(atRest ? "rest" : "moving", privacy: .public)")
                         scrollToBottom(proxy)
                     } label: {
                         // Near-opaque like the composer, so a bubble behind
@@ -548,6 +558,12 @@ struct TranscriptList<Row: View>: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        // A fling still gliding wins over scrollTo, and the list glides on
+        // as if nothing was asked. Stop it where it is first.
+        let gliding = scrollHandle.stop()
+        transcriptScrollLog.notice("scroll to bottom, stopped a glide: \(gliding, privacy: .public)")
+        // Only when the list will move: the rest after it ends the jump.
+        if gliding || !bottomVisible { jumping = true }
         following = true
         unseen = 0
         withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -565,7 +581,9 @@ private struct FollowBottom: ViewModifier {
     /// An older page is going in at the top; it must land above the rows in view.
     let holdOlder: Bool
     @Binding var atRest: Bool
+    @Binding var jumping: Bool
     let legacy: LegacyScrollMonitor
+    let handle: ScrollHandle
     /// A finger is on the list. Read only before iOS 18.
     @GestureState private var touching = false
 
@@ -575,7 +593,8 @@ private struct FollowBottom: ViewModifier {
                 // The role nearest the scroll view wins over the general anchor.
                 .defaultScrollAnchor(following || holdOlder ? .bottom : .top, for: .sizeChanges)
                 .defaultScrollAnchor(.bottom)
-                .onScrollPhaseChange { old, phase in
+                .onScrollPhaseChange { old, phase, context in
+                    transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public)")
                     atRest = phase == .idle || phase == .animating
                     switch phase {
                     case .interacting:
@@ -584,6 +603,13 @@ private struct FollowBottom: ViewModifier {
                     case .idle:
                         // Where a drag or fling comes to rest decides; a tap or a
                         // programmatic scroll only turns following back on.
+                        if handle.stoppedForJump {
+                            // Stopped for the jump to the bottom, which follows.
+                            handle.stoppedForJump = false
+                            following = true
+                            return
+                        }
+                        jumping = false
                         if old == .interacting || old == .decelerating {
                             following = bottomVisible
                         } else if bottomVisible {
@@ -607,6 +633,54 @@ private struct FollowBottom: ViewModifier {
     }
 }
 
+/// The UIScrollView under the transcript, found from inside its content.
+@MainActor
+final class ScrollHandle {
+    weak var view: UIScrollView?
+    /// The glide was stopped to jump to the bottom: the rest that follows is
+    /// not where the guardian left the list.
+    var stoppedForJump = false
+
+    /// Stops a drag's glide where it is. Returns whether one was moving.
+    func stop() -> Bool {
+        guard let view, view.isDecelerating else { return false }
+        stoppedForJump = true
+        view.setContentOffset(view.contentOffset, animated: false)
+        return true
+    }
+}
+
+private struct ScrollViewFinder: UIViewRepresentable {
+    let handle: ScrollHandle
+
+    func makeUIView(context: Context) -> Probe {
+        let probe = Probe()
+        probe.handle = handle
+        probe.isUserInteractionEnabled = false
+        return probe
+    }
+
+    func updateUIView(_ probe: Probe, context: Context) {
+        probe.handle = handle
+        probe.find()
+    }
+
+    final class Probe: UIView {
+        weak var handle: ScrollHandle?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            find()
+        }
+
+        func find() {
+            var view = superview
+            while let current = view, !(current is UIScrollView) { view = current.superview }
+            if let scroll = view as? UIScrollView { handle?.view = scroll }
+        }
+    }
+}
+
 /// Before iOS 18 there is no scroll phase to read, so this stands in for one:
 /// a finger on the list, then the content offset going still for a moment,
 /// is a drag or fling coming to rest. It writes the list's state only when
@@ -616,11 +690,13 @@ private final class LegacyScrollMonitor {
     private var following: Binding<Bool>?
     private var atRest: Binding<Bool>?
     private var bottomVisible: Binding<Bool>?
+    private var jumping: Binding<Bool>?
     private var userMoved = false
     private var fingerDown = false
     private var settle: Task<Void, Never>?
 
-    func attach(following: Binding<Bool>, atRest: Binding<Bool>, bottomVisible: Binding<Bool>) {
+    func attach(following: Binding<Bool>, atRest: Binding<Bool>, bottomVisible: Binding<Bool>, jumping: Binding<Bool>) {
+        self.jumping = jumping
         self.following = following
         self.atRest = atRest
         self.bottomVisible = bottomVisible
@@ -649,6 +725,7 @@ private final class LegacyScrollMonitor {
     }
 
     private func comeToRest() {
+        if jumping?.wrappedValue == true { jumping?.wrappedValue = false }
         setAtRest(true)
         let atBottom = bottomVisible?.wrappedValue ?? true
         if userMoved {
@@ -705,7 +782,10 @@ private struct DistanceFromBottom: ViewModifier {
                 geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height
             } action: { _, distance in
                 let next = BackToBottom.shows(showing, distance: distance, height: visibleHeight)
-                if next != showing { showing = next }
+                if next != showing {
+                    transcriptScrollLog.notice("back-to-bottom \(next ? "shows" : "hides", privacy: .public) at distance \(distance, privacy: .public)")
+                    showing = next
+                }
             }
         } else {
             content
