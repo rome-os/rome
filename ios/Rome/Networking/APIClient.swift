@@ -10,6 +10,8 @@ enum APIError: Error, Equatable, LocalizedError {
     case offline
     case network
     case decoding
+    /// A file past the app's limit, such as an image of more than 20 MB.
+    case tooLarge
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +22,7 @@ enum APIError: Error, Equatable, LocalizedError {
         case .offline: return String(localized: "No network connection")
         case .network: return String(localized: "Could not reach your Rome")
         case .decoding: return String(localized: "Could not read the response")
+        case .tooLarge: return String(localized: "Too large to show")
         }
     }
 }
@@ -54,13 +57,14 @@ final class APIClient: Sendable {
 
     /// The raw bytes of a GET, for files. Query values are encoded strictly:
     /// a `+` would otherwise reach the server as a space.
-    func getData(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+    /// `limit`: stop past this many bytes.
+    func getData(_ path: String, query: [URLQueryItem] = [], limit: Int? = nil) async throws -> Data {
         var request = request(path, method: "GET")
         if !query.isEmpty, let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             components.percentEncodedQueryItems = query.map { URLQueryItem(name: $0.name, value: Self.strictQueryValue($0.value ?? "")) }
             request.url = components.url
         }
-        return try await send(request)
+        return try await send(request, limit: limit)
     }
 
     /// The bytes behind an `/api/…` URL a reply wrote, sent as written: the
@@ -73,7 +77,32 @@ final class APIClient: Sendable {
         if let token = token() {
             request.setValue("rome_session=\(token)", forHTTPHeaderField: "Cookie")
         }
-        return try await send(request)
+        return try await send(request, limit: Self.imageLimit)
+    }
+
+    /// Images past this are not shown: a reply can point at any file.
+    static let imageLimit = 20 * 1024 * 1024
+
+    /// A GET's body, stopped as soon as it passes `limit` bytes: the declared
+    /// length decides first, the bytes received after.
+    static func cappedData(for request: URLRequest, in session: URLSession, limit: Int) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        if response.expectedContentLength > Int64(limit) { throw APIError.tooLarge }
+        var data = Data()
+        if response.expectedContentLength > 0 { data.reserveCapacity(Int(response.expectedContentLength)) }
+        var chunk: [UInt8] = []
+        chunk.reserveCapacity(64 * 1024)
+        for try await byte in bytes {
+            chunk.append(byte)
+            if chunk.count == 64 * 1024 {
+                data.append(contentsOf: chunk)
+                chunk.removeAll(keepingCapacity: true)
+                if data.count > limit { throw APIError.tooLarge }
+            }
+        }
+        data.append(contentsOf: chunk)
+        if data.count > limit { throw APIError.tooLarge }
+        return (data, response)
     }
 
     /// Always on this client's own origin, so the cookie never leaves it.
@@ -166,11 +195,15 @@ final class APIClient: Sendable {
         return request
     }
 
-    private func send(_ request: URLRequest, reportsUnauthorized: Bool = true) async throws -> Data {
+    private func send(_ request: URLRequest, reportsUnauthorized: Bool = true, limit: Int? = nil) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.data(for: request, in: session)
+            if let limit {
+                (data, response) = try await Self.cappedData(for: request, in: session, limit: limit)
+            } else {
+                (data, response) = try await Self.data(for: request, in: session)
+            }
         } catch let error as URLError {
             switch error.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:

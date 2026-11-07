@@ -143,7 +143,7 @@ struct MainShell: View {
             }
             if photoViewerPreview {
                 // Snapshot runs only: the viewer in place of its full-screen cover.
-                PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg")], start: 0)
+                PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg", position: 0)], start: 0)
             }
             if settingsPreview {
                 // Snapshot runs only, for the same reason.

@@ -212,9 +212,9 @@ struct MarkdownText: View {
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
-        blocks.compactMap { block in
+        blocks.enumerated().compactMap { position, block in
             if case .image(let alt, let src) = block, case let source = ImageSource(src: src, origin: origin), source != .rejected {
-                return .markdown(source, alt: alt, src: src)
+                return .markdown(source, alt: alt, src: src, position: position)
             }
             return nil
         }
@@ -222,8 +222,8 @@ struct MarkdownText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                view(for: block)
+            ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
+                view(for: block, at: position)
             }
         }
         .foregroundStyle(color)
@@ -234,7 +234,7 @@ struct MarkdownText: View {
     }
 
     @ViewBuilder
-    private func view(for block: MarkdownBlock) -> some View {
+    private func view(for block: MarkdownBlock, at position: Int) -> some View {
         switch block {
         case .paragraph(let text):
             Text(MarkdownParser.inline(text))
@@ -285,7 +285,7 @@ struct MarkdownText: View {
             Rectangle().fill(Palette.hair).frame(height: 1).padding(.vertical, 4)
         case .image(let alt, let src):
             MarkdownImageView(source: ImageSource(src: src, origin: origin), alt: alt, src: src) {
-                viewerStart = gallery.firstIndex { $0.matches(src: src) } ?? 0
+                viewerStart = gallery.firstIndex { $0.matches(position: position) } ?? 0
                 showViewer = true
             }
         }

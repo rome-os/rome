@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Testing
 @testable import Rome
 
@@ -134,5 +135,60 @@ final class RecordingProtocol: URLProtocol, @unchecked Sendable {
         #expect(data == Data([0xFF, 0xD8]))
         #expect(RecordingProtocol.urls == ["https://me.romeos.cc\(src)"])
         #expect(RecordingProtocol.cookies == ["rome_session=t"])
+    }
+}
+
+/// Answers with a declared length past the image limit.
+final class HugeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/jpeg", "Content-Length": "30000000"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data([0xFF, 0xD8]))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+@Suite struct ImageSafetyTests {
+    @Test func anImagePastTwentyMegabytesIsNotLoaded() async {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HugeProtocol.self]
+        let client = APIClient(origin: URL(string: "https://me.romeos.cc")!, token: { "t" }, configuration: configuration)
+        await #expect(throws: APIError.tooLarge) {
+            try await client.getFile(apiPath: "/projects/asset/big.jpg", percentEncodedQuery: "path=projects%2Fbig.jpg")
+        }
+    }
+
+    /// Another instance or account never sees a picture cached for this one.
+    @Test func theCacheIsScopedToTheWorkspace() {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { _ in }.cgImage!
+        let before = StoredImageCache.key("projects/a.png")
+        StoredImageCache.store(image, for: before)
+        #expect(StoredImageCache.image(before) != nil)
+        StoredImageCache.reset()
+        let after = StoredImageCache.key("projects/a.png")
+        #expect(after != before)
+        #expect(StoredImageCache.image(after) == nil)
+        #expect(StoredImageCache.image(before) == nil)
+    }
+
+    @Test func theSameImageTwiceIsTwoPages() {
+        let source = ImageSource(src: "/projects/a.png")
+        let first = ViewerImage.markdown(source, alt: "", src: "/projects/a.png", position: 0)
+        let second = ViewerImage.markdown(source, alt: "", src: "/projects/a.png", position: 2)
+        #expect(first.id != second.id)
+        #expect(second.matches(position: 2) && !first.matches(position: 2))
+    }
+
+    /// Shared as the file it is: the extension comes from the bytes.
+    @Test func aSharedImageKeepsItsType() throws {
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { _ in }
+        #expect(SharedFile.fileExtension(png) == "png")
+        let shared = try #require(SharedFile.write(png, name: "Hotel / front"))
+        #expect(shared.url.lastPathComponent == "Hotel   front.png")
+        #expect(try Data(contentsOf: shared.url) == png)
     }
 }

@@ -1,6 +1,7 @@
 import os
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 let imageLog = Logger(subsystem: "cc.romeos.mobile", category: "Images")
 
@@ -128,7 +129,7 @@ enum ImageFetch {
             guard let apiLoader else { throw APIError.network }
             return try await apiLoader(path, query)
         case .external(let url):
-            let (data, response) = try await publicSession.data(from: url)
+            let (data, response) = try await APIClient.cappedData(for: URLRequest(url: url), in: publicSession, limit: APIClient.imageLimit)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.network }
             return data
         case .rejected:
@@ -141,26 +142,35 @@ enum ImageFetch {
 enum ViewerImage: Identifiable, Hashable {
     case local(ComposerImage)
     case stored(UploadLines.Upload)
-    case markdown(ImageSource, alt: String, src: String)
+    /// `position`: its block in the reply, so the same image twice is two pages.
+    case markdown(ImageSource, alt: String, src: String, position: Int)
 
     var id: String {
         switch self {
         case .local(let photo): return photo.id.uuidString
         case .stored(let upload): return upload.linkPath
-        case .markdown(_, _, let src): return src
+        case .markdown(_, _, let src, let position): return "\(position)|\(src)"
         }
     }
 
     var label: Text {
         switch self {
         case .local, .stored: return Text("Photo")
-        case .markdown(_, let alt, _): return alt.isEmpty ? Text("Image") : Text(verbatim: alt)
+        case .markdown(_, let alt, _, _): return alt.isEmpty ? Text("Image") : Text(verbatim: alt)
         }
     }
 
-    func matches(src: String) -> Bool {
-        if case .markdown(_, _, let own) = self { return own == src }
+    func matches(position: Int) -> Bool {
+        if case .markdown(_, _, _, let own) = self { return own == position }
         return false
+    }
+
+    /// A name for the shared file, without its extension.
+    var fileName: String {
+        switch self {
+        case .local, .stored: return String(localized: "Photo")
+        case .markdown(_, let alt, _, _): return alt.isEmpty ? String(localized: "Image") : alt
+        }
     }
 
     @MainActor
@@ -168,7 +178,7 @@ enum ViewerImage: Identifiable, Hashable {
         switch self {
         case .local(let photo): return photo.jpeg
         case .stored(let upload): return try await ImageFetch.data(.asset(path: upload.assetPath), assetLoader: assetLoader)
-        case .markdown(let source, _, _): return try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
+        case .markdown(let source, _, _, _): return try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
         }
     }
 }
@@ -230,7 +240,7 @@ struct MarkdownImageView: View {
     }
 
     private func load() async {
-        let key = "md|\(source)"
+        let key = StoredImageCache.key("md|\(source)")
         if let cached = StoredImageCache.image(key) {
             image = cached
             return
@@ -288,8 +298,9 @@ struct PhotoViewer: View {
     @State private var index: Int
     @State private var dragY: CGFloat = 0
     @State private var zoomed = false
-    @State private var loaded: [String: UIImage] = [:]
-    @State private var sharing: UIImage?
+    /// The bytes as they came, shared as they are: full size, metadata, animation.
+    @State private var originals: [String: Data] = [:]
+    @State private var sharing: SharedFile?
     @Environment(\.dismiss) private var dismiss
 
     init(images: [ViewerImage], start: Int) {
@@ -304,10 +315,12 @@ struct PhotoViewer: View {
                 .ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(images.enumerated()), id: \.element.id) { offset, image in
-                    ViewerPage(image: image, zoomed: $zoomed) { loaded[image.id] = $0 }
+                    ViewerPage(image: image, current: offset == index, zoomed: $zoomed) { originals[image.id] = $0 }
                         .tag(offset)
                 }
             }
+            // Each page starts unzoomed; the one left behind zooms back out.
+            .onChange(of: index) { zoomed = false }
             .tabViewStyle(.page(indexDisplayMode: images.count > 1 ? .automatic : .never))
             .ignoresSafeArea()
             .offset(y: dragY)
@@ -329,8 +342,10 @@ struct PhotoViewer: View {
                 HStack {
                     viewerButton("xmark", label: "Close") { dismiss() }
                     Spacer()
-                    if let current = currentImage {
-                        viewerButton("square.and.arrow.up", label: "Share") { sharing = current }
+                    if let current = currentOriginal {
+                        viewerButton("square.and.arrow.up", label: "Share") {
+                            sharing = SharedFile.write(current.data, name: current.image.fileName)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -342,14 +357,15 @@ struct PhotoViewer: View {
         .statusBarHidden()
         .preferredColorScheme(.dark)
         .accessibilityAction(.escape) { dismiss() }
-        .sheet(item: Binding(get: { sharing.map(SharedImage.init) }, set: { if $0 == nil { sharing = nil } })) { shared in
-            ActivitySheet(items: [shared.image])
+        .sheet(item: $sharing) { shared in
+            ActivitySheet(items: [shared.url])
                 .presentationDetents([.medium, .large])
         }
     }
 
-    private var currentImage: UIImage? {
-        images.indices.contains(index) ? loaded[images[index].id] : nil
+    private var currentOriginal: (image: ViewerImage, data: Data)? {
+        guard images.indices.contains(index), let data = originals[images[index].id] else { return nil }
+        return (images[index], data)
     }
 
     private func viewerButton(_ systemImage: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
@@ -364,17 +380,44 @@ struct PhotoViewer: View {
     }
 }
 
-private struct SharedImage: Identifiable {
+/// An image's original bytes in a temporary file named for what it is, so
+/// the share sheet saves or sends the file itself, not a re-encoded copy.
+struct SharedFile: Identifiable {
     let id = UUID()
-    let image: UIImage
+    let url: URL
+
+    static func write(_ data: Data, name: String) -> SharedFile? {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "Shared-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let safeName = name.components(separatedBy: CharacterSet(charactersIn: "/\\:")).joined(separator: " ").prefix(80)
+        let url = folder.appending(path: "\(safeName.isEmpty ? "Image" : String(safeName)).\(fileExtension(data))")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            return SharedFile(url: url)
+        } catch {
+            return nil
+        }
+    }
+
+    /// From the bytes themselves: what the image is, not what its link says.
+    static func fileExtension(_ data: Data) -> String {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source).flatMap({ UTType($0 as String) }),
+              let ext = type.preferredFilenameExtension
+        else { return "jpg" }
+        return ext
+    }
 }
 
 /// One page of the viewer: the full image, decoded off the main actor at
 /// up to three times the screen.
 private struct ViewerPage: View {
     let image: ViewerImage
+    /// The page on screen: only it reports zoom, and the others zoom back out.
+    let current: Bool
     @Binding var zoomed: Bool
-    let onLoad: (UIImage) -> Void
+    /// The original bytes, for sharing.
+    let onLoad: (Data) -> Void
     @Environment(\.assetLoader) private var assetLoader
     @Environment(\.apiFileLoader) private var apiLoader
     @Environment(\.displayScale) private var displayScale
@@ -385,7 +428,7 @@ private struct ViewerPage: View {
         GeometryReader { geometry in
             Group {
                 if let full {
-                    ZoomableImage(image: full, zoomed: $zoomed)
+                    ZoomableImage(image: full, current: current, zoomed: $zoomed)
                         .accessibilityElement()
                         .accessibilityLabel(image.label)
                         .accessibilityAddTraits(.isImage)
@@ -409,9 +452,8 @@ private struct ViewerPage: View {
                 ImageCompressor.thumbnail(from: data, maxPixel: max(600, longEdge))
             }.value
             guard let decoded else { throw APIError.network }
-            let ui = UIImage(cgImage: decoded)
-            full = ui
-            onLoad(ui)
+            full = UIImage(cgImage: decoded)
+            onLoad(data)
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled { failed = true }
@@ -422,6 +464,7 @@ private struct ViewerPage: View {
 /// Pinch and double-tap zoom on an image, the system way.
 private struct ZoomableImage: UIViewRepresentable {
     let image: UIImage
+    let current: Bool
     @Binding var zoomed: Bool
 
     func makeUIView(context: Context) -> UIScrollView {
@@ -455,6 +498,7 @@ private struct ZoomableImage: UIViewRepresentable {
     func updateUIView(_ scroll: UIScrollView, context: Context) {
         context.coordinator.parent = self
         if context.coordinator.imageView?.image !== image { context.coordinator.imageView?.image = image }
+        if !current && scroll.zoomScale > 1 { scroll.setZoomScale(1, animated: false) }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -468,6 +512,7 @@ private struct ZoomableImage: UIViewRepresentable {
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            guard parent.current else { return }
             let zoomed = scrollView.zoomScale > 1.01
             if parent.zoomed != zoomed { parent.zoomed = zoomed }
         }

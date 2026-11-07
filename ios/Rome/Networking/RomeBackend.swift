@@ -117,7 +117,7 @@ final class LiveBackend: RomeBackend {
     /// `projects/…` from the projects route, `memory/…` from memory's.
     func asset(path: String) async throws -> Data {
         let route = path.hasPrefix("memory/") ? "/memory/asset" : "/projects/asset"
-        return try await client.getData(route, query: [URLQueryItem(name: "path", value: path)])
+        return try await client.getData(route, query: [URLQueryItem(name: "path", value: path)], limit: APIClient.imageLimit)
     }
 
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {

@@ -2016,6 +2016,16 @@
         }
       }
     },
+    "Too large to show" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件太大，无法显示"
+          }
+        }
+      }
+    },
     "Topic chats" : {
       "localizations" : {
         "zh-Hans" : {

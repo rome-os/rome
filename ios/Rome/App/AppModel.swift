@@ -233,7 +233,10 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .launching
-    private(set) var workspace: Workspace?
+    private(set) var workspace: Workspace? {
+        // Pictures belong to the workspace that loaded them.
+        didSet { if workspace !== oldValue { StoredImageCache.reset() } }
+    }
     private(set) var instances: [CloudInstance] = []
     private(set) var currentInstanceID: String?
     private(set) var signInError: String?

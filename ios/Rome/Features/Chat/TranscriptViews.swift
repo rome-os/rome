@@ -138,7 +138,8 @@ private struct UserImageTile: View {
 
     private func load(_ upload: UploadLines.Upload) async {
         guard let assetLoader else { return }
-        if let cached = StoredImageCache.image(upload.assetPath) {
+        let key = StoredImageCache.key(upload.assetPath)
+        if let cached = StoredImageCache.image(key) {
             loaded = cached
             return
         }
@@ -149,7 +150,7 @@ private struct UserImageTile: View {
                 ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
             }.value
             guard let thumbnail else { throw APIError.network }
-            StoredImageCache.store(thumbnail, for: upload.assetPath)
+            StoredImageCache.store(thumbnail, for: key)
             loaded = thumbnail
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
@@ -186,6 +187,20 @@ enum StoredImageCache {
         cache.totalCostLimit = 64 * 1024 * 1024
         return cache
     }()
+
+    /// The open workspace's: keys carry it, so a picture loaded for one
+    /// instance or account never shows in another.
+    @MainActor private static var scope = UUID()
+
+    /// The key for a path in the open workspace. Taken before a load starts,
+    /// so a load that ends after a switch lands under the old scope.
+    @MainActor static func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
+
+    /// A workspace opened or closed, or a sign-out: nothing cached carries over.
+    @MainActor static func reset() {
+        scope = UUID()
+        cache.removeAllObjects()
+    }
 
     static func image(_ path: String) -> CGImage? {
         cache.object(forKey: path as NSString)?.image
