@@ -14,7 +14,7 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
-import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
+import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import {
   accountAllowsModel,

@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { ArtifactRef, ResolvedApp } from "../apps/state.js";
+import { AppTurnHooks } from "./app-turn-hooks.js";
+import { TurnListeners } from "./turn-listeners.js";
+import type { AppCatalog } from "../../apps/catalog.js";
+import type { ArtifactRef, ResolvedApp } from "../../apps/state.js";
 import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type { RomeAppRuntimeServices } from "../apps/context.js";
-import type { ActionEngine } from "../actions/engine.js";
-import { getCurrentHookInvocationContext } from "./hook-recursion.js";
+import type { RomeAppRuntimeServices } from "../../apps/context.js";
+import type { ActionEngine } from "../../actions/engine.js";
+import { getCurrentHookInvocationContext } from "../../core/hook-recursion.js";
 
 type LifecycleHookGlobal = typeof globalThis & {
   __agentLifecycleHookEvents?: Array<{ appId: string; event: AgentTurnFinishedEvent }>;
@@ -19,13 +20,11 @@ type LifecycleHookGlobal = typeof globalThis & {
   }>;
   __agentLifecycleCaptureHookContext?: (appId: string) => void;
   __agentLifecycleListenerContext?: ReturnType<typeof getCurrentHookInvocationContext>;
-  __agentLifecycleNestedDispatcher?: ReturnType<typeof createAgentLifecycleDispatcher>;
-  __agentLifecycleHookDispatchResults?: Array<
-    ReturnType<ReturnType<typeof createAgentLifecycleDispatcher>["dispatchFinished"]>
-  >;
+  __agentLifecycleNestedDispatcher?: AppTurnHooks;
+  __agentLifecycleHookDispatchResults?: Array<ReturnType<AppTurnHooks["ended"]>>;
 };
 
-describe("AgentLifecycleDispatcher", () => {
+describe("AppTurnHooks", () => {
   const tempDirs: string[] = [];
 
   afterEach(async () => {
@@ -42,7 +41,7 @@ describe("AgentLifecycleDispatcher", () => {
   it("loads every matching lifecycle hook and fans out without blocking", async () => {
     const first = await createHookDir("first");
     const second = await createHookDir("second");
-    const dispatcher = createAgentLifecycleDispatcher();
+    const dispatcher = new AppTurnHooks();
     const failures = await dispatcher.loadFromCatalog(
       catalogWithHooks([
         hookRef("app.first", "agent-turn-finished", first),
@@ -53,7 +52,7 @@ describe("AgentLifecycleDispatcher", () => {
     expect(failures).toEqual([]);
 
     const event = finishedEvent();
-    dispatcher.dispatchFinished(event);
+    dispatcher.ended(event);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect((globalThis as LifecycleHookGlobal).__agentLifecycleHookEvents).toEqual([
@@ -75,7 +74,7 @@ describe("AgentLifecycleDispatcher", () => {
   `,
     );
     const observer = await createHookDir("observer");
-    const dispatcher = createAgentLifecycleDispatcher();
+    const dispatcher = new AppTurnHooks();
     const failures = await dispatcher.loadFromCatalog(
       catalogWithHooks([
         hookRef("app.mutator", "agent-turn-finished", mutator),
@@ -86,7 +85,7 @@ describe("AgentLifecycleDispatcher", () => {
     expect(failures).toEqual([]);
 
     const event = finishedEvent();
-    dispatcher.dispatchFinished(event);
+    dispatcher.ended(event);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect((globalThis as LifecycleHookGlobal).__agentLifecycleHookEvents).toEqual([
@@ -104,7 +103,7 @@ describe("AgentLifecycleDispatcher", () => {
 
   it("reports hook artifacts that do not implement the declared event method", async () => {
     const dir = await createHookDir("invalid", "return { onAgentTurnStarted() {} };");
-    const dispatcher = createAgentLifecycleDispatcher();
+    const dispatcher = new AppTurnHooks();
 
     const failures = await dispatcher.loadFromCatalog(
       catalogWithHooks([hookRef("app.invalid", "agent-turn-finished", dir)]),
@@ -140,7 +139,7 @@ describe("AgentLifecycleDispatcher", () => {
         set: async () => undefined,
       },
     };
-    const dispatcher = createAgentLifecycleDispatcher({
+    const dispatcher = new AppTurnHooks({
       appRuntimeServices: {
         catalog: catalogWithResolvedAppAndHooks(app, []),
         db: {} as RomeAppRuntimeServices["db"],
@@ -173,7 +172,7 @@ describe("AgentLifecycleDispatcher", () => {
   };
   `,
     );
-    const dispatcher = createAgentLifecycleDispatcher({
+    const dispatcher = new AppTurnHooks({
       appRuntimeServices: {
         catalog: catalogWithHooks([]),
         db: {} as RomeAppRuntimeServices["db"],
@@ -208,7 +207,7 @@ describe("AgentLifecycleDispatcher", () => {
   };
   `,
     );
-    const dispatcher = createAgentLifecycleDispatcher();
+    const dispatcher = new AppTurnHooks();
     (globalThis as LifecycleHookGlobal).__agentLifecycleCaptureHookContext = (appId) => {
       (globalThis as LifecycleHookGlobal).__agentLifecycleHookContexts ??= [];
       (globalThis as LifecycleHookGlobal).__agentLifecycleHookContexts!.push({
@@ -216,9 +215,12 @@ describe("AgentLifecycleDispatcher", () => {
         context: getCurrentHookInvocationContext(),
       });
     };
-    dispatcher.onFinished(() => {
-      (globalThis as LifecycleHookGlobal).__agentLifecycleListenerContext =
-        getCurrentHookInvocationContext();
+    const listeners = new TurnListeners(dispatcher);
+    listeners.listen({
+      ended: () => {
+        (globalThis as LifecycleHookGlobal).__agentLifecycleListenerContext =
+          getCurrentHookInvocationContext();
+      },
     });
     const failures = await dispatcher.loadFromCatalog(
       catalogWithHooks([hookRef("app.context", "agent-turn-finished", dir)]),
@@ -226,7 +228,7 @@ describe("AgentLifecycleDispatcher", () => {
 
     expect(failures).toEqual([]);
 
-    dispatcher.dispatchFinished(finishedEvent());
+    listeners.ended(finishedEvent());
     await flushHookDispatch();
 
     const listenerContext = (globalThis as LifecycleHookGlobal).__agentLifecycleListenerContext;
@@ -257,7 +259,7 @@ describe("AgentLifecycleDispatcher", () => {
       if (!event.turn.turnId.endsWith("-nested")) {
         const nested = structuredClone(event);
         nested.turn.turnId = \`\${event.turn.turnId}-nested\`;
-        const result = globalThis.__agentLifecycleNestedDispatcher.dispatchFinished(nested);
+        const result = globalThis.__agentLifecycleNestedDispatcher.ended(nested);
         globalThis.__agentLifecycleHookDispatchResults ??= [];
         globalThis.__agentLifecycleHookDispatchResults.push(result);
       }
@@ -266,7 +268,7 @@ describe("AgentLifecycleDispatcher", () => {
   `,
     );
     const observer = await createHookDir("observer");
-    const dispatcher = createAgentLifecycleDispatcher();
+    const dispatcher = new AppTurnHooks();
     (globalThis as LifecycleHookGlobal).__agentLifecycleNestedDispatcher = dispatcher;
     const failures = await dispatcher.loadFromCatalog(
       catalogWithHooks([
@@ -277,7 +279,7 @@ describe("AgentLifecycleDispatcher", () => {
 
     expect(failures).toEqual([]);
 
-    const result = dispatcher.dispatchFinished(finishedEvent());
+    const result = dispatcher.ended(finishedEvent());
     await flushHookDispatch();
 
     expect(result).toMatchObject({ invoked: 2, skipped: 0 });
@@ -318,7 +320,7 @@ describe("AgentLifecycleDispatcher", () => {
       if (event.turn.turnId !== "turn-${step}") return;
       const nested = structuredClone(event);
       nested.turn.turnId = "turn-${step + 1}";
-      const result = globalThis.__agentLifecycleNestedDispatcher.dispatchFinished(nested);
+      const result = globalThis.__agentLifecycleNestedDispatcher.ended(nested);
       globalThis.__agentLifecycleHookDispatchResults ??= [];
       globalThis.__agentLifecycleHookDispatchResults.push(result);
     },
@@ -327,11 +329,11 @@ describe("AgentLifecycleDispatcher", () => {
       );
       refs.push(hookRef(`app.step${step}`, "agent-turn-finished", dir));
     }
-    const dispatcher = createAgentLifecycleDispatcher();
+    const dispatcher = new AppTurnHooks();
     (globalThis as LifecycleHookGlobal).__agentLifecycleNestedDispatcher = dispatcher;
     expect(await dispatcher.loadFromCatalog(catalogWithHooks(refs))).toEqual([]);
 
-    dispatcher.dispatchFinished(finishedEvent());
+    dispatcher.ended(finishedEvent());
     for (let i = 0; i < 5; i++) await flushHookDispatch();
 
     const results = (globalThis as LifecycleHookGlobal).__agentLifecycleHookDispatchResults;

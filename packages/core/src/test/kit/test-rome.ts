@@ -43,7 +43,7 @@ import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../../agent/index.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";
@@ -283,7 +283,7 @@ async function buildHarness(
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillLoader(artifactIdentity),
-      lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      turnLifecycle: new TurnListeners(new AppTurnHooks()),
       channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },

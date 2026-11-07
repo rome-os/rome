@@ -8,7 +8,7 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { AgentLoader } from "../agent/index.js";
 import {
   createSessionFromRun,
@@ -89,7 +89,7 @@ describe("AgentSessionManager textPrivate", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },

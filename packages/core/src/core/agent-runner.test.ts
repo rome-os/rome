@@ -82,11 +82,10 @@ import {
   type AgentSessionManager,
   type AgentTurnHandle,
 } from "./agent-session.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { SkillLoader } from "../agent/index.js";
-import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners, type TurnLifecycle } from "../agent/index.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
@@ -2178,33 +2177,22 @@ describe("AgentRunner", () => {
     });
   });
 
-  function createLifecycleRecorder(): AgentLifecycleDispatcher & {
-    started: AgentTurnStartedEvent[];
-    finished: AgentTurnFinishedEvent[];
+  function createLifecycleRecorder(): TurnLifecycle & {
+    startedEvents: AgentTurnStartedEvent[];
+    finishedEvents: AgentTurnFinishedEvent[];
   } {
-    const started: AgentTurnStartedEvent[] = [];
-    const finished: AgentTurnFinishedEvent[] = [];
+    const startedEvents: AgentTurnStartedEvent[] = [];
+    const finishedEvents: AgentTurnFinishedEvent[] = [];
     return {
-      started,
-      finished,
-      async loadFromCatalog() {
-        return [];
+      startedEvents,
+      finishedEvents,
+      started(event) {
+        startedEvents.push(event);
       },
-      dispatchStarted(event) {
-        started.push(event);
-        return { invoked: 0, skipped: 0, skips: [] };
+      ended(event) {
+        finishedEvents.push(event);
       },
-      dispatchFinished(event) {
-        finished.push(event);
-        return { invoked: 0, skipped: 0, skips: [] };
-      },
-      onFinished() {
-        return () => {};
-      },
-      dispatchFailedBeforeStart() {},
-      onFailedBeforeStart() {
-        return () => {};
-      },
+      couldNotStart() {},
     };
   }
 
@@ -2213,7 +2201,7 @@ describe("AgentRunner", () => {
   // are real-but-inert.
   function managerDeps(
     modelResolver: ModelResolver,
-    lifecycleDispatcher?: AgentLifecycleDispatcher,
+    turnLifecycle?: TurnLifecycle,
     appCatalog?: Pick<AppCatalog, "get">,
   ) {
     const activeSubagentRegistry = createActiveSubagentRegistry();
@@ -2229,7 +2217,7 @@ describe("AgentRunner", () => {
       webchatRepo: new ChatsWebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillLoader(artifactIdentity),
-      lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
+      turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
@@ -2242,7 +2230,7 @@ describe("AgentRunner", () => {
 
   function createRunner(
     provider?: ModelProvider,
-    lifecycleDispatcher?: AgentLifecycleDispatcher,
+    turnLifecycle?: TurnLifecycle,
     options: {
       keepAliveAcrossTurns?: boolean;
       appCatalog?: Pick<AppCatalog, "get">;
@@ -2256,7 +2244,7 @@ describe("AgentRunner", () => {
     });
     const manager = createAgentSessionManager(
       {
-        ...managerDeps(modelResolver, lifecycleDispatcher, options.appCatalog),
+        ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.resetPolicy
           ? { resolveProviderSessionReset: async () => options.resetPolicy! }
           : {}),
@@ -3294,7 +3282,7 @@ describe("AgentRunner", () => {
       expect(
         await sessionRepository.deprecatedCheckpoint(start.sessionId, start.turnId),
       ).toBeNull();
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "interrupted",
         output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },
       });
@@ -3622,8 +3610,8 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0]).toMatchObject({
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.startedEvents[0]).toMatchObject({
         type: "agent-turn-started",
         version: 1,
         turn: {
@@ -3642,15 +3630,15 @@ describe("AgentRunner", () => {
         },
         input: { promptLength: "Hello lifecycle".length },
       });
-      expect(lifecycle.started[0].input).not.toHaveProperty("prompt");
+      expect(lifecycle.startedEvents[0].input).not.toHaveProperty("prompt");
 
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         type: "agent-turn-finished",
         version: 1,
         turn: {
-          sessionId: lifecycle.started[0].turn.sessionId,
-          turnId: lifecycle.started[0].turn.turnId,
+          sessionId: lifecycle.startedEvents[0].turn.sessionId,
+          turnId: lifecycle.startedEvents[0].turn.turnId,
           agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
         },
@@ -3666,9 +3654,11 @@ describe("AgentRunner", () => {
           skillWritten: false,
         },
       });
-      expect(lifecycle.finished[0].timing.startedAt).toBe(lifecycle.started[0].timing.startedAt);
-      expect(lifecycle.finished[0].timing.finishedAt).toEqual(expect.any(String));
-      expect(lifecycle.finished[0].timing.durationMs).toEqual(expect.any(Number));
+      expect(lifecycle.finishedEvents[0].timing.startedAt).toBe(
+        lifecycle.startedEvents[0].timing.startedAt,
+      );
+      expect(lifecycle.finishedEvents[0].timing.finishedAt).toEqual(expect.any(String));
+      expect(lifecycle.finishedEvents[0].timing.durationMs).toEqual(expect.any(Number));
     });
 
     it("uses turn-scoped context when a session is reused", async () => {
@@ -3750,14 +3740,12 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(lifecycle.started.map((event) => event.turn.threadContext?.channelUserId)).toEqual([
-        "guardian-one",
-        "guardian-two",
-      ]);
-      expect(lifecycle.finished.map((event) => event.turn.threadContext?.channelUserId)).toEqual([
-        "guardian-one",
-        "guardian-two",
-      ]);
+      expect(
+        lifecycle.startedEvents.map((event) => event.turn.threadContext?.channelUserId),
+      ).toEqual(["guardian-one", "guardian-two"]);
+      expect(
+        lifecycle.finishedEvents.map((event) => event.turn.threadContext?.channelUserId),
+      ).toEqual(["guardian-one", "guardian-two"]);
       expect(observedContexts).toEqual([
         { channelUserId: "guardian-one", sharedRunId: "run-one" },
         { channelUserId: "guardian-two", sharedRunId: "run-two" },
@@ -3786,8 +3774,8 @@ describe("AgentRunner", () => {
       const second = session.sendTurn({ prompt: "second" });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.startedEvents[0].turn.turnId).toBe(first.turnId);
 
       await session.close("user");
       await collectMessages(first.events);
@@ -3798,9 +3786,9 @@ describe("AgentRunner", () => {
         expect.objectContaining({ type: "error", error: "AgentSession closed" }),
         expect.objectContaining({ type: "turn_end", turnId: second.turnId, status: "error" }),
       ]);
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0].turn.turnId).toBe(first.turnId);
       await manager.shutdown();
     });
 
@@ -3872,8 +3860,10 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "core:test-main");
-      const childFinished = lifecycle.finished.filter(
+      const rootFinished = lifecycle.finishedEvents.filter(
+        (e) => e.turn.agentName === "core:test-main",
+      );
+      const childFinished = lifecycle.finishedEvents.filter(
         (e) => e.turn.agentName === "core:test-explore",
       );
 
@@ -3924,7 +3914,7 @@ describe("AgentRunner", () => {
       await collectMessages(
         createRunner(provider, lifecycle).run({ agentName: "test-main", prompt: "Continue" }),
       );
-      expect(lifecycle.finished[0].output).toMatchObject({
+      expect(lifecycle.finishedEvents[0].output).toMatchObject({
         error: message,
         failure: {
           message,
@@ -3943,7 +3933,7 @@ describe("AgentRunner", () => {
           { agentName: "test-main", prompt: "Continue" },
         ),
       );
-      expect(lifecycle.finished[0].output).not.toHaveProperty("failure");
+      expect(lifecycle.finishedEvents[0].output).not.toHaveProperty("failure");
     });
 
     it("classifies provider-interrupted terminal results separately from completions", async () => {
@@ -3971,8 +3961,8 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Stop soon" }));
 
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "interrupted",
         output: {
           text: "Partial answer",
@@ -4011,7 +4001,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Go long" }));
 
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "completed",
         output: {
           state: "final",
@@ -4043,7 +4033,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Hi" }));
 
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "completed",
         output: {
           state: "final",

@@ -11,7 +11,7 @@ import type { AgentEvent } from "../types.js";
 import type { ModelLoginKind } from "../agent/index.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "../agent/index.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
@@ -156,7 +156,7 @@ describe("AgentSession turn usage", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
         channelSurface: testChannelSurface,
         turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },

@@ -13,10 +13,11 @@ import {
   requireAgent,
   storeForkParent,
   turnStatus,
-  turnStop,
+  endedTurn,
   type AgentCatalog,
   type AgentDefinition,
   type TurnEnding,
+  type TurnLifecycle,
 } from "../agent/index.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
@@ -63,8 +64,6 @@ import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { AgentEvent, McpServerConfig } from "../types.js";
 import type {
-  AgentStop,
-  AgentTurnOutput,
   AgentTurnStatus,
   TurnErrorEvent,
   MessageReplyReference,
@@ -140,7 +139,6 @@ import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.j
 import {
   buildRequiredTiming,
   createAgentTurnRef,
-  type AgentLifecycleDispatcher,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
@@ -400,7 +398,7 @@ interface ManagerDeps {
   actionEngine: ActionEngine;
   capabilityDiscovery: CapabilityDiscovery;
   skillCatalog: SkillCatalog;
-  lifecycleDispatcher: AgentLifecycleDispatcher;
+  turnLifecycle: TurnLifecycle;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
   /** Each session's links to what was said where it stands, which a wake's
@@ -2676,12 +2674,11 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private dispatchTurnStarted(sink: TurnSink, input: AgentTurnInput): void {
-    const dispatcher = this.deps.lifecycleDispatcher;
     const startedAtMs = Date.now();
     const startedAt = new Date(startedAtMs).toISOString();
     sink.lifecycleStartedAtMs = startedAtMs;
     sink.lifecycleStartedAt = startedAt;
-    dispatcher.dispatchStarted({
+    this.deps.turnLifecycle.started({
       type: "agent-turn-started",
       version: 1,
       turn: createAgentTurnRef({
@@ -2701,14 +2698,13 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private dispatchTurnFinished(sink: TurnSink, terminal?: StreamAgentEvent): void {
-    const dispatcher = this.deps.lifecycleDispatcher;
     if (sink.lifecycleFinishDispatched) return;
     if (!sink.lifecycleStartedAt || sink.lifecycleStartedAtMs === undefined) {
       // A turn that failed before it started, such as on a model that cannot
       // be resolved, has no finished event; in-process listeners still hear.
       if (terminal?.type === "error") {
         sink.lifecycleFinishDispatched = true;
-        dispatcher.dispatchFailedBeforeStart({
+        this.deps.turnLifecycle.couldNotStart({
           turn: createAgentTurnRef({
             sessionId: this.sessionId,
             turnId: sink.turnId,
@@ -2733,13 +2729,8 @@ class AgentSessionImpl implements AgentSession {
       terminal: terminal?.type === "result" || terminal?.type === "error" ? terminal : undefined,
       stoppedByRome: sink.lifecycleInterrupted,
     };
-    const accounting = ending.terminal?.accounting;
-    const stopReason =
-      accounting?.stopReason ?? (sink.lifecycleInterrupted ? "interrupted" : undefined);
-    const stop = turnStop(ending);
-    const status = turnStatus(ending);
 
-    dispatcher.dispatchFinished({
+    this.deps.turnLifecycle.ended({
       type: "agent-turn-finished",
       version: 1,
       turn: createAgentTurnRef({
@@ -2750,27 +2741,12 @@ class AgentSessionImpl implements AgentSession {
         threadContext: sink.threadContext ?? this.threadContext,
         parent: sink.lifecycleParent,
       }),
-      status,
       timing: buildRequiredTiming({
         startedAt,
         finishedAt,
         durationMs,
       }),
-      output: {
-        ...buildLifecycleOutput(terminal, status, stop, stopReason),
-        ...(terminal?.type === "error"
-          ? {
-              failure: {
-                message: terminal.error,
-                provider: this.modelSession.providerId,
-                ...(terminal.code ? { code: terminal.code } : {}),
-                ...(terminal.reason ? { reason: terminal.reason } : {}),
-                ...(terminal.httpStatus ? { httpStatus: terminal.httpStatus } : {}),
-                ...(terminal.providerError ? { providerError: terminal.providerError } : {}),
-              },
-            }
-          : {}),
-      },
+      ...endedTurn(ending, this.modelSession.providerId),
       metrics: {
         toolCallCount: this.currentTurnToolCallCount,
         skillWritten: this.currentTurnSkillWritten,
@@ -3777,41 +3753,4 @@ function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] 
     name,
     description: requireAgent(agents, name).definition.description,
   }));
-}
-
-function buildLifecycleOutput(
-  terminal: StreamAgentEvent | undefined,
-  status: AgentTurnStatus,
-  stop?: AgentStop,
-  stopReason?: string,
-): AgentTurnOutput {
-  const stopField = stop ? { stop } : {};
-  if (terminal?.type === "result") {
-    return {
-      text: terminal.content,
-      structuredOutput: terminal.structuredOutput,
-      state: status === "interrupted" ? "partial" : "final",
-      terminalKind: "result",
-      ...stopField,
-      stopReason,
-      accounting: terminal.accounting,
-    };
-  }
-  if (terminal?.type === "error") {
-    return {
-      text: "",
-      state: "none",
-      terminalKind: "error",
-      ...stopField,
-      stopReason,
-      error: terminal.error,
-      accounting: terminal.accounting,
-    };
-  }
-  return {
-    text: "",
-    state: "none",
-    ...stopField,
-    stopReason,
-  };
 }

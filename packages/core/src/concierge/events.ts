@@ -4,10 +4,7 @@
 // one reminder turn.
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type {
-  AgentLifecycleDispatcher,
-  AgentTurnFailedBeforeStart,
-} from "../core/agent-lifecycle.js";
+import type { AgentTurnFailedBeforeStart, TurnListeners } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
@@ -170,7 +167,7 @@ export async function renderTaskEvents(
 /** Starts listening. Returns the unsubscribe. */
 export function startConciergeEvents(
   service: ConciergeService,
-  dispatcher: Pick<AgentLifecycleDispatcher, "onFinished" | "onFailedBeforeStart">,
+  turns: Pick<TurnListeners, "listen">,
   options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
   const remindersRunning = new Set<string>();
@@ -367,21 +364,23 @@ export function startConciergeEvents(
   service.attachFailedBeforeStart(onFailedBeforeStart);
 
   const unsubscribers = [
-    dispatcher.onFailedBeforeStart(onFailedBeforeStart),
+    turns.listen({
+      couldNotStart: onFailedBeforeStart,
+      ended: (event) => {
+        const thread = event.turn.threadContext;
+        // A subagent's turn belongs to its parent's turn, which reports on its own.
+        if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+        const chatId = thread.threadId;
+        const handled = isConciergeAgent(event.turn.agentName)
+          ? onConciergeTurn(event, chatId)
+          : onTaskChatTurn(event, chatId);
+        void guard(`concierge turn handling (${event.turn.turnId})`, handled);
+      },
+    }),
     tasks.repo.onChange(({ row }, change) => {
       if (change === "write") coalescer.settle(row.id);
     }),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
-    dispatcher.onFinished((event) => {
-      const thread = event.turn.threadContext;
-      // A subagent's turn belongs to its parent's turn, which reports on its own.
-      if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
-      const chatId = thread.threadId;
-      const handled = isConciergeAgent(event.turn.agentName)
-        ? onConciergeTurn(event, chatId)
-        : onTaskChatTurn(event, chatId);
-      void guard(`concierge turn handling (${event.turn.turnId})`, handled);
-    }),
   ];
 
   return () => {

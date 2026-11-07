@@ -16,7 +16,7 @@ import { createActionEngineRepos, createTestDb, type TestDb } from "../test/help
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "../agent/index.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,
@@ -157,7 +157,7 @@ describe("continuation notice through AgentSessionManager", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
