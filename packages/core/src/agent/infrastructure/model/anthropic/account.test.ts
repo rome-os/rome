@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
+import type { ModelAccountUsage } from "../../../domain/model-account.js";
 import { ClaudeAccount } from "./account.js";
 
 const usage = (usedPercent: number) => ({
@@ -41,18 +42,60 @@ describe("ClaudeAccount", () => {
       usageLimitUntil: "2026-11-07T05:00:00.000Z",
     });
 
+    // With no stated end, the refusal ends five hours after it was seen.
     account.refusedTurn({ kind: "usage" });
-    await expect(account.status()).resolves.toMatchObject({ usageLimitUntil: null });
+    await expect(account.status()).resolves.toMatchObject({
+      usageLimitUntil: "2026-11-07T05:00:00.000Z",
+    });
 
     // The usage read the refusal itself triggers describes the account before
     // the refused turn, so it cannot end the refusal. One after the hold does.
     await account.usage();
-    await expect(account.status()).resolves.toMatchObject({ usageLimitUntil: null });
+    await expect(account.status()).resolves.toMatchObject({
+      usageLimitUntil: "2026-11-07T05:00:00.000Z",
+    });
     now += USAGE_REFUSAL_HOLD_MS;
     await account.usage();
     await expect(account.status()).resolves.not.toHaveProperty("usageLimitUntil");
   });
 
+  it("drops a refusal once its end has passed, however often it is read", async () => {
+    let now = Date.parse("2026-11-07T00:00:00.000Z");
+    const account = new ClaudeAccount({
+      env: {},
+      readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+      readUsage: async () => null,
+      now: () => now,
+    });
+    account.refusedTurn({ kind: "usage" });
+    now += 3 * 60 * 60 * 1000;
+    await account.usage();
+    await expect(account.status()).resolves.toMatchObject({
+      usageLimitUntil: "2026-11-07T05:00:00.000Z",
+    });
+    now += 2 * 60 * 60 * 1000;
+    await expect(account.status()).resolves.not.toHaveProperty("usageLimitUntil");
+  });
+
+  it("lets no usage read that began before a refusal clear it", async () => {
+    let now = Date.parse("2026-11-07T00:00:00.000Z");
+    let answer: ((value: ModelAccountUsage) => void) | undefined;
+    const pending = new Promise<ModelAccountUsage>((resolve) => {
+      answer = resolve;
+    });
+    const account = new ClaudeAccount({
+      env: {},
+      readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+      readUsage: () => pending,
+      now: () => now,
+    });
+    const read = account.usage();
+    now += USAGE_REFUSAL_HOLD_MS * 2;
+    account.refusedTurn({ kind: "usage" });
+    answer?.(usage(10));
+    await read;
+    await expect(account.status()).resolves.toHaveProperty("usageLimitUntil");
+  });
   it("reads no usage for an account the provider bills per use", async () => {
     const readUsage = rs.fn(async () => usage(10));
     const account = new ClaudeAccount({ env: { ANTHROPIC_API_KEY: "sk" }, readUsage });
@@ -69,7 +112,7 @@ describe("ClaudeAccount", () => {
     });
     account.refusedTurn({ kind: "usage" });
     await account.usage();
-    await expect(account.status()).resolves.toMatchObject({ usageLimitUntil: null });
+    await expect(account.status()).resolves.toHaveProperty("usageLimitUntil");
   });
 
   it("returns live usage errors rather than falling back to unmaintained usage files", async () => {

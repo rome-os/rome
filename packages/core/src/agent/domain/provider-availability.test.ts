@@ -43,13 +43,20 @@ describe("availabilityFromAccount", () => {
   });
 
   it.each([
-    null,
     "invalid",
     "2000-01-01T00:00:00Z",
-  ])("assumes the fallback end for a refusal with %s time", (until) => {
-    expect(
-      availabilityFromAccount({ loggedIn: true, usageLimitUntil: until }, null, readAt),
-    ).toMatchObject({ state: "usage_limit_reached", usageLimitUntil: fallback });
+  ])("reads a refusal whose end is %s as over, whatever usage is readable", (until) => {
+    const status = { loggedIn: true, usageLimitUntil: until };
+    expect(availabilityFromAccount(status, null, readAt)).toMatchObject({ state: "available" });
+    const capacity = {
+      checkedAt: readAt.toISOString(),
+      source: "test",
+      fiveHour: { usedPercent: 10 },
+    };
+    expect(availabilityFromAccount(status, capacity, readAt)).toMatchObject({ state: "available" });
+    // Reading the same refusal again never renews it.
+    const later = new Date(readAt.getTime() + 10 * 60 * 60 * 1000);
+    expect(availabilityFromAccount(status, null, later)).toMatchObject({ state: "available" });
   });
 
   it("assumes the fallback end for an exhausted window with no reset", () => {

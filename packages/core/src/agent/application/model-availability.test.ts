@@ -119,7 +119,7 @@ describe("createModelAvailability", () => {
     availability.onChanged((provider, change) => changes.push(`${provider}:${change}`));
     await availability.refresh();
     expect(changes).toEqual(["openai:refreshed"]);
-    codex.set({ loggedIn: true, usageLimited: true, usageLimitUntil: null });
+    codex.set({ loggedIn: true, usageLimited: true, usageLimitUntil: "2026-11-07T05:00:00.000Z" });
     await availability.refresh();
     expect(changes).toEqual(["openai:refreshed", "openai:refreshed"]);
     codex.set({ loggedIn: false });
@@ -142,7 +142,11 @@ describe("createModelAvailability", () => {
       now: () => readAt,
     });
     await availability.refresh();
-    codex.changed({ loggedIn: true, usageLimited: true, usageLimitUntil: null });
+    codex.changed({
+      loggedIn: true,
+      usageLimited: true,
+      usageLimitUntil: "2026-11-07T05:00:00.000Z",
+    });
     await settle();
     expect(availability.read().openai).toMatchObject({
       state: "usage_limit_reached",
@@ -162,8 +166,13 @@ describe("createModelAvailability", () => {
     codex.hold();
     const read = availability.refresh("openai");
     // The provider refuses a turn while the read is waiting on the account.
-    codex.changed({ loggedIn: true, usageLimited: true, usageLimitUntil: null });
-    codex.changed({ loggedIn: true, usageLimited: true, usageLimitUntil: null });
+    const refused = {
+      loggedIn: true,
+      usageLimited: true,
+      usageLimitUntil: "2026-11-07T05:00:00.000Z",
+    };
+    codex.changed(refused);
+    codex.changed(refused);
     // The read that began before the refusal answers with what it saw then.
     codex.release({ loggedIn: true, usageLimited: true });
     await read;

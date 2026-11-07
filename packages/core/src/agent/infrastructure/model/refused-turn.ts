@@ -2,6 +2,8 @@
 // tells its own account, and the account reports it from then on. Nothing
 // outside the adapters' folder carries it.
 
+import { USAGE_LIMIT_FALLBACK_MS } from "../../domain/provider-availability.js";
+
 export type RefusedTurn =
   /** The provider no longer accepts the credential. The adapter has persisted its marker. */
   | { kind: "credential" }
@@ -21,14 +23,33 @@ export interface LearnsRefusedTurns {
  */
 export const USAGE_REFUSAL_HOLD_MS = 5 * 60_000;
 
-/** A usage refusal the account holds: when the provider said it ends, and when the adapter saw it. */
+/** A usage refusal the account holds: when it ends, and when the adapter saw it. */
 export interface UsageRefusal {
-  /** The provider's stated end, null when it said none. */
-  until: string | null;
+  /** The provider's stated end, else the domain's fallback after the refusal. */
+  until: string;
   refusedAt: number;
 }
 
-/** Whether a usage read at `readAt` that shows capacity clears `refusal`. */
+/** The refusal an account holds for a usage refusal the adapter saw at `refusedAt`. */
+export function usageRefusalAt(refusal: { until?: string }, refusedAt: number): UsageRefusal {
+  const stated = Date.parse(refusal.until ?? "");
+  const until =
+    Number.isNaN(stated) || stated <= refusedAt
+      ? new Date(refusedAt + USAGE_LIMIT_FALLBACK_MS).toISOString()
+      : refusal.until!;
+  return { until, refusedAt };
+}
+
+/** Whether the refusal's end has passed at `now`. */
+export function usageRefusalEnded(refusal: UsageRefusal, now: number): boolean {
+  return Date.parse(refusal.until) <= now;
+}
+
+/**
+ * Whether a usage read that began at `readAt` and shows capacity clears
+ * `refusal`. A read that began before the refusal, or within the hold after
+ * it, describes the account before the refused turn.
+ */
 export function usageReadClearsRefusal(refusal: UsageRefusal, readAt: number): boolean {
   return readAt - refusal.refusedAt >= USAGE_REFUSAL_HOLD_MS;
 }

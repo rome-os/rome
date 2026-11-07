@@ -27,6 +27,8 @@ import {
   type RefusedTurn,
   type UsageRefusal,
   usageReadClearsRefusal,
+  usageRefusalAt,
+  usageRefusalEnded,
 } from "../refused-turn.js";
 
 const log = createLogger("claude-account");
@@ -99,8 +101,16 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
     return {
       ...base,
       usageLimited,
-      ...(usageLimited && this.refusal ? { usageLimitUntil: this.refusal.until } : {}),
+      ...(usageLimited && this.heldRefusal() ? { usageLimitUntil: this.refusal?.until } : {}),
     };
+  }
+
+  /** The refusal still held: one whose end has not passed. */
+  private heldRefusal(): UsageRefusal | undefined {
+    if (this.refusal && usageRefusalEnded(this.refusal, (this.options.now ?? Date.now)())) {
+      this.refusal = undefined;
+    }
+    return this.refusal;
   }
 
   /** Stored Anthropic-compatible credentials or an environment credential: the provider bills per use. */
@@ -156,7 +166,7 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
 
   refusedTurn(refusal: RefusedTurn): void {
     if (refusal.kind === "usage") {
-      this.refusal = { until: refusal.until ?? null, refusedAt: (this.options.now ?? Date.now)() };
+      this.refusal = usageRefusalAt(refusal, (this.options.now ?? Date.now)());
     }
     this.emitChanged();
   }

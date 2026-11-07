@@ -29,6 +29,8 @@ import {
   type RefusedTurn,
   type UsageRefusal,
   usageReadClearsRefusal,
+  usageRefusalAt,
+  usageRefusalEnded,
 } from "../refused-turn.js";
 import { isCodexAuthRevokedError } from "./auth-revoked.js";
 import { Method, Notify } from "./app-server-protocol.js";
@@ -200,8 +202,14 @@ export class SharedCodexAccountService
     return {
       ...read,
       ...facts,
-      ...(facts.usageLimited && this.refusal ? { usageLimitUntil: this.refusal.until } : {}),
+      ...(facts.usageLimited && this.heldRefusal() ? { usageLimitUntil: this.refusal?.until } : {}),
     };
+  }
+
+  /** The refusal still held: one whose end has not passed. */
+  private heldRefusal(): UsageRefusal | undefined {
+    if (this.refusal && usageRefusalEnded(this.refusal, this.now())) this.refusal = undefined;
+    return this.refusal;
   }
 
   private async readStatus(): Promise<ModelAccountStatus> {
@@ -447,7 +455,7 @@ export class SharedCodexAccountService
   /** The provider adapter saw the provider refuse a turn. A credential refusal is already in auth.json. */
   refusedTurn(refusal: RefusedTurn): void {
     if (refusal.kind === "usage") {
-      this.refusal = { until: refusal.until ?? null, refusedAt: this.now() };
+      this.refusal = usageRefusalAt(refusal, this.now());
     }
     this.emitAccountChanged();
   }

@@ -71,8 +71,8 @@ function ahead(until: string | undefined, now: Date): string | undefined {
 
 /**
  * What the account's status and usage amount to, read at `readAt`. The end
- * of a usage limit is the provider's stated time, else the latest reset among
- * the exhausted windows, else the fallback. Usage that could not be read
+ * of a usage limit is the time the account reports for a refused turn, else
+ * the latest reset among the exhausted windows, else the fallback. Usage that could not be read
  * (null, or an error) proves neither capacity nor a limit, so a limit still
  * ahead carries over from `previous`.
  */
@@ -89,14 +89,11 @@ export function availabilityFromAccount(
   if (!status.loggedIn) return { ...base, state: "unauthorized" };
   if (status.usageLimited === false) return base;
 
+  // A refusal the account still reports after its end is over, and the
+  // usage decides as if there were none, so a refusal never renews itself.
+  const refusedUntil = ahead(status.usageLimitUntil, readAt);
+  if (refusedUntil) return { ...base, state: "usage_limit_reached", usageLimitUntil: refusedUntil };
   const fallback = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS).toISOString();
-  if (status.usageLimitUntil !== undefined) {
-    return {
-      ...base,
-      state: "usage_limit_reached",
-      usageLimitUntil: ahead(status.usageLimitUntil ?? undefined, readAt) ?? fallback,
-    };
-  }
   if (!usage || usage.error) {
     const carried = ahead(previous?.usageLimitUntil, readAt);
     return carried ? { ...base, state: "usage_limit_reached", usageLimitUntil: carried } : base;

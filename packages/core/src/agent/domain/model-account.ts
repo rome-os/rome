@@ -44,10 +44,12 @@ export interface ModelAccountStatus {
    */
   usageLimited?: boolean;
   /**
-   * The provider refused a turn for usage: until when it said so, or null
-   * when it gave no time. Cleared once a usage read shows capacity again.
+   * The provider refused a turn for usage, until this time: the end the
+   * provider stated, or five hours after the adapter saw the refusal when it
+   * stated none. Dropped once the time passes or a later usage read shows
+   * capacity.
    */
-  usageLimitUntil?: string | null;
+  usageLimitUntil?: string;
 }
 
 /** One of the provider's rolling usage windows. */
