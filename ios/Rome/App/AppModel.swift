@@ -214,6 +214,8 @@ final class AppModel {
 
     let cloud: CloudAuth
     let push: PushCenter
+    /// Light, dark or automatic, for the whole app; kept across sign-out.
+    let appearance = AppearanceSetting()
     /// Keeps the open instance on its latest release.
     let update = InstanceUpdater()
     static let updateCheckHold: Duration = .seconds(1)
@@ -470,6 +472,7 @@ final class AppModel {
     /// Back in front: what the screens show may be behind, whether or not the
     /// app was suspended, so they refetch and the socket starts over.
     func appDidBecomeActive() {
+        appearance.apply()
         // Notifications turned on in the Settings app register this phone.
         Task { await push.launch() }
         if foreground.becameActive(at: .now) {

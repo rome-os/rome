@@ -11,6 +11,9 @@ struct RomeApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                // On the window as soon as it exists, so the launch-to-opening
+                // handoff already follows the setting.
+                .onAppear { model.appearance.apply() }
                 .task { await model.launch() }
         }
     }

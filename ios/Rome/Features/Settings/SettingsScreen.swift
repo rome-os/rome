@@ -118,6 +118,28 @@ struct SettingsScreen: View {
                 }
                 .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
+                    SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
+                        Menu {
+                            Picker("Appearance", selection: Binding(get: { model.appearance.current }, set: { model.appearance.set($0) })) {
+                                ForEach(Appearance.allCases) { option in
+                                    Text(option.title).tag(option)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(model.appearance.current.title)
+                                    .romeFont(17)
+                                    .foregroundStyle(Palette.sub)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .romeFont(12, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Appearance")
+                        .accessibilityValue(Text(model.appearance.current.title))
+                    }
                     SettingsRow(systemImage: "bell", title: "Notifications") {
                         Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: setNotifications))
                             .labelsHidden()
