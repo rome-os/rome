@@ -78,15 +78,16 @@ import type {
   ModelToolCallContext,
   ProviderId,
 } from "./agent-runner.js";
+import { isConciergeAgent } from "../concierge/service.js";
 import {
+  modelResolutionRequest,
   toModelResolutionErrorPayload,
+  type ModelLoginKind,
   type ModelResolution,
   type ModelResolutionErrorPayload,
   type ModelResolver,
-} from "./model-resolver.js";
-import { isConciergeAgent } from "../concierge/service.js";
-import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import type { ModelLoginKind, ModelSelectionId } from "../agent/index.js";
+  type ModelSelectionId,
+} from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
@@ -1632,8 +1633,8 @@ async function openSession(
       ),
     });
   } else {
-    initialResolution = await deps.modelResolver.getModelProvider(
-      resolveAgentModelRequest(config, selectionId, sessionPin),
+    initialResolution = await deps.modelResolver.resolve(
+      modelResolutionRequest(selectionId, sessionPin, config),
     );
     modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =
@@ -2149,8 +2150,8 @@ class AgentSessionImpl implements AgentSession {
 
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
-    const resolution = await this.deps.modelResolver.getModelProvider(
-      resolveAgentModelRequest(this.config, this.selectionId, this.sessionPin),
+    const resolution = await this.deps.modelResolver.resolve(
+      modelResolutionRequest(this.selectionId, this.sessionPin, this.config),
     );
     if (
       this.modelSessionAvailable &&
@@ -2940,7 +2941,8 @@ class AgentSessionImpl implements AgentSession {
               throw new Error("Fork checkpoint belongs to a different model thread");
             }
             const forkModel = input.tier
-              ? await this.deps.modelResolver.getModelProvider({
+              ? await this.deps.modelResolver.resolve({
+                  kind: "tier",
                   tier: input.tier,
                   providerId: sourceModelSession.providerId,
                 })

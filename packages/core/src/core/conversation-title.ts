@@ -1,7 +1,7 @@
 import { recordModelTurnMetrics } from "../telemetry.js";
 import type { ModelSession } from "./agent-runner.js";
 import { createRomeTools } from "./mcp/server.js";
-import type { ModelResolver } from "./model-resolver.js";
+import type { ModelResolver } from "../agent/index.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 export const CONVERSATION_TITLE_MAX_LENGTH = 50;
@@ -88,7 +88,7 @@ export function createConversationTitleGenerator(
       let timeout: ReturnType<typeof setTimeout> | undefined;
 
       const operation = (async () => {
-        const resolution = await modelResolver.getModelProvider({ tier: "small" });
+        const resolution = await modelResolver.resolve({ kind: "tier", tier: "small" });
         const openedSession = await resolution.modelProvider.openSession({
           config: {
             model: resolution.model,

@@ -88,6 +88,16 @@ How Rome is let in to a model provider. A login has one of three kinds, named by
 - For Claude, Rome's setup picks nothing. A stored credential wins over an environment credential, which wins over the Claude CLI's login, so the guardian chooses by what they store. Where Rome found a credential is a detail of the login, not a kind.
 - In code the logins and their ports are in [`packages/core/src/agent/domain/model-login.ts`](../../packages/core/src/agent/domain/model-login.ts). `CodexLogins` logs Rome in to and out of Codex and runs Codex on the login it is told to use. `ClaudeLogins` keeps the credential Rome stores for Claude and logs the CLI out, since the guardian signs in to Claude outside Rome. `claudeLogin` holds Claude's order. `ModelProviderLogins` is the revoke both adapters share. Rome's setup choice is [`packages/core/src/rome-cloud/codex-login.ts`](../../packages/core/src/rome-cloud/codex-login.ts), outside the agent context.
 
+## Model resolution
+
+Which provider and model a run uses. The ask is the most specific of the chat's [selection](#model-selection), the session's pin, the agent's own model and the agent's tier, and the resolution is the answer. A selection, a pin and an agent's own model are exact asks, and an exact ask resolves to exactly that model or fails, never to a substitute.
+
+- A provider is **usable** when its [availability](#model-provider-availability) is available, or Rome has not read it yet. Resolution checks that first, and then whether the [login](#model-provider-login) in effect allows the model. So a failure is either an unavailable provider or a model the login does not allow.
+- A tier resolves on the first usable provider in order (Codex on the guardian's account, Claude, Codex on Rome credits, then the mock) to that provider's model for the tier. When the login there does not allow that model, the ask fails rather than moving on to the next provider.
+- A tier restricted to one provider asks about the guardian's own account, so Rome credits do not count for it.
+- **Tier models** are the guardian's choice of model for each tier and provider. A provider with none chosen uses Rome's default for the tier. The stored setting keeps its older name, `tierModelMappings`.
+- In code the ask is `ModelResolutionRequest` and the rule is `resolveModel` in [`packages/core/src/agent/domain/model-resolution.ts`](../../packages/core/src/agent/domain/model-resolution.ts), a pure function over the facts the resolver reads. `ModelResolver` in [`packages/core/src/agent/application/model-resolver.ts`](../../packages/core/src/agent/application/model-resolver.ts) reads them and words a failure for the wire.
+
 ## Model selection
 
 A model a guardian picks by name for a chat, such as `claude-sonnet` or `gpt-6-luna`, and the provider that serves it. It is one of a fixed list the agent context owns. Leaving the choice to Rome ("auto" in the dashboard) is not a selection but the absence of one, so the resolver picks by [tier](../concepts/agents.md#model-selection) instead.

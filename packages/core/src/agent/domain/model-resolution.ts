@@ -15,7 +15,13 @@ import {
 import { stripLegacyReasoningSuffix } from "./model-alias.js";
 import type { CodexLogin } from "./model-login.js";
 import type { ProviderId } from "./model-port.js";
-import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL, CODEX_TERRA_MODEL } from "./model-selection.js";
+import {
+  CODEX_LUNA_MODEL,
+  CODEX_SOL_MODEL,
+  CODEX_TERRA_MODEL,
+  MODEL_SELECTIONS,
+  type ModelSelectionId,
+} from "./model-selection.js";
 import type { ModelTier } from "./model-tier.js";
 import { providerAvailability } from "./provider-availability.js";
 
@@ -26,6 +32,12 @@ export type ModelResolutionRequest =
 
 /** The guardian's choice of model for each tier and provider. */
 export type TierModels = Partial<Record<AccountedProviderId, Partial<Record<ModelTier, string>>>>;
+
+/** Port. The guardian's tier models, read for each tier ask. */
+export interface TierModelsSetting {
+  /** Malformed and blank values read as absent. */
+  read(): Promise<TierModels>;
+}
 
 /** What the rule reads. The resolver reads each once per ask. */
 export interface ModelResolutionFacts {
@@ -199,4 +211,31 @@ export function resolveModel(
         connected.length > 0 && connected.every((state) => state === "usage_limit_reached"),
     },
   };
+}
+
+/**
+ * The ask is the most specific of the chat's selection, the session's pin, the
+ * agent's model, the agent's tier. Throws on an agent with neither a tier nor
+ * a provider and model, or with a model beside a tier.
+ */
+export function modelResolutionRequest(
+  selectionId: ModelSelectionId | undefined,
+  pin: { providerId: ProviderId; model: string } | undefined,
+  agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
+): ModelResolutionRequest {
+  if (selectionId) {
+    const { providerId, model } = MODEL_SELECTIONS[selectionId];
+    return { kind: "exact", providerId, model };
+  }
+  if (pin) return { kind: "exact", ...pin };
+  if (agent.modelId !== undefined) {
+    if (!agent.providerId || !agent.modelId || agent.tier !== undefined) {
+      throw new Error("An agent modelId requires a provider and cannot be combined with tier");
+    }
+    return { kind: "exact", providerId: agent.providerId, model: agent.modelId };
+  }
+  if (!agent.tier) {
+    throw new Error("Agent config requires a tier or a provider with modelId");
+  }
+  return { kind: "tier", tier: agent.tier, providerId: agent.providerId };
 }

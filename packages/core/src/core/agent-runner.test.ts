@@ -70,7 +70,11 @@ import type {
   ProviderId,
   ThreadStart,
 } from "./agent-runner.js";
-import { createModelResolver, type ModelResolver } from "./model-resolver.js";
+import {
+  createModelResolver,
+  createTierModelsSetting,
+  type ModelResolver,
+} from "../agent/index.js";
 import {
   createAgentSessionManager,
   type AgentSession,
@@ -5313,10 +5317,10 @@ describe("AgentRunner", () => {
       const modelResolver = createModelResolver({
         providers: [claude],
         accounts: fakeAccounts(() => state),
-        settingsRepo: {
+        tierModels: createTierModelsSetting({
           get: async <T = unknown>(key: string): Promise<T | null> =>
             key === "tierModelMappings" ? (tierModelMappings as T) : null,
-        },
+        }),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,

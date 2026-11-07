@@ -67,7 +67,7 @@ import {
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
 import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
-import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
+import { toModelResolutionErrorPayload } from "../../agent/index.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
 import { buildWorkspaceContextSection, type WorkspaceContextSnapshot } from "../../agent/index.js";

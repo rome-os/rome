@@ -13,7 +13,7 @@ import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import type { RomeToolGroup, RomeTools } from "../agent/index.js";
-import { createModelResolver } from "../core/model-resolver.js";
+import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "../test/kit/model-accounts.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import {

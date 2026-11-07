@@ -32,7 +32,7 @@ import type {
   SendTurnOptions,
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
-import { ModelResolutionError } from "../../core/model-resolver.js";
+import { ModelResolutionError } from "../../agent/index.js";
 import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";

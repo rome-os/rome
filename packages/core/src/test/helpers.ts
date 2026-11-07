@@ -29,7 +29,7 @@ import {
   type CodexLogins,
   romeCreditsProxyRoutes,
 } from "../agent/index.js";
-import { createModelResolver } from "../core/model-resolver.js";
+import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
