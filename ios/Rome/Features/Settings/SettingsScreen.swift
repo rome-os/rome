@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// A page's top and a large title: a glass back button on a pushed page, or a
-/// close button at the right on the first page of a sheet.
+/// A page's top and a large title: a glass back button on a pushed page, or
+/// room for a close button at the right on the first page of a sheet. The
+/// close itself is pinned over the scroll (`pinnedClose`), so it stays put.
 struct PageHeader: View {
     let title: LocalizedStringKey
     var onClose: (() -> Void)? = nil
@@ -14,11 +15,9 @@ struct PageHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                if let onClose {
-                    Spacer()
-                    GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
-                        Image(systemName: "xmark").romeFont(16, .semibold)
-                    }
+                if onClose != nil {
+                    // The pinned close button sits over this space.
+                    Color.clear.frame(width: 44, height: 44)
                 } else if let onMenu {
                     GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                         MenuGlyph()
@@ -38,6 +37,20 @@ struct PageHeader: View {
                 .accessibilityAddTraits(.isHeader)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    /// A sheet's close button fixed at the top right, over the scrolling
+    /// list, on glass so it reads over the rows.
+    func pinnedClose(_ action: @escaping () -> Void) -> some View {
+        overlay(alignment: .topTrailing) {
+            GlassCircleButton(accessibilityLabel: "Close", action: action) {
+                Image(systemName: "xmark").romeFont(16, .semibold)
+            }
+            .padding(.trailing, 16)
+            .padding(.top, 16)
+        }
     }
 }
 
@@ -201,6 +214,7 @@ struct SettingsScreen: View {
             .padding(.bottom, 32)
         }
         .background(Palette.bg.ignoresSafeArea())
+        .pinnedClose(onClose)
         .toolbar(.hidden, for: .navigationBar)
         .task { usage = try? await workspace.backend.aiTools() }
         .task {
