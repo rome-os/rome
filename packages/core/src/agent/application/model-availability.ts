@@ -195,7 +195,10 @@ export function createModelAvailability(
     }),
   );
 
-  const interval = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
+  const interval =
+    options.refreshIntervalMs === undefined
+      ? DEFAULT_REFRESH_INTERVAL_MS
+      : options.refreshIntervalMs;
   const timer =
     interval === null
       ? null

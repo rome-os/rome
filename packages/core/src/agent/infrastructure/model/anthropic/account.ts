@@ -45,10 +45,15 @@ export interface ClaudeAccountOptions {
   now?: () => number;
 }
 
-function runClaude(args: string[]): Promise<string> {
+/**
+ * Runs the Claude CLI. `claude auth status` exits non-zero when signed out
+ * and still prints the status, so a status read keeps the output on a failed
+ * exit; any other command fails with the exit.
+ */
+function runClaude(args: string[], tolerate: "exit-with-output" | "nothing"): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("claude", args, { timeout: 10_000 }, (err, stdout) => {
-      if (err && !stdout.trim()) {
+      if (err && (tolerate === "nothing" || !stdout.trim())) {
         reject(new Error(getErrorMessage(err)));
         return;
       }
@@ -58,7 +63,7 @@ function runClaude(args: string[]): Promise<string> {
 }
 
 async function readClaudeCliStatus(): Promise<ModelAccountStatus> {
-  const output = (await runClaude(["auth", "status"])).trim();
+  const output = (await runClaude(["auth", "status"], "exit-with-output")).trim();
   if (!output) throw new Error("claude auth status printed nothing");
   let parsed: ModelAccountStatus & { subscriptionType?: unknown; apiProvider?: unknown };
   try {
@@ -81,7 +86,7 @@ async function readClaudeCliStatus(): Promise<ModelAccountStatus> {
 }
 
 async function logoutClaude(): Promise<void> {
-  await runClaude(["auth", "logout"]);
+  await runClaude(["auth", "logout"], "nothing");
   await clearClaudeAuthRevoked();
 }
 

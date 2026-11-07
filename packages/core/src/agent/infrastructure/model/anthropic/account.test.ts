@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, rs } from "@rstest/core";
 import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import type { ModelAccountUsage } from "../../../domain/model-account.js";
@@ -125,6 +128,24 @@ describe("ClaudeAccount", () => {
     };
     const account = new ClaudeAccount({ env: {}, readUsage: async () => failed });
     await expect(account.usage()).resolves.toEqual(failed);
+  });
+
+  it("fails a logout the CLI refused, whatever it printed", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "rome-claude-account-"));
+    const originalPath = process.env.PATH;
+    try {
+      await fs.writeFile(
+        join(dir, "claude"),
+        ["#!/bin/sh", "echo 'not signed in'", "exit 1"].join("\n"),
+        { mode: 0o755 },
+      );
+      process.env.PATH = `${dir}:${originalPath ?? ""}`;
+      const account = new ClaudeAccount({ env: {} });
+      await expect(account.revoke()).rejects.toThrow();
+    } finally {
+      process.env.PATH = originalPath;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("tells listeners when the provider refused the credential and when it is revoked", async () => {
