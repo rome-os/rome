@@ -23,14 +23,14 @@ Before any code, write one plan for the pillar: what moves where, new words, the
 
 ## The API
 
-The API is what other code may call: a context's public module, its ports, and the shapes they carry. Show it as signatures in the plan, each with one line on what it promises. Have a fresh reviewer judge it, with no access to your reasoning, against the four checks below and the points the person has already settled. Settle each finding before the person sees the plan: fix it, or decline it with a reason in the plan.
+The API is what other code may call: a context's public module, its ports, and the shapes they carry. Show it in the plan as one sentence on the module's responsibility, then signatures, each with one line on what it promises. Have a fresh reviewer judge it, with no access to your reasoning, against the four checks below and the points the person has already settled. Settle each finding before the person sees the plan: fix it, or decline it with a reason in the plan.
 
 | Check | Holds when |
 |---|---|
 | Consistent names | Each name is a word from `docs/domains/` or follows a written naming rule of the context. One concept has one name, and one act has one verb, across every port in the context. |
 | Clear semantics | A reader who sees only the signature and its line can say what the member does, when it fails, and what stays true afterwards. The answer does not depend on the caller or the adapter. |
 | Small surface | Every member has a caller today that needs it. Remove or merge before you add. A member with one caller inside the context stays private. |
-| Whole boundaries | Each concept lives in one context, and one act goes through one module. A caller never combines two modules to do one thing, and a change to one concept never touches two contexts. |
+| Clear responsibility | One sentence says what the module is responsible for and what it leaves to its callers. Every member and every case it handles falls inside that sentence. A case that belongs to a caller stays with that caller, even when the module could absorb it. |
 
 Prefer the change that removes a member or a word over the change that adds one. When the checks pull against each other, ask.
 
