@@ -129,7 +129,7 @@ jobs:
       - run: pnpm lint:deadcode
 
       - run: pnpm typecheck
-      - run: pnpm typecheck:lint-agents
+      - run: pnpm typecheck:lint
 
   # ──────────────────────────────────────────
   # Job 1b: DB schema drift — committed migrations must match the schema files

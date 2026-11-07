@@ -258,9 +258,9 @@ export function runCli(cwd: string = process.cwd()): number {
     // Exit 1 states that the invariant was checked and violated, so a crash
     // takes 2 like every other outcome where it was never checked at all.
     if (error instanceof LintEnvironmentError) {
-      console.error(`check-agents-symlinks: ${error.message}`);
+      console.error(`agents-symlinks: ${error.message}`);
     } else {
-      console.error("check-agents-symlinks: unexpected failure");
+      console.error("agents-symlinks: unexpected failure");
       console.error(error);
     }
     return 2;
@@ -269,21 +269,19 @@ export function runCli(cwd: string = process.cwd()): number {
   // A repository checked out at its root always has one. Zero means the
   // enumeration broke, and reporting success would hide the broken lint.
   if (result.checked === 0) {
-    console.error("check-agents-symlinks: found no CLAUDE.md files at all — the check did not run");
+    console.error("agents-symlinks: found no CLAUDE.md files at all — the check did not run");
     return 2;
   }
 
   if (result.findings.length > 0) {
     for (const finding of result.findings) console.error(`  - ${finding}`);
     console.error(
-      `check-agents-symlinks: ${result.findings.length} problem(s) found — each line above names its fix`,
+      `agents-symlinks: ${result.findings.length} problem(s) found — each line above names its fix`,
     );
     return 1;
   }
 
-  console.log(
-    `check-agents-symlinks: ${result.checked} CLAUDE.md file(s) all have an AGENTS.md symlink`,
-  );
+  console.log(`agents-symlinks: ${result.checked} CLAUDE.md file(s) all have an AGENTS.md symlink`);
   return 0;
 }
 
