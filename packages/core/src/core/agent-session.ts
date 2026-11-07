@@ -3443,7 +3443,7 @@ class AgentSessionImpl implements AgentSession {
       // Turn-middleware onion. App middlewares wrap the act of
       // producing this turn's reply; the real model call is fixed innermost and runs only when every
       // middleware calls next(). A middleware that short-circuits — e.g.
-      // welcome-to-rome's scripted conversation — emits its own model-isomorphic
+      // a scripted conversation — emits its own model-isomorphic
       // content events via ctx.emit and the model is never touched. Bracketing
       // (turn_start/turn_end) and status stay on this wrapper, so a scripted
       // turn closes exactly like a model turn and the downstream SSE/persistence

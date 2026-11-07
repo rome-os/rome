@@ -8,6 +8,7 @@ import { AgentCallView } from "./AgentCallView";
 import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
+import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { RoutineDraftCard } from "./RoutineDraftCard";
@@ -237,6 +238,16 @@ export function renderSingleEntry(
       );
     case "task_chat":
       return <TaskChatCard key={key} chatId={block.chatId} title={block.title} />;
+    case "connect_card":
+      return (
+        <ConnectCard
+          key={key}
+          service={block.service}
+          label={block.label}
+          connect={block.connect}
+          chatId={sid}
+        />
+      );
     case "result":
       return block.accounting ? <UsageSummaryView key={key} accounting={block.accounting} /> : null;
     case "error":

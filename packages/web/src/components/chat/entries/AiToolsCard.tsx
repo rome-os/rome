@@ -9,7 +9,7 @@ import {
 } from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 
-// Core built-in rendering of the welcome conversation's `connect_ai` step. The
+// Core built-in rendering of the built-in `connect_ai` step of a scripted conversation. The
 // turn parks with a `pending_interaction` whose render is `{ kind: "inline",
 // componentId: "ai-tools-card", builtin: true }`; this card embeds the same AI
 // tools panel the settings page uses, limited to the Claude and ChatGPT

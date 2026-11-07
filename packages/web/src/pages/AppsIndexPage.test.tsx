@@ -403,8 +403,8 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
-  it("uses page tiles for exactly five first-party apps and keeps other app images", async () => {
-    const firstParty = ["briefing", "inbox", "showcases", "skills", "welcome-to-rome"];
+  it("uses page tiles for exactly four first-party apps and keeps other app images", async () => {
+    const firstParty = ["briefing", "inbox", "showcases", "skills"];
     mockBackend({
       installed: [
         ...firstParty.map((id) =>
@@ -436,14 +436,8 @@ describe("AppsIndexPage reactivity", () => {
       const icon = tile?.querySelector(".bg-surface-muted");
       expect(icon?.className).toBe(memoryTile?.className);
       expect(icon?.querySelector("svg")?.getAttribute("class")).toContain("h-6 w-6 sm:h-7 sm:w-7");
-      if (id === "welcome-to-rome") {
-        expect(icon?.querySelector("svg")?.getAttribute("class")).toContain("scale-80");
-        expect(icon?.querySelector("mask")).toBeTruthy();
-        expect(icon?.querySelector('svg > path[fill="none"]')).toBeTruthy();
-      } else {
-        expect(icon?.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
-        expect(icon?.querySelector("svg")?.getAttribute("stroke-width")).toBe("2");
-      }
+      expect(icon?.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+      expect(icon?.querySelector("svg")?.getAttribute("stroke-width")).toBe("2");
       expect(tile?.querySelector("img")).toBeNull();
     }
     expect(section.querySelector('img[src="/other.svg"]')).toBeTruthy();
@@ -452,7 +446,7 @@ describe("AppsIndexPage reactivity", () => {
     ).toBeTruthy();
   });
 
-  it.each(["inbox", "welcome-to-rome"])("keeps a disabled %s page tile muted", async (id) => {
+  it.each(["inbox"])("keeps a disabled %s page tile muted", async (id) => {
     mockBackend({
       installed: [
         installedCard({

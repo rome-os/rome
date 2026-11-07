@@ -148,7 +148,7 @@ export function conciergeRoutes(
     if (!concierge || !(await concierge.isEnabled())) {
       return { error: c.json({ error: "Concierge is off" }, 404) };
     }
-    return { following: concierge.following, owner };
+    return { concierge, following: concierge.following, owner };
   };
   const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -160,6 +160,36 @@ export function conciergeRoutes(
     } catch (err) {
       return c.json({ error: messageOf(err) }, 502);
     }
+  });
+
+  // The guardian connected a service from a connect card in one of their
+  // Concierge chats: the Concierge hears of it there, quietly, and goes on. The
+  // service must be connected as the list reads it now, so a call cannot make
+  // the Concierge believe something that is not so. 404 while off.
+  app.post("/concierge/chats/:chatId/service-connected", async (c) => {
+    const { concierge, following, owner, error } = await followingOf(c);
+    if (error) return error;
+    const chatId = c.req.param("chatId");
+    if (
+      !(await concierge.conciergeChat(chatId)) ||
+      (await concierge.ownerOfChat(chatId)) !== owner
+    ) {
+      return c.json({ error: "No such Concierge chat" }, 404);
+    }
+    const body = await c.req
+      .json<{ service?: unknown }>()
+      .catch(() => ({}) as { service?: unknown });
+    const service = typeof body.service === "string" ? body.service : "";
+    try {
+      const { connectors } = await following.list(owner);
+      if (!connectors.some((entry) => entry.service === service && entry.state === "working")) {
+        return c.json({ error: "That service is not connected" }, 409);
+      }
+    } catch (err) {
+      return c.json({ error: messageOf(err) }, 502);
+    }
+    concierge.serviceConnected(chatId, service);
+    return c.body(null, 202);
   });
 
   // The caller's browser time zone, which a visitor's digest times and quiet

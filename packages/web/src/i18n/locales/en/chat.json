@@ -19,6 +19,15 @@
     "openForwardedChat": "Open task chat {{title}}",
     "showFullText": "Show full text",
     "showLess": "Show less",
+    "connect": {
+      "action": "Connect",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "retry": "Try again",
+      "settings": "Settings",
+      "notConnected": "Not connected yet",
+      "unavailable": "Cannot be connected here"
+    },
     "openTaskChat": "Open",
     "tasks": {
       "title": "Tasks",

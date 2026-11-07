@@ -291,6 +291,44 @@ export class ConciergeService {
     return id;
   }
 
+  /**
+   * The guardian's first sign-in: turns the Concierge on, makes sure their main
+   * chat exists and has the Concierge speak first, from `input`. Answers the
+   * main chat's id. The turn is not awaited, and a failure of it (no model
+   * signed in yet) is logged, so the sign-in that calls this never fails on it.
+   */
+  async startOnboarding(input: string): Promise<string> {
+    await this.deps.settingsRepo.set(EXPERIMENTAL_CONCIERGE_SETTING_KEY, true);
+    const chatId = await this.ensureChatId();
+    this.runSystemTurn(chatId, input, { inputLabel: "Onboarding" })
+      .then((ran) => {
+        if (!ran) log.warn("onboarding turn did not run to its end", { chatId });
+      })
+      .catch((error: unknown) =>
+        log.warn("onboarding turn failed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    return chatId;
+  }
+
+  /**
+   * The guardian connected `service` from a connect card in `chatId`: tells the
+   * Concierge there, quietly, so it goes on without the guardian typing. Not
+   * awaited; a failure is logged.
+   */
+  serviceConnected(chatId: string, service: string): void {
+    this.runSystemTurn(chatId, `<service_connected service="${attr(service)}"/>`, {
+      quiet: true,
+      inputLabel: "Service connected",
+    }).catch((error: unknown) =>
+      log.warn("service connected notice failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+
   /** Who each owner is, and whether Rome still serves them. */
   get owners(): ConciergeOwners {
     return this.deps.owners ?? ALL_OWNERS_SERVED;

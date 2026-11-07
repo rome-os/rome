@@ -14,9 +14,8 @@ import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
 // Local-first setup, and the whole of it: the username and password that lock
 // this Rome to its guardian. Creating the account also finishes setup
 // server-side (the username becomes the display name, the agent gets a preset
-// identity), so the guardian name and the agent name are confirmed in the
-// welcome conversation rather than asked for twice. A cloud box never reaches
-// this page — its sign-in callback creates the seat and finishes setup.
+// identity), so no name is asked for here. A cloud box never reaches this
+// page — its sign-in callback creates the seat and finishes setup.
 export default function OnboardPage() {
   const { t } = useTranslation("onboard");
   const { bootstrap } = useAuthStateSnapshot();
@@ -86,7 +85,7 @@ function AccountStep() {
         }
 
         // Setup is complete server-side, so refreshing the auth state flips the
-        // phase to `ready` and AuthGate redirects to the welcome app. Navigating
+        // phase to `ready` and AuthGate redirects home. Navigating
         // here too would race that redirect.
         await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
       } catch {

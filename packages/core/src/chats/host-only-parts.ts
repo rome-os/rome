@@ -3,9 +3,15 @@
  * delete routines, so only the webchat drain writes one (directly to the
  * repository). Every outbound path that stores sender-supplied parts —
  * `send_message`, `channels.send`, a People send — strips them, so a forged card
- * can't bind those controls to a routine or schedule an arbitrary action.
+ * can't bind those controls to a routine or schedule an arbitrary action. A
+ * connect card makes the dashboard open a link and call an API path it carries,
+ * so only the Concierge's own tool may write one.
  */
-const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set(["routine_draft_card", "quota_switch"]);
+const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set([
+  "routine_draft_card",
+  "quota_switch",
+  "connect_card",
+]);
 
 export function withoutHostOnlyParts<T extends { type: string }>(parts: readonly T[]): T[] {
   return parts.filter((part) => !HOST_ONLY_PART_TYPES.has(part.type));

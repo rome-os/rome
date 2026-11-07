@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type { AppRemixStoreIntent } from "@rome/api-types/apps";
 import { useAuthStateSnapshot } from "@/lib/auth-state";
 import { parseRemixIntent, parseRemixSearch } from "@/lib/app-remix";
@@ -12,7 +13,8 @@ const AUTH_LANDING_PATHS = new Set([
   "/login",
   "/connect",
   "/onboard",
-  "/full/apps/welcome-to-rome",
+  // Where a first Cloud sign-in lands.
+  `/chat/${CONCIERGE_CHAT_ID}`,
 ]);
 
 interface PendingIntent {

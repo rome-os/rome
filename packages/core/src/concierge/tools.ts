@@ -1,6 +1,6 @@
 // Concierge's session tools: `say` is its only way to speak, the `chat_*`
-// tools run its task chats and read its other Concierge chats, and
-// `topic_start` starts a topic chat.
+// tools run its task chats and read its other Concierge chats, `topic_start`
+// starts a topic chat, and `connect_card` shows a card that connects a service.
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import {
@@ -810,6 +810,44 @@ export async function buildConciergeTools(
           const chat = await requireTaskChat(chatId);
           const messageId = await showCard(chatId, chat.name);
           return { sent: "Shown; the guardian sees the card.", messageId };
+        }),
+    },
+    {
+      name: "connect_card",
+      description:
+        "Show the guardian a card that connects a service that is not connected yet, so they do not have to find Settings. " +
+        "`service` is the name `core:concierge_following_list` gives it. A service that already works shows no card and the answer says so. " +
+        "When the guardian connects it, a `<service_connected/>` input arrives in this chat.",
+      inputSchema: {
+        type: "object",
+        required: ["service"],
+        properties: { service: { type: "string" } },
+      },
+      handler: (input) =>
+        runTool("connect_card", input, async (args) => {
+          const wanted = requireString(args, "service");
+          const { chatId, turnId } = currentTurn();
+          const { connectors } = await service.following.list(await ownerHere());
+          const connector = connectors.find((entry) => entry.service === wanted);
+          if (!connector) {
+            throw new Error(
+              `No service ${wanted}. Use core:concierge_following_list for the service names.`,
+            );
+          }
+          if (connector.state === "working") {
+            return { connected: true, note: "Already connected; no card shown." };
+          }
+          const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
+            {
+              type: "connect_card",
+              service: connector.service,
+              label: connector.label,
+              // A service with no entry can only be connected from Settings.
+              connect: connector.connect ?? { kind: "dashboard" },
+            },
+          ]);
+          said(chatId, turnId, null);
+          return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),
     },
   ];

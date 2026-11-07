@@ -427,8 +427,8 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
 
 /** The host-owned inline cards rome-web renders itself, each paired with the
  * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
- * has no agent tool and is emitted by turn middleware alone (the welcome
- * conversation), so an exact name is the whole allow-list. */
+ * has no agent tool and is emitted by turn middleware alone, so an exact
+ * name is the whole allow-list. */
 const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
   [
     {
