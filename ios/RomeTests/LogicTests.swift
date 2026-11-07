@@ -405,6 +405,30 @@ final class StubBackend: RomeBackend {
         #expect(watch.topic == nil)
     }
 
+    /// A new connection sends the watch before every data topic, so the
+    /// server's cap on those never refuses it.
+    @Test func connectsWithTheWatchFirst() {
+        var watch = ChatWatch()
+        let topics: Set<String> = (0..<40).reduce(into: []) { $0.insert(LiveTopic.chat("s-\($1)")) }
+        #expect(watch.connecting(topics).count == 40)
+        _ = watch.move(to: "c-42")
+        let frames = watch.connecting(topics)
+        #expect(frames.first == "chat.watch:c-42")
+        #expect(frames.count == 41)
+    }
+
+    /// A view replaced by a new one leaves the new one's chat on screen.
+    @Test func aReplacedViewKeepsTheNewViewsChat() {
+        var screen = ScreenChat()
+        let old = UUID(), new = UUID()
+        screen.show("concierge", by: old)
+        screen.show("concierge", by: new)
+        screen.hide(by: old)
+        #expect(screen.chat == "concierge")
+        screen.hide(by: new)
+        #expect(screen.chat == nil)
+    }
+
     /// The main chat is watched by the server's own id once it is known.
     @Test func watchesTheMainChatByItsServerID() {
         #expect(PushPresentation.serverChat(conciergeChatID, mainServerID: "c-42") == "c-42")

@@ -33,6 +33,8 @@ struct MainShell: View {
     @State private var section: MainSection = .chat
     @State private var path: [Route] = []
     @State private var drawerOpen = false
+    /// Marks this view as the one that set the chat on screen.
+    @State private var screenID = UUID()
     /// A finger is on the drawer's edge.
     @State private var edgeTouched = false
     /// The finger's pull on the drawer while a drag runs. It springs back to
@@ -170,9 +172,9 @@ struct MainShell: View {
         }
         #endif
         // Which chat is in front, for pushes: none under a sheet or the drawer.
-        .onChange(of: visibleChat, initial: true) { _, chat in model.visibleChat = chat }
+        .onChange(of: visibleChat, initial: true) { _, chat in model.show(chat, by: screenID) }
         .onChange(of: workspace.mainChatServerID) { model.rewatch() }
-        .onDisappear { model.visibleChat = nil }
+        .onDisappear { model.hide(by: screenID) }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
             if open {

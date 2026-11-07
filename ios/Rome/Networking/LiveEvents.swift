@@ -59,6 +59,31 @@ struct ChatWatch {
 
     /// What a new connection holds, if a chat is on screen.
     var topic: String? { chatId.map(LiveTopic.watch) }
+
+    /// What a new connection subscribes, the watch first: it never meets the
+    /// server's cap on data topics, whatever comes after it.
+    func connecting(_ topics: Set<String>) -> [String] {
+        (topic.map { [$0] } ?? []) + topics.sorted()
+    }
+}
+
+/// Which view set the chat on screen, so a view replaced by a new one cannot
+/// clear the chat the new one set.
+struct ScreenChat {
+    private(set) var chat: String?
+    private var owner: UUID?
+
+    mutating func show(_ chat: String?, by owner: UUID) {
+        self.chat = chat
+        self.owner = owner
+    }
+
+    /// Clears the chat only if `owner` set it last.
+    mutating func hide(by owner: UUID) {
+        guard self.owner == owner else { return }
+        chat = nil
+        self.owner = nil
+    }
 }
 
 /// When the socket's listeners must refetch after a connection that followed
@@ -181,10 +206,9 @@ final class LiveEventsSocket: LiveEventSource {
         task.resume()
         let topics = Set(subscriptions.values.map(\.topic))
         resync.connecting(topics: topics)
-        for topic in topics {
+        for topic in watching.connecting(topics) {
             sendFrame(type: "subscribe", topic: topic)
         }
-        if let watch = watching.topic { sendFrame(type: "subscribe", topic: watch) }
         receive(task, generation: current)
         pingWork = Task { [weak self] in
             while !Task.isCancelled {

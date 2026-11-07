@@ -545,7 +545,21 @@ final class AppModel {
     /// The chat in front of the guardian, by its store's id; nil when a sheet,
     /// the drawer or another page covers it. A push for it shows no banner,
     /// and opening it clears its delivered notifications.
-    var visibleChat: String? {
+    @ObservationIgnored private var screenChat = ScreenChat()
+
+    /// A view puts its chat in front, for pushes.
+    func show(_ chat: String?, by owner: UUID) {
+        screenChat.show(chat, by: owner)
+        visibleChat = screenChat.chat
+    }
+
+    /// A view leaves; a newer view's chat stays.
+    func hide(by owner: UUID) {
+        screenChat.hide(by: owner)
+        visibleChat = screenChat.chat
+    }
+
+    private(set) var visibleChat: String? {
         didSet {
             guard visibleChat != oldValue else { return }
             workspace?.backend.events.watch(PushPresentation.serverChat(visibleChat, mainServerID: workspace?.mainChatServerID))
