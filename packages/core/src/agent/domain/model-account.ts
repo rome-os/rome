@@ -9,8 +9,6 @@
 // different act. Both words stay out of this port. docs/domains/agents.md
 // carries the language.
 
-import type { AnthropicCompatibleCredentialsSummary } from "@rome/api-types/anthropic-compatible-providers";
-
 /** The provider's subscription tier, as the provider reports it. */
 export type ModelPlanType =
   | "free"
@@ -35,7 +33,6 @@ export interface ModelAccountStatus {
   authMethod?: string;
   accountType?: string;
   needsReauth?: boolean;
-  anthropicCompatible?: (AnthropicCompatibleCredentialsSummary & { needsReauth?: boolean }) | null;
 }
 
 /** One of the provider's rolling usage windows. */

@@ -7,7 +7,7 @@ import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 // Rome credits are an account-wide allowance Rome Cloud serves through its
 // Responses-compatible inference gateway at `<Rome Cloud origin>/v1`. Codex
 // never talks to it directly: it calls core's loopback proxy, which adds the
-// Rome Cloud credential (api/routes/rome-credits-proxy.ts). The one
+// Rome Cloud credential (rome-credits-proxy-route.ts). The one
 // shared app-server knows two providers: its default (the guardian's own
 // OpenAI login) and `rome_credits`. Rome restarts the app-server immediately
 // when the payer changes, so each Codex process has one payer.
