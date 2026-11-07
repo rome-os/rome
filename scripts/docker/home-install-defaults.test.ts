@@ -60,10 +60,10 @@ describe("rome-shell-path.sh", () => {
   });
 });
 
-describe("rome-init.sh ensure_npm_prefix", () => {
-  const initSource = readFileSync(join(PROJECT_ROOT, "scripts/docker/rome-init.sh"), "utf8");
+describe("rome-init-tools.sh ensure_npm_prefix", () => {
+  const initSource = readFileSync(join(PROJECT_ROOT, "scripts/docker/rome-init-tools.sh"), "utf8");
   const helper = initSource.match(/^ensure_npm_prefix\(\) \{\n[\s\S]*?^}\n/m)?.[0];
-  if (!helper) throw new Error("ensure_npm_prefix not found in rome-init.sh");
+  if (!helper) throw new Error("ensure_npm_prefix not found in rome-init-tools.sh");
   let home: string;
 
   beforeEach(() => {
