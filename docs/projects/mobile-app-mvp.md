@@ -64,7 +64,7 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 ## Update page and chat titles
 
-Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pass; snapshots of each update state and the headers in notes folder `update-page-headers/`. Tasks | … capsule 78 pt instead of 92. Follow-up sent: a soft edge fade behind the plain title, since rows show through it.
+Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pass; snapshots of each update state and the headers in notes folder `update-page-headers/`. Tasks | … capsule 78 pt instead of 92. Edge fade behind the plain title (`b5d5296f`).
 
 - [x] Update page in the opening screen's style: mascot, versions named ("Your Rome is on X. The latest is Y."), while updating the animated mascot plus a status line that follows the real state (asking Rome Cloud, downloading Y, restarting, almost done), "This can take a few minutes…" (user, 2026-11-06). Queued after the appearance setting.
 - [x] Topic and task chat headers: the title is one line of small text, no glass pill; side buttons keep their glass; main Chat unchanged (user, 2026-11-06). Queued.
@@ -85,7 +85,7 @@ Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pa
 
 ## Images
 
-- [ ] Tap any photo to open it full screen (zoom, swipe down to close, swipe between a message's images, share); Markdown images in replies show in the bubble (internal ones through the asset endpoints, external https without credentials). Plain links to image files stay links, like the web (user, 2026-11-06: the simpler option). Queued after the draft fixes.
+- [x] (`c3c074be`, `e185e725`; 186 Mac Catalyst tests pass; Simulator: viewer, pinch zoom, swipe down, Share; snapshots in notes folder `images-viewer/`) Tap any photo to open it full screen (zoom, swipe down to close, swipe between a message's images, share); Markdown images in replies show in the bubble (internal ones through the asset endpoints, external https without credentials). Plain links to image files stay links, like the web (user, 2026-11-06: the simpler option). Queued after the draft fixes.
 
 ## Scroll to bottom
 
