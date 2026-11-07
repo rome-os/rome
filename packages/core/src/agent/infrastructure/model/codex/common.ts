@@ -2,10 +2,8 @@
 // accounting. Consumed by CodexAppServerProvider (the only Codex provider).
 
 import type { AgentStop } from "../../../../types.js";
-import {
-  buildAgentAccounting,
-  calculateImpliedCostUsd,
-} from "../../../../core/provider-accounting.js";
+import { buildAgentAccounting, calculateImpliedCostUsd } from "../provider-accounting.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 
 /** Token usage for a Codex turn. Mirrors the shape codex emits over the
  *  app-server protocol. */
@@ -29,17 +27,6 @@ export const CODEX_ENV_ALLOWLIST = [
   "LC_ALL",
   "TERM",
 ] as const;
-
-export function stripLegacyReasoningSuffix(model: string): string {
-  const idx = model.lastIndexOf(":");
-  if (idx >= 0) {
-    const suffix = model.slice(idx + 1);
-    if (suffix === "low" || suffix === "medium" || suffix === "high") {
-      return model.slice(0, idx);
-    }
-  }
-  return model;
-}
 
 interface BuildOpenAiAccountingArgs {
   usage: Usage | undefined;

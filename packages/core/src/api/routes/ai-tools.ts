@@ -44,7 +44,7 @@ export function aiToolsRoutes(
 
   app.get("/ai-tools/status", (c) => {
     const state = deps.aiToolState.get();
-    const login = deps.codexAccountService.getLoginState();
+    const login = deps.codexAccountService.authorizationState();
     return c.json({
       claude: state.claude,
       codex: state.codex,
@@ -172,10 +172,10 @@ export function aiToolsRoutes(
   app.post("/ai-tools/codex/login/start", async (c) => {
     await closeAuthTabs();
     try {
-      const login = await deps.codexAccountService.startBrowserLogin();
+      const login = await deps.codexAccountService.startBrowserAuthorization();
       const opened = await openServerBrowserTab(login.authUrl);
       if (!opened.ok) {
-        await deps.codexAccountService.cancelLogin();
+        await deps.codexAccountService.cancelAuthorization();
         return c.json({ error: opened.error }, opened.status as 502 | 503);
       }
       return c.json({ started: true });
@@ -185,14 +185,14 @@ export function aiToolsRoutes(
   });
 
   app.post("/ai-tools/codex/login/cancel", async (c) => {
-    await deps.codexAccountService.cancelLogin();
+    await deps.codexAccountService.cancelAuthorization();
     return c.json({ ok: true });
   });
 
   // Device-code login uses the same shared app-server and account service.
   app.post("/ai-tools/codex/device-login/start", async (c) => {
     try {
-      const state = await deps.codexAccountService.startDeviceLogin();
+      const state = await deps.codexAccountService.startDeviceAuthorization();
       return c.json({
         userCode: state.userCode,
         verificationUrl: state.verificationUrl,
@@ -203,7 +203,7 @@ export function aiToolsRoutes(
   });
 
   app.post("/ai-tools/codex/device-login/cancel", async (c) => {
-    await deps.codexAccountService.cancelLogin();
+    await deps.codexAccountService.cancelAuthorization();
     return c.json({ ok: true });
   });
 
@@ -223,7 +223,7 @@ export function aiToolsRoutes(
   // Re-probe login state on success so the agent gate reflects it immediately.
   app.post("/ai-tools/codex/logout", async (c) => {
     try {
-      await deps.codexAccountService.logout();
+      await deps.codexAccountService.revoke();
       await deps.aiToolState.refresh("openai");
       return c.json({ ok: true });
     } catch (err) {

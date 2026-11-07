@@ -234,6 +234,44 @@ describe("SubagentExecutionService", () => {
     });
   });
 
+  it("makes no Child when its Parent is deleted while the Child is being opened", async () => {
+    const child = fakeChildSession("child-orphan", ["child-turn"]);
+    const childManager = {
+      // The Parent goes while the Child's runtime opens.
+      acquire: rs.fn(async () => {
+        await repo.deleteSession("parent-1");
+        return child.session;
+      }),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      recordConversation: rs.fn(async () => undefined),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+    await expect(
+      service.startSubagent(
+        "researcher",
+        { prompt: "one" },
+        {
+          parentSessionId: "parent-1",
+          parentAgentSessionId: "parent-runtime-1",
+          parentTurnId: "parent-turn-1",
+          parentToolUseId: "tool-1",
+          parentAgentName: "main",
+          parentChannelThreadKey: "webchat:parent-1",
+          childManager,
+          workingDir: "/tmp/project-a",
+        },
+      ),
+    ).rejects.toThrow("was not found");
+    // No row without the owner and privacy it would have taken from its Parent.
+    await expect(repo.getSession("child-orphan")).resolves.toBeNull();
+  });
+
   it("resumes only an existing Child owned by the same Parent", async () => {
     await repo.ensureRomeSession({
       id: "child-resume",

@@ -10,36 +10,32 @@
 // (setModel/setPermissionMode/setMcpServers/stopTask) — that vocabulary is
 // Claude-SDK-specific and has no place in the provider contract.
 //
-// Extracted from core/agent-runner.ts with its shapes unchanged. The imports
-// from core/ are the shapes it still shares with the run; they go when the
-// port is reshaped.
+// The port imports only the SDK's event vocabulary and its own domain. The
+// shapes it hands the provider or reads back from it are declared here.
 
-import type { TurnErrorEvent, TurnResultEvent } from "@rome-os/app-runtime";
-import type { ActionConfig } from "../../actions/types.js";
-import type { SkillMcpDefinition } from "../../core/skill-catalog.js";
+import type {
+  AgentEvent,
+  ReasoningEffort,
+  TurnErrorEvent,
+  TurnResultEvent,
+} from "@rome-os/app-runtime";
 import type { RomeTools } from "./rome-tools.js";
-import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../../types.js";
-import type { UsageFunding } from "../../usage/events.js";
 
 export type ProviderId = "anthropic" | "openai" | "mock";
 
-export interface ActionMcpDefinition {
-  name: string;
-  description: string;
-  type: ActionConfig["type"];
-  complexity: ActionConfig["complexity"];
-  speed: ActionConfig["speed"];
-  reliability: ActionConfig["reliability"];
-  sideEffects: ActionConfig["sideEffects"];
-  requiresApproval: boolean;
-  cancellable: boolean;
-  inputSchema: Record<string, unknown>;
+export type ModelReasoningEffort = ReasoningEffort;
+
+/** An MCP server the provider launches and mounts next to its builtin tools. */
+export interface McpServerConfig {
+  command: string;
+  args: string[];
 }
 
-// One definition, owned by the skill catalog that produces it.
-export type { SkillMcpDefinition };
-
-export type ModelReasoningEffort = ReasoningEffort;
+/**
+ * Who pays the model provider for a turn. The provider knows its payer and
+ * reports it; Rome's usage record carries it as read.
+ */
+export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
  * The provider's name for one of its threads. Two equal ids name the same
@@ -109,8 +105,6 @@ export type ModelSessionEvent =
 export interface ModelProvider {
   /** Stable id used for telemetry and to look the provider up in the registry. */
   readonly id: ProviderId;
-  /** Human-readable label for the dashboard. */
-  readonly displayName: string;
   /**
    * Names of tools the provider handles natively. These are Rome-canonical
    * names (Read / Edit / Bash / Glob / Grep / WebSearch / WebFetch / Task) —
@@ -128,10 +122,18 @@ export interface ModelProvider {
 
 /**
  * How a session gets its thread. `new` opens a thread the provider names;
- * `resume` continues one it named before. The branch of a thread at a
- * checkpoint joins here when `ModelSession.fork` goes.
+ * `resume` continues one it named before; `branch` starts from a position on
+ * one, with the session configured by these params and not by the source. An
+ * `ephemeral` branch is closed after one use, and the provider may run it
+ * inside the source thread and roll it back when the branch has the source's
+ * model, system prompt, working dir and tools. A `kept` branch gets a thread of
+ * its own that the session records. A provider that keeps the source's tools
+ * on a branch meets the configuration as far as it can.
  */
-export type ThreadStart = { kind: "new" } | { kind: "resume"; modelThreadId: ModelThreadId };
+export type ThreadStart =
+  | { kind: "new" }
+  | { kind: "resume"; modelThreadId: ModelThreadId }
+  | { kind: "branch"; at: ModelPosition; lifetime: "ephemeral" | "kept" };
 
 /**
  * Value object. The model session's configuration: what the run fixes when
@@ -165,9 +167,6 @@ export interface ModelSessionConfig {
 
 export interface ModelSessionParams {
   config: ModelSessionConfig;
-  agentName?: string;
-  /** Rome Cloud App Store listing id for the app owning `agentName`, when installed from the store. */
-  appStoreListingId?: string;
   /**
    * The tools Rome serves the model for this session. The provider mounts
    * each group and calls back with what the model sent; what a tool does and
@@ -176,8 +175,6 @@ export interface ModelSessionParams {
   tools: RomeTools;
   /** The thread the session runs on. The provider names the thread. */
   thread: ThreadStart;
-  /** Provider-owned fork source. Normal application code should not set this. */
-  fork?: ModelSessionForkSource;
 }
 
 export interface ModelUserInput {
@@ -191,43 +188,9 @@ export interface ModelUserInput {
   injectedToolResult?: { toolUseId: string; content: unknown };
 }
 
-export type ModelSessionForkMode = "ephemeral" | "thread";
-
-export interface ModelSessionForkParams {
-  /** Ephemeral forks are closed after one use; thread forks may be persisted. */
-  mode?: ModelSessionForkMode;
-  /**
-   * Whether the fork may change the source session's runtime configuration.
-   * Providers can use exact-mode knowledge to preserve provider-specific cache
-   * lineage when the model and prompt configuration are unchanged.
-   */
-  configurationMode?: "isolated" | "exact";
-  /** Provider-native checkpoint to include as the fork's final source turn. */
-  sourceCheckpoint?: ModelCheckpointId;
-}
-
-export interface ModelSessionForkSource {
-  sourceModelThreadId: ModelThreadId;
-  mode: ModelSessionForkMode;
-  sourceCheckpoint?: ModelCheckpointId;
-}
-
-export type ModelSessionForkOpenParams = Omit<ModelSessionParams, "thread" | "fork">;
-
-export interface ModelSessionFork {
-  readonly providerId: ProviderId;
-  readonly sourceModelThreadId: ModelThreadId;
-  readonly mode: ModelSessionForkMode;
-  readonly modelThreadId?: ModelThreadId;
-
-  open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
-}
-
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
-  /** A disposed provider execution must be reopened before another turn. */
-  readonly isClosed?: boolean;
   /** Single, lifetime stream of events produced by the provider. */
   readonly events: AsyncIterable<ModelSessionEvent>;
 
@@ -235,7 +198,7 @@ export interface ModelSession {
   readonly modelThreadId?: ModelThreadId;
 
   /** Who pays the model provider for a turn that ends now. Unset when unknown. */
-  readonly funding?: UsageFunding;
+  readonly funding?: ModelFunding;
 
   /** Push a new user turn. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;
@@ -243,10 +206,7 @@ export interface ModelSession {
   /** Append without interrupting. Only `deferred` is safe to submit again. */
   steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
 
-  /** Create an isolated provider-owned branch from this live session. */
-  fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
-
-  /** Stop the in-flight turn. The provider may dispose of its execution. */
+  /** Stop the in-flight turn. The session takes the next input as usual. */
   interrupt(reason?: string): Promise<void>;
 
   /**

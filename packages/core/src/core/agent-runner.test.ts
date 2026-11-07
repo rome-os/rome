@@ -1,3 +1,4 @@
+import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
@@ -21,6 +22,11 @@ import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
+import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
+
+const recordMetrics = rs.hoisted(() => rs.fn());
+rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
+
 import type { ModelSessionEvent, RomeTools } from "../agent/index.js";
 import {
   executeActionTool,
@@ -59,10 +65,9 @@ import { createSessionFromRun, createNullModelSession } from "./agent-runner.js"
 import type {
   ModelProvider,
   ModelSession,
-  ModelSessionForkParams,
-  ModelSessionForkOpenParams,
   ModelSessionParams,
   ProviderId,
+  ThreadStart,
 } from "./agent-runner.js";
 import { createModelResolver, type ModelResolver } from "./model-resolver.js";
 import {
@@ -123,6 +128,12 @@ async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<Age
   return messages;
 }
 
+const MOCK_ACCOUNTING = {
+  provider: "mock",
+  model: "mock-model",
+  usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+} as const;
+
 describe("AgentRunner", () => {
   let testDb: TestDb;
   let agentLoader: AgentLoader;
@@ -154,17 +165,18 @@ describe("AgentRunner", () => {
     testDb.close();
   });
 
-  it("mock sessions reject fork with a clear unsupported error", async () => {
-    const session = createSessionFromRun("mock", async function* () {}, {
-      config: { model: "mock-model", systemPrompt: "system", builtinTools: [] },
-      tools: noRomeTools(),
-      thread: { kind: "new" },
-    });
-
-    await expect(session.fork({})).rejects.toThrow(
-      "ModelSession fork is not supported by this provider",
-    );
-    await session.close();
+  it("mock sessions reject a branch with a clear unsupported error", () => {
+    expect(() =>
+      createSessionFromRun("mock", async function* () {}, {
+        config: { model: "mock-model", systemPrompt: "system", builtinTools: [] },
+        tools: noRomeTools(),
+        thread: {
+          kind: "branch",
+          at: { provider: "mock", modelThreadId: "thread", checkpointId: "turn" },
+          lifetime: "ephemeral",
+        },
+      }),
+    ).toThrow("Branching a thread is not supported by this provider");
   });
 
   it("code-backed null session parks until close and never resumes a provider", async () => {
@@ -217,7 +229,6 @@ describe("AgentRunner", () => {
     // code-backed short-circuit.
     const anthropic: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       // A code-backed agent never opens a provider query; if reuse breaks and the
       // session is reopened, this would still not run (null session), so the only
@@ -308,7 +319,6 @@ describe("AgentRunner", () => {
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "Deferred check done." };
@@ -343,7 +353,6 @@ describe("AgentRunner", () => {
     await webchatRepo.createSession("chat-answer", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "Deferred check done." };
@@ -386,7 +395,6 @@ describe("AgentRunner", () => {
     const opened: ModelSessionParams["thread"][] = [];
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         opened.push(params.thread);
@@ -431,7 +439,6 @@ describe("AgentRunner", () => {
     });
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "" };
@@ -587,6 +594,181 @@ describe("AgentRunner", () => {
         "result",
         "turn_end",
       ]);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("records an agent an action starts from a private chat as that chat's owner's, and none once the chat is gone", async () => {
+    const repo = new ChatsWebChatRepository(testDb.db);
+    await repo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.setSessionTrigger("visitor-task", { triggerKind: "concierge", triggerName: "T" });
+    const runner = createRunner(
+      new MockModelProvider([
+        [{ type: "result", content: "Found it" }],
+        [{ type: "result", content: "Found it" }],
+      ]),
+    );
+    const runFrom = (executionId: string, chatId: string) =>
+      actionExecutionContext.run(
+        {
+          executionId,
+          rootExecutionId: executionId,
+          initiator: "agent:main",
+          actionName: "some-app:research",
+          channelContext: { channel: "webchat", threadId: chatId },
+        },
+        () => collectMessages(runner.run({ agentName: "test-main", prompt: "Look it up" })),
+      );
+    await runFrom("exec-private", "visitor-task");
+    expect(await repo.getSession("action:exec-private:core:test-main")).toMatchObject({
+      ownerKey: "visitor:a",
+      triggerKind: "concierge_fork",
+    });
+    // Called from a chat that is gone: nothing is saved for the run.
+    await runFrom("exec-orphan", "deleted-chat");
+    expect(await repo.getSession("action:exec-orphan:core:test-main")).toBeNull();
+  });
+
+  it("does not run a fork of a chat that is gone, and publishes no stream for it", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const turnStreams = createAgentTurnStreamRegistry();
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn() {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: "x",
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Noted", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo, turnStreams);
+      // The task chat the fork is of was deleted before the fork was saved.
+      await expect(
+        collectMessages(
+          runner.runForked({
+            agentName: "main",
+            sourceSessionId: "source-session",
+            channelThreadKey: "webchat:task-chat",
+            prompt: "a note",
+            threadContext: {
+              channel: "webchat",
+              threadId: "task-chat",
+              romeSessionId: "task-chat",
+            },
+            label: "feedback",
+          }),
+        ),
+      ).rejects.toThrow("was not found");
+      expect(await repo.getSession("fork-session")).toBeNull();
+      expect(turnStreams.get("fork-turn")).toBeUndefined();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("stamps a fork of a visitor's task chat private to them when it is made", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "task-chat",
+        "Task",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "visitor:a" },
+      );
+      await repo.setSessionTrigger("task-chat", { triggerKind: "concierge", triggerName: "Task" });
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Noted", agent: "main" } as const;
+          yield {
+            type: "turn_end",
+            turnId: "fork-turn",
+            status: "completed",
+            durationMs: 5,
+            agent: "main",
+          } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+      await collectMessages(
+        runner.runForked({
+          agentName: "main",
+          sourceSessionId: "source-session",
+          channelThreadKey: "webchat:task-chat",
+          prompt: "a note on this answer",
+          threadContext: { channel: "webchat", threadId: "task-chat", romeSessionId: "task-chat" },
+          label: "feedback",
+        }),
+      );
+      // Never promoted, it is private from the start, so deleting the task
+      // chat does not open it.
+      expect(await repo.getSession("fork-session")).toMatchObject({
+        type: "fork",
+        ownerKey: "visitor:a",
+        triggerKind: "concierge_fork",
+        triggerName: "feedback",
+      });
+      await repo.deleteSession("task-chat");
+      const canOpen = (owner: string) =>
+        canOpenChat((id) => repo.getSession(id), "fork-session", owner);
+      expect(await canOpen("visitor:a")).toBe(true);
+      expect(await canOpen("guardian")).toBe(false);
     } finally {
       testDb.close();
     }
@@ -1018,33 +1200,27 @@ describe("AgentRunner", () => {
     expect(turnStreams.listBySession("fork-session")).toEqual([]);
   });
 
-  /** Provider whose live sessions support fork(); each fork opens the
-   *  session produced by `makeForkSession` (which receives the open params
-   *  so tests can inspect the fork's tool surface). */
+  type BranchStart = Extract<ThreadStart, { kind: "branch" }>;
+
+  /** Provider that opens a `branch` thread start on the session produced by
+   *  `makeForkSession`, which receives the open params so tests can inspect
+   *  the fork's tool surface. */
   function withForkSupport(
     provider: MockModelProvider,
-    makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
+    makeForkSession: (openParams: ModelSessionParams) => ModelSession,
     options: {
       modelThreadId?: string;
-      onFork?: (params: ModelSessionForkParams) => void;
+      onBranch?: (branch: BranchStart) => void;
     } = {},
   ): MockModelProvider {
     const baseOpen = provider.openSession.bind(provider);
     provider.openSession = async (params: ModelSessionParams) => {
+      if (params.thread.kind === "branch") {
+        options.onBranch?.(params.thread);
+        return makeForkSession(params);
+      }
       const session = await baseOpen(params);
-      return {
-        ...session,
-        modelThreadId: options.modelThreadId,
-        fork: async (forkParams: ModelSessionForkParams) => {
-          options.onFork?.(forkParams);
-          return {
-            providerId: "mock" as const,
-            sourceModelThreadId: options.modelThreadId ?? "mock-source-thread",
-            mode: "ephemeral" as const,
-            open: async (openParams: ModelSessionForkOpenParams) => makeForkSession(openParams),
-          };
-        },
-      };
+      return { ...session, modelThreadId: options.modelThreadId ?? "mock-source-thread" };
     };
     return provider;
   }
@@ -1055,9 +1231,6 @@ describe("AgentRunner", () => {
       model: "mock-model",
       events: (async function* (): AsyncIterable<ModelSessionEvent> {})(),
       async sendUserInput() {},
-      async fork() {
-        throw new Error("nested fork unsupported");
-      },
       async interrupt() {},
       async close() {},
       ...overrides,
@@ -1066,13 +1239,13 @@ describe("AgentRunner", () => {
 
   /** Run one normal turn to make the source session live, then fork it. */
   async function runForkAgainstLiveSession(
-    makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
+    makeForkSession: (openParams: ModelSessionParams) => ModelSession,
     opts: {
       provider?: MockModelProvider;
       agentName?: string;
       fork?: Partial<Omit<ForkRunParams, "agentName" | "sourceSessionId" | "channelThreadKey">>;
       sourceModelThreadId?: string;
-      onFork?: (params: ModelSessionForkParams) => void;
+      onBranch?: (branch: BranchStart) => void;
       appCatalog?: Pick<AppCatalog, "get">;
     } = {},
   ): Promise<AgentEvent[]> {
@@ -1080,7 +1253,7 @@ describe("AgentRunner", () => {
     const provider = withForkSupport(
       opts.provider ?? new MockModelProvider([[{ type: "result", content: "Done" }]]),
       makeForkSession,
-      { modelThreadId: opts.sourceModelThreadId, onFork: opts.onFork },
+      { modelThreadId: opts.sourceModelThreadId, onBranch: opts.onBranch },
     );
     const runner = createRunner(provider, undefined, {
       keepAliveAcrossTurns: true,
@@ -1101,6 +1274,11 @@ describe("AgentRunner", () => {
         sourceSessionId: start.sessionId,
         channelThreadKey: "webchat:fork-1",
         prompt: "fork it",
+        sourceCheckpoint: {
+          providerId: "mock",
+          providerThreadId: opts.sourceModelThreadId ?? "mock-source-thread",
+          checkpointId: "source-turn",
+        },
         ...opts.fork,
       }),
     );
@@ -1147,7 +1325,7 @@ describe("AgentRunner", () => {
     });
 
     it("validates and forwards the selected provider checkpoint", async () => {
-      let providerFork: ModelSessionForkParams | undefined;
+      let branch: BranchStart | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
@@ -1157,8 +1335,8 @@ describe("AgentRunner", () => {
           }),
         {
           sourceModelThreadId: "model-thread",
-          onFork: (params) => {
-            providerFork = params;
+          onBranch: (start) => {
+            branch = start;
           },
           fork: {
             mode: "exact",
@@ -1172,17 +1350,18 @@ describe("AgentRunner", () => {
       );
 
       expect(messages.map((message) => message.type)).toEqual(["turn_start", "result", "turn_end"]);
-      expect(providerFork).toMatchObject({
-        configurationMode: "exact",
-        sourceCheckpoint: "provider-turn-t2",
+      expect(branch).toEqual({
+        kind: "branch",
+        at: { provider: "mock", modelThreadId: "model-thread", checkpointId: "provider-turn-t2" },
+        lifetime: "ephemeral",
       });
     });
 
     it("rejects a checkpoint from a different model thread", async () => {
-      const onFork = rs.fn();
+      const onBranch = rs.fn();
       const messages = await runForkAgainstLiveSession(() => forkSessionStub({}), {
         sourceModelThreadId: "live-model-thread",
-        onFork,
+        onBranch,
         fork: {
           sourceCheckpoint: {
             providerId: "mock",
@@ -1197,7 +1376,7 @@ describe("AgentRunner", () => {
         type: "error",
         error: "Fork checkpoint belongs to a different model thread",
       });
-      expect(onFork).not.toHaveBeenCalled();
+      expect(onBranch).not.toHaveBeenCalled();
     });
 
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
@@ -1293,7 +1472,7 @@ describe("AgentRunner", () => {
     });
 
     it("opens a fork with an explicitly requested model tier", async () => {
-      const openParams: ModelSessionForkOpenParams[] = [];
+      const openParams: ModelSessionParams[] = [];
       await runForkAgainstLiveSession(
         (params) => {
           openParams.push(params);
@@ -1315,7 +1494,7 @@ describe("AgentRunner", () => {
     });
 
     it("leaves a resumable thread behind for a fork that ran on its own model thread", async () => {
-      let forkMode: string | undefined;
+      let forkLifetime: string | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
@@ -1326,15 +1505,15 @@ describe("AgentRunner", () => {
           }),
         {
           sourceModelThreadId: "source-model-thread",
-          onFork: (params) => {
-            forkMode = params.mode;
+          onBranch: (start) => {
+            forkLifetime = start.lifetime;
           },
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
 
       // A fork that wants to be continuable must ask for a thread of its own.
-      expect(forkMode).toBe("thread");
+      expect(forkLifetime).toBe("kept");
       const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
       await expect(
         sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
@@ -1360,7 +1539,7 @@ describe("AgentRunner", () => {
       // wake-up scheduled here would resume the fork session and deliver into
       // the parent transcript. A one-shot fork keeps defer: it cannot be
       // resumed at all, so nothing can answer into the wrong place.
-      const openParams: ModelSessionForkOpenParams[] = [];
+      const openParams: ModelSessionParams[] = [];
       const runFork = (fork: Partial<ForkRunParams>) =>
         runForkAgainstLiveSession(
           (params) => {
@@ -1409,7 +1588,7 @@ describe("AgentRunner", () => {
     });
 
     it("stays one-shot and ephemeral with no thread key, no model thread, or a failed fork", async () => {
-      let defaultMode: string | undefined;
+      let defaultLifetime: string | undefined;
       const noKey = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
@@ -1419,8 +1598,8 @@ describe("AgentRunner", () => {
             })(),
           }),
         {
-          onFork: (params) => {
-            defaultMode = params.mode;
+          onBranch: (start) => {
+            defaultLifetime = start.lifetime;
           },
         },
       );
@@ -1448,7 +1627,7 @@ describe("AgentRunner", () => {
       );
 
       // Every other fork in Rome (recap, feedback) keeps today's cheap path.
-      expect(defaultMode).toBe("ephemeral");
+      expect(defaultLifetime).toBe("ephemeral");
       for (const messages of [noKey, noThread, failed]) {
         const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
         await expect(
@@ -1588,7 +1767,7 @@ describe("AgentRunner", () => {
 
     it("default forks open an isolated tool surface with execution disabled", async () => {
       registerDemoAction();
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
       const messages = await runForkAgainstLiveSession((openParams) => {
         forkOpen = openParams;
         return forkSessionStub({
@@ -1600,16 +1779,15 @@ describe("AgentRunner", () => {
 
       expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
       expect(forkOpen).toBeDefined();
-      // An empty tool surface: no actions to list, no subagents, and no
-      // interactive surface to propose a routine on.
-      expect(await listActionNames(forkOpen!.tools)).toEqual([]);
-      expect(toolNames(forkOpen!.tools, "subagents")).toEqual([]);
-      expect(toolNames(forkOpen!.tools, "ask_user")).not.toContain("propose_routine");
+      // An empty tool surface: nothing to list in any group, and no builtins.
+      for (const group of ["actions", "subagents", "skills", "ask_user"] as const) {
+        expect(toolNames(forkOpen!.tools, group)).toEqual([]);
+      }
       expect(forkOpen!.config.builtinTools).toEqual([]);
       expect(forkOpen!.config.reasoningEffort).toBe("high");
       await expect(
         executeActionTool(forkOpen!.tools, "demo_action", {}, { toolUseId: "isolated-action" }),
-      ).rejects.toThrow("Actions are disabled in forked turns");
+      ).rejects.toThrow("Unknown tool: execute_action");
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
@@ -1626,15 +1804,18 @@ describe("AgentRunner", () => {
           },
         };
       });
-      let forkOpen: ModelSessionForkOpenParams | undefined;
 
       try {
         await runForkAgainstLiveSession(
-          (openParams) => {
-            forkOpen = openParams;
+          () => {
             return forkSessionStub({
               events: (async function* (): AsyncIterable<ModelSessionEvent> {
-                yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
+                yield {
+                  type: "result",
+                  reasoningEffort: "high",
+                  content: "Fork summary",
+                  accounting: MOCK_ACCOUNTING,
+                };
               })(),
             });
           },
@@ -1655,7 +1836,10 @@ describe("AgentRunner", () => {
           },
         );
 
-        expect(forkOpen?.appStoreListingId).toBe("@publisher/test-app");
+        expect(recordMetrics).toHaveBeenCalledWith(MOCK_ACCOUNTING, {
+          agentName: "core:test-main",
+          appStoreListingId: "@publisher/test-app",
+        });
       } finally {
         recordSpy.mockRestore();
       }
@@ -1665,7 +1849,7 @@ describe("AgentRunner", () => {
       registerDemoAction();
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       provider.builtinTools = new Set(["Read", "Edit", "Bash"]);
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
       await runForkAgainstLiveSession(
         (openParams) => {
           forkOpen = openParams;
@@ -1815,7 +1999,7 @@ describe("AgentRunner", () => {
 
     it("exact forks preserve provider-native structured results without a side-channel event", async () => {
       const payload = { decision: "REPLY", reason: "all good" };
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
 
       const messages = await runForkAgainstLiveSession(
         (openParams) => {
@@ -1954,7 +2138,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-detached",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -2010,7 +2193,9 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
-      const runner = new AgentRunner(manager, agentLoader);
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession("fork-iso", "Fork source");
+      const runner = new AgentRunner(manager, agentLoader, repo);
       const first = await collectMessages(
         runner.run({ agentName: "test-main", prompt: "Hi", channelThreadKey: "webchat:fork-iso" }),
       );
@@ -2023,11 +2208,16 @@ describe("AgentRunner", () => {
           channelThreadKey: "webchat:fork-iso",
           prompt: "fork it",
           mode: "exact",
+          sourceCheckpoint: {
+            providerId: "mock",
+            providerThreadId: "mock-source-thread",
+            checkpointId: "source-turn",
+          },
         }),
       );
 
       // The fork's subagent is always a fresh session owned by the fork.
-      const childOpens = provider.sessions.filter((s) => s.agentName === "core:test-explore");
+      const childOpens = provider.sessions.slice(1);
       expect(childOpens).toHaveLength(1);
       expect(childOpens[0].thread).toEqual({ kind: "new" });
       const terminal = messages.find((m) => m.type === "result");
@@ -2121,7 +2311,8 @@ describe("AgentRunner", () => {
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
-    return new AgentRunner(manager, agentLoader);
+    // A recorded run has its conversation's row, which its subagents need.
+    return new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
@@ -2148,9 +2339,6 @@ describe("AgentRunner", () => {
         },
       },
       async sendUserInput(): Promise<void> {},
-      async fork() {
-        throw new Error("ModelSession fork is not supported by this provider");
-      },
       async interrupt(): Promise<void> {},
       async close(): Promise<void> {
         if (closed) return;
@@ -2468,7 +2656,7 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider through the conversational input lane", async () => {
+    it("takes the next input on the same model session after an interrupt", async () => {
       const opens: ModelSessionParams[] = [];
       const prompts: string[] = [];
       const cancels = rs.fn();
@@ -2482,17 +2670,14 @@ describe("AgentRunner", () => {
       });
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
-          const first = opens.length === 1;
-          let disposed = false;
           const model = createSessionFromRun(
             "anthropic",
             async function* ({ prompt }) {
               prompts.push(prompt);
-              if (first) {
+              if (prompts.length === 1) {
                 yield {
                   type: "tool_use",
                   id: "edit-1",
@@ -2509,7 +2694,6 @@ describe("AgentRunner", () => {
                     checkpointId: "assistant-current",
                   },
                 };
-                await model.close();
               } else {
                 await secondGate;
                 yield { type: "result", content: "Next turn" };
@@ -2520,12 +2704,8 @@ describe("AgentRunner", () => {
           return {
             ...model,
             modelThreadId: "persisted-claude-thread",
-            get isClosed() {
-              return disposed;
-            },
             async interrupt() {
               cancels();
-              disposed = true;
               releaseFirst();
             },
           };
@@ -2572,15 +2752,12 @@ describe("AgentRunner", () => {
       expect(await secondMessages).toContainEqual(
         expect.objectContaining({ type: "result", content: "Next turn" }),
       );
-      expect(opens).toHaveLength(2);
-      expect(opens[1]).toMatchObject({
-        thread: { kind: "resume", modelThreadId: "persisted-claude-thread" },
-      });
+      expect(opens).toHaveLength(1);
       expect(session.status).toBe("idle");
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider before forking its current checkpoint", async () => {
+    it("branches an interrupted source at its current checkpoint", async () => {
       const opens: ModelSessionParams[] = [];
       let releaseInterrupted!: () => void;
       const interruptedGate = new Promise<void>((resolve) => {
@@ -2590,19 +2767,23 @@ describe("AgentRunner", () => {
       const interruptedBegun = new Promise<void>((resolve) => {
         beginInterrupted = resolve;
       });
-      let providerFork: ModelSessionForkParams | undefined;
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
-          const first = opens.length === 1;
-          let disposed = false;
+          if (params.thread.kind === "branch") {
+            return forkSessionStub({
+              providerId: "anthropic",
+              model: "claude-fork",
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
+              })(),
+            });
+          }
           const model = createSessionFromRun(
             "anthropic",
             async function* () {
-              if (!first) return;
               beginInterrupted();
               await interruptedGate;
               yield {
@@ -2614,42 +2795,14 @@ describe("AgentRunner", () => {
                   checkpointId: "assistant-current",
                 },
               };
-              await model.close();
             },
             params,
           );
           return {
             ...model,
             modelThreadId: "persisted-claude-thread",
-            get isClosed() {
-              return disposed;
-            },
             async interrupt() {
-              if (!first || disposed) return;
-              disposed = true;
               releaseInterrupted();
-            },
-            async fork(forkParams) {
-              if (disposed) throw new Error("Cannot fork a closed ModelSession");
-              providerFork = forkParams;
-              return {
-                providerId: "anthropic" as const,
-                sourceModelThreadId: "persisted-claude-thread",
-                mode: forkParams.mode ?? "ephemeral",
-                modelThreadId: "forked-claude-thread",
-                open: async () =>
-                  forkSessionStub({
-                    providerId: "anthropic",
-                    model: "claude-fork",
-                    events: (async function* (): AsyncIterable<ModelSessionEvent> {
-                      yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
-                    })(),
-                  }),
-              };
-            },
-            async close() {
-              disposed = true;
-              await model.close();
             },
           };
         },
@@ -2693,12 +2846,14 @@ describe("AgentRunner", () => {
       ]);
       expect(forkMessages[1]).toMatchObject({ type: "result", content: "Fork complete" });
       expect(opens).toHaveLength(2);
-      expect(opens[1]).toMatchObject({
-        thread: { kind: "resume", modelThreadId: "persisted-claude-thread" },
-      });
-      expect(providerFork).toMatchObject({
-        configurationMode: "exact",
-        sourceCheckpoint: "assistant-current",
+      expect(opens[1]?.thread).toEqual({
+        kind: "branch",
+        at: {
+          provider: "anthropic",
+          modelThreadId: "persisted-claude-thread",
+          checkpointId: "assistant-current",
+        },
+        lifetime: "ephemeral",
       });
       await manager.shutdown();
     });
@@ -3037,7 +3192,6 @@ describe("AgentRunner", () => {
     it("does not persist a provider checkpoint for an interrupted turn", async () => {
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           const session = createSessionFromRun(
@@ -3093,7 +3247,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         async openSession(params) {
           const session = createSessionFromRun(
@@ -3563,7 +3716,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-reused-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -3614,7 +3766,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-closable-session",
         builtinTools: new Set<string>(),
         openSession: async (params) => createClosableModelSession(params),
       };
@@ -3688,11 +3839,11 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-lifecycle-nested",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImplNested),
       };
       const runner = createRunner(provider, lifecycle, { keepAliveAcrossTurns: true });
+      await new ChatsWebChatRepository(testDb.db).createSession("session-subagents", "Chat");
 
       await collectMessages(
         runner.run({
@@ -3763,7 +3914,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id,
-        displayName: id,
         builtinTools: new Set(),
         openSession: makeOpenSessionFromRun(id, async function* () {
           yield { type: "error", error: message, code, httpStatus, providerError };
@@ -3943,7 +4093,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-shared-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -3984,10 +4133,6 @@ describe("AgentRunner", () => {
       const call = provider.calls[0];
       expect(call.systemPrompt).toContain("You are a test main agent.");
       expect(call.systemPrompt).toContain("Extra context");
-      expect(provider.sessions[0]).toMatchObject({
-        agentName: "core:test-main",
-      });
-      expect(provider.sessions[0].appStoreListingId).toBeUndefined();
     });
 
     it("attributes app-store agents by listing id and omits local app attribution", async () => {
@@ -4006,7 +4151,8 @@ describe("AgentRunner", () => {
       });
 
       try {
-        const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
+        const built = { type: "result", content: "Built", accounting: MOCK_ACCOUNTING } as const;
+        const provider = new MockModelProvider([[built]]);
         const appCatalog = {
           get: rs.fn((appId: string) =>
             appId === "test-app"
@@ -4035,12 +4181,12 @@ describe("AgentRunner", () => {
           "You are a test main agent. Handle messages and delegate as needed.\n\n" +
             "App-supplied session context.",
         );
-        expect(provider.sessions[0]).toMatchObject({
+        expect(recordMetrics).toHaveBeenLastCalledWith(MOCK_ACCOUNTING, {
           agentName: "core:test-main",
           appStoreListingId: "@publisher/test-app",
         });
 
-        const localProvider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
+        const localProvider = new MockModelProvider([[built]]);
         const localAppCatalog = {
           get: rs.fn(() => ({
             source: {
@@ -4061,7 +4207,10 @@ describe("AgentRunner", () => {
           }),
         );
 
-        expect(localProvider.sessions[0].appStoreListingId).toBeUndefined();
+        expect(recordMetrics).toHaveBeenLastCalledWith(MOCK_ACCOUNTING, {
+          agentName: "core:test-main",
+          appStoreListingId: undefined,
+        });
       } finally {
         recordSpy.mockRestore();
       }
@@ -4126,7 +4275,6 @@ describe("AgentRunner", () => {
     function alwaysResultProvider(): ModelProvider {
       return {
         id: "mock",
-        displayName: "mock-thread-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* () {
           yield { type: "result", content: "ok" };
@@ -4301,7 +4449,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-no-conversation-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4377,7 +4524,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-linked-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4433,7 +4579,6 @@ describe("AgentRunner", () => {
       const prompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-linked-starter",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           prompts.push(input.prompt);
@@ -4533,7 +4678,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-runtime-reply",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4618,7 +4762,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const anthropic: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           anthropicSessions.push(params);
@@ -4633,7 +4776,6 @@ describe("AgentRunner", () => {
       };
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4689,7 +4831,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const anthropic: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           anthropicSessions.push(params);
@@ -4704,7 +4845,6 @@ describe("AgentRunner", () => {
       };
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4741,7 +4881,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4802,7 +4941,6 @@ describe("AgentRunner", () => {
       const claudeOpens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           const session = createSessionFromRun(
@@ -4819,7 +4957,6 @@ describe("AgentRunner", () => {
       };
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           claudeOpens.push(params);
@@ -4871,7 +5008,6 @@ describe("AgentRunner", () => {
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -4936,7 +5072,6 @@ describe("AgentRunner", () => {
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -4988,7 +5123,6 @@ describe("AgentRunner", () => {
       };
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) =>
           createSessionFromRun(
@@ -5002,7 +5136,6 @@ describe("AgentRunner", () => {
       };
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) =>
           createSessionFromRun(
@@ -5049,13 +5182,11 @@ describe("AgentRunner", () => {
     // so a test can assert which concrete model actually ran.
     function recordingProvider(
       id: ProviderId,
-      displayName: string,
       modelThreadId: string,
       opens: ModelSessionParams[],
     ): ModelProvider {
       return {
         id,
-        displayName,
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -5072,10 +5203,10 @@ describe("AgentRunner", () => {
     }
 
     const codexProvider = (opens: ModelSessionParams[]): ModelProvider =>
-      recordingProvider("openai", "Codex", "codex-thread", opens);
+      recordingProvider("openai", "codex-thread", opens);
 
     const claudeProvider = (opens: ModelSessionParams[]): ModelProvider =>
-      recordingProvider("anthropic", "Claude", "claude-thread", opens);
+      recordingProvider("anthropic", "claude-thread", opens);
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
@@ -5120,7 +5251,6 @@ describe("AgentRunner", () => {
       const opens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -5173,7 +5303,6 @@ describe("AgentRunner", () => {
       const claudeOpens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           claudeOpens.push(params);
@@ -5629,7 +5758,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-action",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImplAction),
       };
@@ -5792,7 +5920,6 @@ describe("AgentRunner", () => {
       });
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
         openSession: openFromRun,
       };
@@ -5840,7 +5967,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-live-catalog",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -5915,7 +6041,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-allow-list",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -5993,7 +6118,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-legacy-action",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -6111,7 +6235,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-subagent-preview",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -6189,7 +6312,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider & { calls: import("./agent-runner.js").ModelRunParams[] } = {
         id: "mock",
-        displayName: "mock-nested",
         builtinTools: new Set<string>(),
         calls: nestedCalls,
         openSession: makeOpenSessionFromRun("mock", runImplNested),
@@ -6292,7 +6414,6 @@ describe("AgentRunner", () => {
         sessions: import("./agent-runner.js").ModelSessionParams[];
       } = {
         id: "mock",
-        displayName: "mock-structured",
         builtinTools: new Set<string>(),
         sessions: [],
         openSession: async (params) => {

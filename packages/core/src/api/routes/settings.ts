@@ -14,6 +14,7 @@ import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
@@ -23,8 +24,14 @@ const DEDICATED_ROUTE_KEYS: Record<string, string> = {
   [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
 };
 
+// Each person's Concierge state: their follows, rules and time zone. Only
+// owner-scoped Concierge actions read or write it, so no dashboard user reads
+// another's here.
+const CONCIERGE_PRIVATE_KEYS = [CONCIERGE_FOLLOWING_SETTING_KEY];
+
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
+  for (const key of CONCIERGE_PRIVATE_KEYS) delete redacted[key];
   if (ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING in redacted) {
     redacted[ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING] =
       redactAnthropicCompatibleCredentialsSetting(
@@ -57,6 +64,11 @@ export function settingsRoutes(deps: ApiDeps): Hono {
     for (const [key, route] of Object.entries(DEDICATED_ROUTE_KEYS)) {
       if (key in body) {
         return c.json({ error: `${key} is managed by PUT ${route}, not /api/settings.` }, 400);
+      }
+    }
+    for (const key of CONCIERGE_PRIVATE_KEYS) {
+      if (key in body) {
+        return c.json({ error: `${key} is managed by the Concierge, not /api/settings.` }, 400);
       }
     }
 

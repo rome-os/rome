@@ -5,7 +5,7 @@ import { useSettings } from "@/hooks/use-settings";
 
 /** The canonical id of the agent behind the Concierge chat. */
 export const CONCIERGE_AGENT_ID = "core:concierge";
-/** The main Concierge chat's fixed id: the dashboard opens it at `/chat/concierge`. */
+/** The guardian's main Concierge chat's id. A visitor's main chat has its own, which the server answers. */
 export const CONCIERGE_CHAT_ID = "concierge";
 /** `triggerKind` of a task chat Concierge started. */
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
@@ -19,15 +19,42 @@ export const CONCIERGE_CHATS_QUERY_KEY = ["concierge-chats"] as const;
 export const CONCIERGE_UNREAD_CAP = 100;
 
 interface ConciergeSession {
+  /** The signed-in person's main Concierge chat. */
   id: string;
-  /** Agent messages since the guardian last read the chat, at most {@link CONCIERGE_UNREAD_CAP}. */
+  /** Agent messages since it was last read, at most {@link CONCIERGE_UNREAD_CAP}. */
   unread: number;
+}
+
+let timeZoneReported = false;
+
+/**
+ * Tells the server this browser's time zone once per page load, so a
+ * visitor's digest times and quiet hours read in their own zone.
+ */
+function reportTimeZone(): void {
+  if (timeZoneReported) return;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!timeZone) return;
+  timeZoneReported = true;
+  void fetchJson<void>("/api/concierge/timezone", {
+    method: "PUT",
+    json: { timeZone },
+    fallback: "",
+  }).catch(() => {
+    timeZoneReported = false;
+  });
 }
 
 const conciergeSessionQuery = {
   queryKey: CONCIERGE_SESSION_QUERY_KEY,
-  queryFn: ({ signal }: { signal: AbortSignal }) =>
-    fetchJson<ConciergeSession>("/api/concierge/session", { signal, fallback: "" }),
+  queryFn: async ({ signal }: { signal: AbortSignal }) => {
+    const session = await fetchJson<ConciergeSession>("/api/concierge/session", {
+      signal,
+      fallback: "",
+    });
+    reportTimeZone();
+    return session;
+  },
 };
 
 function useConciergeSession(enabled: boolean) {
@@ -35,15 +62,16 @@ function useConciergeSession(enabled: boolean) {
 }
 
 /**
- * Resolves once the server has created the Concierge chat, joining a request
- * already in flight and reusing a recent one. Rejects when the server cannot.
+ * Resolves with the main Concierge chat's id once the server has created it,
+ * joining a request already in flight and reusing a recent one. Rejects when
+ * the server cannot.
  */
-export async function ensureConciergeChat(queryClient: QueryClient): Promise<void> {
-  await queryClient.fetchQuery({ ...conciergeSessionQuery, staleTime: 10_000 });
+export async function ensureConciergeChat(queryClient: QueryClient): Promise<string> {
+  return (await queryClient.fetchQuery({ ...conciergeSessionQuery, staleTime: 10_000 })).id;
 }
 
 export interface ConciergeChat {
-  /** `CONCIERGE_CHAT_ID` once the chat exists, else null: Concierge is off or not loaded yet. */
+  /** The signed-in person's main Concierge chat once it exists, else null: Concierge is off or not loaded yet. */
   chatId: string | null;
   /** Whether Concierge is on. The chat may not exist yet; `ensureConciergeChat` waits for it. */
   enabled: boolean;
@@ -54,15 +82,15 @@ export interface ConciergeChat {
 }
 
 /**
- * The Concierge chat. The server creates it on the first request, and asks
- * again on every mount, which recreates a deleted chat.
+ * The signed-in person's main Concierge chat. The server creates it on the
+ * first request, and asks again on every mount, which recreates a deleted chat.
  */
 export function useConciergeChat(): ConciergeChat {
   const { data: settings, isPending: settingsPending } = useSettings();
   const enabled = settings?.[EXPERIMENTAL_CONCIERGE_SETTING_KEY] === true;
-  const { isSuccess, isPending } = useConciergeSession(enabled);
+  const { data, isSuccess, isPending } = useConciergeSession(enabled);
   return {
-    chatId: enabled && isSuccess ? CONCIERGE_CHAT_ID : null,
+    chatId: enabled && isSuccess ? data.id : null,
     enabled,
     settingsLoading: settingsPending,
     loading: settingsPending || (enabled && isPending),

@@ -141,7 +141,11 @@ describe("gateGuardianUpgrade", () => {
     const allowed = captureSocket();
     expect(
       await gateUpgrade(visitor("visitor@example.com"), allowed.socket, testDb.db, dashboardAccess),
-    ).toEqual({ kind: "dashboard-visitor", email: "visitor@example.com" });
+    ).toEqual({
+      kind: "dashboard-visitor",
+      accountId: "account-1",
+      email: "visitor@example.com",
+    });
     expect(allowed.response()).toBe("");
 
     const guardianOnly = captureSocket();

@@ -22,13 +22,13 @@ import type {
   ModelProvider,
   ModelReasoningEffort,
   ModelSession,
-  ModelSessionForkOpenParams,
-  ModelSessionFork,
-  ModelSessionForkParams,
+  ModelSessionConfig,
   ModelSessionParams,
   ModelUserInput,
   ProviderId,
   ModelPosition,
+  ThreadStart,
+  ModelFunding,
 } from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
@@ -79,12 +79,8 @@ import {
   type DynamicToolCallResponse,
 } from "./app-server-protocol.js";
 import { buildTurnInput } from "./turn-input.js";
-import {
-  buildOpenAiAccounting,
-  calculateOpenAiCostUsd,
-  stripLegacyReasoningSuffix,
-  type Usage,
-} from "./common.js";
+import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -105,7 +101,6 @@ import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
 import { CODEX_SHELL_ENV_EXCLUDE } from "./rome-credits-provider.js";
 import { createLogger } from "../../../../logger.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
-import type { UsageFunding } from "../../../../usage/events.js";
 import {
   alignRomeDynamicToolsToInheritedCatalog,
   createRomeDynamicTools,
@@ -184,7 +179,7 @@ export function codexToolOverrides(
 }
 
 function buildThreadConfigurationOverrides(
-  params: ModelSessionForkOpenParams,
+  params: ModelSessionParams,
   model: string,
 ): ThreadConfigurationOverrides {
   const tools = codexToolOverrides(params.config.builtinTools);
@@ -224,7 +219,7 @@ function buildThreadConfigurationOverrides(
 }
 
 function buildThreadConfig(
-  params: ModelSessionForkOpenParams,
+  params: ModelSessionParams,
   model: string,
   romeTools: RomeDynamicTools,
 ): ThreadStartParams {
@@ -451,7 +446,7 @@ interface CodexAppServerProviderOptions {
   /** The Rome credits gateway refused a model it no longer serves. */
   onRomeCreditsModelNotServed?: () => Promise<void> | void;
   /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
-  funding?: () => UsageFunding;
+  funding?: () => ModelFunding;
 }
 
 interface CodexFailureClassification {
@@ -461,6 +456,15 @@ interface CodexFailureClassification {
   provider?: TurnErrorEvent["provider"];
   reason?: TurnErrorEvent["reason"];
   pending?: Promise<void>;
+}
+
+/** An open session's thread, which a branch finds by id to run inside or fork from. */
+interface LiveCodexThread {
+  modelThreadId(): string | undefined;
+  branch(
+    params: ModelSessionParams,
+    start: Extract<ThreadStart, { kind: "branch" }>,
+  ): Promise<ModelSession>;
 }
 
 /** The turn/start reply and turn/started can each name the turn, in either order. */
@@ -588,7 +592,7 @@ function classifyCodexFailure(
 
 export class CodexAppServerProvider implements ModelProvider {
   readonly id: ProviderId = "openai";
-  readonly displayName = "Codex (ChatGPT)";
+  private readonly liveThreads = new Set<LiveCodexThread>();
   // Anthropic's set, so agent yamls stay provider-agnostic, plus ImageGeneration,
   // which only Codex provides.
   readonly builtinTools: ReadonlySet<string> = new Set([
@@ -621,7 +625,15 @@ export class CodexAppServerProvider implements ModelProvider {
   }
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
-    return await this.openSessionWithInheritedDynamicTools(params);
+    if (params.thread.kind !== "branch") {
+      return await this.openSessionWithInheritedDynamicTools(params);
+    }
+    const { at } = params.thread;
+    for (const live of this.liveThreads) {
+      if (live.modelThreadId() === at.modelThreadId)
+        return await live.branch(params, params.thread);
+    }
+    throw new Error(`Cannot branch Codex thread ${at.modelThreadId}: it has no live session`);
   }
 
   private async openSessionWithInheritedDynamicTools(
@@ -727,7 +739,7 @@ export class CodexAppServerProvider implements ModelProvider {
           threadId ?? (params.thread.kind === "resume" ? params.thread.modelThreadId : undefined)
         );
       },
-      get funding(): UsageFunding | undefined {
+      get funding(): ModelFunding | undefined {
         return funding?.();
       },
     } as ModelSession;
@@ -1375,177 +1387,158 @@ export class CodexAppServerProvider implements ModelProvider {
       }
     };
 
-    session.fork = async (forkParams: ModelSessionForkParams): Promise<ModelSessionFork> => {
-      if (closed || closing) throw new Error("Cannot fork a closed ModelSession");
-      // A native thread/fork would copy the contaminated history into the
-      // child; a borrowed fork would run on it directly. Refuse both.
-      if (contaminatedReason) throw new Error(contaminatedReason);
-      const source = session.modelThreadId;
-      if (!source) throw new Error("Cannot fork Codex session before modelThreadId is available");
-      const mode = forkParams.mode ?? "ephemeral";
-      // The fork's turn runs under an owner of its own, whether on a borrowed
-      // source thread or a native child.
-      const forkOwnerId = randomUUID();
-      let opened = false;
-      let forkedId: string | undefined;
-      return {
-        providerId: this.id,
-        sourceModelThreadId: source,
-        mode,
-        get modelThreadId() {
-          return forkedId;
-        },
-        open: async (openParams) => {
-          if (opened) throw new Error("ModelSession fork already opened");
-          opened = true;
+    const liveThread: LiveCodexThread = {
+      modelThreadId: () => session.modelThreadId,
+      branch: async (openParams, { at, lifetime }) => {
+        if (closed || closing) throw new Error("Cannot branch a closed ModelSession");
+        // A native thread/fork would copy the contaminated history into the
+        // child; a borrowed fork would run on it directly. Refuse both.
+        if (contaminatedReason) throw new Error(contaminatedReason);
+        const source = at.modelThreadId;
+        // The fork's turn runs under an owner of its own, whether on a borrowed
+        // source thread or a native child.
+        const forkOwnerId = randomUUID();
+        // A branch that serves no tools uses none, but Codex keeps the source's
+        // catalog on a forked thread, so it is told so and refuses them.
+        const isolated =
+          !openParams.config.builtinTools?.length &&
+          createRomeDynamicTools(openParams.tools).definitions.length === 0;
+        const compatibility = evaluateBorrowedExactFork({
+          openParams,
+          sourceConfig: params.config,
+          sourceDynamicTools: romeTools.definitions,
+        });
+        const targetIsCurrentHead = at.checkpointId === lastCheckpointId;
+        // Borrowing runs the turn inside the source thread and reverts it
+        // (a temporary workaround for openai/codex#24704 — see
+        // codex/borrowed-exact-fork.ts). That leaves nothing to resume and
+        // reports the source's own thread id, so a fork that asked to be
+        // persisted must take the native path instead, whatever it costs in
+        // uncached prefix. Every other fork keeps the cheap path.
+        const borrowSourceThread =
+          lifetime === "ephemeral" &&
+          compatibility.eligible &&
+          targetIsCurrentHead &&
+          openedThread.historyMode === "paginated";
+        log.info("codex fork strategy selected", {
+          strategy: borrowSourceThread ? "borrow_source_thread" : "native_thread_fork",
+          isolated,
+          targetIsCurrentHead,
+          sameModel: compatibility.sameModel,
+          sameSystemPrompt: compatibility.sameSystemPrompt,
+          sameWorkingDir: compatibility.sameWorkingDir,
+          sameTurnSettings: compatibility.sameTurnSettings,
+          sourceHistoryMode: openedThread.historyMode,
+        });
 
-          const compatibility = evaluateBorrowedExactFork({
-            forkParams,
+        if (borrowSourceThread) {
+          return await createBorrowedExactForkSession({
+            providerId: this.id,
+            forkOwnerId,
+            sourceThreadId: source,
             openParams,
-            sourceModelName: modelName,
-            sourceSystemPrompt: params.config.systemPrompt,
-            sourceWorkingDir: params.config.workingDir,
-          });
-          const targetIsCurrentHead =
-            forkParams.sourceCheckpoint === undefined ||
-            forkParams.sourceCheckpoint === lastCheckpointId;
-          // Borrowing runs the turn inside the source thread and reverts it
-          // (a temporary workaround for openai/codex#24704 — see
-          // codex/borrowed-exact-fork.ts). That leaves nothing to resume and
-          // reports the source's own thread id, so a fork that asked to be
-          // persisted must take the native path instead, whatever it costs in
-          // uncached prefix. Every other fork keeps the cheap path.
-          const borrowSourceThread =
-            mode === "ephemeral" &&
-            compatibility.eligible &&
-            targetIsCurrentHead &&
-            openedThread.historyMode === "paginated";
-          log.info("codex fork strategy selected", {
-            strategy: borrowSourceThread ? "borrow_source_thread" : "native_thread_fork",
-            configurationMode: forkParams.configurationMode,
-            targetedCheckpoint: forkParams.sourceCheckpoint !== undefined,
-            targetIsCurrentHead,
-            sameModel: compatibility.sameModel,
-            sameSystemPrompt: compatibility.sameSystemPrompt,
-            sameWorkingDir: compatibility.sameWorkingDir,
-            sourceHistoryMode: openedThread.historyMode,
-          });
-
-          if (borrowSourceThread) {
-            forkedId = source;
-            return await createBorrowedExactForkSession({
-              providerId: this.id,
-              forkOwnerId,
-              sourceThreadId: source,
-              openParams,
-              runExclusive: async (work) => await turnCoordinator.run(work),
-              runTurn: async (input, runtime) => await runOne([input], runtime),
-              // The fork turn queues behind the source's turns like any other.
-              onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
-              revertTurn: async (threadIdToRevert, beforeTurnId) => {
-                // Revert is the only thing keeping the borrowed turn out of
-                // the source conversation, so its failure cannot be a plain
-                // turn error. The turn-id boundary prevents a retry from
-                // removing an earlier source turn: after a successful first
-                // request the boundary is gone and a second request fails
-                // closed. Retry once so pre-mutation shutdown/drain failures
-                // can recover; if both attempts fail, source state is still
-                // uncertain and the session must be poisoned.
-                const revertParams: ThreadRevertParams = {
-                  threadId: threadIdToRevert,
-                  beforeTurnId,
-                };
-                let lastMessage = "unknown error";
-                for (let attempt = 1; attempt <= 2; attempt++) {
-                  try {
-                    await this.appServerManager.requestForThread(
-                      threadIdToRevert,
-                      Method.threadRevert,
-                      revertParams,
-                    );
+            runExclusive: async (work) => await turnCoordinator.run(work),
+            runTurn: async (input, runtime) => await runOne([input], runtime),
+            // The fork turn queues behind the source's turns like any other.
+            onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
+            revertTurn: async (threadIdToRevert, beforeTurnId) => {
+              // Revert is the only thing keeping the borrowed turn out of
+              // the source conversation, so its failure cannot be a plain
+              // turn error. The turn-id boundary prevents a retry from
+              // removing an earlier source turn: after a successful first
+              // request the boundary is gone and a second request fails
+              // closed. Retry once so pre-mutation shutdown/drain failures
+              // can recover; if both attempts fail, source state is still
+              // uncertain and the session must be poisoned.
+              const revertParams: ThreadRevertParams = {
+                threadId: threadIdToRevert,
+                beforeTurnId,
+              };
+              let lastMessage = "unknown error";
+              for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                  await this.appServerManager.requestForThread(
+                    threadIdToRevert,
+                    Method.threadRevert,
+                    revertParams,
+                  );
+                  return;
+                } catch (err) {
+                  if (isMissingRevertBoundary(err, beforeTurnId)) {
+                    // The borrowed turn was never persisted, or an earlier
+                    // request already removed this exact boundary. Upstream
+                    // reloads the paginated runtime before returning this
+                    // error, so the source history is clean in either case.
+                    log.info("codex exact-fork revert boundary already absent", {
+                      attempt,
+                      beforeTurnId,
+                    });
                     return;
-                  } catch (err) {
-                    if (isMissingRevertBoundary(err, beforeTurnId)) {
-                      // The borrowed turn was never persisted, or an earlier
-                      // request already removed this exact boundary. Upstream
-                      // reloads the paginated runtime before returning this
-                      // error, so the source history is clean in either case.
-                      log.info("codex exact-fork revert boundary already absent", {
-                        attempt,
-                        beforeTurnId,
-                      });
-                      return;
-                    }
-                    lastMessage = err instanceof Error ? err.message : String(err);
-                    log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
                   }
+                  lastMessage = err instanceof Error ? err.message : String(err);
+                  log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
                 }
-                // The fork's turn may now be part of the source thread, or a
-                // response may have been lost after a successful mutation.
-                // Poison the session so nothing resumes from uncertain
-                // history, and surface the failure on the source events
-                // stream (out-of-turn, like Notify.error).
-                contaminatedReason = `codex exact-fork revert failed, source thread state is uncertain: ${lastMessage}`;
-                if (!closed) sink.push({ type: "error", error: contaminatedReason });
-                throw new Error(contaminatedReason);
-              },
-              interrupt: async (reason) => await interruptOwnerTurn(forkOwnerId, reason),
-              funding,
-            });
-          }
-
-          // A model- or prompt-changing fork cannot safely borrow the source
-          // thread. Materialize a native child and rejoin it through its own
-          // session binding on the shared app-server. Supplying the final
-          // model at fork time avoids a transient default-model switch in the
-          // child's rollout.
-          //
-          // The snapshot goes through the turn lane: a borrowed exact fork may
-          // be mid-turn, and a thread/fork issued then would copy its
-          // not-yet-reverted turn into the child. Contamination is
-          // re-checked inside the lane because a queued snapshot would
-          // otherwise run immediately after the failed revert that set it.
-          const isolatedNativeFork = forkParams.configurationMode !== "exact";
-          let forkThreadConfiguration = buildThreadConfigurationOverrides(
-            openParams,
-            stripLegacyReasoningSuffix(openParams.config.model),
-          );
-          if (isolatedNativeFork) {
-            forkThreadConfiguration = constrainIsolatedFork(forkThreadConfiguration);
-          }
-          const forkRes = await turnCoordinator.run(async () => {
-            if (contaminatedReason) throw new Error(contaminatedReason);
-            const nativeForkParams: ThreadForkParams = {
-              threadId: source,
-              ...(forkParams.sourceCheckpoint ? { lastTurnId: forkParams.sourceCheckpoint } : {}),
-              ...forkThreadConfiguration,
-              ephemeral: false,
-              excludeTurns: true,
-            };
-            return await this.appServerManager.requestForThread<
-              { thread?: { id?: string } } | undefined
-            >(source, Method.threadFork, nativeForkParams);
+              }
+              // The fork's turn may now be part of the source thread, or a
+              // response may have been lost after a successful mutation.
+              // Poison the session so nothing resumes from uncertain
+              // history, and surface the failure on the source events
+              // stream (out-of-turn, like Notify.error).
+              contaminatedReason = `codex exact-fork revert failed, source thread state is uncertain: ${lastMessage}`;
+              if (!closed) sink.push({ type: "error", error: contaminatedReason });
+              throw new Error(contaminatedReason);
+            },
+            interrupt: async (reason) => await interruptOwnerTurn(forkOwnerId, reason),
+            funding,
           });
-          forkedId = forkRes?.thread?.id;
-          if (!forkedId) throw new Error("codex thread/fork did not return a thread id");
-          return await this.openSessionWithInheritedDynamicTools(
-            {
-              ...openParams,
-              thread: { kind: "resume", modelThreadId: forkedId },
-              fork: {
-                sourceModelThreadId: source,
-                mode,
-                sourceCheckpoint: forkParams.sourceCheckpoint,
-              },
-            },
-            {
-              dynamicToolDefinitions: romeTools.definitions,
-              isolated: isolatedNativeFork,
-            },
-          );
-        },
-      };
+        }
+
+        // A model- or prompt-changing fork cannot safely borrow the source
+        // thread. Materialize a native child and rejoin it through its own
+        // session binding on the shared app-server. Supplying the final
+        // model at fork time avoids a transient default-model switch in the
+        // child's rollout.
+        //
+        // The snapshot goes through the turn lane: a borrowed exact fork may
+        // be mid-turn, and a thread/fork issued then would copy its
+        // not-yet-reverted turn into the child. Contamination is
+        // re-checked inside the lane because a queued snapshot would
+        // otherwise run immediately after the failed revert that set it.
+        let forkThreadConfiguration = buildThreadConfigurationOverrides(
+          openParams,
+          stripLegacyReasoningSuffix(openParams.config.model),
+        );
+        if (isolated) {
+          forkThreadConfiguration = constrainIsolatedFork(forkThreadConfiguration);
+        }
+        const forkRes = await turnCoordinator.run(async () => {
+          if (contaminatedReason) throw new Error(contaminatedReason);
+          const nativeForkParams: ThreadForkParams = {
+            threadId: source,
+            lastTurnId: at.checkpointId,
+            ...forkThreadConfiguration,
+            ephemeral: false,
+            excludeTurns: true,
+          };
+          return await this.appServerManager.requestForThread<
+            { thread?: { id?: string } } | undefined
+          >(source, Method.threadFork, nativeForkParams);
+        });
+        const forkedId = forkRes?.thread?.id;
+        if (!forkedId) throw new Error("codex thread/fork did not return a thread id");
+        return await this.openSessionWithInheritedDynamicTools(
+          {
+            ...openParams,
+            thread: { kind: "resume", modelThreadId: forkedId },
+          },
+          {
+            dynamicToolDefinitions: romeTools.definitions,
+            isolated,
+          },
+        );
+      },
     };
+    this.liveThreads.add(liveThread);
     session.interrupt = async (reason?: string) => await interruptOwnerTurn(ownerSessionId, reason);
     session.close = async () => {
       if (closed || closing) return;
@@ -1554,6 +1547,7 @@ export class CodexAppServerProvider implements ModelProvider {
       await dispatcher.waitForIdle();
       await turnCoordinator.waitForIdle();
       closed = true;
+      this.liveThreads.delete(liveThread);
       if (threadId) await this.appServerManager.unsubscribe(threadId);
       sink.end();
     };

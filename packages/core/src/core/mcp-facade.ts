@@ -21,12 +21,23 @@
 import { isValidTimeZone } from "../lib/timezone.js";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
-import type {
-  ActionMcpDefinition,
-  ModelToolCallContext,
-  RomeToolDefinition,
-  SkillMcpDefinition,
-} from "./agent-runner.js";
+import type { ModelToolCallContext, RomeToolDefinition } from "./agent-runner.js";
+import type { ActionConfig } from "../actions/types.js";
+import type { SkillMcpDefinition } from "./skill-catalog.js";
+
+/** One action as the facade lists and describes it to the model. */
+export interface ActionMcpDefinition {
+  name: string;
+  description: string;
+  type: ActionConfig["type"];
+  complexity: ActionConfig["complexity"];
+  speed: ActionConfig["speed"];
+  reliability: ActionConfig["reliability"];
+  sideEffects: ActionConfig["sideEffects"];
+  requiresApproval: boolean;
+  cancellable: boolean;
+  inputSchema: Record<string, unknown>;
+}
 
 const log = createLogger("mcp-facade");
 

@@ -2,17 +2,14 @@ import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type { AgentEvent, McpServerConfig } from "../types.js";
 import type { ActionRegistry } from "../actions/types.js";
 import type {
-  ActionMcpDefinition,
   ModelReasoningEffort,
   ModelSession,
-  ModelSessionFork,
   ModelSessionParams,
   ModelToolCallContext,
   RomeToolDefinition,
   ModelUserInput,
   ProviderId,
   RomeTools,
-  SkillMcpDefinition,
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
@@ -44,17 +41,10 @@ export type {
   ModelTier,
   RomeToolDefinition,
   ModelToolCallContext,
-  ActionMcpDefinition,
-  SkillMcpDefinition,
   ModelReasoningEffort,
   ModelProvider,
   ModelSessionParams,
   ModelUserInput,
-  ModelSessionForkMode,
-  ModelSessionForkParams,
-  ModelSessionForkSource,
-  ModelSessionForkOpenParams,
-  ModelSessionFork,
   ModelSession,
   ThreadStart,
 } from "../agent/index.js";
@@ -91,6 +81,9 @@ export function createSessionFromRun(
   run: (params: ModelRunParams) => AsyncIterable<AgentEvent | ModelSessionEvent>,
   params: ModelSessionParams,
 ): ModelSession {
+  if (params.thread.kind === "branch") {
+    throw new Error("Branching a thread is not supported by this provider");
+  }
   // Standard async-queue: emit() either hands the value to a waiting
   // consumer (resolvers FIFO) or buffers it for the next next() call. Don't
   // share a single `pending` slot — back-to-back emits would clobber each
@@ -155,9 +148,6 @@ export function createSessionFromRun(
         );
       }
     },
-    async fork(): Promise<ModelSessionFork> {
-      throw new Error("ModelSession fork is not supported by this provider");
-    },
     async interrupt(): Promise<void> {},
     async close(): Promise<void> {
       if (closed) return;
@@ -219,9 +209,6 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     async sendUserInput(): Promise<void> {
       emit({ type: "text", content: FALLBACK });
       emit({ type: "error", error: "No handler took this turn" });
-    },
-    async fork(): Promise<ModelSessionFork> {
-      throw new Error("a code-backed agent session cannot fork");
     },
     async interrupt(): Promise<void> {},
     async close(): Promise<void> {
@@ -470,6 +457,9 @@ export class AgentRunner {
               // without risking the source session that owns it.
               liveStream = this.turnStreams.register({
                 sessionId: message.sessionId,
+                // The fork is a chat of its own once its row is saved; one
+                // whose row could not be saved is open to no one.
+                chatId: message.sessionId,
                 turnId: message.turnId,
                 agentName: params.agentName,
               });
@@ -504,9 +494,11 @@ export class AgentRunner {
   }
 
   /**
-   * Register the fork's rome session (with parent lineage) and return a
-   * recorder targeting it. Best-effort: a persistence failure must not break
-   * the forked run, so any error degrades to "no recording" with a warning.
+   * Register the fork's rome session and return a recorder targeting it. A
+   * fork of a chat is that chat's child: it is saved with its parent's owner
+   * and privacy, and when the chat is gone or the row cannot be saved this
+   * throws, so the fork does not run. A fork that names no chat is
+   * best-effort: a persistence failure degrades to "no recording".
    */
   private async createForkTraceRecorder(
     params: ForkRunParams,
@@ -514,22 +506,24 @@ export class AgentRunner {
     sourceChatId?: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
-    try {
-      const thread = params.threadContext;
-      // Prefer the source's conversation while it exists. Read again rather
-      // than trusting the session's cached row, which can outlive a deletion.
-      // The fallbacks cover rows that recorded none, or one since deleted.
-      const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
-      const parentSessionId =
-        recorded?.id ??
-        thread?.romeSessionId ??
-        (thread ? channelChatId(thread.channel, thread.threadId) : null);
-      const parent =
-        recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
-      const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
-      const label = params.label ?? "fork";
-      const trigger = { triggerKind: "fork", triggerName: label };
-      await this.webchatRepo.ensureRomeSession({
+    const thread = params.threadContext;
+    // Prefer the source's conversation while it exists. Read again rather
+    // than trusting the session's cached row, which can outlive a deletion.
+    const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
+    // The chat the fork is of, when the turn names one.
+    const named = recorded?.id ?? thread?.romeSessionId;
+    // A channel thread that recorded no conversation may still have its row.
+    const fallback = thread ? channelChatId(thread.channel, thread.threadId) : null;
+    const parentSessionId =
+      named ?? (fallback && (await this.webchatRepo.getSession(fallback)) ? fallback : null);
+    const parent =
+      recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
+    if (named && !parent) throw new Error(`Parent Rome session "${named}" was not found`);
+    const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
+    const label = params.label ?? "fork";
+    const trigger = { triggerKind: "fork", triggerName: label };
+    const save = async () => {
+      await this.webchatRepo!.ensureRomeSession({
         id: turnStart.sessionId,
         type: "fork",
         name: `${label}: ${parentName}`,
@@ -539,11 +533,11 @@ export class AgentRunner {
         // Later turns of the side chat read the folder from this row.
         deviceFolder: thread?.deviceFolder ?? null,
         trigger,
-        parentSessionId: parent ? parentSessionId : null,
-        parentTurnId: parent ? (params.parentTurnId ?? null) : null,
+        parentSessionId,
+        parentTurnId: parentSessionId ? (params.parentTurnId ?? null) : null,
       });
       return new AgentTraceRecorder({
-        webchatRepo: this.webchatRepo,
+        webchatRepo: this.webchatRepo!,
         agentName: params.agentName,
         channelThreadKey: params.channelThreadKey,
         turnId: turnStart.turnId,
@@ -552,6 +546,11 @@ export class AgentRunner {
         persistTranscript: true,
         trigger,
       });
+    };
+    // A child must be saved with its parent's owner, or not run at all.
+    if (parentSessionId) return save();
+    try {
+      return await save();
     } catch (err) {
       log.warn("failed to register forked run session; skipping trace persistence", {
         agent: params.agentName,

@@ -273,6 +273,9 @@ describe("Markdown", () => {
 });
 
 describe("Markdown Mermaid theme", () => {
+  // The theme is only resolved for content with a Mermaid fence.
+  const mermaid = (label: string) => `\`\`\`mermaid\ngraph TD; A-->B; %% ${label}\n\`\`\``;
+
   function countThemeReads(ui: React.ReactElement): number {
     const spy = rs.spyOn(window, "getComputedStyle");
     render(ui);
@@ -290,12 +293,43 @@ describe("Markdown Mermaid theme", () => {
     return reads;
   }
 
+  it("does not resolve the theme for Markdown without a Mermaid fence", () => {
+    const reads = countThemeReads(
+      <>
+        <Markdown>plain text</Markdown>
+        <Markdown>{"```typescript\nconst diagram = 'mermaid';\n```"}</Markdown>
+      </>,
+    );
+
+    expect(reads).toBe(0);
+  });
+
+  it("resolves the theme when streamed content gains a Mermaid fence", () => {
+    const single = readsPerResolve();
+    const { rerender } = render(<Markdown>plain text</Markdown>);
+    const spy = rs.spyOn(window, "getComputedStyle");
+    expect(spy.mock.calls.length).toBe(0);
+
+    rerender(<Markdown>{mermaid("streamed")}</Markdown>);
+
+    // Resolved at least once. Creating the root observer on this first commit
+    // marks the just-resolved entry stale (see subscribeToThemeRoot), so the
+    // follow-up render may re-validate it once more: at most twice, ever.
+    const flipReads = spy.mock.calls.length;
+    expect(flipReads).toBeGreaterThanOrEqual(single);
+    expect(flipReads).toBeLessThanOrEqual(2 * single);
+
+    // Once the observer watches the root, further content does not re-resolve.
+    rerender(<Markdown>{mermaid("streamed, longer")}</Markdown>);
+    expect(spy.mock.calls.length).toBe(flipReads);
+  });
+
   it("resolves the theme once however many instances are mounted", () => {
-    const single = countThemeReads(<Markdown>one</Markdown>);
+    const single = countThemeReads(<Markdown>{mermaid("one")}</Markdown>);
     const many = countThemeReads(
       <>
         {Array.from({ length: 20 }, (_, index) => (
-          <Markdown key={index}>{`message ${index}`}</Markdown>
+          <Markdown key={index}>{mermaid(`message ${index}`)}</Markdown>
         ))}
       </>,
     );
@@ -309,7 +343,7 @@ describe("Markdown Mermaid theme", () => {
     render(
       <>
         {Array.from({ length: 5 }, (_, index) => (
-          <Markdown key={index}>{`message ${index}`}</Markdown>
+          <Markdown key={index}>{mermaid(`message ${index}`)}</Markdown>
         ))}
       </>,
     );
@@ -326,7 +360,7 @@ describe("Markdown Mermaid theme", () => {
     render(
       <>
         {Array.from({ length: 5 }, (_, index) => (
-          <Markdown key={index}>{`message ${index}`}</Markdown>
+          <Markdown key={index}>{mermaid(`message ${index}`)}</Markdown>
         ))}
       </>,
     );
@@ -350,7 +384,7 @@ describe("Markdown Mermaid theme", () => {
     }
     render(
       <Suspense fallback={null}>
-        <Markdown>discarded</Markdown>
+        <Markdown>{mermaid("discarded")}</Markdown>
         <Suspends />
       </Suspense>,
     );
@@ -358,7 +392,7 @@ describe("Markdown Mermaid theme", () => {
     document.documentElement.classList.add("dark");
     const spy = rs.spyOn(window, "getComputedStyle");
 
-    render(<Markdown>mounted</Markdown>);
+    render(<Markdown>{mermaid("mounted")}</Markdown>);
 
     expect(spy.mock.calls.length).toBe(single);
   });

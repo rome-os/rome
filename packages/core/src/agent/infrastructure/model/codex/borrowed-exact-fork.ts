@@ -10,12 +10,14 @@
 // provider branch that calls it. The remaining workaround seams are deliberately
 // easy to find: CodexTurnRuntime.beforeTerminal and Method.threadRevert.
 
+import { isDeepStrictEqual } from "node:util";
 import type {
   ModelSession,
-  ModelSessionForkOpenParams,
-  ModelSessionForkParams,
+  ModelSessionConfig,
+  ModelSessionParams,
   ModelUserInput,
   ProviderId,
+  ModelFunding,
 } from "../../../domain/model-port.js";
 import {
   createGeneratedImageTracker,
@@ -23,10 +25,10 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./image-trace.js";
-import { stripLegacyReasoningSuffix } from "./common.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import { AgentMessageSink } from "./session.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
-import type { UsageFunding } from "../../../../usage/events.js";
+import type { DynamicToolSpec } from "./app-server-protocol.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 
 export interface BorrowedExactForkCompatibility {
@@ -34,36 +36,45 @@ export interface BorrowedExactForkCompatibility {
   sameModel: boolean;
   sameSystemPrompt: boolean;
   sameWorkingDir: boolean;
+  sameTools: boolean;
+  sameTurnSettings: boolean;
 }
 
 /**
- * Keep the workaround opt-in. Matching model/prompt/cwd is necessary but not
- * sufficient: isolated forks intentionally open a reduced tool surface, while
- * exact mode guarantees that the provider-visible configuration was copied
- * from the live source session by AgentSession.
+ * A borrowed turn runs on the source thread under the source's configuration,
+ * so a turn can borrow it only when the branch opens with that same
+ * configuration and catalog.
  */
 export function evaluateBorrowedExactFork(args: {
-  forkParams: ModelSessionForkParams;
-  openParams: ModelSessionForkOpenParams;
-  sourceModelName: string;
-  sourceSystemPrompt: string;
-  sourceWorkingDir?: string;
+  openParams: ModelSessionParams;
+  sourceConfig: ModelSessionConfig;
+  sourceDynamicTools: readonly DynamicToolSpec[];
 }): BorrowedExactForkCompatibility {
+  const branch = args.openParams.config;
+  const source = args.sourceConfig;
   const sameModel =
-    stripLegacyReasoningSuffix(args.openParams.config.model) === args.sourceModelName;
-  const sameSystemPrompt = args.openParams.config.systemPrompt === args.sourceSystemPrompt;
+    stripLegacyReasoningSuffix(branch.model) === stripLegacyReasoningSuffix(source.model);
+  const sameSystemPrompt = branch.systemPrompt === source.systemPrompt;
   const sameWorkingDir =
-    (args.openParams.config.workingDir ?? process.cwd()) ===
-    (args.sourceWorkingDir ?? process.cwd());
+    (branch.workingDir ?? process.cwd()) === (source.workingDir ?? process.cwd());
+  const sameTools =
+    isDeepStrictEqual(branch.builtinTools ?? [], source.builtinTools ?? []) &&
+    isDeepStrictEqual(branch.externalMcpServers ?? {}, source.externalMcpServers ?? {}) &&
+    isDeepStrictEqual(
+      createRomeDynamicTools(args.openParams.tools).definitions,
+      args.sourceDynamicTools,
+    );
+  const sameTurnSettings =
+    branch.reasoningEffort === source.reasoningEffort &&
+    isDeepStrictEqual(branch.outputSchema, source.outputSchema) &&
+    isDeepStrictEqual(branch.env ?? {}, source.env ?? {});
   return {
-    eligible:
-      args.forkParams.configurationMode === "exact" &&
-      sameModel &&
-      sameSystemPrompt &&
-      sameWorkingDir,
+    eligible: sameModel && sameSystemPrompt && sameWorkingDir && sameTools && sameTurnSettings,
     sameModel,
     sameSystemPrompt,
     sameWorkingDir,
+    sameTools,
+    sameTurnSettings,
   };
 }
 
@@ -71,14 +82,14 @@ export interface CreateBorrowedExactForkSessionArgs {
   providerId: ProviderId;
   forkOwnerId: string;
   sourceThreadId: string;
-  openParams: ModelSessionForkOpenParams;
+  openParams: ModelSessionParams;
   runExclusive<T>(work: () => Promise<T>): Promise<T>;
   runTurn(input: ModelUserInput, runtime: CodexTurnRuntime): Promise<void>;
   /** Called when the input is sent, before it waits behind the source's turns. */
   onSend?: (input: ModelUserInput) => void;
   revertTurn(threadId: string, beforeTurnId: string): Promise<void>;
   interrupt(reason?: string): Promise<void>;
-  funding?: () => UsageFunding | undefined;
+  funding?: () => ModelFunding | undefined;
 }
 
 /** Build the ephemeral one-turn ModelSession used only by eligible exact forks. */
@@ -120,7 +131,7 @@ export async function createBorrowedExactForkSession(
     model: args.openParams.config.model,
     events: sink.iter(),
     modelThreadId: args.sourceThreadId,
-    get funding(): UsageFunding | undefined {
+    get funding(): ModelFunding | undefined {
       return args.funding?.();
     },
     sendUserInput: async (input) => {
@@ -139,9 +150,6 @@ export async function createBorrowedExactForkSession(
             });
           }
         });
-    },
-    fork: async () => {
-      throw new Error("Nested exact Codex forks are not supported");
     },
     interrupt: args.interrupt,
     close: async () => {

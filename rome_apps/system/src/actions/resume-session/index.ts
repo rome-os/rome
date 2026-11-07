@@ -125,6 +125,7 @@ export function createResumeSessionAction(config: ActionConfig, deps: RuntimeDep
           threadId,
           channelUserId: typeof args.channelUserId === "string" ? args.channelUserId : undefined,
           prompt,
+          ...(typeof args.ownerKey === "string" ? { ownerKey: args.ownerKey } : {}),
         });
         return { status: "ok" as const, data: { action: "resumed", channel, threadId } };
       } catch (err) {

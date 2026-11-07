@@ -340,5 +340,15 @@ describe("runDefer", () => {
     });
     expect(args.args).not.toHaveProperty("channelThreadKey");
     expect(args.args.text).toBe("⏰ Time's up: watch deploy");
+    expect(args.args).not.toHaveProperty("ownerKey");
+  });
+
+  it("records whose chat it was scheduled in, so the wake-up reaches them after the chat is gone", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-3" });
+    await runDefer(
+      { name: "check back", afterMinutes: 5 },
+      { context: { ...baseContext, ownerKey: "visitor:a" }, createRoutine, now: NOW },
+    );
+    expect(createRoutine.mock.calls[0][0].args).toMatchObject({ ownerKey: "visitor:a" });
   });
 });

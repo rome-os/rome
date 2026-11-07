@@ -14,10 +14,13 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import {
+  NO_ROME_TOOLS,
   Session,
   type ModelSessionEvent,
   type ModelTurnStartedEvent,
   type ModelPosition,
+  type ModelProvider,
+  type ThreadStart,
   type SessionRepository,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
@@ -57,17 +60,16 @@ import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type { EventSources } from "../events/event-sources.js";
 import type {
-  ActionMcpDefinition,
   ModelSession,
-  ModelSessionForkOpenParams,
   ModelSessionParams,
   ModelReasoningEffort,
   ModelTier,
   RomeToolDefinition,
   ModelToolCallContext,
   ProviderId,
-  SkillMcpDefinition,
 } from "./agent-runner.js";
+import type { ActionMcpDefinition } from "./mcp-facade.js";
+import type { SkillMcpDefinition } from "./skill-catalog.js";
 import {
   toModelResolutionErrorPayload,
   type ModelResolution,
@@ -76,7 +78,8 @@ import {
 } from "./model-resolver.js";
 import { isConciergeAgent } from "../concierge/service.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
+import type { ModelSelectionId } from "../agent/index.js";
+import { resolveWebchatLargeModelSelection } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
@@ -435,6 +438,16 @@ const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
 
 /** The surface a channel's talker declares, with an omitted fact read as a
  *  messaging channel's. */
+/** Whose a dashboard chat is, for work scheduled in it; undefined for any other thread. */
+async function dashboardChatOwner(
+  webchatRepo: WebChatRepository | undefined,
+  thread: ThreadContext | undefined,
+): Promise<string | undefined> {
+  if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
+  const chat = await webchatRepo.getSession(thread.threadId);
+  return chat ? (chat.ownerKey ?? "guardian") : undefined;
+}
+
 export function talkerChannelSurface(talker: {
   interactiveCards?: boolean;
   promptContext?: boolean;
@@ -802,6 +815,8 @@ interface ForkTurnContext {
   forkTurnId: string;
   /** Model id the fork opens with (caller-resolved tier override, else the source's live model). */
   model: string;
+  /** The position the fork branches from. */
+  thread: Extract<ThreadStart, { kind: "branch" }>;
   /** Thread metadata for the fork's action executions (see ForkedAgentTurnInput). */
   threadContext?: ThreadContext;
   /**
@@ -820,7 +835,7 @@ interface ForkTurnContext {
  * What the open-params factory hands back to `runForkedTurn`.
  */
 interface ForkOpen {
-  params: ModelSessionForkOpenParams;
+  params: ModelSessionParams;
   /** Replace provider-generic subagent tool events with semantic ones. */
   projectProviderMessage: (msg: StreamAgentEvent) => Promise<StreamAgentEvent[]>;
   /**
@@ -1292,6 +1307,7 @@ async function openSession(
             agentName: key.agentName,
             sessionId: refs.sessionId,
             channelContext: refs.getThreadContext(),
+            ownerKey: await dashboardChatOwner(deps.webchatRepo, refs.getThreadContext()),
           },
           createRoutine: async (createArgs) => {
             const result = await deps.actionEngine.run(
@@ -1400,8 +1416,6 @@ async function openSession(
       env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
       maxTurns: config.maxTurns,
     },
-    agentName: key.agentName,
-    appStoreListingId,
     tools: createRomeTools(toolParams),
     // A thread resumes only on the provider that named it; another provider
     // starts a new one.
@@ -1485,20 +1499,8 @@ async function openSession(
             // Same channel as the source session's config, for the same reason.
             env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
           },
-          agentName: key.agentName,
-          appStoreListingId,
-          tools: createRomeTools({
-            getActionCatalog: () => [],
-            getSkillCatalog: () => [],
-            subagentTools: [],
-            executeAction: async () => {
-              throw new Error("Actions are disabled in forked turns");
-            },
-            executeSubagent: async () => {
-              throw new Error("Subagents are disabled in forked turns");
-            },
-            supportsInteractiveSurface: false,
-          }),
+          thread: fork.thread,
+          tools: NO_ROME_TOOLS,
         },
         projectProviderMessage: async (msg) => [msg],
         dispose: async () => {},
@@ -1581,10 +1583,11 @@ async function openSession(
       // OTel context instead of re-binding into a source turn's span.
       bindTurnCtx: (fn) => fn(),
     };
-    const { thread: _thread, fork: _forkSource, ...liveOpenParams } = lastOpenParams;
+    const liveOpenParams = lastOpenParams;
     return {
       params: {
         ...liveOpenParams,
+        thread: fork.thread,
         config: { ...liveOpenParams.config, model: fork.model },
         // The same catalog as the live session, run through fresh fork-bound
         // callbacks, never the source's per-turn closures.
@@ -1665,7 +1668,6 @@ async function openSession(
         {
           modelProvider: {
             id: "mock",
-            displayName: "Code-backed",
             builtinTools: new Set(),
             openSession: async () => {
               throw new Error("Code-backed agents do not open model sessions");
@@ -1715,6 +1717,7 @@ async function openSession(
     replacedThread: !threadResumed && !!resumed?.modelThreadId,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
+    modelProvider: initialResolution?.modelProvider,
     toolCount:
       (initialResolution
         ? config.tools.filter((name) => initialResolution.modelProvider.builtinTools.has(name))
@@ -1742,6 +1745,8 @@ interface ImplArgs {
   session: Session;
   conversation?: SessionConversation;
   modelSession: ModelSession;
+  /** The provider of the session the run opened. Unset for a code-backed agent. */
+  modelProvider?: ModelProvider;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
   structuredOutputValidator?: CompiledOutputSchema;
@@ -1987,6 +1992,9 @@ class AgentSessionImpl implements AgentSession {
   // Manager built lazily for subagent runs; keeps subagents owned by this session.
   private _childManager?: AgentSessionManager;
   private modelSession: ModelSession;
+  private modelProvider?: ModelProvider;
+  /** Where the latest turn left the thread, if it did. A fork with no checkpoint branches here. */
+  private lastPosition?: ModelPosition;
   private deps: ManagerDeps;
   private config: ReturnType<AgentLoader["get"]>;
   private structuredOutputValidator?: CompiledOutputSchema;
@@ -2070,6 +2078,7 @@ class AgentSessionImpl implements AgentSession {
     this.sessionId = args.session.id;
     this.conversation = args.conversation;
     this.modelSession = args.modelSession;
+    this.modelProvider = args.modelProvider;
     this.deps = args.deps;
     this.config = args.config;
     this.structuredOutputValidator = args.structuredOutputValidator;
@@ -2187,7 +2196,6 @@ class AgentSessionImpl implements AgentSession {
     );
     if (
       this.modelSessionAvailable &&
-      !this.modelSession.isClosed &&
       resolution.modelProvider.id === this.modelSession.providerId &&
       resolution.model === this.modelSession.model
     ) {
@@ -2202,6 +2210,7 @@ class AgentSessionImpl implements AgentSession {
     try {
       await previous.close();
       await this.modelEventsLoop;
+      this.modelProvider = resolution.modelProvider;
       const next = await this.openModelSession(
         resolution,
         sameProvider ? previous.providerId : undefined,
@@ -2213,6 +2222,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
+        this.lastPosition = undefined;
         if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
           this.previousModel = previous.model;
@@ -2230,7 +2240,6 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private async runEventsLoop(session: ModelSession): Promise<void> {
-    let streamError: unknown;
     try {
       enterSession(this.sessionId);
       for await (const event of session.events) {
@@ -2363,6 +2372,7 @@ class AgentSessionImpl implements AgentSession {
           if (outbound.type === "result") {
             const interrupted =
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
+            if (!interrupted) this.lastPosition = position;
             await this.persistTurn(
               session,
               sink.turnId,
@@ -2379,7 +2389,6 @@ class AgentSessionImpl implements AgentSession {
         }
       }
     } catch (err) {
-      streamError = err;
       log.warn("agent session events loop ended", {
         sessionId: this.sessionId,
         provider: session.providerId,
@@ -2388,20 +2397,6 @@ class AgentSessionImpl implements AgentSession {
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
       const sink = this.currentSink;
-      if (session.isClosed) {
-        this.modelSessionAvailable = false;
-        if (sink && !sink.done) {
-          if (sink.lifecycleInterrupted && !streamError) {
-            this.finalizeTurn(sink, { type: "result", content: "" });
-          } else {
-            this.failTurn(
-              sink,
-              streamError instanceof Error ? streamError.message : "session closed mid-turn",
-            );
-          }
-        }
-        return;
-      }
       this.inputs.close();
       if (sink && !sink.done) {
         this.failTurn(sink, "session closed mid-turn");
@@ -2552,6 +2547,14 @@ class AgentSessionImpl implements AgentSession {
   private finalizeTurn(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
     if (this.currentSink === sink) {
       this.finalizeTurnSpans(sink, terminal);
+    }
+    // A turn that stopped before the provider named the thread leaves nothing
+    // behind, so the next turn starts a thread that has seen no context.
+    if (
+      (sink.lifecycleInterrupted || terminal.type === "error") &&
+      this.modelSession.modelThreadId === undefined
+    ) {
+      this.threadContextInjected = false;
     }
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
@@ -2946,68 +2949,69 @@ class AgentSessionImpl implements AgentSession {
         agent: this.key.agentName,
       };
       try {
-        // An interrupt may close the provider query while leaving the Rome
-        // session reusable. Ordinary turns reopen that provider at their mutex
-        // boundary; forks need the same gate before touching the source. Keep
-        // the lock only through descriptor creation so the independent fork
-        // does not block later source turns.
-        const { fork, forkOpen, outbound } = await this.turnMutex.runExclusive(async () => {
-          if (this.status === "closed") {
-            throw new Error(`AgentSession ${this.sessionId} is closed`);
-          }
-          await this.ensureModelSessionForTurn();
-          const sourceModelSession = this.modelSession;
-          sourceFunding = sourceModelSession.funding;
-          sourceModelThreadId = sourceModelSession.modelThreadId;
-          if (input.sourceCheckpoint) {
-            if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
+        // The resolver may have moved the source to another model; forks take
+        // the same gate as ordinary turns before reading it. Keep the lock only
+        // through descriptor creation so the independent fork does not block
+        // later source turns.
+        const { modelProvider, forkOpen, outbound } = await this.turnMutex.runExclusive(
+          async () => {
+            if (this.status === "closed") {
+              throw new Error(`AgentSession ${this.sessionId} is closed`);
+            }
+            await this.ensureModelSessionForTurn();
+            const sourceModelSession = this.modelSession;
+            sourceFunding = sourceModelSession.funding;
+            sourceModelThreadId = sourceModelSession.modelThreadId;
+            if (!this.modelProvider) throw new Error("a code-backed agent session cannot fork");
+            const { sourceCheckpoint } = input;
+            if (sourceCheckpoint && sourceCheckpoint.providerId !== sourceModelSession.providerId) {
               throw new Error(
-                `Fork checkpoint provider ${input.sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
+                `Fork checkpoint provider ${sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
               );
             }
+            const at: ModelPosition | undefined = sourceCheckpoint
+              ? {
+                  provider: sourceModelSession.providerId,
+                  modelThreadId: sourceCheckpoint.providerThreadId,
+                  checkpointId: sourceCheckpoint.checkpointId,
+                }
+              : this.lastPosition;
+            if (!at) throw new Error("Cannot fork before a turn has left a checkpoint");
             const liveModelThreadId = sourceModelSession.modelThreadId;
-            if (
-              liveModelThreadId &&
-              input.sourceCheckpoint.providerThreadId !== liveModelThreadId
-            ) {
+            if (liveModelThreadId && at.modelThreadId !== liveModelThreadId) {
               throw new Error("Fork checkpoint belongs to a different model thread");
             }
-          }
-          const forkModel = input.tier
-            ? await this.deps.modelResolver.getModelProvider({
-                tier: input.tier,
-                providerId: sourceModelSession.providerId,
-              })
-            : undefined;
-          const fork = await sourceModelSession.fork({
-            // Two different "mode"s meet here — do not confuse them.
-            // `mode` is ModelSessionForkMode (ephemeral | thread): whether the
-            // provider branch is disposable or a thread that may be persisted.
-            // `configurationMode` is ForkRunMode (isolated | exact): the tool
-            // surface the fork opens with.
-            mode: input.persistThreadKey ? "thread" : "ephemeral",
-            configurationMode: mode,
-            sourceCheckpoint: input.sourceCheckpoint?.checkpointId,
-          });
-          // One serialized outbound stream for the whole forked turn: the
-          // provider-event pump below and out-of-band emitters (exact-mode
-          // subagent relays) push concurrently; the drain
-          // loop yields in arrival order. A provider stream failure becomes the
-          // turn's terminal error block, preserving the bracketing invariant.
-          const outbound = new ForkStreamQueue();
-          const forkOpen = this.buildForkOpenParams({
-            mode,
-            forkSessionId,
-            forkTurnId: turnId,
-            model: forkModel?.model ?? sourceModelSession.model,
-            threadContext: input.threadContext,
-            emit: (msg) => outbound.push(msg),
-            continuable: !!input.persistThreadKey,
-          });
-          return { fork, forkOpen, outbound };
-        });
+            const forkModel = input.tier
+              ? await this.deps.modelResolver.getModelProvider({
+                  tier: input.tier,
+                  providerId: sourceModelSession.providerId,
+                })
+              : undefined;
+            // One serialized outbound stream for the whole forked turn: the
+            // provider-event pump below and out-of-band emitters (exact-mode
+            // subagent relays) push concurrently; the drain
+            // loop yields in arrival order. A provider stream failure becomes the
+            // turn's terminal error block, preserving the bracketing invariant.
+            const outbound = new ForkStreamQueue();
+            const forkOpen = this.buildForkOpenParams({
+              mode,
+              forkSessionId,
+              forkTurnId: turnId,
+              model: forkModel?.model ?? sourceModelSession.model,
+              thread: {
+                kind: "branch",
+                at,
+                lifetime: input.persistThreadKey ? "kept" : "ephemeral",
+              },
+              threadContext: input.threadContext,
+              emit: (msg) => outbound.push(msg),
+              continuable: !!input.persistThreadKey,
+            });
+            return { modelProvider: this.modelProvider, forkOpen, outbound };
+          },
+        );
         disposeForkResources = forkOpen.dispose;
-        forkSession = await fork.open(forkOpen.params);
+        forkSession = await modelProvider.openSession(forkOpen.params);
         forkFunding = forkSession.funding;
         await forkSession.sendUserInput({
           text: input.prompt,
@@ -3375,6 +3379,8 @@ class AgentSessionImpl implements AgentSession {
       this.failTurn(sink, "AgentSession closed");
       return;
     }
+    // Only this turn's own position is a place to branch at, and it may leave none.
+    this.lastPosition = undefined;
     // Turns are FIFO-serialized by turnMutex. Resolve exactly once at this
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
@@ -3634,6 +3640,8 @@ class AgentSessionImpl implements AgentSession {
               reasoningEffort: mwInput.reasoningEffort,
               injectedToolResult: input.injectedToolResult,
             });
+            // Taking the input may have replaced a Claude query, and its payer.
+            sink.funding = this.modelSession.funding;
             this.inputs.ready(turnId);
             if (this.deps.turnLinks && unseenLineIds.length > 0) {
               try {

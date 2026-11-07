@@ -13,6 +13,7 @@ import {
 } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -30,7 +31,7 @@ import {
   type AgentSessionManager,
 } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import type { ModelSelectionId } from "./model-selector.js";
+import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
@@ -54,36 +55,49 @@ function createProvider(id: ProviderId) {
   const opened: ModelSessionParams[] = [];
   /** How many of the next turns fail before reaching the thread. */
   const failing = { next: 0 };
+  /** Claude names a new thread only after its first assistant message. */
+  const naming = { atOpen: true };
+  /** A completed turn can leave no position to branch at. */
+  const positions = { reported: true };
   const openSession = rs.fn(async (params: ModelSessionParams) => {
     opened.push(params);
     const session = createSessionFromRun(
       id,
-      async function* (input): AsyncIterable<AgentEvent> {
+      async function* (input): AsyncIterable<AgentEvent | ModelSessionEvent> {
         calls.push(input);
         if (failing.next > 0) {
           failing.next -= 1;
           yield { type: "error", error: "quota exhausted" };
           return;
         }
-        yield { type: "result", content: "done" };
+        yield {
+          type: "result",
+          content: "done",
+          ...(positions.reported
+            ? {
+                position: {
+                  provider: id,
+                  modelThreadId: `${id}-thread-1`,
+                  checkpointId: `turn-${calls.length}`,
+                },
+              }
+            : {}),
+        };
       },
       params,
     );
-    return {
-      ...session,
-      modelThreadId:
-        params.thread.kind === "resume"
-          ? params.thread.modelThreadId
-          : `${id}-thread-${opened.length}`,
-    };
+    const modelThreadId =
+      params.thread.kind === "resume"
+        ? params.thread.modelThreadId
+        : `${id}-thread-${opened.length}`;
+    return { ...session, modelThreadId: naming.atOpen ? modelThreadId : undefined };
   });
   const provider: ModelProvider = {
     id,
-    displayName: id,
     builtinTools: new Set<string>(),
     openSession,
   };
-  return { provider, openSession, calls, opened, failing };
+  return { provider, openSession, calls, opened, failing, naming, positions };
 }
 
 function healthyState() {
@@ -252,6 +266,49 @@ describe("continuation notice through AgentSessionManager", () => {
       provider: "openai",
       model: "gpt-6-luna",
     });
+  });
+
+  it("has no position to branch at until a turn runs on the new provider's thread", async () => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    openai.naming.atOpen = false;
+    await acquire(manager, "gpt-6-luna");
+
+    const events: AgentEvent[] = [];
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Cannot fork before a turn has left a checkpoint",
+      }),
+    );
+  });
+
+  it.each([
+    ["failed", () => (anthropic.failing.next = 1)],
+    ["left no position", () => (anthropic.positions.reported = false)],
+  ])("never branches at an earlier turn when the latest one %s", async (_label, arrange) => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    arrange();
+    await chatTurn(session, "second");
+
+    const events: AgentEvent[] = [];
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Cannot fork before a turn has left a checkpoint",
+      }),
+    );
   });
 
   it("keeps the notice due until a turn on the new thread returns a result", async () => {

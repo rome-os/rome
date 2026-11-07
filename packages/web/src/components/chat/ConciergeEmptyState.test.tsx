@@ -56,7 +56,7 @@ describe("ConciergeTopicEmptyState", () => {
   const renderTopic = (onStart = rs.fn()) =>
     render(
       <MemoryRouter>
-        <ConciergeTopicEmptyState onStart={onStart} />
+        <ConciergeTopicEmptyState mainChatId="concierge" onStart={onStart} />
       </MemoryRouter>,
     );
 

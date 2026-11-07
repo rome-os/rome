@@ -23,9 +23,6 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
       yield { type: "result" as const, content, structuredOutput, reasoningEffort: "low" };
     })(),
     sendUserInput: rs.fn(async () => undefined),
-    fork: rs.fn(async () => {
-      throw new Error("not supported");
-    }),
     interrupt: rs.fn(async () => undefined),
     close: rs.fn(async () => undefined),
   };
@@ -34,7 +31,6 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
 function generatorFor(session: ModelSession) {
   const provider: ModelProvider = {
     id: "mock",
-    displayName: "Mock",
     builtinTools: new Set(),
     openSession: rs.fn(async () => session),
   };
@@ -50,7 +46,6 @@ describe("conversation title generation", () => {
     let openParams: ModelSessionParams | undefined;
     const provider: ModelProvider = {
       id: "mock",
-      displayName: "Mock",
       builtinTools: new Set(),
       openSession: rs.fn(async (params) => {
         openParams = params;
@@ -75,7 +70,6 @@ describe("conversation title generation", () => {
         reasoningEffort: "low",
         outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
       },
-      agentName: "conversation-title",
       thread: { kind: "new" },
     });
     // The title session serves the model no actions, skills or subagents.
@@ -135,7 +129,6 @@ describe("conversation title generation", () => {
     const session = resultSession("Bounded title");
     const provider: ModelProvider = {
       id: "mock",
-      displayName: "Mock",
       builtinTools: new Set(),
       openSession: rs.fn(async () => session),
     };
@@ -171,7 +164,6 @@ describe("conversation title generation", () => {
       );
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "Mock",
         builtinTools: new Set(),
         openSession,
       };

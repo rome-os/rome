@@ -55,3 +55,12 @@ export interface RomeTools {
     context?: ModelToolCallContext,
   ): Promise<RomeToolResult>;
 }
+
+/** The empty tool surface: a session that serves the model nothing. */
+export const NO_ROME_TOOLS: RomeTools = {
+  listTools: () => [],
+  callTool: async (_group, name) => ({
+    content: [{ type: "text", text: `Unknown tool: ${name}` }],
+    isError: true,
+  }),
+};
