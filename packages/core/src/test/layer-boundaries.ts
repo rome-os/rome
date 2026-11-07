@@ -144,7 +144,7 @@ function importSites(path: string): ImportSite[] {
     path,
     readFileSync(path, "utf8"),
     ts.ScriptTarget.Latest,
-    true,
+    false,
   );
   const sites: ImportSite[] = [];
   const add = (node: ts.Node, specifier: string | null, mode: ts.ResolutionMode) =>

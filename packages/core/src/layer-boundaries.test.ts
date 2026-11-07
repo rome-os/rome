@@ -8,6 +8,10 @@ const srcDir = dirname(fileURLToPath(import.meta.url));
 /** Contexts laid out as `<context>/<layer>`. A context adopting the layout joins this list. */
 const LAYERED_CONTEXTS = ["agent"];
 
+// Parsing and resolving every file in src/ takes about 2 s on an idle machine
+// and several times that on a loaded CI runner, past the 10 s default.
+const SCAN_TIMEOUT_MS = 60_000;
+
 describe("layered context imports", () => {
   it("follow the layer rules", () => {
     const lines = checkLayerBoundaries(
@@ -16,5 +20,5 @@ describe("layered context imports", () => {
       LAYERED_CONTEXTS,
     ).map(formatLayerViolation);
     expect(lines, `\nImports that break a layer rule:\n${lines.join("\n")}\n`).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 });
