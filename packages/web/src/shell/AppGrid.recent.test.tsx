@@ -94,7 +94,6 @@ describe("Recent apps on the rail", () => {
     "inbox",
     "showcases",
     "skills",
-    "welcome-to-rome",
   ])("renders %s like a page in pins, recents and overflow", async (id) => {
     const app = fixture(id, id, { origin: "builtin" });
     seed([app], { [id]: minutesAgo(1) });
@@ -111,12 +110,7 @@ describe("Recent apps on the rail", () => {
       .getByRole("link", { name: "Memory" })
       .querySelector(".rome-sidebar-icon");
     expect(link.querySelector(".rome-sidebar-icon")?.className).toBe(pageIcon?.className);
-    if (id === "welcome-to-rome") {
-      expect(link.querySelector("mask")).toBeTruthy();
-      expect(link.querySelector("svg")?.getAttribute("class")).toContain("scale-80");
-    } else {
-      expect(link.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
-    }
+    expect(link.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
     expect(link.querySelector("img")).toBeNull();
     pinned.unmount();
 

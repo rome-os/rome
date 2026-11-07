@@ -197,7 +197,15 @@ export type ConciergeWatchCapability = ConciergeCapabilityStatus & {
 export interface ConciergeConnectorDto {
   /** The connection kind (such as `github`, `telegram_user`) or the Composio toolkit (such as `gmail`). */
   service: string;
+  /** The service's name as a person reads it, such as `GitHub`. */
   label: string;
+  /**
+   * The id of the service's mark, from whatever provides the service:
+   * `brand:<connection kind>` for one of Rome's own connections, `glyph:<id>`
+   * for a service its provider draws with a glyph. Null when the provider
+   * names none; a client then shows a neutral tile.
+   */
+  icon: string | null;
   origin: "connection" | "composio";
   /** The connection's id, or null for a Composio service or a kind never connected. */
   connectionId: string | null;

@@ -48,7 +48,7 @@ describe("TurnMiddlewareChain", () => {
       `{
         order: 0,
         async handle(ctx, next) {
-          if (ctx.session.agentName !== "welcome-to-rome") { await next(); return; }
+          if (ctx.session.agentName !== "scripted-app") { await next(); return; }
           ctx.emit({ type: "text", content: "scripted reply" });
           ctx.emit({ type: "result", content: "scripted reply" });
         },
@@ -60,7 +60,7 @@ describe("TurnMiddlewareChain", () => {
     // Matching session → short-circuit, terminal never runs.
     const emitted: AgentEvent[] = [];
     let terminalRan = false;
-    await chain.run(makeCtx("welcome-to-rome", emitted), async () => {
+    await chain.run(makeCtx("scripted-app", emitted), async () => {
       terminalRan = true;
     });
     expect(terminalRan).toBe(false);

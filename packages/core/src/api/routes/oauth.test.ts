@@ -59,7 +59,11 @@ rs.mock("../../lib/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   getEnabledOAuthProviders: () => ["github", "slack"],
   isEnabledOAuthProvider: () => true,
-  OAUTH_PROVIDER_DESCRIPTORS: { github: { label: "GitHub", description: "" } },
+  OAUTH_PROVIDER_DESCRIPTORS: {
+    google: { label: "Google", description: "" },
+    github: { label: "GitHub", description: "" },
+    slack: { label: "Slack", description: "" },
+  },
 }));
 
 import { createTestDb } from "../../test/helpers.js";

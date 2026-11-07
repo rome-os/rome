@@ -36,6 +36,21 @@ describe("Rome Cloud OAuth brokering", () => {
       expect(link.connectUrl).toBe("/api/oauth/github/start");
     });
 
+    it("asks the start route to repair a broken connection when told to reconnect", () => {
+      expect(createRomeCloudOAuthStartUrl("github", { reconnect: true }).connectUrl).toBe(
+        "/api/oauth/github/start?reconnect=1",
+      );
+      expect(createRomeCloudOAuthStartUrl("github", { reconnect: false }).connectUrl).toBe(
+        "/api/oauth/github/start",
+      );
+    });
+
+    it("leaves Shopify's install link alone on a reconnect", () => {
+      expect(createRomeCloudOAuthStartUrl("shopify", { reconnect: true }).connectUrl).toBe(
+        createRomeCloudOAuthStartUrl("shopify").connectUrl,
+      );
+    });
+
     it("sends Shopify to Shopify's install link, which asks for the store", () => {
       const link = createRomeCloudOAuthStartUrl("shopify");
       expect(link.available).toBe(true);

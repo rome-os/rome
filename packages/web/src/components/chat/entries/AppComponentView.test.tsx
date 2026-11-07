@@ -18,7 +18,7 @@ function renderFailingCard(result?: Record<string, unknown>) {
     <ThemeProvider>
       <AppComponentView
         toolUseId="tool-1"
-        appId="welcome-to-rome"
+        appId="some-app"
         componentId="name-card"
         result={result}
         onSubmit={() => {}}

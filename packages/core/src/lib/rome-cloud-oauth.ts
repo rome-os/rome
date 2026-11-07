@@ -51,7 +51,16 @@ function createPkceChallenge(verifier: string): string {
   return toBase64Url(createHash("sha256").update(verifier).digest());
 }
 
-export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloudOAuthProviderLink {
+/**
+ * The link that starts `provider`'s sign-in. `reconnect` is for a connection
+ * whose access broke: the start route reads `reconnect=1` and repairs the
+ * grant, where a plain start would begin a new one. Shopify's link is
+ * Shopify's own install page, which takes no such flag.
+ */
+export function createRomeCloudOAuthStartUrl(
+  provider: OAuthProvider,
+  opts: { reconnect?: boolean } = {},
+): RomeCloudOAuthProviderLink {
   if (!getRomeCloudOrigin()) {
     return {
       provider,
@@ -69,7 +78,10 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
   // link, where Shopify asks which store.
   return {
     provider,
-    connectUrl: provider === "shopify" ? SHOPIFY_INSTALL_URL : `/api/oauth/${provider}/start`,
+    connectUrl:
+      provider === "shopify"
+        ? SHOPIFY_INSTALL_URL
+        : `/api/oauth/${provider}/start${opts.reconnect ? "?reconnect=1" : ""}`,
     available: true,
     unavailableReason: null,
   };

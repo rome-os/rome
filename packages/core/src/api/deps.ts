@@ -1,5 +1,6 @@
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
 import type { ConciergeService } from "../concierge/service.js";
@@ -86,7 +87,7 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
-  /** The Concierge feature. Absent ⇒ its routes answer as if the setting were off. */
+  /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
@@ -172,6 +173,8 @@ export interface ApiDeps {
   >;
   /** Starts what needs a linked instance: node caller, relay mailbox, favor sync. Never rejects. */
   provisionAfterLink?: () => Promise<void>;
+  /** The guardian's Rome Cloud account, whose signup survey a first sign-in reads. */
+  cloudProfile?: CloudProfileService;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
    *  Never rejects. */
   autoConnectEmail?: () => Promise<void>;

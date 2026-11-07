@@ -70,8 +70,6 @@ export {
 };
 /** The dashboard language the guardian picked: `en` or `zh-CN`. */
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
-/** The guardian setting that turns Concierge on. Any value but `true` is off. */
-const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
@@ -120,6 +118,8 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): string[];
   interruptTurn(turnId: string): Promise<void>;
@@ -229,17 +229,6 @@ export class ConciergeService {
     return this.attached;
   }
 
-  async isEnabled(): Promise<boolean> {
-    try {
-      return (await this.deps.settingsRepo.get(EXPERIMENTAL_CONCIERGE_SETTING_KEY)) === true;
-    } catch (error) {
-      log.warn("concierge setting unreadable, treating it as off", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
-  }
-
   /** An owner's main Concierge chat's id, or null when it does not exist yet. */
   async findChatId(owner: ConciergeOwner = GUARDIAN_OWNER): Promise<string | null> {
     const id = mainChatIdOf(owner);
@@ -289,6 +278,44 @@ export class ConciergeService {
     );
     log.info("concierge chat created", { chatId: id });
     return id;
+  }
+
+  /**
+   * The guardian's first sign-in: makes sure their main chat exists. With a
+   * `message`, it goes into that chat as the guardian's own, the way the
+   * composer sends it, and the Concierge answers it as any other. Answers the
+   * main chat's id. The message is not awaited, and a failure to send it (no
+   * model signed in yet) is logged, so the sign-in that calls this never fails
+   * on it.
+   */
+  async startMainChat(message: string | null): Promise<string> {
+    const chatId = await this.ensureChatId();
+    if (message) {
+      this.dashboard.chats.sendAsGuardian(chatId, message).catch((error: unknown) =>
+        log.warn("first message to the Concierge was not sent", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return chatId;
+  }
+
+  /**
+   * The guardian connected `service` from a connect card in `chatId`: tells the
+   * Concierge there, quietly, so it goes on without the guardian typing. Not
+   * awaited; a failure is logged.
+   */
+  serviceConnected(chatId: string, service: string): void {
+    this.runSystemTurn(chatId, `<service_connected service="${attr(service)}"/>`, {
+      quiet: true,
+      inputLabel: "Service connected",
+    }).catch((error: unknown) =>
+      log.warn("service connected notice failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 
   /** Who each owner is, and whether Rome still serves them. */

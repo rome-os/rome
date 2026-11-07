@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import FreePage, { MainChatRedirect } from "./FreePage";
 
 const concierge = rs.hoisted(() => ({
-  state: { chatId: null as string | null, enabled: false, settingsLoading: false, loading: false },
+  state: { chatId: null as string | null, loading: false },
 }));
 rs.mock("@/hooks/use-concierge", () => ({ useConciergeChat: () => concierge.state }));
 // The grid reads its chat from the `sessionId` prop or, without one, from the route.
@@ -34,7 +34,7 @@ function renderAt(path: string) {
 }
 
 const on = (chatId: string | null, loading = false) => {
-  concierge.state = { chatId, enabled: chatId !== null, settingsLoading: false, loading };
+  concierge.state = { chatId, loading };
 };
 
 afterEach(() => {
@@ -61,12 +61,6 @@ describe("FreePage", () => {
     renderAt("/message");
     expect(screen.queryByTestId("grid")).toBeNull();
     expect(screen.getByTestId("where").textContent).toBe("/message");
-  });
-
-  it("goes to a new chat at /message while Concierge is off", () => {
-    on(null);
-    renderAt("/message");
-    expect(screen.getByTestId("where").textContent).toBe("/chat");
   });
 
   it("leaves a chat route to name its own chat", () => {

@@ -424,8 +424,8 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
 
 /** The host-owned inline cards rome-web renders itself, each paired with the
  * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
- * has no agent tool and is emitted by turn middleware alone (the welcome
- * conversation), so an exact name is the whole allow-list. */
+ * has no agent tool and is emitted by turn middleware alone, so an exact
+ * name is the whole allow-list. */
 const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
   [
     {
@@ -758,6 +758,8 @@ export interface WebchatRuntime {
   startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
+  /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -4499,6 +4501,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
       );
       return opened.sessionId;
+    },
+    async sendAsGuardian(chatId, text) {
+      const inputId = randomUUID();
+      const sent = await handleChatSend(chatId, { inputId, text });
+      if (sent.status < 400) return;
+      // Once the input is recorded it is said, even when the agent could not be woken on it.
+      if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
+        throw new Error(routeError(sent));
+      }
+      log.warn("guardian message recorded but its agent was not woken", {
+        chatId,
+        inputId,
+        error: routeError(sent),
+      });
     },
     isRunning: isSessionRunning,
     activeTurns: (sessionId) =>

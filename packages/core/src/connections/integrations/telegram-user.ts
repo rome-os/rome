@@ -360,6 +360,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   session.setup = makeTelegramUserSetup({ openLogin: deps.openLogin ?? openTelegramUserLogin });
   return {
     connectionKind: "telegram_user",
+    label: "Telegram account",
     reviveProfile: (record) => reviveTelegramUserProfile(record),
     accountIdOf: (record) => (typeof record.userId === "string" && record.userId) || null,
     link: "delegate",

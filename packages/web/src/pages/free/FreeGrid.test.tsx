@@ -320,7 +320,7 @@ describe("FreeGrid mobile header", () => {
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
   });
 
-  it("leaves the header without it while Concierge is off", async () => {
+  it("leaves the header without it until the main chat is loaded", async () => {
     const { container } = renderAt("/chat/concierge");
     await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();

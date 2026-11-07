@@ -179,7 +179,6 @@ export function startConciergeEvents(
 
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
-    isEnabled: () => service.isEnabled(),
     render: (dirty) => renderTaskEvents(service, dirty),
     deliver: async ({ chatId: from, owner, prompt, quiet }) => {
       // A row whose chat is gone or archived reports to the main chat.
@@ -212,7 +211,6 @@ export function startConciergeEvents(
       const chain: { finished?: AgentTurnFinishedEvent } = {};
       recoveriesRunning.set(chatId, chain);
       try {
-        if (!(await service.isEnabled())) return;
         const recover = async (
           input: AgentTurnFailure,
           kind: typeof reason,
@@ -231,8 +229,7 @@ export function startConciergeEvents(
           await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
             30_000,
           );
-          // The wait may have ended Concierge or the subscription that paid for this turn.
-          if (!(await service.isEnabled())) return;
+          // The wait may have ended the subscription that paid for this turn.
           if (!failoverReason(failure, service.deps.accounts.read())) return;
           next = await recover(failure, reason, true);
         } else {
@@ -251,7 +248,6 @@ export function startConciergeEvents(
       }
       return;
     }
-    if (!(await service.isEnabled())) return;
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,
@@ -275,7 +271,6 @@ export function startConciergeEvents(
   };
 
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
-    if (!(await service.isEnabled())) return;
     const taskId = await taskOf(chatId);
     if (!taskId) return;
     await waitForTurnStream(service, chatId, event.turn.turnId);
@@ -325,7 +320,6 @@ export function startConciergeEvents(
     const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
       ?.channelContext;
     if (typeof context?.threadId !== "string") return;
-    if (!(await service.isEnabled())) return;
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
     coalescer.mark({

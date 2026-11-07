@@ -135,19 +135,11 @@ describe("resolveAuthRouting", () => {
       });
     });
 
-    it("redirects the /onboard completion moment to the welcome app", () => {
-      // Must match OnboardPage.enterRome()'s target so the two redirect sources
-      // never disagree and race.
+    it("redirects the /onboard completion moment home", () => {
       expect(resolveAuthRouting({ pathname: "/onboard", phase: "ready" })).toEqual({
         action: "redirect",
-        location: "/full/apps/welcome-to-rome",
+        location: "/",
       });
-    });
-
-    it("does not redirect a guardian sitting on the full welcome screen (fixed point)", () => {
-      expect(
-        resolveAuthRouting({ pathname: "/full/apps/welcome-to-rome", phase: "ready" }),
-      ).toEqual({ action: "next" });
     });
   });
 
