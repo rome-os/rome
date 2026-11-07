@@ -35,6 +35,13 @@ export type {
 } from "./domain/model-login.js";
 export { codexLoginKind } from "./domain/model-login.js";
 export { providerAvailability } from "./domain/provider-availability.js";
+export {
+  resolveModel,
+  type ModelResolutionFacts,
+  type ModelResolutionFailure,
+  type ModelResolutionRequest,
+  type TierModels,
+} from "./domain/model-resolution.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export {

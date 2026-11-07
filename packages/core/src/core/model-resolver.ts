@@ -1,22 +1,15 @@
 import type { ModelProvider, ModelTier, ProviderId } from "./agent-runner.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
-  accountAllowsModel,
-  CODEX_LUNA_MODEL,
-  CODEX_SOL_MODEL,
-  CODEX_TERRA_MODEL,
   MODEL_SELECTIONS,
-  providerAuthorized,
-  providerAvailability,
-  providerUsable,
-  stripLegacyReasoningSuffix,
+  resolveModel,
   type AccountedProviderId,
-  type CodexLogin,
   type CodexLogins,
   type ModelAccounts,
-  type ModelAccountReports,
+  type ModelResolutionFailure,
+  type ModelResolutionRequest as DomainModelResolutionRequest,
   type ModelSelectionId,
-  type ModelAccountReport,
+  type TierModels,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 
@@ -119,34 +112,6 @@ export interface CreateModelResolverOptions {
   codexLogins?: Pick<CodexLogins, "login">;
 }
 
-const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
-  large: "claude-opus-5-5[1m]",
-  medium: "claude-sonnet-5-5",
-  small: "claude-haiku-5-5",
-};
-
-const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
-  large: "claude-opus-5-5[1m]",
-  medium: "claude-sonnet-5-5",
-  small: "claude-haiku-5-5",
-};
-
-/**
- * The Codex model for a tier, within what the account's plan allows, or the
- * models the Rome credits gateway serves on that login. An unread account
- * allows any.
- */
-function codexModel(
-  tier: ModelTier,
-  codex: ModelAccountReport | undefined,
-  served: ReadonlySet<string> | null,
-): string {
-  const allows = (model: string): boolean =>
-    served ? served.has(model) : !codex || accountAllowsModel(codex.account, model);
-  if (tier === "small") return allows(CODEX_LUNA_MODEL) ? CODEX_LUNA_MODEL : CODEX_TERRA_MODEL;
-  return allows(CODEX_SOL_MODEL) ? CODEX_SOL_MODEL : CODEX_TERRA_MODEL;
-}
-
 /**
  * Settings can also be written outside the dashboard, so treat malformed or
  * blank values as absent rather than letting an invalid setting break model
@@ -186,13 +151,58 @@ function providerDisplayName(id: ProviderId): string {
 
 // Agents, apps, and logs see only the message, not the reason field, so the
 // message itself names the cause and when a usage limit ends.
-function unavailableCause(provider: ModelProvider, report: ModelAccountReport): string {
-  const name = providerDisplayName(provider.id);
-  if (!providerAuthorized(report)) return `${name} is not signed in`;
-  const until = report.usageLimitUntil;
-  return until
-    ? `${name} has reached its usage limit until ${until}`
-    : `${name} has reached its usage limit`;
+function resolutionError(failure: ModelResolutionFailure): ModelResolutionError {
+  switch (failure.kind) {
+    case "provider_unavailable": {
+      const name = providerDisplayName(failure.provider);
+      const limited = failure.availability === "usage_limit_reached";
+      const cause = !limited
+        ? `${name} is not signed in`
+        : failure.usageLimitUntil
+          ? `${name} has reached its usage limit until ${failure.usageLimitUntil}`
+          : `${name} has reached its usage limit`;
+      return new ModelResolutionError(`Selected model provider is unavailable: ${cause}`, {
+        code: "model_provider_unavailable",
+        provider: failure.provider,
+        reason: limited ? "quota_exhausted" : "not_logged_in",
+      });
+    }
+    case "model_not_allowed":
+      return new ModelResolutionError(`Selected model is unavailable: ${failure.model}`, {
+        code: "model_unavailable",
+        provider: failure.provider,
+        reason: "model_access_denied",
+      });
+    case "none_usable":
+      return new ModelResolutionError(
+        failure.allAtUsageLimit
+          ? "All connected model providers have reached their usage limits"
+          : "No model provider is available",
+        {
+          code: "no_model_provider_available",
+          reason: failure.allAtUsageLimit ? "quota_exhausted" : "no_available_provider",
+        },
+      );
+  }
+}
+
+/** The provider whose account a failure asks to read again. Undefined reads them all. */
+function refreshScope(failure: ModelResolutionFailure): AccountedProviderId | undefined {
+  if (failure.kind === "provider_unavailable") return failure.provider;
+  if (failure.kind === "model_not_allowed") return "openai";
+  return undefined;
+}
+
+/** The guardian's tier models, with malformed and blank values dropped. */
+function readTierModels(value: unknown): TierModels {
+  const tierModels: TierModels = {};
+  for (const providerId of ["anthropic", "openai"] as const) {
+    for (const tier of ["large", "medium", "small"] as const) {
+      const model = configuredTierModel(value, providerId, tier);
+      if (model) tierModels[providerId] = { ...tierModels[providerId], [tier]: model };
+    }
+  }
+  return tierModels;
 }
 
 export function createModelResolver(options: CreateModelResolverOptions): ModelResolver {
@@ -207,188 +217,47 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
-  /**
-   * Throws when the provider is unauthorized, expired or at its usage limit on
-   * `login`. Without a login it asks about the guardian's own account.
-   */
-  const requireUsableProvider = (
-    provider: ModelProvider,
-    state: ModelAccountReports,
-    login?: CodexLogin,
-  ): void => {
-    const report = state[provider.id];
-    const codexLogin = provider.id === "openai" ? login : undefined;
-    if (!report || providerAvailability(report, codexLogin) === "available") return;
-    const providerId = provider.id as AccountedProviderId;
-    refreshAfterFailure(providerId);
-    throw new ModelResolutionError(
-      `Selected model provider is unavailable: ${unavailableCause(provider, report)}`,
-      {
-        code: "model_provider_unavailable",
-        provider: providerId,
-        reason: providerAuthorized(report) ? "quota_exhausted" : "not_logged_in",
-      },
-    );
+  const known = (providerId: ProviderId): ModelProvider => {
+    const provider = providers.get(providerId);
+    if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
+    return provider;
   };
 
-  /**
-   * Throws when the account's plan does not allow the model. With a known
-   * `served` list, the Rome credits gateway decides instead: it accepts only
-   * the exact model names it serves.
-   */
-  const requireModelAccess = (
-    providerId: ProviderId,
-    model: string,
-    codex: ModelAccountReport | undefined,
-    served: ReadonlySet<string> | null,
-  ): void => {
-    if (providerId !== "openai") return;
-    const denied = served
-      ? !served.has(stripLegacyReasoningSuffix(model))
-      : codex !== undefined && !accountAllowsModel(codex.account, model);
-    if (!denied) return;
-    refreshAfterFailure("openai");
-    throw new ModelResolutionError(`Selected model is unavailable: ${model}`, {
-      code: "model_unavailable",
-      provider: "openai",
-      reason: "model_access_denied",
+  const resolve = (ask: DomainModelResolutionRequest, tierModels?: TierModels): ModelResolution => {
+    const outcome = resolveModel(ask, {
+      providers: [...providers.keys()],
+      reports: options.accounts.read(),
+      logins: { openai: options.codexLogins?.login() },
+      tierModels,
     });
-  };
-
-  const usingRomeCredits = (): boolean => options.codexLogins?.login().kind === "rome_credits";
-  /**
-   * The models the Rome credits gateway reports serving on that login. Null on
-   * the guardian's own login, or when the gateway has not reported a list, in
-   * which case credits are assumed to serve Sol and Luna.
-   */
-  const creditsServedModels = (): ReadonlySet<string> | null => {
-    const login = options.codexLogins?.login();
-    if (login?.kind !== "rome_credits" || !login.modelsServed) return null;
-    return new Set(login.modelsServed);
-  };
-  /**
-   * Availability as seen by resolution. On Rome credits, Codex is available
-   * and allows the models the gateway serves, or any when the gateway has not
-   * said.
-   */
-  const resolutionState = (state = options.accounts.read()): ModelAccountReports => {
-    if (!usingRomeCredits()) return state;
-    return {
-      ...state,
-      openai: { state: "available", account: { loggedIn: true, usageLimited: false } },
-    };
+    if (!outcome.ok) {
+      refreshAfterFailure(refreshScope(outcome.failure));
+      throw resolutionError(outcome.failure);
+    }
+    return { modelProvider: known(outcome.providerId), model: outcome.model };
   };
 
   return {
     async getModelProvider(request) {
       if (request.exact) {
-        const state = resolutionState();
         const { providerId, model } = request.exact;
-        const provider = providers.get(providerId);
-        if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
-        requireUsableProvider(provider, options.accounts.read(), options.codexLogins?.login());
-        requireModelAccess(provider.id, model, state.openai, creditsServedModels());
-        return { modelProvider: provider, model };
+        known(providerId);
+        return resolve({ kind: "exact", providerId, model });
       }
       if (request.selectionId) {
-        const selection = MODEL_SELECTIONS[request.selectionId];
-        const state = resolutionState();
-        const provider = providers.get(selection.providerId);
-        if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
-        requireUsableProvider(provider, options.accounts.read(), options.codexLogins?.login());
-        requireModelAccess(provider.id, selection.model, state.openai, creditsServedModels());
-        return { modelProvider: provider, model: selection.model };
+        const { providerId, model } = MODEL_SELECTIONS[request.selectionId];
+        known(providerId);
+        return resolve({ kind: "exact", providerId, model });
       }
-
-      const tierModelMappings = await options.settingsRepo?.get<unknown>(
-        TIER_MODEL_MAPPINGS_SETTING_KEY,
+      // Tier models are read first, so the reports and the login this ask
+      // reads are the ones current after the read.
+      const tierModels = readTierModels(
+        await options.settingsRepo?.get<unknown>(TIER_MODEL_MAPPINGS_SETTING_KEY),
       );
-      // Settings reads can yield while account state changes. Read the login
-      // and provider state after the await so this resolution sees the current
-      // login.
-      const accountState = options.accounts.read();
-      const onRomeCredits = usingRomeCredits();
-      const state = resolutionState(accountState);
-      const creditsServed = creditsServedModels();
-
-      const resolveTierModel = (
-        provider: ModelProvider,
-        providerState = state,
-        served = creditsServed,
-      ): string => {
-        const configured = configuredTierModel(tierModelMappings, provider.id, request.tier);
-        const model =
-          configured ??
-          (provider.id === "openai"
-            ? codexModel(request.tier, providerState.openai, served)
-            : provider.id === "anthropic"
-              ? CLAUDE_TIER_TO_MODEL[request.tier]
-              : TEST_TIER_TO_MODEL[request.tier]);
-        // A configured model is intentional, but what the login does not allow
-        // still fails with the same recoverable error as an exact
-        // model selection instead of reaching the provider with a bad request.
-        requireModelAccess(provider.id, model, providerState.openai, served);
-        return model;
-      };
-
-      if (request.providerId) {
-        const provider = providers.get(request.providerId);
-        if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
-        // A provider pin by tier asks for that provider's own login. The one
-        // Codex pin, image_gen, needs ChatGPT's hosted image tool, which the
-        // Rome credits gateway rejects.
-        requireUsableProvider(provider, accountState);
-        return {
-          modelProvider: provider,
-          model: resolveTierModel(provider, accountState, null),
-        };
-      }
-
-      const claude = providers.get("anthropic");
-      const codex = providers.get("openai");
-      if (codex && providerUsable(accountState.openai)) {
-        return { modelProvider: codex, model: resolveTierModel(codex) };
-      }
-      if (claude && providerUsable(state.anthropic)) {
-        return { modelProvider: claude, model: resolveTierModel(claude) };
-      }
-      // Rome credits run only when no subscription can serve the tier, and only
-      // for a tier whose default model the gateway serves. A configured model
-      // the gateway does not serve still fails with model_unavailable.
-      const creditsServeTier =
-        !creditsServed ||
-        configuredTierModel(tierModelMappings, "openai", request.tier) !== null ||
-        creditsServed.has(codexModel(request.tier, state.openai, creditsServed));
-      if (codex && onRomeCredits && creditsServeTier) {
-        return { modelProvider: codex, model: resolveTierModel(codex) };
-      }
-
-      // Test providers have no login/quota concept. Production only registers
-      // Codex and Claude, but accepting a lone mock keeps the provider contract
-      // easy to exercise without adding test-only branches to AgentSession.
-      const mock = providers.get("mock");
-      if (mock) return { modelProvider: mock, model: resolveTierModel(mock) };
-
-      const connectedProviders: ModelAccountReport[] = [];
-      if (codex && providerAuthorized(state.openai) && state.openai) {
-        connectedProviders.push(state.openai);
-      }
-      if (claude && providerAuthorized(state.anthropic) && state.anthropic) {
-        connectedProviders.push(state.anthropic);
-      }
-      const allConnectedProvidersQuotaExhausted =
-        connectedProviders.length > 0 &&
-        connectedProviders.every((provider) => provider.state === "usage_limit_reached");
-
-      refreshAfterFailure();
-      throw new ModelResolutionError(
-        allConnectedProvidersQuotaExhausted
-          ? "All connected model providers have reached their usage limits"
-          : "No model provider is available",
-        {
-          code: "no_model_provider_available",
-          reason: allConnectedProvidersQuotaExhausted ? "quota_exhausted" : "no_available_provider",
-        },
+      if (request.providerId) known(request.providerId);
+      return resolve(
+        { kind: "tier", tier: request.tier, providerId: request.providerId },
+        tierModels,
       );
     },
   };
