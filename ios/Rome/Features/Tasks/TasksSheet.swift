@@ -79,23 +79,18 @@ struct TasksSheet: View {
 
     private func groupView(_ group: TaskGroup) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Circle().fill(group.key.tone == .neutral ? Palette.sub.opacity(0.6) : group.key.tone.dot).frame(width: 7, height: 7)
-                Text(group.key.title)
-                Text(verbatim: "\(group.tasks.count + group.hidden)").fontWeight(.medium).opacity(0.8)
-            }
-            .romeFont(13, .semibold)
-            .foregroundStyle(Palette.sub)
-            .padding(.horizontal, 6)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
+            Text(group.key.title)
+                .romeFont(13, .semibold)
+                .foregroundStyle(Palette.sub)
+                .padding(.horizontal, 6)
+                .accessibilityAddTraits(.isHeader)
 
             if !group.tasks.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(group.tasks.enumerated()), id: \.element.id) { index, task in
                         TaskRow(
                             task: task,
-                            tone: tone(for: task),
+                            status: store.rowStatus(task),
                             last: index == group.tasks.count - 1
                         ) { onOpen(task) }
                         .transition(.opacity)
@@ -117,23 +112,13 @@ struct TasksSheet: View {
         }
     }
 
-    private func tone(for task: ConciergeTask) -> TaskTone {
-        switch task.state {
-        case .needsUser: return .needsYou
-        case .doing:
-            if let chatId = task.chat?.id, store.chats[chatId]?.lastTurnFailed == true, store.chats[chatId]?.running != true {
-                return .failed
-            }
-            return .running
-        case .done: return .done
-        case .next, .watching, .dropped: return .neutral
-        }
-    }
 }
 
+/// One task: its title and one muted line. A task waiting on the guardian has
+/// a small dot before its title.
 struct TaskRow: View {
     let task: ConciergeTask
-    let tone: TaskTone
+    let status: TaskRowStatus
     let last: Bool
     let action: () -> Void
 
@@ -141,101 +126,49 @@ struct TaskRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                glyph
-                    .frame(width: 22)
-                    .padding(.top, 14)
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        if status == .waiting {
+                            Circle()
+                                .fill(Palette.sub)
+                                .frame(width: 6, height: 6)
+                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                                .accessibilityHidden(true)
+                        }
                         Text(task.title)
                             .romeFont(16, .medium)
                             .tracking(-0.3)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        if !meta.isEmpty {
-                            Text(meta)
-                                .romeFont(13)
-                                .foregroundStyle(metaColor)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                        }
                     }
-                    Spacer(minLength: 0)
-                    if tappable {
-                        Image(systemName: "chevron.right")
-                            .romeFont(11, .bold)
+                    let line = TasksStore.rowLine(task, status: status, now: .now)
+                    if !line.isEmpty {
+                        Text(line)
+                            .romeFont(13)
                             .foregroundStyle(Palette.sub)
+                            .lineLimit(1)
                     }
                 }
-                .padding(.vertical, 12)
-                .overlay(alignment: .bottom) {
-                    if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+                Spacer(minLength: 0)
+                if tappable {
+                    Image(systemName: "chevron.right")
+                        .romeFont(11, .bold)
+                        .foregroundStyle(Palette.sub)
                 }
             }
-            .padding(.leading, 14)
+            .padding(.vertical, 12)
+            .padding(.leading, 16)
             .padding(.trailing, 12)
+            .overlay(alignment: .bottom) {
+                if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 16) }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         .disabled(!tappable)
         .accessibilityElement(children: .combine)
         .accessibilityHint(task.chat != nil ? String(localized: "Opens the task chat.") : (task.sourceMessageId != nil ? String(localized: "Shows the message in Chat.") : ""))
-    }
-
-    @ViewBuilder
-    private var glyph: some View {
-        switch task.state {
-        case .next:
-            Circle()
-                .strokeBorder(Palette.sub, style: StrokeStyle(lineWidth: 1.6, dash: [2.6, 2.4]))
-                .frame(width: 18, height: 18)
-                .accessibilityLabel("Up next")
-        case .watching:
-            Image(systemName: "eye")
-                .romeFont(10, .bold)
-                .foregroundStyle(Palette.sub)
-                .frame(width: 18, height: 18)
-                .overlay(Circle().strokeBorder(Palette.sub, lineWidth: 1.6))
-                .accessibilityLabel("Watching")
-        case .dropped:
-            Image(systemName: "minus")
-                .romeFont(9, .heavy)
-                .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
-                .background(Palette.sub, in: Circle())
-                .accessibilityLabel("Dropped")
-        default:
-            StatusGlyph(tone: tone)
-        }
-    }
-
-    private var meta: String {
-        let now = Date.now
-        var parts: [String] = []
-        switch task.state {
-        case .needsUser:
-            parts.append(task.waitingOn ?? task.summary ?? String(localized: "Needs you"))
-            if let date = RomeDate.fromMillis(task.updatedAt) { parts.append(RelativeTime.ago(date, now: now)) }
-        case .doing:
-            parts.append(tone == .failed ? String(localized: "Failed") : (task.summary ?? String(localized: "Working")))
-        case .next, .watching:
-            if let summary = task.summary { parts.append(summary) }
-            if let due = RomeDate.fromMillis(task.dueAt) { parts.append(RelativeTime.until(due, now: now)) }
-        case .done, .dropped:
-            parts.append(task.summary ?? (task.state == .done ? String(localized: "Done") : String(localized: "Dropped")))
-            if let date = RomeDate.fromMillis(task.completedAt ?? task.updatedAt) { parts.append(RelativeTime.ago(date, now: now)) }
-        }
-        if task.notSynced == true { parts.append(String(localized: "Not synced")) }
-        return parts.joined(separator: " · ")
-    }
-
-    private var metaColor: Color {
-        switch tone {
-        case .needsYou: return Palette.warningText
-        case .running: return Palette.runningText
-        case .failed: return Palette.destructive
-        default: return Palette.sub
-        }
     }
 }

@@ -208,7 +208,7 @@ struct TaskChatScreen: View {
         case .error(_, let text):
             ErrorLine(text: text)
         case .taskCard(_, let id, let title):
-            TaskCard(title: title, tone: workspace.tasks.tone(forChat: id)) {}
+            TaskCard(title: title) {}
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
         }

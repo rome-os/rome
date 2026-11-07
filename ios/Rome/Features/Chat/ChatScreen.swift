@@ -22,7 +22,7 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(title: Text("Chat"), needsYou: workspace.tasks.needsYouCount(inChat: conciergeChatID), onMenu: {
+                ChatHeader(title: Text("Chat"), onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
@@ -160,7 +160,7 @@ struct ConciergeRow: View {
             AgentBubble(text: text, long: long, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
         case .taskCard(_, let chatId, let title):
             let name = tasks.title(forChat: chatId, fallback: title)
-            TaskCard(title: name, tone: tasks.tone(forChat: chatId)) {
+            TaskCard(title: name) {
                 onOpenChat(chatId, name)
             }
         case .typing:
@@ -173,10 +173,9 @@ struct ConciergeRow: View {
     }
 }
 
-/// The floating header: menu, title, tasks with its needs-you badge.
+/// The floating header: menu, title, tasks.
 struct ChatHeader: View {
     let title: Text
-    let needsYou: Int
     let onMenu: () -> Void
     let onTasks: () -> Void
 
@@ -195,24 +194,10 @@ struct ChatHeader: View {
                 .glassSurface(Capsule())
                 .accessibilityAddTraits(.isHeader)
             Spacer()
-            GlassCircleButton(accessibilityLabel: needsYou > 0 ? "Tasks, \(needsYou) need you" : "Tasks", action: onTasks) {
+            // No count: task progress is not reported accurately enough to badge.
+            GlassCircleButton(accessibilityLabel: "Tasks", action: onTasks) {
                 ChecklistGlyph()
             }
-            .overlay(alignment: .topTrailing) {
-                if needsYou > 0 {
-                    Text(verbatim: "\(needsYou)")
-                        .romeFont(12, .bold, monospacedDigits: true)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .frame(minWidth: 19, minHeight: 19)
-                        .background(Palette.destructive, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Palette.bg, lineWidth: 2).padding(-2))
-                        .offset(x: 3, y: -3)
-                        .transition(.scale.combined(with: .opacity))
-                        .allowsHitTesting(false)
-                }
-            }
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: needsYou)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)

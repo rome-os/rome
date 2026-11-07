@@ -31,7 +31,6 @@ struct TopicChatScreen: View {
         .floatingTopBar {
             ChatHeader(
                 title: Text(verbatim: title),
-                needsYou: chatId.map { workspace.tasks.needsYouCount(inChat: $0) } ?? 0,
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false

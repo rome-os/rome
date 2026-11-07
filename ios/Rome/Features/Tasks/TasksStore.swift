@@ -1,40 +1,35 @@
 import Foundation
 import Observation
 
-/// The groups of the Tasks sheet, in the order it shows them.
+/// The groups of the Tasks sheet, in the order it shows them. Progress is
+/// not reported accurately enough to show finer states, so there are two.
 enum TaskGroupKey: String, CaseIterable, Identifiable, Sendable {
-    case needsYou, doing, next, watching, done
+    case inProgress, done
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .needsYou: return String(localized: "Needs you")
-        case .doing: return String(localized: "Doing")
-        case .next: return String(localized: "Up next")
-        case .watching: return String(localized: "Watching")
+        case .inProgress: return String(localized: "In progress")
         case .done: return String(localized: "Done")
-        }
-    }
-
-    var tone: TaskTone {
-        switch self {
-        case .needsYou: return .needsYou
-        case .doing: return .running
-        case .next, .watching: return .neutral
-        case .done: return .done
         }
     }
 
     static func of(_ state: TaskState) -> TaskGroupKey {
         switch state {
-        case .needsUser: return .needsYou
-        case .doing: return .doing
-        case .next: return .next
-        case .watching: return .watching
+        case .needsUser, .doing, .next, .watching: return .inProgress
         case .done, .dropped: return .done
         }
     }
+}
+
+/// What a task row says about itself, beyond its title.
+enum TaskRowStatus: Equatable, Sendable {
+    /// Waiting on an approval or an answer from the guardian.
+    case waiting
+    /// Its chat's last turn failed and nothing runs now.
+    case failed
+    case plain
 }
 
 struct TaskGroup: Identifiable, Sendable {
@@ -61,11 +56,6 @@ final class TasksStore {
 
     init(backend: RomeBackend) {
         self.backend = backend
-    }
-
-    /// The rows waiting on the guardian that Concierge chat `chatId` started.
-    func needsYouCount(inChat chatId: String) -> Int {
-        tasks.filter { $0.state == .needsUser && $0.archivedAt == nil && Self.belongs($0, toChat: chatId) }.count
     }
 
     /// Whether a row came from Concierge chat `chatId`. A row from an older
@@ -178,23 +168,43 @@ final class TasksStore {
     }
 
     nonisolated private static func sorter(_ key: TaskGroupKey) -> (ConciergeTask, ConciergeTask) -> Bool {
-        func ascending(_ a: Double?, _ b: Double?) -> Bool? {
-            switch (a, b) {
-            case let (a?, b?) where a != b: return a < b
-            case (nil, _?): return false
-            case (_?, nil): return true
-            default: return nil
-            }
-        }
         switch key {
-        case .needsYou, .doing:
-            return { $0.updatedAt > $1.updatedAt }
-        case .next:
-            return { ascending($0.rank, $1.rank) ?? ($0.createdAt < $1.createdAt) }
-        case .watching:
-            return { ascending($0.dueAt, $1.dueAt) ?? ($0.updatedAt > $1.updatedAt) }
+        case .inProgress:
+            // What waits on the guardian comes first, then the latest update.
+            return { a, b in
+                let waitingA = a.state == .needsUser, waitingB = b.state == .needsUser
+                if waitingA != waitingB { return waitingA }
+                return a.updatedAt > b.updatedAt
+            }
         case .done:
             return { ($0.completedAt ?? $0.updatedAt) > ($1.completedAt ?? $1.updatedAt) }
+        }
+    }
+
+    // MARK: Rows
+
+    func rowStatus(_ task: ConciergeTask) -> TaskRowStatus {
+        Self.rowStatus(task, chat: task.chat.flatMap { chats[$0.id] })
+    }
+
+    nonisolated static func rowStatus(_ task: ConciergeTask, chat: ChatSession?) -> TaskRowStatus {
+        switch task.state {
+        case .needsUser: return .waiting
+        case .doing, .next, .watching:
+            return chat?.lastTurnFailed == true && chat?.running != true ? .failed : .plain
+        case .done, .dropped: return .plain
+        }
+    }
+
+    /// The one muted line under a row's title: "Waiting on you", "Didn't
+    /// finish", or when it last changed.
+    nonisolated static func rowLine(_ task: ConciergeTask, status: TaskRowStatus, now: Date) -> String {
+        switch status {
+        case .waiting: return String(localized: "Waiting on you")
+        case .failed: return String(localized: "Didn't finish")
+        case .plain:
+            let changed = TaskGroupKey.of(task.state) == .done ? (task.completedAt ?? task.updatedAt) : task.updatedAt
+            return RomeDate.fromMillis(changed).map { RelativeTime.ago($0, now: now) } ?? ""
         }
     }
 

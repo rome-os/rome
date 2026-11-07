@@ -134,21 +134,18 @@ struct CopyButton: View {
 }
 
 /// A card for a task chat the Concierge started: "Task" + status, then its title.
+/// A task the Concierge started, as a card in the chat: the label and the
+/// title. Its status is left out, since progress is not reported accurately.
 struct TaskCard: View {
     let title: String
-    let tone: TaskTone
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text("Task")
-                        .romeFont(12, .semibold)
-                        .foregroundStyle(Palette.sub)
-                    Spacer(minLength: 0)
-                    if tone != .neutral { StatusPill(tone: tone) }
-                }
+                Text("Task")
+                    .romeFont(12, .semibold)
+                    .foregroundStyle(Palette.sub)
                 HStack(spacing: 8) {
                     Text(title)
                         .romeFont(16, .semibold)
@@ -171,8 +168,7 @@ struct TaskCard: View {
         .buttonStyle(PressScaleStyle(scale: 0.98))
         .containerRelativeFrame(.horizontal) { width, _ in (width - 32) * 0.82 }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeInOut(duration: 0.25), value: tone)
-        .accessibilityLabel("Task, \(title), \(tone.label)")
+        .accessibilityLabel("Task, \(title)")
     }
 }
 

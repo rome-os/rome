@@ -387,12 +387,12 @@
         }
       }
     },
-    "Doing" : {
+    "Didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "进行中"
+            "value" : "未完成"
           }
         }
       }
@@ -403,16 +403,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已完成"
-          }
-        }
-      }
-    },
-    "Dropped" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已放下"
           }
         }
       }
@@ -612,6 +602,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分钟后"
+          }
+        }
+      }
+    },
+    "In progress" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进行中"
           }
         }
       }
@@ -943,16 +943,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未登录"
-          }
-        }
-      }
-    },
-    "Not synced" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未同步"
           }
         }
       }
@@ -1701,12 +1691,12 @@
         }
       }
     },
-    "Task, %@, %@" : {
+    "Task, %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "任务，%@，%@"
+            "value" : "任务，%@"
           }
         }
       }
@@ -1717,34 +1707,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "任务"
-          }
-        }
-      }
-    },
-    "Tasks, %lld need you" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Tasks, %lld needs you"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Tasks, %lld need you"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "任务，%lld 个等你处理"
           }
         }
       }
@@ -1951,16 +1913,6 @@
         }
       }
     },
-    "Up next" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "接下来"
-          }
-        }
-      }
-    },
     "Update now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2049,22 +2001,22 @@
         }
       }
     },
+    "Waiting on you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你回复"
+          }
+        }
+      }
+    },
     "Watch my Gmail inbox for me" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "帮我订阅 Gmail 邮件"
-          }
-        }
-      }
-    },
-    "Watching" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "盯着"
           }
         }
       }
