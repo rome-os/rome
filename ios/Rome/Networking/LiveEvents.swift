@@ -10,8 +10,8 @@ enum LiveEvent: Sendable {
     case sessionName(sessionId: String, name: String)
     /// The Concierge wrote a task row (`concierge.tasks`).
     case taskUpsert(ConciergeTask)
-    /// The socket came back after a drop. Listeners refetch what they show,
-    /// since events sent while it was down are gone.
+    /// Events may have been missed: the app came back to the foreground, or
+    /// the socket came back after a drop. Listeners refetch what they show.
     case reconnected
 }
 
@@ -31,8 +31,32 @@ enum LiveTopic {
     static func chat(_ sessionId: String) -> String { "chat.session:\(sessionId)" }
 }
 
+/// When the socket's listeners must refetch after a connection that followed
+/// a drop or a pause: once per topic held before, when the server confirms it
+/// again. Events sent before that confirmation are gone.
+struct LiveResync {
+    private var missed = false
+    /// Topics this connection still owes a refetch for.
+    private var owed: Set<String> = []
+
+    /// The connection closed with events possibly unsent: a drop or a pause.
+    mutating func dropped() { missed = true }
+
+    /// A new connection starts with `topics`.
+    mutating func connecting(topics: Set<String>) {
+        owed = missed ? topics : []
+        missed = false
+    }
+
+    /// The server confirmed `topic` on this connection. True when its
+    /// listeners missed events and should refetch now.
+    mutating func confirmed(_ topic: String) -> Bool {
+        owed.remove(topic) != nil
+    }
+}
+
 /// One WebSocket carries every topic. It reconnects with backoff, subscribes
-/// again to what it held, and tells listeners it came back.
+/// again to what it held, and tells listeners when they may have missed events.
 @MainActor
 final class LiveEventsSocket: LiveEventSource {
     private struct Subscription {
@@ -46,7 +70,7 @@ final class LiveEventsSocket: LiveEventSource {
     private var subscriptions: [UUID: Subscription] = [:]
     private var attempt = 0
     private var paused = false
-    private var connectedOnce = false
+    private var resync = LiveResync()
     private var reconnectWork: Task<Void, Never>?
     private var pingWork: Task<Void, Never>?
     private var generation = 0
@@ -75,16 +99,22 @@ final class LiveEventsSocket: LiveEventSource {
     }
 
     func pause() {
+        guard !paused else { return }
         paused = true
+        resync.dropped()
         disconnect()
     }
 
+    /// Listeners refetch right away, before the socket is back: a socket that
+    /// is slow, refused or dead must not keep the screen on what it showed
+    /// before the app went away. They refetch again as the server confirms
+    /// each topic, which covers what was sent in between.
     func resume() {
         guard paused else { return }
         paused = false
-        // Events sent while the app was away are gone, so treat this like a reconnect.
-        attempt = max(attempt, 1)
-        if !subscriptions.isEmpty { connect() }
+        guard !subscriptions.isEmpty else { return }
+        for subscription in Array(subscriptions.values) { subscription.handler(.reconnected) }
+        connect()
     }
 
     private func connect() {
@@ -95,7 +125,9 @@ final class LiveEventsSocket: LiveEventSource {
         let task = session.webSocketTask(with: client.socketRequest("/ws/events"))
         self.task = task
         task.resume()
-        for topic in Set(subscriptions.values.map(\.topic)) {
+        let topics = Set(subscriptions.values.map(\.topic))
+        resync.connecting(topics: topics)
+        for topic in topics {
             sendFrame(type: "subscribe", topic: topic)
         }
         receive(task, generation: current)
@@ -121,23 +153,17 @@ final class LiveEventsSocket: LiveEventSource {
                 guard let self, self.generation == current else { return }
                 switch result {
                 case .success(let message):
-                    self.handleOpen()
+                    self.attempt = 0
                     if case .string(let text) = message { self.handle(text) }
                     self.receive(task, generation: current)
                 case .failure:
+                    self.resync.dropped()
+                    // A refused session would fail every retry the same way;
+                    // the REST client's handler gets a fresh one.
+                    if (task.response as? HTTPURLResponse)?.statusCode == 401 { self.client.reportUnauthorized() }
                     self.scheduleReconnect()
                 }
             }
-        }
-    }
-
-    private func handleOpen() {
-        guard attempt > 0 || !connectedOnce else { return }
-        let wasReconnect = connectedOnce
-        attempt = 0
-        connectedOnce = true
-        if wasReconnect {
-            for subscription in subscriptions.values { subscription.handler(.reconnected) }
         }
     }
 
@@ -162,8 +188,16 @@ final class LiveEventsSocket: LiveEventSource {
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
               let frame = try? JSONDecoder().decode(JSONValue.self, from: data),
-              frame["type"]?.string == "event",
-              let topic = frame["topic"]?.string,
+              let topic = frame["topic"]?.string
+        else { return }
+        if frame["type"]?.string == "subscribed" {
+            guard resync.confirmed(topic) else { return }
+            for subscription in Array(subscriptions.values) where subscription.topic == topic {
+                subscription.handler(.reconnected)
+            }
+            return
+        }
+        guard frame["type"]?.string == "event",
               let name = frame["event"]?.string,
               let event = Self.decode(name: name, data: frame["data"])
         else { return }

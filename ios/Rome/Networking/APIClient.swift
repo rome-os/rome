@@ -82,6 +82,9 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
+    /// The live-events socket's upgrade was refused with a 401.
+    func reportUnauthorized() { onUnauthorized() }
+
     /// A request carrying the session cookie, for the live-events socket.
     func socketRequest(_ path: String) -> URLRequest {
         var components = URLComponents(url: origin.appending(path: path), resolvingAgainstBaseURL: false)!
