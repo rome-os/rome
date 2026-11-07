@@ -26,7 +26,7 @@ import type {
   ModelFunding,
 } from "../../../domain/model-port.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
-import { buildAgentAccounting } from "../../../../core/provider-accounting.js";
+import { buildAgentAccounting } from "../provider-accounting.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
 import { AsyncMessageQueue } from "./async-message-queue.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";

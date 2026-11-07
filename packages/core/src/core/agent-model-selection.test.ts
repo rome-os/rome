@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
+import { MODEL_SELECTIONS, type ModelSelectionId } from "../agent/index.js";
 
 const config = { providerId: "openai" as const, modelId: "gpt-5.3-codex-spark" };
 const sessionPin = { providerId: "anthropic" as const, model: "saved-model[1m]" };
@@ -29,9 +29,9 @@ describe("resolveAgentModelRequest", () => {
   });
 
   it.each(
-    Object.keys(WEBCHAT_LARGE_MODEL_SELECTIONS) as ModelSelectionId[],
+    Object.keys(MODEL_SELECTIONS) as ModelSelectionId[],
   )("lets explicit selection %s override both the saved and agent pins without a tier", (selectionId) => {
-    const { providerId, model } = WEBCHAT_LARGE_MODEL_SELECTIONS[selectionId];
+    const { providerId, model } = MODEL_SELECTIONS[selectionId];
     expect(resolveAgentModelRequest(config, selectionId, sessionPin)).toEqual({
       exact: { providerId, model },
     });

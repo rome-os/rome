@@ -1,5 +1,5 @@
 import { claudeUsesApiKey, type AIToolProviderId, type AIToolStateValue } from "./ai-tool-state.js";
-import type { ModelSelectionId } from "./model-selector.js";
+import type { ModelSelectionId } from "../agent/index.js";
 
 export function soleExhaustedProvider(state: AIToolStateValue): AIToolProviderId | null {
   if (state.codex.quotaExhausted === state.claude.quotaExhausted) return null;

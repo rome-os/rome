@@ -2,11 +2,8 @@
 // accounting. Consumed by CodexAppServerProvider (the only Codex provider).
 
 import type { AgentStop } from "../../../../types.js";
-import {
-  buildAgentAccounting,
-  calculateImpliedCostUsd,
-} from "../../../../core/provider-accounting.js";
-import { stripLegacyReasoningSuffix } from "../../../../core/model-alias.js";
+import { buildAgentAccounting, calculateImpliedCostUsd } from "../provider-accounting.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 
 /** Token usage for a Codex turn. Mirrors the shape codex emits over the
  *  app-server protocol. */

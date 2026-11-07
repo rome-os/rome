@@ -25,7 +25,7 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./image-trace.js";
-import { stripLegacyReasoningSuffix } from "../../../../core/model-alias.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import { AgentMessageSink } from "./session.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
 import type { DynamicToolSpec } from "./app-server-protocol.js";

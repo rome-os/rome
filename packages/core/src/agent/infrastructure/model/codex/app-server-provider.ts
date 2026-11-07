@@ -80,7 +80,7 @@ import {
 } from "./app-server-protocol.js";
 import { buildTurnInput } from "./turn-input.js";
 import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
-import { stripLegacyReasoningSuffix } from "../../../../core/model-alias.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
