@@ -1168,6 +1168,17 @@ export class WebChatRepository {
 
     const id = channelChatId(input.channel, input.threadId);
     const now = new Date();
+    // A row a message starts stands in its chat from the first, starting
+    // where `ensureChannelChat` would place a session standing nowhere yet.
+    const { speaker } = input;
+    const thread = parent ? input.threadId : null;
+    const startSecond = speaker
+      ? firstPlacementSecond(
+          this.db,
+          { chatId: speaker.chat.id, threadId: thread, accountId: speaker.accountId },
+          speaker.at,
+        )
+      : null;
     await this.db
       .insert(romeSessions)
       .values({
@@ -1183,12 +1194,27 @@ export class WebChatRepository {
             ? null
             : input.agentName,
         type: "channel",
-        sourceChannel: input.channel,
-        sourceThreadId: input.threadId,
-        sourceThreadName: input.threadName ?? null,
-        sourceThreadType: input.threadType ?? null,
+        // One opened with no speaker stands nowhere yet, and the legacy
+        // chats backfill places it later, by these source columns.
+        ...(speaker && startSecond !== null
+          ? {
+              chatId: speaker.chat.id,
+              chatPlatform: speaker.chat.platform,
+              threadId: thread,
+              accountId: speaker.accountId,
+            }
+          : {
+              sourceChannel: input.channel,
+              sourceThreadId: input.threadId,
+              sourceThreadName: input.threadName ?? null,
+              sourceThreadType: input.threadType ?? null,
+            }),
         parentSessionId: parent?.id ?? null,
-        createdAt: now,
+        // As `placedCreatedAt` starts one: a second before it was placed.
+        createdAt:
+          startSecond !== null && now.getTime() >= startSecond * 1000
+            ? new Date((startSecond - 1) * 1000)
+            : now,
         activityAt: now,
         lastSeenActivityAt: null,
       })
@@ -1291,13 +1317,16 @@ export class WebChatRepository {
    *  rows created before the channel reported a name do. A name already
    *  recorded is kept, so email subjects and guardian renames stay put. */
   private async backfillChannelConversationName(
-    row: { id: string; name: string; sourceThreadName: string | null },
+    row: { id: string; name: string; chatId: number | null; sourceThreadName: string | null },
     address: { channel: string; threadId: string },
     threadName: string,
   ): Promise<void> {
     const placeholders = [address.threadId, `${address.channel}:${address.threadId}`];
+    // Only a row standing in no chat yet keeps its legacy name, which the
+    // legacy chats backfill reads to place it.
     const sourceMissing =
-      row.sourceThreadName === null || placeholders.includes(row.sourceThreadName);
+      row.chatId === null &&
+      (row.sourceThreadName === null || placeholders.includes(row.sourceThreadName));
     const nameMissing = placeholders.includes(row.name);
     if (!sourceMissing && !nameMissing) return;
     // Each column is rewritten only while it still holds a placeholder, so a
@@ -1305,15 +1334,20 @@ export class WebChatRepository {
     const updated = await this.db
       .update(romeSessions)
       .set({
-        sourceThreadName: sql`case when ${romeSessions.sourceThreadName} is null or ${inArray(romeSessions.sourceThreadName, placeholders)} then ${threadName} else ${romeSessions.sourceThreadName} end`,
+        sourceThreadName: sql`case when ${romeSessions.chatId} is null and (${romeSessions.sourceThreadName} is null or ${inArray(romeSessions.sourceThreadName, placeholders)}) then ${threadName} else ${romeSessions.sourceThreadName} end`,
         name: sql`case when ${inArray(romeSessions.name, placeholders)} then ${threadName} else ${romeSessions.name} end`,
       })
       .where(
         and(
           eq(romeSessions.id, row.id),
           or(
-            isNull(romeSessions.sourceThreadName),
-            inArray(romeSessions.sourceThreadName, placeholders),
+            and(
+              isNull(romeSessions.chatId),
+              or(
+                isNull(romeSessions.sourceThreadName),
+                inArray(romeSessions.sourceThreadName, placeholders),
+              ),
+            ),
             inArray(romeSessions.name, placeholders),
           ),
         ),
@@ -1333,6 +1367,7 @@ export class WebChatRepository {
     id: string;
     agentName: string | null;
     name: string;
+    chatId: number | null;
     sourceThreadName: string | null;
   } | null> {
     const rows = await this.db
@@ -1340,6 +1375,7 @@ export class WebChatRepository {
         id: romeSessions.id,
         agentName: romeSessions.agentName,
         name: romeSessions.name,
+        chatId: romeSessions.chatId,
         sourceThreadName: romeSessions.sourceThreadName,
       })
       .from(romeSessions)

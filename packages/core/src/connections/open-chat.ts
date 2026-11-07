@@ -5,6 +5,7 @@ import type { ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { startChannelChat, type StartChannelChatDeps } from "./channel-chat.js";
 import { addressOf, type ChatAdapters } from "./chat-adapter.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { channelChatId } from "../db/session-kind.js";
 import type { Speakers } from "../sessions/speakers.js";
 
 export interface OpenChannelChatDeps {
@@ -58,13 +59,13 @@ async function openAsSpeaker(
     ? { ...named, parentThreadId: addressOf(thread), threadType: "group" }
     : named;
   const { chat, romeEnd } = startChannelChat(deps, input);
-  const opened = await webchatRepo.ensureChannelChat(input);
   // A session keeps its place while the channel's account is still the one
   // it speaks as. A channel paired again as another account moves it to that
-  // account's chat; what was said in the old one stays there.
-  const standing = deps.speakers.speakerOf(opened.id);
+  // account's chat; what was said in the old one stays there. A session Rome
+  // holds no row for yet starts standing in the chat.
+  const standing = deps.speakers.speakerOf(channelChatId(input.channel, input.threadId));
   if (standing?.accountId === romeEnd && standing.place.chat.platform === chat.platform) {
-    return opened;
+    return webchatRepo.ensureChannelChat(input);
   }
   return webchatRepo.ensureChannelChat({
     ...input,
