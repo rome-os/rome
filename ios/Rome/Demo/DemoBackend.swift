@@ -259,13 +259,23 @@ final class DemoBackend: RomeBackend {
 
     func me() async throws -> String? { "lin@example.com" }
 
+    /// The next time the clock reads `hour`: today if it is still ahead, else tomorrow.
+    private static func nextAt(_ hour: Double) -> String {
+        let today = Calendar.current.startOfDay(for: .now).addingTimeInterval(hour * 3600)
+        return RomeDate.string(today > .now ? today : today.addingTimeInterval(24 * 3600))
+    }
+
     private var routineList: [Routine] = [
-        Routine(id: "r1", name: "每日简报", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("08:30"), "rrule": .string("FREQ=DAILY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(8.5 * 3600))),
-        Routine(id: "r2", name: "price_watch", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(9 * 3600))),
+        Routine(id: "r1", name: "每日简报", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("08:30"), "rrule": .string("FREQ=DAILY")]), nextRunAt: DemoBackend.nextAt(8.5)),
+        Routine(id: "r2", name: "price_watch", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: DemoBackend.nextAt(9)),
         Routine(id: "r3", name: "weekly_report", enabled: false, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=WEEKLY;BYDAY=MO")]), nextRunAt: nil),
         Routine(id: "r4", name: "dream", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("03:00"), "rrule": .string("FREQ=DAILY;INTERVAL=3")]), nextRunAt: nil, managedBy: "dream"),
         // Listed with "Last run failed".
-        Routine(id: "r5", name: "notion_sync", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("07:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(7 * 3600)), lastRun: .init(status: "error")),
+        Routine(id: "r5", name: "notion_sync", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("07:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: DemoBackend.nextAt(7), lastRun: .init(status: "error")),
+        Routine(id: "r7", name: "Standup notes", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:30"), "rrule": .string("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")]), nextRunAt: DemoBackend.nextAt(9.5)),
+        Routine(id: "r8", name: "team_digest", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=WEEKLY;BYDAY=MO")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 4, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(9 * 3600))),
+        Routine(id: "r9", name: "每月对账：汇总所有订阅、发票和退款，整理成表格发到邮箱", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("10:00"), "rrule": .string("FREQ=MONTHLY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 12, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(10 * 3600))),
+        Routine(id: "r10", name: "Weekend reading list for the family trip planning", enabled: false, trigger: .object(["type": .string("schedule"), "localTime": .string("08:00"), "rrule": .string("FREQ=WEEKLY;BYDAY=SA,SU")]), nextRunAt: nil),
         // A one-off that already ran: hidden, as on the dashboard.
         Routine(id: "r6", name: "dentist_reminder", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("10:00")]), nextRunAt: nil, lastFiredAt: .string("2026-11-01T10:00:00Z"), lastRun: .init(status: "success")),
     ]

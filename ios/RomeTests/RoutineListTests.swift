@@ -66,4 +66,11 @@ import Testing
         #expect(decoded.lastFiredAt != nil)
         #expect(decoded.managedBy == nil)
     }
+
+    /// Active ones first, then the paused ones in their own group, each by name.
+    @Test func groupsActiveThenPaused() {
+        let groups = RoutineList.groups([routine("b-paused", enabled: false), routine("c-active"), routine("a-paused", enabled: false), routine("a-active")])
+        #expect(groups.active.map(\.id) == ["a-active", "c-active"])
+        #expect(groups.paused.map(\.id) == ["a-paused", "b-paused"])
+    }
 }

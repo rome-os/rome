@@ -297,6 +297,16 @@
         }
       }
     },
+    "Chat is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat 未开启"
+          }
+        }
+      }
+    },
     "Check the network and try again" : {
       "localizations" : {
         "zh-Hans" : {
@@ -333,16 +343,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
-          }
-        }
-      }
-    },
-    "Concierge is off" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Concierge 未开启"
           }
         }
       }
@@ -642,6 +642,16 @@
         }
       }
     },
+    "Fridays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周五"
+          }
+        }
+      }
+    },
     "From “%@”" : {
       "localizations" : {
         "zh-Hans" : {
@@ -837,6 +847,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一"
+          }
+        }
+      }
+    },
+    "Mondays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周一"
           }
         }
       }
@@ -1506,6 +1526,16 @@
         }
       }
     },
+    "Saturdays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周六"
+          }
+        }
+      }
+    },
     "Scroll to the latest message" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1835,6 +1865,16 @@
         }
       }
     },
+    "Sundays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周日"
+          }
+        }
+      }
+    },
     "Switch instance" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1996,6 +2036,26 @@
         }
       }
     },
+    "Thursdays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周四"
+          }
+        }
+      }
+    },
+    "To add or change one, ask in Chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想新增或修改，在 Chat 里说一声"
+          }
+        }
+      }
+    },
     "Today %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2067,6 +2127,16 @@
         }
       }
     },
+    "Tuesdays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周二"
+          }
+        }
+      }
+    },
     "Turn it on to chat here." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2087,12 +2157,12 @@
         }
       }
     },
-    "Turn on Concierge" : {
+    "Turn on Chat" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启 Concierge"
+            "value" : "开启 Chat"
           }
         }
       }
@@ -2236,6 +2306,36 @@
         }
       }
     },
+    "Wednesdays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每周三"
+          }
+        }
+      }
+    },
+    "Weekdays" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作日"
+          }
+        }
+      }
+    },
+    "Weekends" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "周末"
+          }
+        }
+      }
+    },
     "Weekly" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2292,16 +2392,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Chat 里交代的事，开成任务后会出现在这里。"
-          }
-        }
-      }
-    },
-    "Work that runs on its own schedule. To add or change one, ask the Concierge in Chat." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按时自动运行的工作。在 Chat 里让 Concierge 新建或修改。"
           }
         }
       }

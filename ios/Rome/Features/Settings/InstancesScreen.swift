@@ -278,10 +278,9 @@ struct RoutinesScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 PageHeader(title: "Routines", onMenu: onMenu)
-                Text("Work that runs on its own schedule. To add or change one, ask the Concierge in Chat.")
+                Text("To add or change one, ask in Chat.")
                     .romeFont(15)
                     .foregroundStyle(Palette.sub)
-                    .lineSpacing(4)
                     .padding(.horizontal, 20)
                     .padding(.top, -6)
                 if let routines {
@@ -291,17 +290,21 @@ struct RoutinesScreen: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
                     } else {
-                        VStack(spacing: 0) {
-                            ForEach(Array(routines.enumerated()), id: \.element.id) { index, routine in
-                                RoutineRow(routine: routine, last: index == routines.count - 1) { enabled in
-                                    toggle(routine, enabled)
-                                }
-                            }
+                        let groups = RoutineList.groups(routines)
+                        if !groups.active.isEmpty {
+                            group(groups.active)
                         }
-                        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-                        .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-                        .hairline(radius: Metrics.groupRadius)
-                        .padding(.horizontal, 16)
+                        if !groups.paused.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Paused")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                                    .padding(.horizontal, 32)
+                                    .accessibilityAddTraits(.isHeader)
+                                group(groups.paused)
+                            }
+                            .padding(.top, groups.active.isEmpty ? 0 : 6)
+                        }
                     }
                 } else if failed {
                     CenteredMessage(title: "Could not load routines", detail: "Check the network and try again", actionTitle: "Try again") {
@@ -317,6 +320,20 @@ struct RoutinesScreen: View {
         .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
+    }
+
+    private func group(_ list: [Routine]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, routine in
+                RoutineRow(routine: routine, last: index == list.count - 1) { enabled in
+                    toggle(routine, enabled)
+                }
+            }
+        }
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+        .hairline(radius: Metrics.groupRadius)
+        .padding(.horizontal, 16)
     }
 
     private func load() async {
@@ -349,25 +366,31 @@ struct RoutineRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // Two lines at most: the name, then when it runs.
             VStack(alignment: .leading, spacing: 3) {
-                Text(RoutineText.title(routine.name))
-                    .romeFont(17, .medium)
-                    .foregroundStyle(Palette.fg)
+                HStack(spacing: 6) {
+                    Text(RoutineText.title(routine.name))
+                        .romeFont(17, .medium)
+                        .foregroundStyle(Palette.fg)
+                        .lineLimit(1)
+                    if routine.lastRunFailed {
+                        Circle()
+                            .fill(Palette.destructive)
+                            .frame(width: 7, height: 7)
+                            .accessibilityLabel("Last run failed")
+                    }
+                }
                 Text(RoutineText.schedule(routine))
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
-                if routine.lastRunFailed {
-                    Text("Last run failed")
-                        .romeFont(12, .medium)
-                        .foregroundStyle(Palette.destructive)
-                }
+                    .lineLimit(1)
             }
             // A paused routine stays in the list, quieter than the active ones.
             .opacity(routine.enabled ? 1 : 0.55)
             Spacer()
             Toggle(isOn: Binding(get: { routine.enabled }, set: onToggle)) { EmptyView() }
                 .labelsHidden()
-                .tint(Palette.primary)
+                .tint(Palette.switchOn)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -381,9 +404,15 @@ struct RoutineRow: View {
 /// Which routines the page lists, in what order. Like the dashboard, it
 /// leaves out one-off routines that are done; it also leaves out routines an
 /// app or the system manages (Concierge follows and digests, the nightly
-/// upgrade check), which the guardian does not run. Paused ones stay, after
-/// the active ones.
+/// upgrade check), which the guardian does not run. Paused ones stay, in a
+/// group of their own after the active ones.
 enum RoutineList {
+    /// The active routines, then the paused ones, each by name.
+    static func groups(_ routines: [Routine]) -> (active: [Routine], paused: [Routine]) {
+        let shown = shown(routines)
+        return (shown.filter(\.enabled), shown.filter { !$0.enabled })
+    }
+
     static func shown(_ routines: [Routine]) -> [Routine] {
         routines
             .filter { $0.managedBy == nil && !isCompletedOneOff($0) }
@@ -413,8 +442,8 @@ enum RoutineText {
         return words.prefix(1).uppercased() + words.dropFirst()
     }
 
-    /// "Daily 08:30 · Next: Tomorrow 08:30".
-    static func schedule(_ routine: Routine) -> String {
+    /// "Daily 07:00", "Mondays 09:00 · Next: Mon 09:00".
+    static func schedule(_ routine: Routine, now: Date = .now) -> String {
         var parts: [String] = []
         if routine.trigger?["type"]?.string == "schedule" {
             let time = routine.trigger?["localTime"]?.string ?? ""
@@ -423,24 +452,56 @@ enum RoutineText {
         } else if let type = routine.trigger?["type"]?.string {
             parts.append(type == "event" ? String(localized: "On an event") : String(localized: "On a trigger"))
         }
-        if !routine.enabled {
-            parts.append(String(localized: "Paused"))
-        } else if let next = RomeDate.parse(routine.nextRunAt) {
+        if showsNext(routine, now: now), let next = RomeDate.parse(routine.nextRunAt) {
             parts.append(String(localized: "Next: \(RelativeTime.until(next))"))
         }
         return parts.joined(separator: " · ")
     }
 
-    static func frequency(_ rule: String) -> String {
-        let fields = Dictionary(rule.split(separator: ";").compactMap { part -> (String, String)? in
+    /// Whether the next run needs saying: not for one that runs every day,
+    /// hour or weekday and runs again within a day, which its schedule tells.
+    /// Weekly, monthly and one-off ones, and anything further off, say it.
+    static func showsNext(_ routine: Routine, now: Date = .now) -> Bool {
+        guard routine.enabled, let next = RomeDate.parse(routine.nextRunAt) else { return false }
+        guard routine.trigger?["type"]?.string == "schedule" else { return true }
+        let fields = ruleFields(routine.trigger?["rrule"]?.string ?? "")
+        let interval = Int(fields["INTERVAL"] ?? "1") ?? 1
+        let days = Set((fields["BYDAY"] ?? "").split(separator: ",").map(String.init))
+        let everyDayLike: Bool
+        switch fields["FREQ"] {
+        case "DAILY": everyDayLike = interval == 1
+        case "HOURLY": everyDayLike = true
+        case "WEEKLY": everyDayLike = interval == 1 && [weekdays, weekend, weekdays.union(weekend)].contains(days)
+        default: everyDayLike = false
+        }
+        return !(everyDayLike && next.timeIntervalSince(now) <= 24 * 3600)
+    }
+
+    private static let weekdays: Set<String> = ["MO", "TU", "WE", "TH", "FR"]
+    private static let weekend: Set<String> = ["SA", "SU"]
+
+    private static func ruleFields(_ rule: String) -> [String: String] {
+        Dictionary(rule.split(separator: ";").compactMap { part -> (String, String)? in
             let pair = part.split(separator: "=", maxSplits: 1).map(String.init)
             return pair.count == 2 ? (pair[0], pair[1]) : nil
         }, uniquingKeysWith: { a, _ in a })
+    }
+
+    static func frequency(_ rule: String) -> String {
+        let fields = ruleFields(rule)
         let interval = Int(fields["INTERVAL"] ?? "1") ?? 1
         switch fields["FREQ"] {
         case "DAILY": return interval > 1 ? String(localized: "Every \(interval) days") : String(localized: "Daily")
         case "WEEKLY":
-            let byDay = (fields["BYDAY"] ?? "").split(separator: ",").compactMap { weekday(String($0)) }
+            let codes = (fields["BYDAY"] ?? "").split(separator: ",").map(String.init)
+            if interval == 1 {
+                let set = Set(codes)
+                if set == weekdays { return String(localized: "Weekdays") }
+                if set == weekend { return String(localized: "Weekends") }
+                if set == weekdays.union(weekend) { return String(localized: "Daily") }
+                if codes.count == 1, let every = everyWeekday(codes[0]) { return every }
+            }
+            let byDay = codes.compactMap(weekday)
             if !byDay.isEmpty {
                 let list = byDay.joined(separator: String(localized: "routine.weekdaySeparator", defaultValue: ", ", comment: "Between weekdays in a weekly schedule"))
                 return String(localized: "Weekly on \(list)")
@@ -449,6 +510,20 @@ enum RoutineText {
         case "HOURLY": return interval > 1 ? String(localized: "Every \(interval) hours") : String(localized: "Hourly")
         case "MONTHLY": return String(localized: "Monthly")
         default: return String(localized: "On a schedule")
+        }
+    }
+
+    /// One weekday every week: "Mondays", "每周一".
+    private static func everyWeekday(_ code: String) -> String? {
+        switch code {
+        case "MO": return String(localized: "Mondays")
+        case "TU": return String(localized: "Tuesdays")
+        case "WE": return String(localized: "Wednesdays")
+        case "TH": return String(localized: "Thursdays")
+        case "FR": return String(localized: "Fridays")
+        case "SA": return String(localized: "Saturdays")
+        case "SU": return String(localized: "Sundays")
+        default: return nil
         }
     }
 

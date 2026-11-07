@@ -122,9 +122,9 @@ struct ChatScreen: View {
             Spacer()
         case .off:
             CenteredMessage(
-                title: "Concierge is off",
+                title: "Chat is off",
                 detail: "Turn it on to chat here.",
-                actionTitle: "Turn on Concierge"
+                actionTitle: "Turn on Chat"
             ) { Task { await workspace.enableConcierge() } }
         case .failed:
             CenteredMessage(

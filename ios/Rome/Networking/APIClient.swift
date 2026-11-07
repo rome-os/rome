@@ -16,7 +16,7 @@ enum APIError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unauthorized: return String(localized: "Session expired")
-        case .conciergeOff: return String(localized: "Concierge is off")
+        case .conciergeOff: return String(localized: "Chat is off")
         case .notFound: return String(localized: "Not found")
         case .server(_, let message): return message ?? String(localized: "Server error")
         case .offline: return String(localized: "No network connection")
