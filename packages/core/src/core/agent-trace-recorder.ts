@@ -216,6 +216,9 @@ export class AgentTraceRecorder {
       sourceThreadName,
       sourceThreadType: thread?.threadType ?? null,
       trigger: type === "action" ? trigger : undefined,
+      // An agent an action starts from a dashboard chat serves that chat's
+      // turn: it is that chat's owner's, and as private as the chat.
+      servesSessionId: type === "action" ? this.callerChatId() : null,
     });
     this.ensured = true;
   }
@@ -247,6 +250,13 @@ export class AgentTraceRecorder {
       rootActionExecutionId: ctx.rootExecutionId ?? null,
       parentActionExecutionId: ctx.parentExecutionId ?? null,
     };
+  }
+
+  /** The dashboard chat whose turn called the action this run serves, if any. */
+  private callerChatId(): string | null {
+    const caller = this.currentActionContext()?.channelContext;
+    if (caller?.channel !== "webchat") return null;
+    return caller.romeSessionId ?? caller.threadId ?? null;
   }
 
   private currentActionContext(): CurrentActionContext | undefined {

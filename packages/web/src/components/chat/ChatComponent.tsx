@@ -44,6 +44,7 @@ export interface ChatComponentProps {
   onSessionCreated: (id: string) => void;
   onSessionNotFound?: () => void;
   onSessionMessage?: (message: SessionMessage) => void;
+  onSessionLayout?: (sessionId: string, layout: unknown[] | null) => void;
   initialProjectName?: string;
   initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
@@ -62,6 +63,7 @@ export function ChatComponent({
   onSessionCreated,
   onSessionNotFound,
   onSessionMessage,
+  onSessionLayout,
   initialProjectName,
   initialDeviceFolder,
   initialAgentMention,
@@ -75,7 +77,10 @@ export function ChatComponent({
   const concierge = useConciergeChat();
   const conciergeChats = useConciergeChats();
   const isListedConcierge =
-    sessionId === CONCIERGE_CHAT_ID || conciergeChats.some((chat) => chat.id === sessionId);
+    sessionId === concierge.chatId ||
+    // The guardian's main chat, opened at `/chat/concierge` before it is loaded.
+    (concierge.chatId === null && sessionId === CONCIERGE_CHAT_ID) ||
+    conciergeChats.some((chat) => chat.id === sessionId);
   const coarsePointer = useCoarsePointer();
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
@@ -274,10 +279,10 @@ export function ChatComponent({
   }, [queryClient]);
   const recoverMissingSession = useCallback(
     async (missingSessionId: string) => {
-      if (missingSessionId !== CONCIERGE_CHAT_ID) return false;
       try {
-        await ensureConciergeChat(queryClient);
-        return true;
+        // Only the caller's own main chat is made on demand. While the
+        // Concierge is off the server refuses, and nothing is recovered.
+        return (await ensureConciergeChat(queryClient)) === missingSessionId;
       } catch {
         return false;
       }
@@ -300,6 +305,7 @@ export function ChatComponent({
         onSessionsChanged={notifySessionsChanged}
         onSessionNotFound={handleSessionNotFound}
         onSessionMessage={onSessionMessage}
+        onSessionLayout={onSessionLayout}
         onSessionCreated={handleSessionCreated}
         initialProjectName={initialProjectName}
         initialDeviceFolder={initialDeviceFolder}
@@ -308,6 +314,7 @@ export function ChatComponent({
         navbarSlot={navbarSlot}
         recoverMissingSession={conciergeEnabled ? recoverMissingSession : undefined}
         variant={conciergeEnabled ? "concierge" : "default"}
+        conciergeMainChatId={concierge.chatId ?? CONCIERGE_CHAT_ID}
         startSession={topicDraft && concierge.enabled ? startTopicChat : undefined}
         centerDraftComposer={greetingOnlyHome && !topicDraft}
         emptyState={

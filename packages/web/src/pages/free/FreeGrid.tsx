@@ -12,7 +12,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AgentMention } from "@/lib/chat-types";
@@ -23,6 +23,7 @@ import { deleteSession } from "@/lib/chat-api";
 import { useApps } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
@@ -49,8 +50,9 @@ import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
+  applyFirstPageLayout,
   collapseToolsOnMount,
-  loadLayoutForSession,
+  isLayoutLoaded,
   placeWidgetsIfSessionActive,
   setActiveSession,
   type PlacementLink,
@@ -259,11 +261,18 @@ export function FreeGrid() {
   }, []);
 
   const suppressProjectsRef = useRef(false);
-  useEffect(() => {
+  // A widget handoff waiting for the session's server layout, so it lands on top
+  // of that layout instead of making it lose the revision guard.
+  const pendingWidgetsRef = useRef<{ sessionId: string; apply: () => void } | null>(null);
+  // A layout effect, so the session's cached layout is in the store before the
+  // first paint. `flushLayout` still reads the outgoing session's iframes: the
+  // render that carries the new URL keeps showing them until the switch below.
+  useLayoutEffect(() => {
     flushLayout();
     suppressProjectsRef.current = false;
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
+    pendingWidgetsRef.current = null;
     const applyInitialWidgets = (targetSessionId: string | null) => {
       if (!initialWidgetsKey || !initialWidgets) {
         return;
@@ -274,15 +283,27 @@ export function FreeGrid() {
         chatFirst: window.innerWidth < COMPACT_WIDTH,
       });
     };
-    if (urlSessionId) {
-      const targetSessionId = urlSessionId;
-      void loadLayoutForSession(targetSessionId).finally(() =>
-        applyInitialWidgets(targetSessionId),
-      );
-    } else {
+    if (!urlSessionId) {
       applyInitialWidgets(null);
+    } else if (isLayoutLoaded(urlSessionId)) {
+      applyInitialWidgets(urlSessionId);
+    } else if (initialWidgetsKey) {
+      // The layout rides the session's first messages page; `handleSessionLayout`
+      // places the widgets once it has been applied.
+      pendingWidgetsRef.current = {
+        sessionId: urlSessionId,
+        apply: () => applyInitialWidgets(urlSessionId),
+      };
     }
   }, [urlSessionId, initialWidgets, initialWidgetsKey, flushLayout]);
+
+  const handleSessionLayout = useCallback((sessionId: string, layout: unknown[] | null) => {
+    applyFirstPageLayout(sessionId, layout);
+    const pending = pendingWidgetsRef.current;
+    if (pending?.sessionId !== sessionId) return;
+    pendingWidgetsRef.current = null;
+    pending.apply();
+  }, []);
 
   useEffect(() => {
     return eventBus.on<{ appId: string }>("app:installed", ({ appId }) => {
@@ -352,8 +373,14 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
-    useSessionIdentity(chatSessionId);
+  const {
+    loading: sessionLoading,
+    sessionName,
+    model,
+    reasoningEffort,
+    pinnedAgentMention,
+    pinnedAt,
+  } = useSessionIdentity(chatSessionId);
   // The chat a guardian names is the one they keep a tab on, so the name
   // outranks the route's own title. Claimed here rather than in FreePage so it
   // reads the same identity the header does, and follows a rename with it.
@@ -413,6 +440,7 @@ export function FreeGrid() {
             <ChatWidget
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}
+              onSessionLayout={handleSessionLayout}
               initialProjectName={initialProjectName}
               initialDeviceFolder={initialDeviceFolder}
               initialAgentMention={initialAgentMention}
@@ -429,9 +457,17 @@ export function FreeGrid() {
                   model={model}
                   reasoningEffort={reasoningEffort}
                 />
-                <span className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}>
-                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-                </span>
+                {sessionLoading ? (
+                  <SessionLoadingTitle />
+                ) : (
+                  <span
+                    className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}
+                  >
+                    {sessionName?.trim() ||
+                      pinnedAgentMention?.appLabel ||
+                      t("recentChats.newChat")}
+                  </span>
+                )}
                 {isConcierge ? <ConciergeTasksPill chatId={chatSessionId ?? null} /> : null}
                 {/* Same label as the desktop navbar, also none for the Concierge. */}
                 {!isConcierge && sessionName?.trim() && pinnedAgentMention && (

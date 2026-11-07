@@ -437,6 +437,16 @@ const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
 
 /** The surface a channel's talker declares, with an omitted fact read as a
  *  messaging channel's. */
+/** Whose a dashboard chat is, for work scheduled in it; undefined for any other thread. */
+async function dashboardChatOwner(
+  webchatRepo: WebChatRepository | undefined,
+  thread: ThreadContext | undefined,
+): Promise<string | undefined> {
+  if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
+  const chat = await webchatRepo.getSession(thread.threadId);
+  return chat ? (chat.ownerKey ?? "guardian") : undefined;
+}
+
 export function talkerChannelSurface(talker: {
   interactiveCards?: boolean;
   promptContext?: boolean;
@@ -1296,6 +1306,7 @@ async function openSession(
             agentName: key.agentName,
             sessionId: refs.sessionId,
             channelContext: refs.getThreadContext(),
+            ownerKey: await dashboardChatOwner(deps.webchatRepo, refs.getThreadContext()),
           },
           createRoutine: async (createArgs) => {
             const result = await deps.actionEngine.run(

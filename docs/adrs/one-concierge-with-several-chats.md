@@ -25,7 +25,7 @@ Rome has one Concierge per owner, with a main chat and any number of topic chats
 - **Following the same thing from two chats.** Rejected because each event would then be triaged and deduplicated per chat, and "stop following Gmail" would need to ask which follow. Splitting by target or kind covers the real cases: one repository here, another there.
 - **One follow sending to several chats.** Deferred, not rejected: Muse supports it and reports almost no use, and the main-chat digest already shows every chat's items. A list of chats in place of one chat changes neither triage nor dedupe.
 - **A digest in every chat.** Rejected because a topic chat the guardian does not open would hide its items, the failure Muse's users report. The main chat is the one overview.
-- **An owner column on follows, tasks and follow items.** Rejected because the owner already lives on the chat, and a second copy could disagree with it.
+- **Leaving the owner on the chat alone.** Rejected once each person had their own Concierge ([a Concierge for each person](a-concierge-for-each-person.md)): a deleted chat takes its owner with it, and what reported to it would then fall to the guardian. Follows, task rows and kept events record their owner, set once from the chat they are made in.
 
 ## Consequences
 
@@ -33,10 +33,10 @@ Adding a chat adds no triage, no subscription and no dedupe work. The guardian s
 
 Future diffs must respect:
 
-- Triage runs once per batch, whatever number of chats there are.
+- Triage runs once per batch for each owner, whatever number of chats that owner has.
 - A follow has one chat. Its alerts go there, or to the main chat when that chat is archived or gone.
-- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to the main chat and says so there. The main chat cannot be archived or deleted.
-- Only a chat records its owner. Follows, tasks and follow items reach their owner through their chat, and no owner means the guardian.
+- Archiving or deleting a Concierge chat moves its follows and unfinished tasks to its owner's main chat and says so there. The main chat cannot be archived or deleted.
+- Follows, tasks and kept events record their owner, which never changes. No owner means the guardian.
 - A rule for "the Concierge chat" applies to every Concierge chat, unless it names the main chat.
 
 The delivery invariants live in [Concierge following](../architecture/concierge-following.md).

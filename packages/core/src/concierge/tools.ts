@@ -4,7 +4,6 @@
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import {
-  CONCIERGE_CHAT_ID,
   CONCIERGE_TASK_STATES,
   CONCIERGE_TASK_SUMMARY_MAX_LENGTH,
   type ConciergeTaskState,
@@ -29,6 +28,8 @@ import {
   type ConciergeService,
   isConciergeAgent,
   isConciergeChat,
+  isMainConciergeChat,
+  privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
@@ -117,9 +118,22 @@ export async function buildConciergeTools(
           (await webchatRepo.listProjects()).map((stored) => stored.path),
         );
 
+  // Whose Concierge this turn is: the owner of the chat it runs in. Every
+  // chat and row the tools reach is that owner's.
+  const ownerHere = async () => {
+    const { chatId } = currentTurn();
+    const owner = await service.ownerOfChat(chatId);
+    if (owner === null) throw new Error(`No Concierge chat ${chatId}`);
+    return owner;
+  };
+
   const requireTaskChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (!chat || chat.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
+    if (
+      !chat ||
+      chat.triggerKind !== TASK_CHAT_TRIGGER_KIND ||
+      privateOwnerOf(chat) !== (await ownerHere())
+    ) {
       throw new Error(`No task chat ${chatId}. Use chat_list to find your task chats.`);
     }
     return chat;
@@ -129,10 +143,29 @@ export async function buildConciergeTools(
   // Concierge chats.
   const requireReadableChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (!chat || (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat))) {
+    if (
+      !chat ||
+      (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat)) ||
+      privateOwnerOf(chat) !== (await ownerHere())
+    ) {
       throw new Error(`No task chat or Concierge chat ${chatId}. Use chat_list to find them.`);
     }
     return chat;
+  };
+
+  // A row of this owner's task list.
+  const requireTaskRow = async (taskId: string) => {
+    const found = await tasks.repo.getWithChat(taskId);
+    if (!found || found.owner !== (await ownerHere())) {
+      throw new Error(`No task ${taskId}. Use task_list to find it.`);
+    }
+    return found.row;
+  };
+
+  /** This owner's rows, as the agent's list reads them. */
+  const ownRows = async (includeDone: boolean) => {
+    const owner = await ownerHere();
+    return (await tasks.repo.listForAgent(includeDone)).filter((task) => task.owner === owner);
   };
 
   // Said as Concierge's account, so the task event reads who asked off the
@@ -200,7 +233,10 @@ export async function buildConciergeTools(
       if (typeof value !== "string") throw new Error(`${where}.${field} must be a string or null`);
       return value.trim() || null;
     };
-    if (raw.id !== undefined) write.id = requireString(raw, "id");
+    if (raw.id !== undefined) {
+      write.id = requireString(raw, "id");
+      await requireTaskRow(write.id);
+    }
     if (raw.title !== undefined) write.title = requireString(raw, "title");
     if (raw.state !== undefined) {
       if (!isTaskState(raw.state)) {
@@ -423,7 +459,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("task_list", input, async (args) => ({
-          tasks: (await tasks.repo.listForAgent(args.includeDone === true)).map(compactTask),
+          tasks: (await ownRows(args.includeDone === true)).map(compactTask),
         })),
     },
     {
@@ -487,8 +523,7 @@ export async function buildConciergeTools(
           const taskId = optionalString(args, "taskId");
           const messageId = optionalString(args, "messageId");
           if (taskId) {
-            const planned = await tasks.repo.get(taskId);
-            if (!planned) throw new Error(`No task ${taskId}. Use task_list to find it.`);
+            const planned = await requireTaskRow(taskId);
             if (planned.sessionId) {
               throw new Error(
                 `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,
@@ -503,10 +538,14 @@ export async function buildConciergeTools(
               : undefined
             : await sourceMessageForNewRow(messageId);
           const { chatId: conciergeChatId } = currentTurn();
-          const chatId = await service.dashboard.chats.startChat({
-            agentName: optionalString(args, "agent"),
-            projectPath: await taskProjectPath(optionalString(args, "project")),
-          });
+          // The task chat is the owner's, private to them as their Concierge is.
+          const chatId = await service.dashboard.chats.startChat(
+            {
+              agentName: optionalString(args, "agent"),
+              projectPath: await taskProjectPath(optionalString(args, "project")),
+            },
+            await ownerHere(),
+          );
           // Marked before the first turn, so that turn's event already sees it.
           await webchatRepo.setSessionTrigger(chatId, {
             triggerKind: TASK_CHAT_TRIGGER_KIND,
@@ -603,7 +642,7 @@ export async function buildConciergeTools(
             kind:
               chat.triggerKind === TASK_CHAT_TRIGGER_KIND
                 ? "task chat"
-                : chat.id === CONCIERGE_CHAT_ID
+                : isMainConciergeChat(chat)
                   ? "main chat"
                   : "topic chat",
             status: statusOf(
@@ -650,10 +689,13 @@ export async function buildConciergeTools(
           const wanted = TASK_STATUSES.find((status) => status === args.status);
           const { chats } = service.dashboard;
           const { chatId: here } = currentTurn();
-          const all = await webchatRepo.listSessions("all");
+          const owner = await ownerHere();
+          const all = (await webchatRepo.listSessions("all")).filter(
+            (chat) => privateOwnerOf(chat) === owner,
+          );
           // The Concierge chat each task chat came from, by its task row.
           const cameFrom = new Map(
-            (await tasks.repo.listForAgent(true)).flatMap(({ row, conciergeChat }) =>
+            (await ownRows(true)).flatMap(({ row, conciergeChat }) =>
               row.sessionId
                 ? [[row.sessionId, { chatId: conciergeChat.id, title: conciergeChat.name }]]
                 : [],
@@ -671,7 +713,7 @@ export async function buildConciergeTools(
             .filter((chat) => !wanted || chat.status === wanted);
           const conciergeChats = wanted
             ? []
-            : (await service.listChats())
+            : (await service.listChats(owner))
                 .filter((chat) => chat.id !== here)
                 .map((chat) => ({
                   chatId: chat.id,
@@ -696,7 +738,7 @@ export async function buildConciergeTools(
       handler: (input) =>
         runFacadeTool("topic_start", input, async (args) => {
           currentTurn();
-          const chat = await service.startTopicChat(requireString(args, "name"));
+          const chat = await service.startTopicChat(await ownerHere(), requireString(args, "name"));
           return { chatId: chat.id, name: chat.name, link: `/chat/${chat.id}` };
         }),
     },

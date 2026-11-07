@@ -608,6 +608,99 @@ describe("applyAgentPlacement", () => {
   });
 });
 
+// Kept ahead of "layout sync": its last test resets the module registry, after
+// which a dynamically imported store would load a second copy of React and its
+// hooks would fail inside `renderHook`.
+describe("layout from the first messages page", () => {
+  const server = [{ id: "files", type: "projects", order: 0 }];
+  const readLayout = (sessionId: string) =>
+    JSON.parse(localStorage.getItem(`rome:free-layout:${sessionId}`) ?? "[]") as unknown[];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const puts = () =>
+    rs
+      .mocked(fetch)
+      .mock.calls.filter(([, init]) => init?.method === "PUT")
+      .map(([url, init]) => ({ url, layout: JSON.parse(String(init?.body)).layout }));
+
+  async function setup(sessionId: string) {
+    const store = await import("./use-free-cells");
+    const hook = renderHook(() => store.useFreeCells());
+    act(() => store.setActiveSession(sessionId));
+    return { store, ...hook };
+  }
+
+  it("shows and stores the page's layout without requesting /layout", async () => {
+    const { store, result } = await setup("page-chat");
+    expect(store.isLayoutLoaded("page-chat")).toBe(false);
+
+    act(() => store.applyFirstPageLayout("page-chat", server));
+
+    expect(result.current.placements).toEqual(server);
+    expect(readLayout("page-chat")).toEqual(server);
+    expect(store.isLayoutLoaded("page-chat")).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the cached layout when the page has none", async () => {
+    const cached = [{ id: "notes", type: "app", targetId: "notes", order: 0 }];
+    localStorage.setItem("rome:free-layout:null-chat", JSON.stringify(cached));
+    const { store, result } = await setup("null-chat");
+
+    act(() => store.applyFirstPageLayout("null-chat", null));
+
+    expect(result.current.placements).toEqual(cached);
+    expect(store.isLayoutLoaded("null-chat")).toBe(true);
+  });
+
+  it("does not erase a tool opened since the session became active", async () => {
+    const { store, result } = await setup("edited-chat");
+    act(() => result.current.addWidget("desktop"));
+    const local = readLayout("edited-chat");
+
+    act(() => store.applyFirstPageLayout("edited-chat", server));
+
+    expect(result.current.placements).toEqual(local);
+    expect(readLayout("edited-chat")).toEqual(local);
+  });
+
+  it("keeps an unsynced local layout and sends it again instead of the page's", async () => {
+    const local = [{ id: "notes", type: "app", targetId: "notes", order: 0 }];
+    localStorage.setItem("rome:free-layout:unsynced-chat", JSON.stringify(local));
+    localStorage.setItem("rome:free-layout-unsynced:unsynced-chat", "1");
+    const { store, result } = await setup("unsynced-chat");
+
+    act(() => store.applyFirstPageLayout("unsynced-chat", server));
+    await settle();
+
+    expect(result.current.placements).toEqual(local);
+    expect(readLayout("unsynced-chat")).toEqual(local);
+    expect(puts()).toEqual([{ url: "/api/chat/sessions/unsynced-chat/layout", layout: local }]);
+  });
+
+  it("ignores a layout for a session that is not active", async () => {
+    const { store, result } = await setup("active-chat");
+
+    act(() => store.applyFirstPageLayout("background-chat", server));
+
+    expect(result.current.placements).toEqual([]);
+    expect(readLayout("background-chat")).toEqual([]);
+  });
+
+  it("loses to the draft layout carried into a freshly created session", async () => {
+    const store = await import("./use-free-cells");
+    const { result } = renderHook(() => store.useFreeCells());
+    act(() => store.setActiveSession(null));
+    act(() => result.current.addWidget("desktop"));
+    const draft = result.current.placements;
+    act(() => store.setActiveSession("created-chat"));
+
+    act(() => store.applyFirstPageLayout("created-chat", server));
+
+    expect(result.current.placements).toEqual(draft);
+    expect(readLayout("created-chat")).toEqual(draft);
+  });
+});
+
 describe("layout sync", () => {
   const readLayout = (sessionId: string) =>
     JSON.parse(localStorage.getItem(`rome:free-layout:${sessionId}`) ?? "[]") as unknown[];

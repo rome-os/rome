@@ -13,6 +13,7 @@ describe("AgentTurnStreamRegistry conversation routing", () => {
     const interrupt = rs.fn(async () => undefined);
     const stream = registry.register({
       sessionId: "session-1",
+      chatId: "session-1",
       turnId: "turn-1",
       agentName: "main",
       conversation,
@@ -32,12 +33,14 @@ describe("AgentTurnStreamRegistry conversation routing", () => {
     const registry = createAgentTurnStreamRegistry();
     const older = registry.register({
       sessionId: "session-1",
+      chatId: "session-1",
       turnId: "turn-1",
       agentName: "main",
       conversation,
     });
     const newer = registry.register({
       sessionId: "session-2",
+      chatId: "session-2",
       turnId: "turn-2",
       agentName: "main",
       conversation,

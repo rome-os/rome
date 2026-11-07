@@ -1,7 +1,7 @@
 import { createLogger } from "../../../../logger.js";
 import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
-import { ROME_CREDITS_PROXY_SECRET } from "../../../../core/rome-credits-proxy.js";
+import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
 import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {

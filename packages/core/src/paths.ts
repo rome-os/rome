@@ -215,6 +215,10 @@ export function getProfileAppsRuntimeStatusPath(): string {
   return join(getProfileAppsDir(), "runtime-status.json");
 }
 
+export function getProfileAppActionSchemaCachePath(): string {
+  return join(getProfileAppsDir(), "action-schemas.json");
+}
+
 export function getProfileMemoryDir(): string {
   return join(getProfileDir(), "memory");
 }

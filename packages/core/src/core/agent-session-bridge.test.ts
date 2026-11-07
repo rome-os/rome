@@ -14,6 +14,7 @@ import type {
   AgentTurnHandle,
 } from "./agent-session.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
+import { canOpen } from "../concierge/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb } from "../test/helpers.js";
@@ -179,6 +180,153 @@ describe("AgentSessionBridge conversation", () => {
         const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
         expect(roles).toContain("user");
       });
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
+describe("AgentSessionBridge resuming a session by its id", () => {
+  it("refuses a caller who may not open the session's chat, and lets its owner in", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "concierge",
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+      );
+      await repo.createSession("plain", "Plain");
+      const sent: unknown[] = [];
+      const session = {
+        key: { agentName: "core:concierge", channelThreadKey: "webchat:concierge" },
+        sessionId: "guardian-runtime",
+        sendTurn: (input: unknown) => {
+          sent.push(input);
+          return {
+            turnId: `turn-${sent.length}`,
+            events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+            interrupt: async () => undefined,
+          } as unknown as AgentTurnHandle;
+        },
+      } as unknown as AgentSession;
+      const manager = {
+        acquire: async () => session,
+        acquireBySessionId: async () => session,
+        peek: () => session,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      // A summon from an ordinary chat names the guardian's Concierge runtime.
+      const summon = (reqId: string, actor: Record<string, unknown>) =>
+        child.emit("message", {
+          type: "rpc_request",
+          reqId,
+          method: "agent.session.runTurn",
+          callerActionName: "system:summon",
+          callerActionContext: {
+            actor,
+            channelContext: { channel: "webchat", threadId: "plain" },
+          },
+          params: {
+            key: session.key,
+            sessionId: "guardian-runtime",
+            input: { prompt: "what did they say?" },
+          },
+        });
+      const responseTo = (reqId: string) =>
+        child.sent.find(
+          (m) =>
+            (m as { reqId?: string }).reqId === reqId &&
+            (m as { type?: string }).type === "rpc_response",
+        ) as { error?: unknown } | undefined;
+
+      summon("as-visitor", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      await rs.waitFor(() => expect(responseTo("as-visitor")).toBeDefined());
+      expect(responseTo("as-visitor")?.error).toBeDefined();
+      expect(sent).toEqual([]);
+
+      summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
+      await rs.waitFor(() => expect(sent).toHaveLength(1));
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
+describe("AgentSessionBridge fresh run started from a chat", () => {
+  it("records a summon from a private task chat as that chat's owner's, private from the start", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await repo.setSessionTrigger("guardian-task", { triggerKind: "concierge", triggerName: "T" });
+      const session = {
+        key: { agentName: "main", channelThreadKey: "summon:exec-1" },
+        sessionId: "summon-runtime",
+        sendTurn: () =>
+          ({
+            turnId: "summon-turn",
+            events: (async function* (): AsyncIterable<StreamAgentEvent> {
+              yield {
+                type: "turn_start",
+                turnId: "summon-turn",
+                sessionId: "summon-runtime",
+                userPrompt: "look it up",
+                agent: "main",
+              };
+              yield { type: "result", content: "Found it", agent: "main" };
+            })(),
+            interrupt: async () => undefined,
+          }) as unknown as AgentTurnHandle,
+      } as unknown as AgentSession;
+      const manager = {
+        acquire: async () => session,
+        peek: () => session,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      child.emit("message", {
+        type: "rpc_request",
+        reqId: "summon-1",
+        method: "agent.session.runTurn",
+        params: {
+          key: session.key,
+          input: { prompt: "look it up" },
+          actionContext: {
+            actionName: "system:summon",
+            executionId: "exec-1",
+            channelContext: { channel: "webchat", threadId: "guardian-task" },
+          },
+        },
+      });
+      const runId = "action:exec-1:main";
+      await rs.waitFor(async () => expect(await repo.getSession(runId)).not.toBeNull());
+      const run = await repo.getSession(runId);
+      expect(run).toMatchObject({ ownerKey: "guardian", triggerKind: "concierge_fork" });
+      expect(canOpen(run, "visitor:a")).toBe(false);
+      expect(canOpen(run, "guardian")).toBe(true);
     } finally {
       testDb.close();
     }

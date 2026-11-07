@@ -1,7 +1,4 @@
-import {
-  ROME_CREDITS_PROXY_PATH,
-  ROME_CREDITS_PROXY_SECRET,
-} from "../../../../core/rome-credits-proxy.js";
+import { ROME_CREDITS_PROXY_PATH } from "./rome-credits-proxy.js";
 import { getInternalApiBaseUrl } from "../../../../internal-api-url.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 
@@ -15,7 +12,7 @@ import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 // OpenAI login) and `rome_credits`. Rome restarts the app-server immediately
 // when the payer changes, so each Codex process has one payer.
 
-/** Env var the app-server reads its proxy key from on each request. */
+/** Env var the app-server reads the proxy secret from on each request. */
 export const ROME_CREDITS_TOKEN_ENV = "ROME_CREDITS_TOKEN";
 
 /**
@@ -38,9 +35,9 @@ function tomlString(value: string): string {
  * Codex's normal OpenAI-login default.
  *
  * Codex keeps `*TOKEN*` variables in agent shell commands by default, so the
- * proxy key is excluded from the shell env explicitly. This is not a security
+ * proxy secret is excluded from the shell env explicitly. This is not a security
  * boundary: a full-access agent command runs as the same user and can still
- * read the app-server's environ, as it can read Rome's settings DB. The key
+ * read the app-server's environ, as it can read Rome's settings DB. The secret
  * only reaches the loopback proxy, never a Rome Cloud credential.
  *
  * Codex's bundled skills (skill-creator, openai-docs, ...) are off so agents
@@ -67,7 +64,7 @@ export function codexAppServerConfigArgs(
     `base_url=${tomlString(`${getInternalApiBaseUrl()}${ROME_CREDITS_PROXY_PATH}`)}`,
     `env_key=${tomlString(ROME_CREDITS_TOKEN_ENV)}`,
     `wire_api="responses"`,
-    // The proxy authenticates its own key, not an OpenAI login.
+    // The proxy authenticates its own secret, not an OpenAI login.
     "requires_openai_auth=false",
     "supports_websockets=false",
     // The gateway answers 429 with `retry-after: 60`; one retry keeps a turn
