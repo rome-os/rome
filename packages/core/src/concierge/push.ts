@@ -1,6 +1,6 @@
 // A Concierge turn with a push level, proactive or the reply to the guardian's
-// own message, sends the first message it says to the guardian's phone, unless
-// the phone app shows the chat
+// own message, sends one message to the guardian's phone: the first it says
+// while the phone app does not show the chat
 // (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
 
 import { marked, type Token } from "marked";
@@ -113,13 +113,19 @@ export class ConciergePush {
   }
 
   /**
-   * Pushes the first message of a turn that has a push level. Answers at once:
-   * the push never holds or fails the turn, and the message stays in the chat
-   * whatever happens to it.
+   * Pushes the first message of a turn that has a push level, skipping any the
+   * phone shows as it is said. Answers at once: the push never holds or fails
+   * the turn, and the message stays in the chat whatever happens to it.
    */
   said(said: SaidInTurn): void {
     const { turnId, chatId, level } = said;
     if (!level || this.pushed.has(turnId)) return;
+    // A message read on the phone leaves the turn's push to a later message,
+    // so an answer that comes after the guardian leaves the chat still pushes.
+    if (this.deps.watching?.(chatId)) {
+      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+      return;
+    }
     this.pushed.add(turnId);
     if (this.pushed.size > PUSHED_TURNS_KEPT) {
       this.pushed.delete(this.pushed.values().next().value as string);
@@ -135,10 +141,6 @@ export class ConciergePush {
 
   private async send({ turnId, chatId, ownWords }: SaidInTurn, level: NotifyLevel): Promise<void> {
     if (!(await this.deps.pushesFor(chatId))) return;
-    if (this.deps.watching?.(chatId)) {
-      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
-      return;
-    }
     if ((await this.deps.quietUntil(this.now())) !== null) {
       log.info("concierge push held back by quiet hours", { turnId, chatId });
       return;

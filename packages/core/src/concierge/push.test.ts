@@ -124,6 +124,42 @@ describe("ConciergePush", () => {
     expect(sent.map((content) => content.body)).toEqual(["reply in B", "after leaving"]);
   });
 
+  it("leaves the turn's push to the answer after an acknowledgement the phone showed", async () => {
+    const { PhoneWatching } = await import("../lib/phone-watching.js");
+    const watching = new PhoneWatching();
+    const { push, sent } = pushWith({ watching: (chatId) => watching.isWatching(chatId) });
+    const unwatch = watching.watch("c");
+    push.said({ turnId: "t1", chatId: "c", ownWords: "On it, checking…", level: "active" });
+    await settle();
+    unwatch();
+    push.said({ turnId: "t1", chatId: "c", ownWords: "the answer", level: "active" });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "a follow-up", level: "active" });
+    await settle();
+    expect(sent.map((content) => content.body)).toEqual(["the answer"]);
+  });
+
+  it("spends the turn's push in quiet hours, so no later message pushes", async () => {
+    let quietUntil: number | null = Date.now() + 60_000;
+    const sent: SystemNotifyContent[] = [];
+    const push = new ConciergePush({
+      notify: {
+        send: async (content) => {
+          sent.push(content);
+          return { kind: "ok", attempted: 1, sent: 1, failed: 0 };
+        },
+      },
+      quietUntil: async () => quietUntil,
+      pushesFor: async () => true,
+      language: async () => null,
+    });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "in quiet hours", level: "active" });
+    await settle();
+    quietUntil = null;
+    push.said({ turnId: "t1", chatId: "c", ownWords: "after", level: "active" });
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
   it("pushes nothing in quiet hours", async () => {
     const { push, sent } = pushWith({ quietUntil: Date.now() + 60_000 });
     push.said({ turnId: "t1", chatId: "c", ownWords: "hi", level: "active" });
