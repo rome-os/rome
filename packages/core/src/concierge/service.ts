@@ -158,7 +158,7 @@ export interface ConciergeDeps {
   runBackendTurn: (
     params: BackendTurnParams,
     options?: { quiet?: boolean; inputLabel?: string },
-  ) => Promise<"completed" | "failed" | void>;
+  ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
 }
 
 export class ConciergeService {
@@ -526,6 +526,15 @@ export class ConciergeService {
     prompt: string,
     options: { quiet?: boolean; inputLabel?: string } = {},
   ): Promise<boolean> {
+    return (await this.systemTurnOutcome(chatId, prompt, options)) === "completed";
+  }
+
+  /** {@link runSystemTurn}, telling a turn cut short by a Stop or a newer message from one that failed. */
+  async systemTurnOutcome(
+    chatId: string,
+    prompt: string,
+    options: { quiet?: boolean; inputLabel?: string } = {},
+  ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,
       sessionId: "",
@@ -533,9 +542,8 @@ export class ConciergeService {
       threadId: chatId,
       prompt,
     });
-    if (!params.sessionId) return false;
-    const outcome = await this.deps.runBackendTurn(params, options);
-    return outcome === "completed";
+    if (!params.sessionId) return "failed";
+    return (await this.deps.runBackendTurn(params, options)) ?? "failed";
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */

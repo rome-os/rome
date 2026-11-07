@@ -64,8 +64,8 @@ export interface TaskEventDeps {
   isEnabled(): Promise<boolean>;
   /** The payloads for these rows, read from the database now, one per Concierge chat; empty when none of them exist any more. */
   render(tasks: DirtyTask[]): Promise<TaskEventDelivery[]>;
-  /** Runs one payload as a system turn in its chat and answers whether it ran to its end. */
-  deliver(delivery: TaskEventDelivery): Promise<boolean>;
+  /** Runs one payload as a system turn in its chat and answers how the turn ended. */
+  deliver(delivery: TaskEventDelivery): Promise<"completed" | "stopped" | "interrupted" | "failed">;
   /** The row was flushed and still not settled after its retry. */
   giveUp(taskId: string): void;
 }
@@ -182,6 +182,8 @@ export class TaskEventCoalescer {
     );
     // Rows whose turn did not run to its end; all of them until delivery starts.
     const notRun = new Set(taken.map(([taskId]) => taskId));
+    // Rows whose turn the guardian stopped.
+    const stopped = new Set<string>();
     // What each row's turn carries, kept in case the turn does not run.
     const carried = new Map(
       taken.map(([taskId, entry]) => [
@@ -212,13 +214,17 @@ export class TaskEventCoalescer {
       notRun.clear();
       // One chat's turn failing leaves the other chats' turns to run.
       for (const delivery of deliveries) {
-        const ran = await this.deps.deliver(delivery).catch((error: unknown) => {
+        const outcome = await this.deps.deliver(delivery).catch((error: unknown) => {
           log.warn("task event delivery to one chat failed", {
             error: error instanceof Error ? error.message : String(error),
           });
-          return false;
+          return "failed" as const;
         });
-        if (!ran) for (const taskId of delivery.taskIds) notRun.add(taskId);
+        if (outcome === "completed") continue;
+        // Only a Stop drops what the turn carried. A turn a newer message cut
+        // short may never have sent it to the model.
+        const ended = outcome === "stopped" ? stopped : notRun;
+        for (const taskId of delivery.taskIds) ended.add(taskId);
       }
     } catch (error) {
       log.warn("task event flush failed", {
@@ -229,6 +235,7 @@ export class TaskEventCoalescer {
       this.afterFlush(
         taken.map(([taskId]) => taskId),
         notRun,
+        stopped,
         carried,
       );
       this.arm();
@@ -238,6 +245,7 @@ export class TaskEventCoalescer {
   private afterFlush(
     taskIds: string[],
     notRun: Set<string>,
+    stopped: Set<string>,
     carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean }>,
   ): void {
     for (const taskId of taskIds) {
@@ -262,6 +270,11 @@ export class TaskEventCoalescer {
         }
         entry.undelivered = true;
         entry.notBefore = this.deps.now() + RETRY_MS;
+      } else if (stopped.has(taskId) && entry.changes === carried.get(taskId)?.changes) {
+        // The guardian stopped the turn: what it carried is never handed over
+        // again, and the row shows it is not synced.
+        this.dirty.delete(taskId);
+        this.deps.giveUp(taskId);
       } else if (entry.builtAt !== undefined && entry.since > entry.builtAt) {
         // A change came after the build: it waits for its own flush.
         entry.builtAt = undefined;
