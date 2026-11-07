@@ -7,7 +7,8 @@ import { canOpen } from "../concierge/privacy.js";
 import { readerOwner } from "../chats/dashboard/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
 import type { IpcCallContext, IpcRpc } from "../actions/ipc.js";
-import { type ParsedSessionKey, parseSessionKey } from "./agent-session-key.js";
+import { walkToRoot } from "../agent/index.js";
+import { parseSessionKey } from "./agent-session-key.js";
 import type {
   ChatId,
   CurrentActionContext,
@@ -115,15 +116,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     const required: string[] = [];
     const known = new Set<string>([session.sessionId]);
     if (session.conversation?.origin === "recorded") known.add(session.conversation.id);
-    const collect = (key: ParsedSessionKey) => {
-      if (key.kind === "webchat") required.push(key.chatId);
-      if (key.kind === "subagent") collect(key.parent);
-      if (key.kind === "fork") {
-        known.add(key.forkSessionId);
-        collect(key.parent);
-      }
-    };
-    collect(parseSessionKey(session.key.channelThreadKey));
+    const root = walkToRoot(session.key.channelThreadKey);
+    for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
+    const rootKey = parseSessionKey(root);
+    if (rootKey.kind === "webchat") required.push(rootKey.chatId);
     for (const chatId of required) {
       const chat = await repo.getSession(chatId);
       if (!chat || !canOpen(chat, owner)) return false;

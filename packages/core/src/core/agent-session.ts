@@ -11,6 +11,7 @@ import {
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import {
   requireAgent,
+  storeForkParent,
   turnStatus,
   endedTurn,
   type AgentCatalog,
@@ -150,11 +151,7 @@ import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
-import {
-  forkSessionKey,
-  sessionKeyChannel,
-  webchatConversationOfKey,
-} from "./agent-session-key.js";
+import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
@@ -1492,7 +1489,7 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
+      childChannelThreadKey: storeForkParent(key.channelThreadKey, fork.forkSessionId),
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
           parent: {

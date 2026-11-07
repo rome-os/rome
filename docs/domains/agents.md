@@ -51,6 +51,15 @@ An agent that another agent's turn hands work to. The session that runs it has t
 - A subagent that fails to load for its own reasons does not fail the agent that names it in the same load. That agent fails later, when a session opens it. The rule is `resolveSubagents` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts).
 - In code, the `Subagents` port is in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
 
+## Subagent call
+
+One call a turn makes to a subagent. The subagent's session has that turn as its parent.
+
+- One turn of the subagent's session answers the call. The session is a fresh one, or one that the same parent started before for the same subagent in the same project. Any other resume is refused.
+- The call ends completed with an output, failed with an error, or cancelled. The output is the turn's structured output when it has one, and its result text when not. A turn that ended interrupted is cancelled.
+- Cancelling the calling turn cancels its open calls.
+- In code, the rules for the request, a resume and the outcome are in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
+
 ## System prompt
 
 What the model reads before the conversation. It is built when a run opens the agent's session, and kept across reopens and forks of the model's session.
