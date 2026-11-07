@@ -80,8 +80,8 @@ Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pa
 
 ## Login and Settings
 
-- [ ] Login page with the mascot: centered where the launch logo sits, "Rome" and the sign-in line below, an occasional blink; stopped / no-instance states use the mascot instead of the power icon (user, 2026-11-06). Queued after the update page.
-- [ ] Settings: the X at top right stays fixed while the list scrolls (user, 2026-11-06). Queued.
+- [x] (`0bb06f72`, `0972ae4a`) Login page with the mascot: centered where the launch logo sits, "Rome" and the sign-in line below, an occasional blink; stopped / no-instance states use the mascot instead of the power icon (user, 2026-11-06). Queued after the update page.
+- [x] (`6984af95`; 190 Mac Catalyst tests pass; screenshots in notes folder `login-settings/`) Settings: the X at top right stays fixed while the list scrolls (user, 2026-11-06). Queued.
 
 ## Images
 
