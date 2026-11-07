@@ -150,6 +150,26 @@ describe("SharedCodexAccountService", () => {
     await expect(service.availability()).resolves.toMatchObject({ state: "available" });
   });
 
+  it("drops a refusal when an authorization completes, since it may name another account", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/login/start", {
+      type: "chatgptDeviceCode",
+      loginId: "device-1",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    });
+    rpc.queue("account/read", { account: { type: "chatgpt", planType: "pro" } });
+    rpc.queue("account/rateLimits/read", {
+      rateLimits: { primary: { usedPercent: 10 }, secondary: { usedPercent: 10 } },
+    });
+    const service = createService(rpc);
+    service.refusedTurn({ kind: "usage" });
+    await service.startDeviceAuthorization();
+    rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
+    await expect(service.availability()).resolves.toMatchObject({ state: "available" });
+    service.close();
+  });
+
   it("classifies the current single-window rate-limit response by duration", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/rateLimits/read", {

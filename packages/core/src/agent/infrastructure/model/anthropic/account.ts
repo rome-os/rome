@@ -22,7 +22,11 @@ import type {
   ModelAccountUsage,
 } from "../../../domain/model-account.js";
 import type { ProviderAvailability } from "../../../domain/provider-availability.js";
-import { accountAvailability, usageShowsCapacity } from "../account-availability.js";
+import {
+  accountAvailability,
+  refusalAfterReport,
+  usageShowsCapacity,
+} from "../account-availability.js";
 import {
   type LearnsRefusedTurns,
   type RefusedTurn,
@@ -41,6 +45,8 @@ export interface ClaudeAccountOptions {
   settingsRepo?: Pick<SettingsRepository, "get">;
   env?: NodeJS.ProcessEnv;
   readCliStatus?: () => Promise<ModelAccountStatus>;
+  /** Whether the provider refused the CLI's credential, from the persisted marker. */
+  readCredentialRevoked?: () => Promise<boolean>;
   readUsage?: () => Promise<ModelAccountUsage | null>;
   logout?: () => Promise<void>;
   now?: () => number;
@@ -115,11 +121,20 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
       if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
     }
     this.last = accountAvailability(status, usage, this.heldRefusal(), this.now(), this.last);
+    this.refusal = refusalAfterReport(this.refusal, this.last);
     return this.last;
   }
 
   async status(): Promise<ModelAccountStatus> {
-    const base = await this.readStatus();
+    const base = await this.readStatus().catch(async (err: unknown) => {
+      // The provider refused the credential and the CLI cannot say so right
+      // now: the persisted marker still does, and a run must not keep
+      // selecting an account the provider refused.
+      if (await (this.options.readCredentialRevoked ?? isAnthropicAuthRevoked)()) {
+        return { ...this.last?.account, loggedIn: false, needsReauth: true };
+      }
+      throw err;
+    });
     return { ...base, usageLimited: !UNLIMITED_AUTH_METHODS.has(base.authMethod ?? "") };
   }
 

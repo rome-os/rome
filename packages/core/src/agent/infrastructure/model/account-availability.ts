@@ -49,6 +49,21 @@ function ahead(until: string | undefined, now: number): string | undefined {
  * nor a limit, so a limit still ahead carries over from `previous`, the
  * account's last report.
  */
+/**
+ * The refusal as the account should keep holding it after it reported
+ * `availability`: ending when the exhausted window resets, when that comes
+ * first, so a usage read that fails later cannot bring the limit back past a
+ * reset the provider stated.
+ */
+export function refusalAfterReport(
+  refusal: UsageRefusal | undefined,
+  availability: ProviderAvailability,
+): UsageRefusal | undefined {
+  const until = availability.usageLimitUntil;
+  if (!refusal || !until || Date.parse(until) >= Date.parse(refusal.until)) return refusal;
+  return { ...refusal, until };
+}
+
 export function accountAvailability(
   status: ModelAccountStatus,
   usage: ModelAccountUsage | null,

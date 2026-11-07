@@ -149,6 +149,40 @@ describe("ClaudeAccount", () => {
     });
   });
 
+  it("reports a refused credential as expired when the CLI cannot be read, else fails the read", async () => {
+    let revoked = true;
+    const account = new ClaudeAccount({
+      env: {},
+      readCliStatus: async () => {
+        throw new Error("claude timed out");
+      },
+      readCredentialRevoked: async () => revoked,
+    });
+    await expect(account.availability()).resolves.toMatchObject({ state: "expired" });
+    revoked = false;
+    await expect(account.availability()).rejects.toThrow("claude timed out");
+  });
+
+  it("holds a refusal no longer than the window reset it reported", async () => {
+    let now = Date.parse("2026-11-07T00:00:00.000Z");
+    const resetsAt = "2026-11-07T01:00:00.000Z";
+    const reads = [
+      { ...usage(100), fiveHour: { usedPercent: 100, resetsAt } },
+      { checkedAt: "2026-11-07T01:30:00.000Z", source: "test", error: "HTTP 429" },
+    ];
+    const account = new ClaudeAccount({
+      env: {},
+      readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+      readUsage: async () => reads.shift() ?? null,
+      now: () => now,
+    });
+    account.refusedTurn({ kind: "usage" });
+    await expect(account.availability()).resolves.toMatchObject({ usageLimitUntil: resetsAt });
+    // After the reset, a usage read that fails does not bring the refusal back.
+    now = Date.parse(resetsAt) + 30 * 60 * 1000;
+    await expect(account.availability()).resolves.toMatchObject({ state: "available" });
+  });
+
   it("fails a logout the CLI refused, whatever it printed", async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), "rome-claude-account-"));
     const originalPath = process.env.PATH;

@@ -24,7 +24,11 @@ import type {
 } from "../../../domain/model-account.js";
 import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL } from "../../../domain/model-selection.js";
 import type { ProviderAvailability } from "../../../domain/provider-availability.js";
-import { accountAvailability, usageShowsCapacity } from "../account-availability.js";
+import {
+  accountAvailability,
+  refusalAfterReport,
+  usageShowsCapacity,
+} from "../account-availability.js";
 import {
   type LearnsRefusedTurns,
   type RefusedTurn,
@@ -211,6 +215,7 @@ export class SharedCodexAccountService
       if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
     }
     this.last = accountAvailability(status, usage, this.heldRefusal(), this.now(), this.last);
+    this.refusal = refusalAfterReport(this.refusal, this.last);
     return this.last;
   }
 
@@ -520,6 +525,8 @@ export class SharedCodexAccountService
     if (active) this.takeActiveLogin();
     if (notification.success === true) {
       this.lastLoginError = null;
+      // The authorization may name another account; a refusal was the old one's.
+      this.refusal = undefined;
     } else {
       this.lastLoginError =
         typeof notification.error === "string" && notification.error.trim()
