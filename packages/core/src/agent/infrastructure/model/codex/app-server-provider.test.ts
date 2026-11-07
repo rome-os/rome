@@ -1,9 +1,9 @@
 import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { CodexAppServerProvider } from "./app-server-provider.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import { testRomeTools, type TestRomeToolsOptions } from "../../../../test/tool-calls.js";
 import { NO_ROME_TOOLS, type RomeTools } from "../../../domain/rome-tools.js";
+import { subagentToolName } from "../../../domain/subagent.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
 import type { CodexLoginChoice } from "../../../domain/model-login.js";
 import type {
@@ -94,16 +94,11 @@ rs.mock("./app-server-client.js", () => ({
 type ParamOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
   /** What the session's Rome tools are built from. */
-  tools?: Partial<FacadeParams>;
+  tools?: TestRomeToolsOptions;
 };
 
-function buildTools(overrides: Partial<FacadeParams> = {}): RomeTools {
-  return createRomeTools({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "delegated",
+function buildTools(overrides: TestRomeToolsOptions = {}): RomeTools {
+  return testRomeTools({
     ...overrides,
   });
 }
@@ -500,13 +495,17 @@ describe("CodexAppServerProvider", () => {
       if (method === "thread/start") {
         const names = payload.dynamicTools?.map((tool) => tool.name) ?? [];
         return {
-          thread: { id: names.includes("alpha_researcher") ? "thread-alpha" : "thread-beta" },
+          thread: {
+            id: names.includes(subagentToolName("alpha_researcher"))
+              ? "thread-alpha"
+              : "thread-beta",
+          },
         };
       }
       if (method === "turn/start") {
         const isAlpha = payload.threadId === "thread-alpha";
         const turnId = isAlpha ? "turn-alpha" : "turn-beta";
-        const tool = isAlpha ? "alpha_researcher" : "beta_researcher";
+        const subagentName = isAlpha ? "alpha_researcher" : "beta_researcher";
         const callId = isAlpha ? "call-alpha" : "call-beta";
         captured.onNotification?.("turn/started", {
           threadId: payload.threadId,
@@ -517,8 +516,8 @@ describe("CodexAppServerProvider", () => {
           turnId,
           callId,
           namespace: null,
-          tool,
-          arguments: { prompt: tool },
+          tool: subagentToolName(subagentName),
+          arguments: { prompt: subagentName },
         });
         captured.onNotification?.("turn/completed", {
           threadId: payload.threadId,
@@ -527,15 +526,7 @@ describe("CodexAppServerProvider", () => {
       }
       return {};
     });
-    const tool = (name: string) => ({
-      name,
-      description: name,
-      inputSchema: {
-        type: "object" as const,
-        properties: { prompt: { type: "string" } },
-        required: ["prompt"],
-      },
-    });
+    const subagent = (name: string) => ({ name, description: name });
     const provider = new CodexAppServerProvider();
 
     const [alpha, beta] = await Promise.all([
@@ -545,7 +536,7 @@ describe("CodexAppServerProvider", () => {
             systemPrompt: "alpha",
           },
           tools: {
-            subagentTools: [tool("alpha_researcher")],
+            subagents: [subagent("alpha_researcher")],
             executeSubagent: alphaExecute,
           },
         }),
@@ -556,7 +547,7 @@ describe("CodexAppServerProvider", () => {
             systemPrompt: "beta",
           },
           tools: {
-            subagentTools: [tool("beta_researcher")],
+            subagents: [subagent("beta_researcher")],
             executeSubagent: betaExecute,
           },
         }),
@@ -594,7 +585,7 @@ describe("CodexAppServerProvider", () => {
     expect(closeMock).toHaveBeenCalledTimes(1);
   });
 
-  it("maps dynamic facade results into app-server responses and Rome tool traces", async () => {
+  it("maps dynamic tool results into app-server responses and Rome tool traces", async () => {
     let dynamicResponse: unknown;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thread-ask" } };
@@ -641,9 +632,7 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const provider = new CodexAppServerProvider();
-    const session = await provider.openSession(
-      buildParams({ tools: { supportsInteractiveSurface: true } }),
-    );
+    const session = await provider.openSession(buildParams({ tools: { widgetsShow: true } }));
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "ask" });
     const messages = await collected;
@@ -750,7 +739,7 @@ describe("CodexAppServerProvider", () => {
           turnId: "isolated-turn",
           callId: "call-source-tool",
           namespace: null,
-          tool: "source_researcher",
+          tool: subagentToolName("source_researcher"),
           arguments: { prompt: "inspect" },
         });
         n("turn/completed", {
@@ -765,13 +754,7 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({
         tools: {
-          subagentTools: [
-            {
-              name: "source_researcher",
-              description: "Research for the source",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
+          subagents: [{ name: "source_researcher", description: "Research for the source" }],
           executeSubagent: sourceExecuteSubagent,
         },
       }),
@@ -785,7 +768,7 @@ describe("CodexAppServerProvider", () => {
       contentItems: [
         {
           type: "inputText",
-          text: "Dynamic tool is disabled in this fork: source_researcher",
+          text: `Dynamic tool is disabled in this fork: ${subagentToolName("source_researcher")}`,
         },
       ],
       success: false,
@@ -816,7 +799,9 @@ describe("CodexAppServerProvider", () => {
     );
     expect(logMock.debug).toHaveBeenCalledWith(
       "codex isolated fork disabled inherited dynamic tools",
-      { disabledInheritedToolNames: expect.arrayContaining(["source_researcher"]) },
+      {
+        disabledInheritedToolNames: expect.arrayContaining([subagentToolName("source_researcher")]),
+      },
     );
 
     await forkSession.close();
@@ -838,13 +823,7 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({
         tools: {
-          subagentTools: [
-            {
-              name: "source_researcher",
-              description: "Research for the source",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
+          subagents: [{ name: "source_researcher", description: "Research for the source" }],
         },
       }),
     );
@@ -857,13 +836,7 @@ describe("CodexAppServerProvider", () => {
             model: "gpt-5.4-mini",
           },
           tools: {
-            subagentTools: [
-              {
-                name: "fork_reviewer",
-                description: "Review for the fork",
-                inputSchema: { type: "object", properties: {} },
-              },
-            ],
+            subagents: [{ name: "fork_reviewer", description: "Review for the fork" }],
           },
         },
       ),
@@ -875,8 +848,8 @@ describe("CodexAppServerProvider", () => {
     );
     expect(logMock.warn).toHaveBeenCalledWith("codex native fork dynamic tool catalogs differ", {
       isolated: false,
-      disabledInheritedToolNames: ["source_researcher"],
-      droppedConfiguredToolNames: ["fork_reviewer"],
+      disabledInheritedToolNames: [subagentToolName("source_researcher")],
+      droppedConfiguredToolNames: [subagentToolName("fork_reviewer")],
     });
     expect(logMock.debug).not.toHaveBeenCalledWith(
       "codex isolated fork disabled inherited dynamic tools",
@@ -1153,17 +1126,7 @@ describe("CodexAppServerProvider", () => {
       turnId: "fork-child-turn",
       output: "fork result",
     }));
-    const subagentTools = [
-      {
-        name: "researcher",
-        description: "Research a topic",
-        inputSchema: {
-          type: "object" as const,
-          properties: { prompt: { type: "string" } },
-          required: ["prompt"],
-        },
-      },
-    ];
+    const subagents = [{ name: "researcher", description: "Research a topic" }];
 
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -1176,7 +1139,7 @@ describe("CodexAppServerProvider", () => {
           item: {
             type: "dynamicToolCall",
             id: "call-fork-subagent",
-            tool: "researcher",
+            tool: subagentToolName("researcher"),
             arguments: { prompt: "inspect the fork" },
           },
           threadId: "source-thread",
@@ -1187,14 +1150,14 @@ describe("CodexAppServerProvider", () => {
           turnId: "fork-turn",
           callId: "call-fork-subagent",
           namespace: null,
-          tool: "researcher",
+          tool: subagentToolName("researcher"),
           arguments: { prompt: "inspect the fork" },
         });
         n("item/completed", {
           item: {
             type: "dynamicToolCall",
             id: "call-fork-subagent",
-            tool: "researcher",
+            tool: subagentToolName("researcher"),
             arguments: { prompt: "inspect the fork" },
           },
           threadId: "source-thread",
@@ -1213,7 +1176,7 @@ describe("CodexAppServerProvider", () => {
       buildParams({
         thread: { kind: "new" },
         tools: {
-          subagentTools,
+          subagents,
           executeSubagent: sourceExecuteSubagent,
         },
       }),
@@ -1222,7 +1185,7 @@ describe("CodexAppServerProvider", () => {
     const forkSession = await provider.openSession(
       buildBranchParams(
         { lifetime: "ephemeral" },
-        { tools: { subagentTools, executeSubagent: forkExecuteSubagent } },
+        { tools: { subagents, executeSubagent: forkExecuteSubagent } },
       ),
     );
     const collected = collectUntilTerminal(forkSession);
@@ -1712,7 +1675,7 @@ describe("CodexAppServerProvider", () => {
           turnId: "provider-turn-1",
           callId: "call-subagent-1",
           namespace: null,
-          tool: "researcher",
+          tool: subagentToolName("researcher"),
           arguments: { prompt: "inspect" },
         });
         captured.onNotification?.("turn/completed", {
@@ -1726,17 +1689,7 @@ describe("CodexAppServerProvider", () => {
     const session = await provider.openSession(
       buildParams({
         tools: {
-          subagentTools: [
-            {
-              name: "researcher",
-              description: "Research a topic",
-              inputSchema: {
-                type: "object",
-                properties: { prompt: { type: "string" } },
-                required: ["prompt"],
-              },
-            },
-          ],
+          subagents: [{ name: "researcher", description: "Research a topic" }],
           executeSubagent,
         },
       }),
@@ -1744,7 +1697,9 @@ describe("CodexAppServerProvider", () => {
 
     const startCall = requestMock.mock.calls.find((call) => call[0] === "thread/start");
     expect(startCall?.[1]).toMatchObject({
-      dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "researcher" })]),
+      dynamicTools: expect.arrayContaining([
+        expect.objectContaining({ name: subagentToolName("researcher") }),
+      ]),
     });
     expect((startCall?.[1] as { config: Record<string, unknown> }).config).not.toHaveProperty(
       "mcp_servers",

@@ -18,6 +18,18 @@ export interface AgentAction {
   inputSchema: Record<string, unknown>;
 }
 
+/** What this agent may call. */
+export interface AgentActions {
+  /** Read on every call, so an action installed mid-session shows at once. */
+  list(): readonly AgentAction[];
+  /**
+   * Runs an action this agent may call. Resolves with the action's result,
+   * its domain rejections included. Throws `Unknown action: <name>` for any
+   * other name, and on an invocation failure; either becomes an error result.
+   */
+  run(name: string, input: unknown): Promise<ActionResult>;
+}
+
 interface ActionArgumentSummary {
   name: string;
   type: string;
@@ -163,28 +175,24 @@ export function searchActions(
   limit: number | undefined,
 ): ActionSummary[] {
   const normalizedLimit = normalizeSearchLimit(limit);
-  const matcher = createSearchMatcher(queryText);
+  const matches = createSearchMatcher(queryText);
   const sortedActions = [...actionCatalog].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
 
-  if (!matcher) {
+  if (!matches) {
     return sortedActions.slice(0, normalizedLimit).map(toActionSummary);
   }
 
   return sortedActions
     .map((action) => {
       const haystack = buildActionSearchText(action);
-      if (!matcher.matches(haystack)) {
+      if (!matches(haystack)) {
         return null;
       }
 
-      let score = 1;
-      score += matcher.scoreName(action.name);
-      score += matcher.scoreDescription(action.description);
-      if (matcher.kind === "regex") {
-        score += 1;
-      }
+      // A match in the name ranks above one in the description.
+      const score = (matches(action.name) ? 5 : 0) + (matches(action.description) ? 3 : 0);
 
       return { action, score };
     })

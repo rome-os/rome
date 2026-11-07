@@ -169,7 +169,7 @@ describe("createModelAccounts", () => {
       accounts: { openai: codex.account },
       startRefresh: false,
       refreshIntervalMs: null,
-      log: { info: () => {}, warn },
+      log: { info: () => {}, error: () => {}, warn },
       now: () => readAt,
     });
     await accounts.refresh();

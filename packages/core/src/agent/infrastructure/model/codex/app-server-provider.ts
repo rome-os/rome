@@ -11,7 +11,7 @@
 // The JSON-RPC transport lives in app-server-client.ts; the
 // notification→AgentEvent translation is below. Headless config:
 // approvalPolicy=never, so Rome's per-action approval gate (inside the Rome tool
-// facade) is the only gate and no server→client approval round-trips are
+// handler) is the only gate and no server→client approval round-trips are
 // needed. The agent's declared builtins pick Codex's own tools and the sandbox
 // (codexToolOverrides).
 
@@ -818,7 +818,7 @@ export class CodexAppServerProvider implements ModelProvider {
       const tool = toolNameForItem(item);
       // External MCP tools arrive as `mcpToolCall`, which nests the real result
       // in `item.result`. Rome-owned tools arrive as `dynamicToolCall` and use
-      // the in-process facade output retained by callId. Normalize both so the
+      // the in-process tool output retained by callId. Normalize both so the
       // drain loop sees the real args/result rather than the wrapper item.
       const isMcp = item.type === "mcpToolCall";
       const isDynamic = item.type === "dynamicToolCall";

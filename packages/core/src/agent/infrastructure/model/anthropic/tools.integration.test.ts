@@ -5,7 +5,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@rstest/core";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
 import { AnthropicProvider, CLAUDE_AGENT_SDK_ENV, CLAUDE_AGENT_SDK_SETTINGS } from "./provider.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
+import { testRomeTools } from "../../../../test/tool-calls.js";
 import type { RomeToolGroup } from "../../../domain/rome-tools.js";
 import { MODEL_SELECTIONS } from "../../../domain/model-selection.js";
 
@@ -25,13 +25,8 @@ const claudeModels = Object.values(MODEL_SELECTIONS)
 describe("bundled Claude Code", () => {
   const builtinTools = [...new AnthropicProvider().builtinTools];
   // A web chat's Rome tools: actions, skills and the interactive ones.
-  const tools = createRomeTools({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "unused",
-    supportsInteractiveSurface: true,
+  const tools = testRomeTools({
+    widgetsShow: true,
   });
 
   it.each(claudeModels)("gives %s every tool Rome requests", async (model) => {

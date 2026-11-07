@@ -25,17 +25,3 @@ export interface SessionToolContext {
  * the next open. An empty answer registers nothing.
  */
 export type SessionToolsProvider = (context: SessionToolContext) => Promise<RomeTool[]>;
-
-/**
- * The same tools with handlers that refuse. A forked turn advertises its
- * source's catalog unchanged, but its calls must not act on the source's turn.
- */
-export function detachSessionTools(tools: RomeTool[]): RomeTool[] {
-  return tools.map((tool) => ({
-    ...tool,
-    handler: async () => ({
-      content: [{ type: "text", text: `${tool.name} is unavailable in a forked turn.` }],
-      isError: true,
-    }),
-  }));
-}

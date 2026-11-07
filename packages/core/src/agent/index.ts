@@ -41,22 +41,10 @@ export {
 } from "./domain/model-resolution.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
-export {
-  searchSkills,
-  toSkillSummary,
-  type Skill,
-  type SkillCatalog,
-} from "./domain/skill.js";
-export {
-  actionToolOutput,
-  describeAction,
-  searchActions,
-  toActionSummary,
-  type AgentAction,
-} from "./domain/agent-action.js";
-export { MAX_SEARCH_LIMIT, SEARCH_LIMIT_DESCRIPTION } from "./domain/catalog-search.js";
-export { askQuestionToolOutput, normalizeAskQuestionForCard } from "./domain/ask-question.js";
-export { parseDeferInput, type DeferInput } from "./domain/defer.js";
+export type { Skill, SkillCatalog } from "./domain/skill.js";
+export type { AgentAction, AgentActions } from "./domain/agent-action.js";
+export type { AgentLog } from "./domain/agent-log.js";
+export type { WakeUp } from "./domain/defer.js";
 export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
 export { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
 export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
@@ -103,7 +91,6 @@ export {
 } from "./domain/usage-switch.js";
 export {
   createModelAccounts,
-  type AgentLog,
   type CreateModelAccountsOptions,
   type ModelAccounts,
   type ModelAccountChange,
@@ -134,13 +121,14 @@ export type {
   ModelToolCallContext,
   RomeTool,
   RomeToolDefinition,
-  RomeToolHandler,
   RomeToolGroup,
   RomeToolResult,
   RomeTools,
-  ModelToolCallId,
 } from "./domain/rome-tools.js";
-export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
+export { subagentToolName, type Subagent, type Subagents } from "./domain/subagent.js";
+export { detachSessionTools, NO_ROME_TOOLS } from "./domain/rome-tools.js";
+export { createRomeTools } from "./application/rome-tools.js";
+export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { SkillLoader } from "./infrastructure/skill-loader.js";
 

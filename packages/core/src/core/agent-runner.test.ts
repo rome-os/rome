@@ -74,13 +74,13 @@ import {
   createModelResolver,
   createTierModelsSetting,
   type ModelResolver,
+  subagentToolName,
 } from "../agent/index.js";
 import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
-  subagentToolName,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
@@ -2116,48 +2116,6 @@ describe("AgentRunner", () => {
       });
       expect((actionResult as { pendingInteraction?: boolean }).pendingInteraction).toBeUndefined();
       expect((actionResult as { message: string }).message).toContain("Pick a time slot");
-    });
-
-    it("takes the non-interactive fallback for action results when opened detached", async () => {
-      // A side chat's follow-up runs on a `webchat:` key, so the surface check
-      // would otherwise say it can mount UI — but it renders in the read-only
-      // Sessions detail view, where nobody can answer a card.
-      registerDemoAction(async () => ({
-        status: "pending_interaction",
-        interaction: {
-          appId: "demo-app",
-          promptText: "Pick a time slot",
-          render: { kind: "inline", componentId: "slot-picker" },
-        },
-      }));
-
-      let actionResult: unknown;
-      const runImpl = async function* (
-        params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentEvent> {
-        actionResult = await executeActionTool(params.tools, "demo_action", {});
-        yield { type: "result", content: "done" };
-      };
-      const provider: ModelProvider = {
-        id: "mock",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", runImpl),
-      };
-      const manager = createAgentSessionManager(
-        managerDeps(createTestModelResolver({ providers: [provider] })),
-      );
-      const session = await manager.acquire(
-        { agentName: "test-main", channelThreadKey: "webchat:detached-follow-up" },
-        { interactiveSurfaceDetached: true },
-      );
-      await collectMessages(session.sendTurn({ prompt: "continue" }).events);
-
-      expect(actionResult).toMatchObject({
-        message: expect.stringContaining("cannot render an interactive UI"),
-      });
-      expect((actionResult as { pendingInteraction?: boolean }).pendingInteraction).toBeUndefined();
-
-      await session.close("shutdown");
     });
 
     it("exact fork subagents run in fresh fork-owned child sessions", async () => {
@@ -5997,7 +5955,7 @@ describe("AgentRunner", () => {
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {
       // Repro of the in-session app_management install flow: the provider's
-      // facade tools (list_actions, execute_action) must observe registrations
+      // Rome tools (list_actions, execute_action) must observe registrations
       // that happen *after* openSession captured a snapshot. The session
       // exposes the live view via params.getActionCatalog and routes the
       // executeAction callback through the same allow-list-filtered lookup.
@@ -6059,7 +6017,7 @@ describe("AgentRunner", () => {
       });
 
       // The live getter now reports both actions to anything that reads it
-      // (the facade tools' list_actions / search_actions / read_action).
+      // (the Rome tools' list_actions / search_actions / read_action).
       // Order is registry-insertion-order; sort for stable comparison.
       expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action", "repro_hello"]);
 

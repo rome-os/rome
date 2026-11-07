@@ -20,7 +20,7 @@ The model is the one open param the caller does choose. A fork is invoked for a 
 
 ## Decision
 
-An exact-mode fork derives its open params by spreading the parameters captured from the source session's last successful provider open. The spread drops the per-session identity fields, then overrides the caller's model and the execute callbacks bound to the fork's own session and turn. It also sets `interactiveSurfaceDetached`, which degrades the interactive runtime while the advertised catalog stays identical. No exact-fork path builds that object field by field, and an isolated-mode fork enumerates its own deliberately empty surface.
+An exact-mode fork derives its open params by spreading the parameters captured from the source session's last successful provider open. The spread drops the per-session identity fields, then overrides the caller's model and the execute callbacks bound to the fork's own session and turn. It also states that it has no speaker, so no widget shows while the advertised catalog stays identical. No exact-fork path builds that object field by field, and an isolated-mode fork enumerates its own deliberately empty surface.
 
 ## Alternatives
 

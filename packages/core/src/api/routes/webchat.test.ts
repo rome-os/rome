@@ -4486,7 +4486,7 @@ describe("Webchat API", () => {
 
     const parkedEvents = (toolUseId: string) =>
       async function* () {
-        // Mirror the real MCP facade tool_result shape: the action's JSON is
+        // Mirror the real tool_result shape: the action's JSON is
         // wrapped in a `[{ type: "text", text }]` content block, not handed back
         // as a bare object — the drain loop must unwrap it.
         yield {

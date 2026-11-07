@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { askQuestionToolOutput, normalizeAskQuestionForCard } from "./ask-question.js";
+import { askQuestionToolOutput, parseAskQuestionInput, type Question } from "./ask-question.js";
 
 const single = (options: unknown) => ({
   questions: [{ id: "q1", question: "Pick one", type: "single", options }],
@@ -9,9 +9,9 @@ const multi = (options: unknown) => ({
   questions: [{ id: "q1", question: "Pick any", type: "multi", options }],
 });
 
-describe("normalizeAskQuestionForCard", () => {
+describe("parseAskQuestionInput", () => {
   it("accepts well-formed single-choice and text questions", () => {
-    const result = normalizeAskQuestionForCard({
+    const result = parseAskQuestionInput({
       questions: [
         { id: "q1", question: "Pick one", type: "single", options: ["A", "B"] },
         { id: "q2", question: "Anything else?", type: "text" },
@@ -21,51 +21,49 @@ describe("normalizeAskQuestionForCard", () => {
   });
 
   it("accepts a well-formed multi-choice question", () => {
-    expect(normalizeAskQuestionForCard(multi(["A", "B", "C"])).ok).toBe(true);
+    expect(parseAskQuestionInput(multi(["A", "B", "C"])).ok).toBe(true);
   });
 
   it("rejects a non-object input", () => {
-    expect(normalizeAskQuestionForCard("nope").ok).toBe(false);
-    expect(normalizeAskQuestionForCard({ questions: [] }).ok).toBe(false);
+    expect(parseAskQuestionInput("nope").ok).toBe(false);
+    expect(parseAskQuestionInput({ questions: [] }).ok).toBe(false);
   });
 
   it("rejects missing id / question / type", () => {
-    expect(normalizeAskQuestionForCard({ questions: [{ question: "x", type: "text" }] }).ok).toBe(
-      false,
-    );
-    expect(normalizeAskQuestionForCard({ questions: [{ id: "q1", type: "text" }] }).ok).toBe(false);
+    expect(parseAskQuestionInput({ questions: [{ question: "x", type: "text" }] }).ok).toBe(false);
+    expect(parseAskQuestionInput({ questions: [{ id: "q1", type: "text" }] }).ok).toBe(false);
     expect(
-      normalizeAskQuestionForCard({ questions: [{ id: "q1", question: "x", type: "bogus" }] }).ok,
+      parseAskQuestionInput({ questions: [{ id: "q1", question: "x", type: "bogus" }] }).ok,
     ).toBe(false);
   });
 
   it("rejects single-choice with a missing or empty options array", () => {
-    expect(normalizeAskQuestionForCard(single(undefined)).ok).toBe(false);
-    expect(normalizeAskQuestionForCard(single([])).ok).toBe(false);
+    expect(parseAskQuestionInput(single(undefined)).ok).toBe(false);
+    expect(parseAskQuestionInput(single([])).ok).toBe(false);
   });
 
   it("rejects multi-choice with a missing or empty options array", () => {
-    expect(normalizeAskQuestionForCard(multi(undefined)).ok).toBe(false);
-    expect(normalizeAskQuestionForCard(multi([])).ok).toBe(false);
+    expect(parseAskQuestionInput(multi(undefined)).ok).toBe(false);
+    expect(parseAskQuestionInput(multi([])).ok).toBe(false);
   });
 
   // Regression: the web renderer drops non-string options, so these used to
   // pass and render a choice card with zero buttons (a dead parked turn).
   it("rejects single-choice options that are not all non-empty strings", () => {
-    expect(normalizeAskQuestionForCard(single([null])).ok).toBe(false);
-    expect(normalizeAskQuestionForCard(single(["", "B"])).ok).toBe(false);
-    expect(normalizeAskQuestionForCard(single(["A", 42])).ok).toBe(false);
-    expect(normalizeAskQuestionForCard(single(["  "])).ok).toBe(false);
+    expect(parseAskQuestionInput(single([null])).ok).toBe(false);
+    expect(parseAskQuestionInput(single(["", "B"])).ok).toBe(false);
+    expect(parseAskQuestionInput(single(["A", 42])).ok).toBe(false);
+    expect(parseAskQuestionInput(single(["  "])).ok).toBe(false);
   });
 
   it("rejects multi-choice options that are not all non-empty strings", () => {
-    expect(normalizeAskQuestionForCard(multi([null])).ok).toBe(false);
-    expect(normalizeAskQuestionForCard(multi(["A", 42])).ok).toBe(false);
+    expect(parseAskQuestionInput(multi([null])).ok).toBe(false);
+    expect(parseAskQuestionInput(multi(["A", 42])).ok).toBe(false);
   });
 });
 
 describe("askQuestionToolOutput", () => {
-  const questions = [
+  const questions: Question[] = [
     { id: "day", question: "Which day?", type: "single", options: ["Mon", "Tue"], freeText: true },
     { id: "note", question: "Anything else?", type: "text", optional: true },
   ];

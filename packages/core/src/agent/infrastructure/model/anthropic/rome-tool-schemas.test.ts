@@ -2,21 +2,15 @@ import { describe, it, expect } from "@rstest/core";
 import { z } from "zod";
 import { jsonSchemaObjectToZodRawShape } from "zod-from-json-schema";
 import type { JSONSchema } from "zod/v4/core";
-import type { RomeTool } from "../agent/index.js";
-import { proposeRoutineTools } from "../routines/propose-routine-tool.js";
-import { buildFacadeBundle } from "./mcp-facade.js";
-import { toMcpToolShape } from "./mcp/json-schema-zod.js";
+import { proposeRoutineTools } from "../../../../routines/propose-routine-tool.js";
+import { testRomeTools } from "../../../../test/tool-calls.js";
+import { ROME_TOOL_GROUPS, type RomeToolDefinition } from "../../../domain/rome-tools.js";
+import { toMcpToolShape } from "./json-schema-zod.js";
 
-// Every built-in tool the facade can offer, with each optional group switched on.
-function allBuiltInTools(): RomeTool[] {
-  const bundle = buildFacadeBundle({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({}),
-    executeSubagent: async () => ({}),
-    executeDefer: async () => ({}),
-    supportsInteractiveSurface: true,
+// Every built-in Rome tool, with each optional group switched on.
+function allBuiltInTools(): RomeToolDefinition[] {
+  const tools = testRomeTools({
+    defer: { schedule: async () => ({}), finalText: "deliver" },
     sessionTools: proposeRoutineTools({
       widgets: "card",
       hasSpeaker: true,
@@ -28,10 +22,10 @@ function allBuiltInTools(): RomeTool[] {
       runAction: async () => ({ status: "ok" }),
     }),
   });
-  return [...bundle.actions, ...bundle.subagents, ...bundle.skills, ...bundle.interactiveTools];
+  return ROME_TOOL_GROUPS.flatMap((group) => [...tools.listTools(group)]);
 }
 
-function findTool(name: string): RomeTool {
+function findTool(name: string): RomeToolDefinition {
   const tool = allBuiltInTools().find((t) => t.name === name);
   if (!tool) throw new Error(`missing built-in tool ${name}`);
   return tool;
@@ -40,7 +34,7 @@ function findTool(name: string): RomeTool {
 // The Claude path converts each inputSchema to zod and re-serializes it for
 // tools/list. A schema that cannot make that round trip falls back to a flat
 // shape and loses its nested item shapes, so every built-in must survive it.
-describe("facade tool input schemas", () => {
+describe("Rome tool input schemas", () => {
   it("offers every optional built-in when each option is on", () => {
     expect(allBuiltInTools().map((t) => t.name)).toEqual(
       expect.arrayContaining(["execute_action", "ask_question", "defer", "propose_routine"]),

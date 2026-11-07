@@ -6,12 +6,12 @@
 // wakes in its own conversation with full context. A time wakeup is a dated
 // schedule routine; an event wakeup is a `once` event-bus routine.
 //
-// This module shapes the `create_routine` args from the parsed input. The side
+// This module shapes the `create_routine` args from the parsed wake-up. The side
 // effects (reading the live thread context, subscribing to the event's source,
 // calling create_routine through the action engine) are injected by the
 // caller (`agent-session.ts`) so this stays testable without a running engine.
 
-import { parseDeferInput, type DeferInput } from "../agent/index.js";
+import type { WakeUp } from "../agent/index.js";
 import type { ThreadContext } from "../core/types.js";
 
 /** The action the one-off routine fires: `resume_session` continues this
@@ -48,8 +48,6 @@ export interface DeferDeps {
     | { ok: true; subscription?: "existing" | "created"; warning?: string }
     | { ok: false; error: string }
   >;
-  /** Wall-clock `Date.now()` for the running turn, injected for testability. */
-  now: number;
 }
 
 export type DeferResult =
@@ -95,15 +93,8 @@ function buildResumeArgs(
 }
 
 /** Schedule the deferred wakeup. Throws (for the tool to relay as an error)
- * on bad input or a missing thread context. `parseDeferInput` still re-validates
- * the value-level rules the MCP schema can't express (note non-empty, the
- * afterMinutes/at xor). */
-export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<DeferResult> {
-  const parsed = parseDeferInput(input, deps.now);
-  if (!parsed.ok) {
-    throw new Error(parsed.error);
-  }
-
+ * on a missing thread context. */
+export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferResult> {
   const channelContext = deps.context.channelContext;
   if (!channelContext?.channel || !channelContext?.threadId) {
     throw new Error("defer is only available inside an active conversation thread");

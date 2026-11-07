@@ -17,14 +17,23 @@ const ASK_QUESTION_COMPONENT_ID = "question-card";
 const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
 
-/** Shape the `ask_question` tool input into a `pendingInteraction` payload that
- * the webchat drain renders as the host built-in question-card component
- * (render.builtin = true, appId = "core"); the guardian's answer resumes the
- * turn through the unchanged interaction-result path. Fails closed on a
- * malformed questions array so a broken card never renders. */
-export function normalizeAskQuestionForCard(
+/** One question as the model asked it. Any other field it sent rides along to the card. */
+export interface Question {
+  id: string;
+  question: string;
+  type: "single" | "multi" | "text";
+  options?: string[];
+  freeText?: boolean;
+  optional?: boolean;
+  [field: string]: unknown;
+}
+
+/** What `ask_question` accepts, the same where it draws a card and where it
+ * relays a plain message. Fails closed on a malformed questions array, so a
+ * broken card never renders. */
+export function parseAskQuestionInput(
   input: unknown,
-): { ok: true; questions: Record<string, unknown>[] } | { ok: false; error: string } {
+): { ok: true; questions: Question[] } | { ok: false; error: string } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ok: false, error: "ask_question input must be an object" };
   }
@@ -67,12 +76,12 @@ export function normalizeAskQuestionForCard(
       }
     }
   }
-  return { ok: true, questions: questions as Record<string, unknown>[] };
+  return { ok: true, questions: questions as Question[] };
 }
 
 // The questions as a plain message, for where no card shows. The guardian
 // replies in words and the answer arrives as the next turn.
-function askQuestionsToPromptText(questions: Record<string, unknown>[]): string {
+function askQuestionsToPromptText(questions: readonly Question[]): string {
   return questions
     .map((q) => {
       const base = typeof q.question === "string" ? q.question : "";
@@ -102,7 +111,7 @@ function askQuestionsToPromptText(questions: Record<string, unknown>[]): string 
  * clarifying question never dead-ends.
  */
 export function askQuestionToolOutput(
-  questions: Record<string, unknown>[],
+  questions: readonly Question[],
   widgetsShow: boolean,
 ): unknown {
   if (!widgetsShow) {

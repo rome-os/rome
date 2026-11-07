@@ -376,11 +376,11 @@ const isProposeRoutineTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
 /** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
- * JSON-serialized through the facade. Returns null for any non-suspended
+ * JSON-serialized through the Rome tools. Returns null for any non-suspended
  * result so the drain loop ignores ordinary tool calls. */
 function readSuspensionFromOutput(output: unknown): Suspension | null {
   let value: unknown = output;
-  // An MCP facade tool_result surfaces as `[{ type: "text", text: "<json>" }]`
+  // A Rome tool_result surfaces as `[{ type: "text", text: "<json>" }]`
   // (or `{ content: [...] }`); unwrap to the JSON text the action returned.
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const content = (value as { content?: unknown }).content;
@@ -476,7 +476,7 @@ function buildBuiltinCard(
 }
 
 /** Pull a fire-and-forget `placeWidget` descriptor out of an action's tool_result
- * output (the agent-session shim returns `{ placeWidget: true, appId }` for an
+ * output (`actionToolOutput` returns `{ placeWidget: true, appId }` for an
  * action whose ActionResult carried `place_widget`). Unlike a pending
  * interaction this does NOT park the agent or persist a card — the drain loop just
  * emits a `widget_placement` event so the live client mounts the widget. Returns

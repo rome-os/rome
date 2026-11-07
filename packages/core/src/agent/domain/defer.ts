@@ -5,10 +5,13 @@ import { z } from "zod";
 
 const MINUTE_MS = 60_000;
 
-export type ParsedDefer =
-  | { ok: true; kind: "time"; name: string; fireAtMs: number }
-  | { ok: true; kind: "event"; name: string; event: DeferEvent }
-  | { ok: false; error: string };
+/** When a deferred session wakes, under the name the agent gave what it watches:
+ * at a minute-aligned instant, or on the next event that matches. */
+export type WakeUp =
+  | { kind: "time"; name: string; fireAtMs: number }
+  | { kind: "event"; name: string; event: DeferEvent };
+
+export type ParsedDefer = { ok: true; wakeUp: WakeUp } | { ok: false; error: string };
 
 // Strict: an unknown key (say, a field nested one level off) is an error the
 // model sees and fixes, not a field silently dropped.
@@ -69,12 +72,10 @@ const deferInputSchema = z
     },
   );
 
-export type DeferInput = z.infer<typeof deferInputSchema>;
-
 /** Validate the tool input. A time wakeup resolves to one absolute fire
  * instant, ceiled to the next whole minute (the schedule trigger is
  * minute-resolution) and in the future. An event wakeup resolves to the event
- * match. Exported for unit tests. */
+ * match. */
 export function parseDeferInput(input: unknown, now: number): ParsedDefer {
   const parsed = deferInputSchema.safeParse(input);
   if (!parsed.success) {
@@ -88,7 +89,7 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
   }
   const { name, afterMinutes, at, event } = parsed.data;
 
-  if (event) return { ok: true, kind: "event", name, event };
+  if (event) return { ok: true, wakeUp: { kind: "event", name, event } };
 
   let rawMs: number;
   if (afterMinutes != null) {
@@ -109,5 +110,5 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
     return { ok: false, error: "defer fires in the past — pick a time at least a minute from now" };
   }
 
-  return { ok: true, kind: "time", name, fireAtMs };
+  return { ok: true, wakeUp: { kind: "time", name, fireAtMs } };
 }

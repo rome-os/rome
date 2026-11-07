@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { ModelToolCallContext, RomeToolDefinition } from "../../../../core/agent-runner.js";
+import { testRomeTools } from "../../../../test/tool-calls.js";
+import type { ModelToolCallContext } from "../../../../core/agent-runner.js";
 import type { AgentAction } from "../../../domain/agent-action.js";
 import type { Skill } from "../../../domain/skill.js";
+import { subagentToolName, type Subagent } from "../../../domain/subagent.js";
 
 const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
   createSdkMcpServerMock: rs.fn((config: unknown) => config),
@@ -33,7 +34,7 @@ interface BuildArgs {
   getActionCatalog?: () => AgentAction[];
   skillCatalog?: Skill[];
   getSkillCatalog?: () => Skill[];
-  subagentTools?: RomeToolDefinition[];
+  subagents?: Subagent[];
   executeAction?: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent?: (
     name: string,
@@ -88,12 +89,17 @@ function build(args: BuildArgs = {}) {
   const actionSnapshot = args.actionCatalog ?? baseActionCatalog;
   const skillSnapshot = args.skillCatalog ?? [];
   return buildAnthropicMcpServers({
-    tools: createRomeTools({
-      getActionCatalog: args.getActionCatalog ?? (() => actionSnapshot),
-      getSkillCatalog: args.getSkillCatalog ?? (() => skillSnapshot),
-      subagentTools: args.subagentTools ?? [],
-      executeAction: args.executeAction ?? (async () => ({ ok: true })),
-      executeSubagent: args.executeSubagent ?? (async () => "delegated"),
+    tools: testRomeTools({
+      actions: {
+        list: args.getActionCatalog ?? (() => actionSnapshot),
+        run: async (name, input) => ({
+          status: "ok",
+          data: await (args.executeAction ?? (async () => ({ ok: true })))(name, input),
+        }),
+      },
+      skills: { list: args.getSkillCatalog ?? (() => skillSnapshot) },
+      subagents: args.subagents,
+      executeSubagent: args.executeSubagent,
     }),
   });
 }
@@ -197,20 +203,12 @@ describe("buildAnthropicMcpServers", () => {
   it("passes Claude's exact tool-use identity into subagent execution", async () => {
     const executeSubagent = rs.fn(async () => ({ status: "completed" }));
     build({
-      subagentTools: [
-        {
-          name: "researcher",
-          description: "Research a topic",
-          inputSchema: {
-            type: "object",
-            properties: { prompt: { type: "string" } },
-            required: ["prompt"],
-          },
-        },
-      ],
+      subagents: [{ name: "researcher", description: "Research a topic" }],
       executeSubagent,
     });
-    const tool = getSubagentServerTools().find((candidate) => candidate.name === "researcher");
+    const tool = getSubagentServerTools().find(
+      (candidate) => candidate.name === subagentToolName("researcher"),
+    );
 
     const response = await tool!.handler(
       { prompt: "inspect" },
@@ -346,8 +344,8 @@ describe("buildAnthropicMcpServers", () => {
   });
 
   it("executes actions with json_args and rejects invalid inputs", async () => {
-    // The facade's execute_action no longer pre-checks against the catalog;
-    // it delegates to the AgentSession-supplied executeAction, which is the
+    // execute_action no longer pre-checks against the catalog;
+    // it delegates to the session's `AgentActions` port, which is the
     // single source of truth for "is this name visible to this agent". The
     // stub here mirrors that contract: unknown name → throw.
     const allowedNames = new Set(baseActionCatalog.map((a) => a.name));

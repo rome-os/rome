@@ -3,18 +3,39 @@
 // helpers parse it so a test can assert on the action's own output, and raise
 // the error text the model would have read.
 
-import type { ModelToolCallContext, RomeToolResult, RomeTools } from "../agent/index.js";
-import { createRomeTools } from "../core/mcp/server.js";
+import {
+  createRomeTools,
+  type ModelToolCallContext,
+  type RomeToolDefinition,
+  type RomeToolResult,
+  type RomeTools,
+  type Subagent,
+  type Subagents,
+} from "../agent/index.js";
+
+type RomeToolsOptions = Parameters<typeof createRomeTools>[0];
+
+export interface TestRomeToolsOptions extends Partial<Omit<RomeToolsOptions, "subagents">> {
+  subagents?: readonly Subagent[];
+  executeSubagent?: Subagents["run"];
+}
+
+/** Rome tools for a test, serving no actions, skills or subagents unless given. */
+export function testRomeTools(options: TestRomeToolsOptions = {}): RomeTools {
+  const { subagents = [], executeSubagent, ...rest } = options;
+  return createRomeTools({
+    actions: { list: () => [], run: async () => ({ status: "ok", data: { ok: true } }) },
+    skills: { list: () => [] },
+    subagents: { list: () => subagents, run: executeSubagent ?? (async () => "delegated") },
+    widgetsShow: false,
+    log: { info: () => {}, warn: () => {}, error: () => {} },
+    ...rest,
+  });
+}
 
 /** Rome tools serving no actions, skills or subagents. */
 export function noRomeTools(): RomeTools {
-  return createRomeTools({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "delegated",
-  });
+  return testRomeTools();
 }
 
 /** A tool's answer as the action or subagent produced it; an error result throws its text. */

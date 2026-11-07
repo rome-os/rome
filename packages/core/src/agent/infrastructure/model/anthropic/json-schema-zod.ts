@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { jsonSchemaObjectToZodRawShape } from "zod-from-json-schema";
 import type { JSONSchema } from "zod/v4/core";
-import { createLogger } from "../../logger.js";
+import { createLogger } from "../../../../logger.js";
 
 const log = createLogger("mcp-schema");
 

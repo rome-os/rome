@@ -62,14 +62,17 @@ describe("defer session continuity", () => {
       channelContext,
     } satisfies DeferContext;
     await runDefer(
-      { name: "deferred follow-up", afterMinutes: 1 },
+      {
+        kind: "time",
+        name: "deferred follow-up",
+        fireAtMs: Date.parse("2026-07-15T12:00:00.000Z") + 60_000,
+      },
       {
         context: deferContext,
         createRoutine: async (args) => {
           routineArgs = args;
           return { routineId: "defer-follow-up" };
         },
-        now: Date.parse("2026-07-15T12:00:00.000Z"),
       },
     );
 
@@ -145,6 +148,7 @@ describe("defer session continuity", () => {
     let routineId = "";
     await runDefer(
       {
+        kind: "event",
         name: "CI on #12",
         event: { eventName: "github.check_suite", filter: [{ field: "pr", equals: "12" }] },
       },
@@ -164,7 +168,6 @@ describe("defer session continuity", () => {
           await routineEngine.activate(toRoutine(row));
           return { routineId };
         },
-        now: Date.now(),
       },
     );
 

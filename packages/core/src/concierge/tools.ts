@@ -1,4 +1,4 @@
-// Concierge's facade tools: `say` is its only way to speak, the `chat_*`
+// Concierge's session tools: `say` is its only way to speak, the `chat_*`
 // tools run its task chats and read its other Concierge chats, and
 // `topic_start` starts a topic chat.
 
@@ -18,8 +18,7 @@ import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
 } from "../core/conversation-title.js";
-import type { RomeTool } from "../agent/index.js";
-import { runFacadeTool } from "../core/mcp-facade.js";
+import { romeToolRunner, type RomeTool } from "../agent/index.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
@@ -35,6 +34,7 @@ import {
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 
 const log = createLogger("concierge-tools");
+const runTool = romeToolRunner(log);
 
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -360,7 +360,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("say", input, async (args) => {
+        runTool("say", input, async (args) => {
           const messageId = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
@@ -431,7 +431,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("task_upsert", input, async (args) => {
+        runTool("task_upsert", input, async (args) => {
           currentTurn();
           if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
             throw new Error("tasks is required: an array with one entry per row to write");
@@ -470,7 +470,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("task_list", input, async (args) => ({
+        runTool("task_list", input, async (args) => ({
           tasks: (await ownRows(args.includeDone === true)).map(compactTask),
         })),
     },
@@ -520,7 +520,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_start", input, async (args) => {
+        runTool("chat_start", input, async (args) => {
           currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
@@ -613,7 +613,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_send", input, async (args) => {
+        runTool("chat_send", input, async (args) => {
           currentTurn();
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
@@ -640,7 +640,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_read", input, async (args) => {
+        runTool("chat_read", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireReadableChat(chatId);
           const limit =
@@ -679,7 +679,7 @@ export async function buildConciergeTools(
         properties: { chatId: { type: "string" } },
       },
       handler: (input) =>
-        runFacadeTool("chat_stop", input, async (args) => {
+        runTool("chat_stop", input, async (args) => {
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
           const { chats } = service.dashboard;
@@ -697,7 +697,7 @@ export async function buildConciergeTools(
         properties: { status: { type: "string", enum: [...TASK_STATUSES] } },
       },
       handler: (input) =>
-        runFacadeTool("chat_list", input, async (args) => {
+        runTool("chat_list", input, async (args) => {
           const wanted = TASK_STATUSES.find((status) => status === args.status);
           const { chats } = service.dashboard;
           const { chatId: here } = currentTurn();
@@ -748,7 +748,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("topic_start", input, async (args) => {
+        runTool("topic_start", input, async (args) => {
           currentTurn();
           const chat = await service.startTopicChat(await ownerHere(), requireString(args, "name"));
           return { chatId: chat.id, name: chat.name, link: `/chat/${chat.id}` };
@@ -768,7 +768,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_forward", input, async (args) => {
+        runTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
           const [latest] = await latestSaid(
@@ -805,7 +805,7 @@ export async function buildConciergeTools(
         properties: { chatId: { type: "string" } },
       },
       handler: (input) =>
-        runFacadeTool("chat_card", input, async (args) => {
+        runTool("chat_card", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
           const messageId = await showCard(chatId, chat.name);
