@@ -1,54 +1,28 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
-import { loadArtifactRecords } from "../apps/artifact-records.js";
-import { parseSkillFrontmatterResult } from "../apps/packaging/skill-frontmatter.js";
-export {
-  parseSkillFrontmatter,
-  parseSkillFrontmatterResult,
-  type SkillFrontmatter,
-  type SkillFrontmatterErrorReason,
-  type SkillFrontmatterResult,
-} from "../apps/packaging/skill-frontmatter.js";
+import type { AppCatalog } from "../../apps/catalog.js";
+import { toArtifactMetadata } from "../../apps/artifact-ref-adapter.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
+import { loadArtifactRecords } from "../../apps/artifact-records.js";
+import { parseSkillFrontmatterResult } from "../../apps/packaging/skill-frontmatter.js";
+import type { Skill, SkillCatalog, SkillLoadFailure } from "../domain/skill.js";
 
-export interface LoadedSkill {
-  metadata: ArtifactMetadata;
-  name: string;
-  localName: string;
-  description: string;
-  tools?: string[];
-  content: string;
-  /** Absolute skill directory; set only when the skill ships companion files. */
-  directory?: string;
-  /** Companion files relative to `directory` (everything except SKILL.md). */
-  files?: string[];
-}
-
-export interface SkillMcpDefinition {
-  name: string;
-  description: string;
-  tools?: string[];
-  content: string;
-  directory?: string;
-  files?: string[];
-  ownerType: ArtifactMetadata["ownerType"];
-  ownerId: string;
-}
-
-export function stripSkillStructuredSection(content: string): string {
+function stripSkillStructuredSection(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/, "").trim();
 }
 
-export class SkillCatalog {
-  private skills: LoadedSkill[] = [];
-  private registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
+/**
+ * The agent's skill catalog, loaded from the skills installed apps offer. The
+ * composition root reloads it on every app catalog event, as it does the agent
+ * and action loaders.
+ */
+export class SkillLoader implements SkillCatalog {
+  private skills: Skill[] = [];
+  private failures: SkillLoadFailure[] = [];
 
   constructor(private readonly identity: ArtifactIdentityContext) {}
 
-  async loadFromCatalog(catalog: AppCatalog): Promise<LoadedSkill[]> {
+  async loadFromCatalog(catalog: AppCatalog): Promise<void> {
     const { records, failures } = await loadArtifactRecords({
       kind: "skill",
       sources: catalog.listArtifacts("skill").map(toArtifactMetadata),
@@ -70,41 +44,29 @@ export class SkillCatalog {
     });
 
     this.skills = Array.from(records, ([artifactId, { config, metadata }]) => ({
-      metadata,
       name: artifactId,
       localName: config.name,
       description: config.description,
       tools: config.tools,
-      content: config.content,
+      content: stripSkillStructuredSection(config.content),
       ...(config.directory ? { directory: config.directory, files: config.files } : {}),
+      ownerType: metadata.ownerType,
+      ownerId: metadata.ownerId,
     })).sort((left, right) => left.name.localeCompare(right.name));
-    this.registryLoadFailures = failures;
-    return this.getAll();
+    this.failures = failures.map((failure) => ({ ...failure, kind: "skill" }));
   }
 
-  getAll(): LoadedSkill[] {
+  list(): readonly Skill[] {
     return [...this.skills];
   }
 
-  get(name: string): LoadedSkill | undefined {
+  find(name: string): Skill | undefined {
     const resolved = this.resolveName(name);
     return this.skills.find((skill) => skill.name === resolved);
   }
 
-  getRegistryLoadFailures(): AppOwnedArtifactLoadFailure[] {
-    return [...this.registryLoadFailures];
-  }
-
-  getMcpDefinitions(): SkillMcpDefinition[] {
-    return this.skills.map((skill) => ({
-      name: skill.name,
-      description: skill.description,
-      tools: skill.tools,
-      content: stripSkillStructuredSection(skill.content),
-      ...(skill.directory ? { directory: skill.directory, files: skill.files } : {}),
-      ownerType: skill.metadata.ownerType,
-      ownerId: skill.metadata.ownerId,
-    }));
+  loadFailures(): readonly SkillLoadFailure[] {
+    return [...this.failures];
   }
 
   private resolveName(name: string): string {

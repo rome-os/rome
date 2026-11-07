@@ -17,24 +17,21 @@ export function skillsRoutes(deps: ApiDeps): Hono {
     // the SPA falls back to the Rome mark).
     const apps = deps.appCatalog.listResolved();
     const appById = new Map(apps.map((app) => [app.appId, app]));
-    const skills = deps.skillCatalog.getAll().map((skill) => {
-      const resolved = appById.get(skill.metadata.ownerId);
+    const skills = deps.skillCatalog.list().map((skill) => {
+      const resolved = appById.get(skill.ownerId);
       return {
         name: skill.name,
         localName: skill.localName,
         description: skill.description,
         tools: skill.tools ?? [],
-        ownerType: skill.metadata.ownerType,
-        ownerId: skill.metadata.ownerId,
+        ownerType: skill.ownerType,
+        ownerId: skill.ownerId,
         // Owner display identity, resolved the same way as /chat/agents — the
         // composer's slash menu groups skills by app like the @ mention menu.
-        ownerLabel:
-          skill.metadata.ownerType === "core"
-            ? "Rome"
-            : (resolved?.displayName ?? skill.metadata.ownerId),
+        ownerLabel: skill.ownerType === "core" ? "Rome" : (resolved?.displayName ?? skill.ownerId),
         ownerDescription: resolved?.manifest.description ?? "",
         iconUrl: resolved?.iconAbsolutePath
-          ? `/api/apps/${appIdToPathSegment(skill.metadata.ownerId)}/icon`
+          ? `/api/apps/${appIdToPathSegment(skill.ownerId)}/icon`
           : null,
       };
     });
@@ -43,7 +40,7 @@ export function skillsRoutes(deps: ApiDeps): Hono {
     // silently — without this the only trace is a worker `console.warn`. Surface
     // them so the Skills app can tell an author their skill exists but was
     // rejected, and why.
-    const loadFailures = deps.skillCatalog.getRegistryLoadFailures().map((failure) => {
+    const loadFailures = deps.skillCatalog.loadFailures().map((failure) => {
       const resolved = appById.get(failure.ownerId);
       return {
         publicName: failure.publicName,

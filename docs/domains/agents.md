@@ -16,6 +16,12 @@ How a chat treats one agent's turns: whether the agent's text reaches the chat, 
 - The agent declares it in the `policy:` block of its definition. Nothing stores it, and every session of an agent has the same policy.
 - In code it is `AgentPolicy` in [`packages/core/src/agent/domain/agent-policy.ts`](../../packages/core/src/agent/domain/agent-policy.ts).
 
+## Skill
+
+Know-how an agent reads and follows. An agent has the skills its installed apps offer, and a slash command invokes one for a turn. What a skill is, is in [`concepts/skills.md`](../concepts/skills.md).
+
+- In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts).
+
 ## Model provider account
 
 Whose subscription an agent's turns run under when Rome credits is not the payer: the guardian's Codex (ChatGPT) account today. Rome never acts or chats as this account, so it is not a [connection](connections.md#connection) and has no connected account. Its alternative, Rome credits, has no external account at all.

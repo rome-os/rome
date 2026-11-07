@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "@rstest/core";
 import {
-  listCompanionFiles,
   parseSkillFrontmatter,
   parseSkillFrontmatterResult,
-} from "./skill-catalog.js";
+} from "../../apps/packaging/skill-frontmatter.js";
+import { listCompanionFiles } from "./skill-loader.js";
 
 describe("parseSkillFrontmatter", () => {
   it("parses a kebab-case name", () => {

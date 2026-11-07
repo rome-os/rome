@@ -221,7 +221,7 @@ function setup(
   });
   const deps = {
     skillCatalog: {
-      get: (name: string) => (name === "coding:app_creation" ? { name } : undefined),
+      find: (name: string) => (name === "coding:app_creation" ? { name } : undefined),
     },
     settingsRepo: {
       get: async () => {

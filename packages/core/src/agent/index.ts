@@ -29,6 +29,12 @@ export type {
 } from "./domain/model-account.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
+export type { Skill, SkillCatalog, SkillLoadFailure } from "./domain/skill.js";
+export {
+  buildSlashSkillPrompt,
+  parseSlashSkillInvocation,
+  type SlashSkillInvocation,
+} from "./domain/slash-skill.js";
 export type { ModelTier } from "./domain/model-tier.js";
 export { matchesModelAlias, stripLegacyReasoningSuffix } from "./domain/model-alias.js";
 export {
@@ -87,6 +93,7 @@ export type {
 } from "./domain/rome-tools.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
+export { SkillLoader } from "./infrastructure/skill-loader.js";
 
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.

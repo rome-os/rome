@@ -3806,12 +3806,12 @@ describe("Webchat API", () => {
       } satisfies FakeSession;
     });
     deps.skillCatalog = {
-      get: (name) =>
+      find: (name) =>
         name === "app_creation" || name === "@ray/calendar:daily_brief"
           ? ({ name } as never)
           : undefined,
-      getAll: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
-      getRegistryLoadFailures: () => [],
+      list: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
+      loadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
 
@@ -3891,9 +3891,9 @@ describe("Webchat API", () => {
     // The structured field is the composer chip's explicit selection — it
     // resolves against the catalog independently of any typed text.
     deps.skillCatalog = {
-      get: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
-      getAll: () => [{ name: "research:deep-research" } as never],
-      getRegistryLoadFailures: () => [],
+      find: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
+      list: () => [{ name: "research:deep-research" } as never],
+      loadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
 
@@ -3974,9 +3974,9 @@ describe("Webchat API", () => {
     }));
     rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
     deps.skillCatalog = {
-      get: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
-      getAll: () => [],
-      getRegistryLoadFailures: () => [],
+      find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      list: () => [],
+      loadFailures: () => [],
     };
     await deps.webchatRepo.createSession(
       "concierge-skills",
@@ -4048,9 +4048,9 @@ describe("Webchat API", () => {
     }));
     rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
     deps.skillCatalog = {
-      get: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
-      getAll: () => [],
-      getRegistryLoadFailures: () => [],
+      find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      list: () => [],
+      loadFailures: () => [],
     };
     const { runtime } = createWebchatRuntime(deps);
     const chatId = await runtime.startChat({}, "guardian");
@@ -7180,9 +7180,9 @@ describe("Webchat API", () => {
     it("tells the agent on every automated turn, preserves slash expansion, and leaves a plain loopback turn unchanged", async () => {
       const { send, sessionId } = await setup();
       deps.skillCatalog = {
-        get: (name: string) => (name === "brief" ? { name } : undefined),
-        getAll: () => [],
-        getRegistryLoadFailures: () => [],
+        find: (name: string) => (name === "brief" ? { name } : undefined),
+        list: () => [],
+        loadFailures: () => [],
       } as never;
       const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
       for (let i = 0; i < 2; i++) {
@@ -7270,9 +7270,9 @@ describe("Webchat API", () => {
     it("wraps the expanded skill prompt and keeps the workspace block outside the reply", async () => {
       const { text, seed, send } = await setup();
       deps.skillCatalog = {
-        get: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
-        getAll: () => [{ name: "app_creation" }] as never[],
-        getRegistryLoadFailures: () => [],
+        find: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
+        list: () => [{ name: "app_creation" }] as never[],
+        loadFailures: () => [],
       };
       await seed("a1", "assistant", text("Start in Lisbon."), "t1");
 

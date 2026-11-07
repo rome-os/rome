@@ -49,7 +49,6 @@ import { callMain } from "./worker-rpc-client.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
   createCodexImageGenerationProvider,
@@ -104,7 +103,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     ),
   };
   const agentLoader = new AgentLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   await hydrateCatalogFromLockfile({
@@ -113,7 +111,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   });
   await agentLoader.loadFromCatalog(appCatalog);
   await actionLoader.loadFromCatalog(appCatalog);
-  await skillCatalog.loadFromCatalog(appCatalog);
 
   const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
@@ -274,11 +271,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   if (agentLoader.getRegistryLoadFailures().length > 0) {
     log.debug("some app agents failed to load", {
       failures: agentLoader.getRegistryLoadFailures(),
-    });
-  }
-  if (skillCatalog.getRegistryLoadFailures().length > 0) {
-    log.debug("some app skills failed to load", {
-      failures: skillCatalog.getRegistryLoadFailures(),
     });
   }
   if (actionLoader.getRegistryLoadFailures().length > 0) {

@@ -1,4 +1,4 @@
-import type { SkillCatalog } from "./skill-catalog.js";
+import type { SkillCatalog } from "./skill.js";
 
 /**
  * Slash-command skill invocation. A guardian message whose first
@@ -30,12 +30,12 @@ export interface SlashSkillInvocation {
  * message is not slash-shaped or the token names no catalog skill. */
 export function parseSlashSkillInvocation(
   text: string,
-  skillCatalog: Pick<SkillCatalog, "get">,
+  catalog: Pick<SkillCatalog, "find">,
 ): SlashSkillInvocation | null {
   const match = text.trimStart().match(SLASH_COMMAND_PATTERN);
   if (!match) return null;
   const skillName = match[1];
-  const skill = skillCatalog.get(skillName);
+  const skill = catalog.find(skillName);
   if (!skill) return null;
   return { skillName: skill.name, task: match[2]?.trim() ?? "" };
 }
@@ -50,14 +50,4 @@ export function buildSlashSkillPrompt(invocation: SlashSkillInvocation): string 
     return `${header}\n\nThe guardian did not include any task text — after reading the skill, ask what they want to do with it.`;
   }
   return `${header}\n\nTask: ${invocation.task}`;
-}
-
-/** Convenience: returns the expanded model prompt, or null when `text` is not
- * a slash-skill invocation. */
-export function expandSlashSkillPrompt(
-  text: string,
-  skillCatalog: Pick<SkillCatalog, "get">,
-): string | null {
-  const invocation = parseSlashSkillInvocation(text, skillCatalog);
-  return invocation ? buildSlashSkillPrompt(invocation) : null;
 }

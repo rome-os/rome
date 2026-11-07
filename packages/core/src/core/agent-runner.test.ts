@@ -80,7 +80,7 @@ import {
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import type {
   AgentTurnFinishedEvent,
@@ -2272,7 +2272,7 @@ describe("AgentRunner", () => {
       actionEngine,
       webchatRepo: new ChatsWebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(artifactIdentity),
+      skillCatalog: new SkillLoader(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
       channelSurface: testChannelSurface,
       activeSubagentRegistry,

@@ -29,7 +29,7 @@ import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-da
 import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
 import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
 import { findUpgradeCandidates } from "../../apps/upgrade-detector.js";
-import { parseSkillFrontmatterResult } from "../../core/skill-catalog.js";
+import { parseSkillFrontmatterResult } from "../../apps/packaging/skill-frontmatter.js";
 import { getProfileAppsDir, getProjectsRoot } from "../../paths.js";
 import { settings } from "../../db/schema.js";
 import {
@@ -473,7 +473,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
       ...deps.agentLoader.getRegistryLoadFailures(),
       ...deps.actionLoader.getRegistryLoadFailures(),
-      ...deps.skillCatalog.getRegistryLoadFailures(),
+      ...deps.skillCatalog.loadFailures(),
     ]);
     const cards = views.map((view) =>
       toInstalledAppCard(

@@ -34,7 +34,7 @@ import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.j
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
-import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { SkillCatalog } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
@@ -158,7 +158,7 @@ export interface ApiDeps {
    * the chat composer's slash-command autocomplete. `getRegistryLoadFailures`
    * surfaces app-owned skills that were declared but failed to load, so the
    * Skills app can show an author *why* a skill is missing. */
-  skillCatalog: Pick<SkillCatalog, "get" | "getAll" | "getRegistryLoadFailures">;
+  skillCatalog: SkillCatalog;
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
