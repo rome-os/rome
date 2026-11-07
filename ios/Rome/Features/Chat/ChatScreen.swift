@@ -200,25 +200,33 @@ struct ChatHeader: View {
     /// A topic chat's "…" menu. Without both, only the Tasks button shows.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    /// A topic chat's title: one line of small text, no pill.
+    var plainTitle = false
 
     var body: some View {
         HStack {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            Spacer()
-            title
-                .lineLimit(1)
-                .romeFont(17, .semibold)
-                .tracking(-0.4)
-                .padding(.horizontal, 18)
-                .frame(height: 44)
-                .glassSurface(Capsule())
-                .accessibilityAddTraits(.isHeader)
-            Spacer()
+            if plainTitle {
+                PlainHeaderTitle(title: title)
+            } else {
+                Spacer()
+                title
+                    .lineLimit(1)
+                    .romeFont(17, .semibold)
+                    .tracking(-0.4)
+                    .padding(.horizontal, 18)
+                    .frame(height: 44)
+                    .glassSurface(Capsule())
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+            }
             // No count: task progress is not reported accurately enough to badge.
             if let onRename, let onArchive {
-                HStack(spacing: 0) {
+                // Each keeps a 44 pt target; the targets overlap so the icons
+                // sit as close as iOS's own paired toolbar buttons.
+                HStack(spacing: -10) {
                     Button(action: onTasks) {
                         ChecklistGlyph()
                             .frame(width: 44, height: 44)
@@ -242,7 +250,6 @@ struct ChatHeader: View {
                     }
                     .accessibilityLabel("More")
                 }
-                .padding(.horizontal, 2)
                 .glassSurface(Capsule(), interactive: true)
             } else {
                 GlassCircleButton(accessibilityLabel: "Tasks", action: onTasks) {
@@ -253,6 +260,23 @@ struct ChatHeader: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
+    }
+}
+
+/// A header title without a pill: one line of small semibold text, cut at
+/// the end, centered between the side buttons.
+struct PlainHeaderTitle: View {
+    let title: Text
+
+    var body: some View {
+        title
+            .romeFont(15, .semibold)
+            .foregroundStyle(Palette.fg)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

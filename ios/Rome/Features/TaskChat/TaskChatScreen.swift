@@ -84,20 +84,20 @@ struct TaskChatScreen: View {
             GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
                 Image(systemName: "chevron.left").romeFont(17, .semibold)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Text(title)
-                    .romeFont(16, .semibold)
-                    .tracking(-0.3)
+                    .romeFont(15, .semibold)
+                    .foregroundStyle(Palette.fg)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityAddTraits(.isHeader)
                 if spinning {
-                    Spinner(size: 12, lineWidth: 2.4, color: Palette.sub, trackOpacity: 0.3)
+                    Spinner(size: 11, lineWidth: 2.2, color: Palette.sub, trackOpacity: 0.3)
                         .transition(.opacity)
                         .accessibilityLabel("Running")
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 44)
-            .glassSurface(Capsule())
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
             .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {

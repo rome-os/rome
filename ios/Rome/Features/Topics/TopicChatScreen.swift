@@ -55,7 +55,8 @@ struct TopicChatScreen: View {
                     newName = title
                     renaming = true
                 },
-                onArchive: chatId.map { id in { archive(id) } }
+                onArchive: chatId.map { id in { archive(id) } },
+                plainTitle: true
             )
         }
         .alert("Rename chat", isPresented: $renaming) {
