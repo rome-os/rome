@@ -52,6 +52,41 @@ describe("Rome tool input schemas", () => {
     expect(advertised).toEqual(full);
   });
 
+  it("keeps question defaults and descriptions through the Claude schema conversion without unions for Codex", () => {
+    const tool = findTool("ask_question");
+    // Codex receives the Rome tool schema directly, without the Claude conversion.
+    expect(JSON.stringify(tool.inputSchema)).not.toMatch(/"(?:oneOf|anyOf)"/);
+    const schema = z.object(toMcpToolShape(tool.name, tool.inputSchema));
+    const input = {
+      questions: [
+        {
+          id: "q",
+          question: "Pick",
+          type: "multi",
+          options: ["A"],
+          defaults: ["A"],
+          optionDescriptions: { A: "First option" },
+        },
+        { id: "t", question: "Note", type: "text", defaultText: "Billing" },
+      ],
+    };
+    expect(schema.parse(input)).toEqual(input);
+    expect(z.toJSONSchema(schema)).toMatchObject({
+      properties: {
+        questions: {
+          items: {
+            properties: {
+              defaults: { type: "array", items: { type: "string" } },
+              defaultText: { type: "string" },
+              // The converter keeps arbitrary keys, and the normalizer checks their values.
+              optionDescriptions: { type: "object", additionalProperties: {} },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("advertises propose_routine's filter conditions with their item shape", () => {
     const shape = toMcpToolShape("propose_routine", findTool("propose_routine").inputSchema);
     const advertised = z.toJSONSchema(z.object(shape)) as {
