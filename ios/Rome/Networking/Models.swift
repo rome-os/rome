@@ -107,6 +107,23 @@ enum InputPriority: String, Sendable {
     case next
 }
 
+// MARK: - Concierge chats
+
+/// A Concierge chat: the main chat, or a topic chat the guardian started.
+/// An untitled topic chat has an empty name until its first message names it.
+struct ConciergeChat: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    var name: String
+    var main: Bool
+    /// Agent messages since the guardian last read it.
+    var unread: Int?
+}
+
+/// `GET /concierge/chats`: the main chat first, then the topic chats, oldest first.
+struct ConciergeChatsResponse: Codable, Sendable {
+    var chats: [ConciergeChat]
+}
+
 // MARK: - Concierge tasks
 
 /// The state the Concierge gave a task row. The system never derives it.
@@ -129,6 +146,8 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     var dueAt: Double?
     var rank: Double?
     var chat: LinkedChat?
+    /// The Concierge chat the row came from. Older servers leave it out.
+    var conciergeChat: ConciergeChat?
     var sourceMessageId: String?
     var createdAt: Double
     var updatedAt: Double

@@ -169,6 +169,8 @@ final class StubBackend: RomeBackend {
     let displayOrigin = "stub"
     let events: LiveEventSource = Events()
     func conciergeSession() async throws -> ConciergeSessionInfo { .init(id: "concierge", unread: 0) }
+    func conciergeChats() async throws -> [ConciergeChat] { [] }
+    func startTopicChat() async throws -> ConciergeChat { throw APIError.network }
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage { .init(messages: []) }
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn { .init() }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {}

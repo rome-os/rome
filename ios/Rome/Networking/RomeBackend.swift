@@ -23,6 +23,10 @@ protocol RomeBackend: AnyObject, Sendable {
     var events: LiveEventSource { get }
 
     func conciergeSession() async throws -> ConciergeSessionInfo
+    /// The main chat first, then the topic chats, oldest first.
+    func conciergeChats() async throws -> [ConciergeChat]
+    /// Starts an untitled topic chat, which its first message names.
+    func startTopicChat() async throws -> ConciergeChat
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws
@@ -61,6 +65,15 @@ final class LiveBackend: RomeBackend {
 
     func conciergeSession() async throws -> ConciergeSessionInfo {
         try await client.get("/concierge/session")
+    }
+
+    func conciergeChats() async throws -> [ConciergeChat] {
+        let response: ConciergeChatsResponse = try await client.get("/concierge/chats")
+        return response.chats
+    }
+
+    func startTopicChat() async throws -> ConciergeChat {
+        try await client.post("/concierge/chats", json: .object([:]), as: ConciergeChat.self)
     }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {

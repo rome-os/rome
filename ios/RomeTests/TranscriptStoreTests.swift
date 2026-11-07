@@ -49,7 +49,28 @@ final class FakeBackend: RomeBackend {
     }
 
     func conciergeSession() async throws -> ConciergeSessionInfo { throw APIError.network }
-    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn { throw APIError.network }
+
+    /// Topic chats and the calls that start and write to them, in order.
+    var topicChats: [ConciergeChat] = []
+    var calls: [String] = []
+    var startFails = false
+
+    func conciergeChats() async throws -> [ConciergeChat] {
+        [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+    }
+
+    func startTopicChat() async throws -> ConciergeChat {
+        calls.append("start")
+        if startFails { throw APIError.network }
+        let chat = ConciergeChat(id: "topic-\(topicChats.count + 1)", name: "", main: false, unread: 0)
+        topicChats.append(chat)
+        return chat
+    }
+
+    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+        calls.append("send \(sessionId) \(text)")
+        throw APIError.network
+    }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.network }
     func markRead(sessionId: String) async {}
     func sessions() async throws -> [ChatSession] { [] }

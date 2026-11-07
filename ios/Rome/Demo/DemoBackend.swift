@@ -39,6 +39,7 @@ final class DemoBackend: RomeBackend {
     private var messages: [String: [ChatMessage]] = [:]
     private var chats: [String: ChatSession] = [:]
     private var tasks: [ConciergeTask] = []
+    private var topicChats: [ConciergeChat] = []
     private var approvals: [String: ApprovalRecord] = [:]
     private var running: [String: String] = [:]
     private var counter = 0
@@ -54,6 +55,7 @@ final class DemoBackend: RomeBackend {
         if variant != .full && variant != .updateRequired {
             messages[conciergeChatID] = []
             tasks = []
+            topicChats = []
         }
     }
 
@@ -63,6 +65,20 @@ final class DemoBackend: RomeBackend {
         try await pause(0.25)
         if variant == .conciergeOff { throw APIError.conciergeOff }
         return ConciergeSessionInfo(id: conciergeChatID, unread: 0)
+    }
+
+    func conciergeChats() async throws -> [ConciergeChat] {
+        try await pause(0.2)
+        if variant == .conciergeOff { throw APIError.conciergeOff }
+        return [ConciergeChat(id: conciergeChatID, name: "Concierge", main: true, unread: 0)] + topicChats
+    }
+
+    func startTopicChat() async throws -> ConciergeChat {
+        try await pause(0.3)
+        let chat = ConciergeChat(id: "topic-\(nextID())", name: "", main: false, unread: 0)
+        topicChats.append(chat)
+        messages[chat.id] = []
+        return chat
     }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
@@ -78,15 +94,23 @@ final class DemoBackend: RomeBackend {
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         try await pause(0.35)
         if text.contains("失败") { throw APIError.network }
-        insert(sessionId, user(inputId, text, at: .now))
+        insert(sessionId, user(inputId, text, at: .now, session: sessionId))
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
+        let topic = topicChats.firstIndex { $0.id == sessionId }
+        let concierge = sessionId == conciergeChatID || topic != nil
         Task {
-            try? await pause(sessionId == conciergeChatID ? 1.8 : 3.5)
-            if sessionId == conciergeChatID {
-                insert(sessionId, agent("好，我记下了。", at: .now))
+            try? await pause(concierge ? 1.8 : 3.5)
+            if concierge {
+                insert(sessionId, agent("好，我记下了。", at: .now, session: sessionId))
                 try? await pause(0.7)
-                insert(sessionId, agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now))
+                insert(sessionId, agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId))
+                // An untitled topic chat is named from its first message.
+                if let topic, topicChats[topic].name.isEmpty {
+                    let name = String(text.prefix(16))
+                    topicChats[topic].name = name
+                    bus.emit(LiveTopic.chat(sessionId), .sessionName(sessionId: sessionId, name: name))
+                }
             } else {
                 // A task turn streams a few replies of mixed length, so scrolling
                 // during a running turn can be tried. Stop ends it early.
@@ -338,12 +362,18 @@ final class DemoBackend: RomeBackend {
         ]
         running = ["chat-site": "turn-site", "chat-notes": "turn-notes"]
 
-        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
+        topicChats = [
+            ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
+            ConciergeChat(id: "topic-home", name: "家里装修", main: false, unread: 0),
+        ]
+
+        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000
             return ConciergeTask(
                 id: id, title: title, state: state, summary: summary, waitingOn: waitingOn,
                 dueAt: due.map { nowMs + $0 * 60_000 }, rank: nil,
                 chat: chat.map { .init(id: $0, name: chats[$0]?.name ?? title) },
+                conciergeChat: topic.flatMap { id in topicChats.first { $0.id == id } },
                 sourceMessageId: nil, createdAt: updated - 3_600_000, updatedAt: updated,
                 completedAt: done ? updated : nil, archivedAt: nil, notSynced: false
             )
@@ -357,6 +387,18 @@ final class DemoBackend: RomeBackend {
             task("t6", "每周一整理周报", .next, chat: nil, summary: "下周一早上开始", minutesAgo: 120, due: 60 * 30),
             task("t7", "盯着降噪耳机价格", .watching, chat: nil, summary: "每天早上 9 点检查一次", minutesAgo: 300, due: 60 * 14),
             task("t8", "修复登录页样式", .done, chat: "chat-login", summary: "按钮间距和深色模式都改好了", minutesAgo: 60 * 24 * 3, done: true),
+            task("t9", "比较京都三家酒店", .doing, chat: nil, from: "topic-trip", summary: "正在看评价和价格", minutesAgo: 6),
+        ]
+
+        // A topic chat about one trip.
+        messages["topic-trip"] = [
+            user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
+            agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
+            agent("酒店比较好了：河原町那家离车站最近，价格中等。要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
+        ]
+        messages["topic-home"] = [
+            user("h1", "厨房翻新，记下要找的师傅。", at: at(20, 10, daysAgo: 1), session: "topic-home"),
+            agent("记下了：水电、瓷砖、橱柜三位。", at: at(20, 11, daysAgo: 1), session: "topic-home"),
         ]
 
         // Concierge, as on the design's Chat board.
