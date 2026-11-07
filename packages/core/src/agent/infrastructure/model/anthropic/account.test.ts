@@ -5,6 +5,18 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelAccountUsage } from "../../../domain/model-account.js";
 import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import { ClaudeAccount } from "./account.js";
+import * as refusedCredential from "./refused-credential.js" with { rstest: "importActual" };
+
+const { clearStoredMark } = rs.hoisted(() => ({ clearStoredMark: rs.fn() }));
+
+// The real mark is a file in the home folder of whoever runs these tests.
+rs.mock("./refused-credential.js", () => ({
+  ...refusedCredential,
+  clearClaudeAuthRevoked: rs.fn(),
+  clearStoredAnthropicCompatibleAuthRevoked: clearStoredMark,
+  isAnthropicAuthRevoked: async () => false,
+  isAnthropicCompatibleAuthRevoked: async () => false,
+}));
 
 const usage = (usedPercent: number) => ({
   checkedAt: "2026-11-07T00:00:00.000Z",
@@ -254,6 +266,7 @@ describe("ClaudeAccount", () => {
 
       await account.storeCredential(credential as never);
       expect(changed).toHaveBeenCalledTimes(1);
+      expect(clearStoredMark).toHaveBeenCalledTimes(1);
       expect(await account.status()).toMatchObject({
         authMethod: "stored-compatible",
         usageLimited: false,
@@ -262,6 +275,7 @@ describe("ClaudeAccount", () => {
 
       await account.removeCredential();
       expect(changed).toHaveBeenCalledTimes(2);
+      expect(clearStoredMark).toHaveBeenCalledTimes(2);
       expect(await account.storedCredential()).toBeNull();
       expect(await account.status()).toMatchObject({ loggedIn: false });
     });
