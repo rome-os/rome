@@ -23,6 +23,7 @@ import {
   type ReadAnswerShape,
   type TurnAttribution,
   type SessionSettings,
+  type RecordedChat,
   restoresSavedSelection,
   evaluateProviderSessionReset,
   type AgentFolders,
@@ -63,7 +64,7 @@ import {
   type Subagent,
   type RomeTools,
 } from "../agent/index.js";
-import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
+import type { SessionConversation } from "./session-conversation.js";
 import type { ActionRegistry, Action, ActionResult } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
@@ -678,7 +679,7 @@ export function createAgentSessionManager(
       // only after their acquire has returned.
       for (const session of [...sessions.values()]) {
         if (session.sessionId !== sessionId || session.conversation) continue;
-        const recorded = await findRecordedConversation(deps.webchatRepo, chatId);
+        const recorded = await recordedChatOf(deps, stored);
         if (recorded) session.conversation = { origin: "recorded", ...recorded };
       }
     },
@@ -792,6 +793,25 @@ async function reachableRecordedWorkingDir(
     () => false,
   );
   return isDirectory ? recorded : undefined;
+}
+
+/**
+ * The chat a session recorded, while it still exists. The lookup only refines
+ * where turns record, so a failed read leaves the session serving no chat.
+ */
+async function recordedChatOf(
+  deps: Pick<ManagerDeps, "sessionRepository">,
+  session: Session,
+): Promise<RecordedChat | undefined> {
+  try {
+    return (await deps.sessionRepository.recordedChat(session)) ?? undefined;
+  } catch (err) {
+    log.warn("failed to read a session's recorded conversation", {
+      chatId: session.deprecatedChatId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
 }
 
 /** A channel-thread key maps to one conversation, so a stored row that names
@@ -924,7 +944,7 @@ async function openSession(
   // A caller that names no conversation still serves the one the session recorded.
   const recordedConversation = requestedRomeSessionId
     ? undefined
-    : await findRecordedConversation(deps.webchatRepo, session.deprecatedChatId ?? undefined);
+    : await recordedChatOf(deps, session);
   const conversation: SessionConversation | undefined = requestedRomeSessionId
     ? { origin: "named", id: requestedRomeSessionId }
     : recordedConversation && { origin: "recorded", ...recordedConversation };

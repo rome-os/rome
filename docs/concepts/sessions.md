@@ -29,6 +29,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
 - A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
 - Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
+- A session serves the chat it recorded only while that chat exists, since recording under a deleted chat's id would recreate it. In code, the session repository answers it (`recordedChat` in [`packages/core/src/agent/domain/session-repository.ts`](../../packages/core/src/agent/domain/session-repository.ts)).
 
 **Not to be confused with:**
 

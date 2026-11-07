@@ -2,7 +2,15 @@
 // that keeps sessions. Adapters live in agent/infrastructure/.
 // Aggregate: ./session.ts. Vocabulary: docs/concepts/sessions.md.
 
+import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { AgentName, ContinuityKey, Session, SessionId, TurnCheckpoint } from "./session.js";
+
+/** The chat a session recorded, as Rome holds it. */
+export interface RecordedChat {
+  id: string;
+  name: string;
+  type: RomeSessionType;
+}
 
 /** Thrown by `add` when the continuity key and agent already have an active session. */
 export class ActiveSessionExistsError extends Error {
@@ -56,6 +64,13 @@ export interface SessionRepository {
    * continuity key.
    */
   replace(retired: Session, successor: Session): Promise<void>;
+
+  /**
+   * The chat `session` recorded, or null when it recorded none or the chat is
+   * gone. A deleted chat leaves its id on the session, and recording under
+   * that id would recreate it.
+   */
+  recordedChat(session: Session): Promise<RecordedChat | null>;
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back
    *  to a fork. Goes when the session resolves its own fork point. */

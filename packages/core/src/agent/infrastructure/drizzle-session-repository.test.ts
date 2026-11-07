@@ -5,7 +5,7 @@ import {
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
 } from "../../apps/artifact-id.js";
-import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
+import { romeSessions, sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ActiveSessionExistsError } from "../domain/session-repository.js";
 import { Session } from "../domain/session.js";
@@ -31,6 +31,40 @@ describe("DrizzleSessionRepository", () => {
   });
 
   afterEach(() => testDb.close());
+
+  it("recordedChat() finds the chat a session recorded while it exists", async () => {
+    const at = new Date();
+    testDb.db
+      .insert(romeSessions)
+      .values([
+        {
+          id: "chat-1",
+          name: "Plans",
+          type: "channel",
+          chatPlatform: "webchat",
+          createdAt: at,
+          activityAt: at,
+        },
+        { id: "chat-2", name: "Ops", type: "routine", createdAt: at, activityAt: at },
+      ])
+      .run();
+    const chat = (id?: string) =>
+      Session.create("main", { workingDir: "/w", ...(id ? { deprecatedChatId: id } : {}) });
+
+    expect(await repo.recordedChat(chat("chat-1"))).toEqual({
+      id: "chat-1",
+      name: "Plans",
+      type: "webchat",
+    });
+    expect(await repo.recordedChat(chat("chat-2"))).toEqual({
+      id: "chat-2",
+      name: "Ops",
+      type: "routine",
+    });
+    // A deleted chat leaves its id on the session.
+    expect(await repo.recordedChat(chat("gone"))).toBeNull();
+    expect(await repo.recordedChat(chat())).toBeNull();
+  });
 
   it("add() stores a session that session() reads back", async () => {
     const session = Session.create("main", {

@@ -1,11 +1,13 @@
 // The Drizzle adapter of the Sessions repository port, over `sessions` and
-// `session_turn_checkpoints`. Port: agent/domain/session-repository.ts.
+// `session_turn_checkpoints`, reading a recorded chat from `rome_sessions`. Port: agent/domain/session-repository.ts.
 // Aggregate: agent/domain/session.ts.
 
+import type { RomeSessionType } from "@rome-os/app-runtime";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
-import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
+import { romeSessions, sessions, sessionTurnCheckpoints } from "../../db/schema.js";
+import { sessionKindOf } from "../../db/session-kind.js";
 import {
   Session,
   type AgentName,
@@ -15,7 +17,11 @@ import {
   type SessionState,
   type TurnCheckpoint,
 } from "../domain/session.js";
-import { ActiveSessionExistsError, type SessionRepository } from "../domain/session-repository.js";
+import {
+  ActiveSessionExistsError,
+  type RecordedChat,
+  type SessionRepository,
+} from "../domain/session-repository.js";
 
 type SessionRow = typeof sessions.$inferSelect;
 
@@ -148,6 +154,22 @@ export class DrizzleSessionRepository implements SessionRepository {
     if (successorState.chatId !== null && successor.deprecatedChatId === null) {
       successor.deprecatedInheritChat(successorState.chatId);
     }
+  }
+
+  async recordedChat(session: Session): Promise<RecordedChat | null> {
+    const chatId = session.deprecatedChatId;
+    if (!chatId) return null;
+    const [row] = await this.db
+      .select({
+        id: romeSessions.id,
+        name: romeSessions.name,
+        type: romeSessions.type,
+        chatPlatform: romeSessions.chatPlatform,
+      })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, chatId));
+    if (!row) return null;
+    return { id: row.id, name: row.name, type: sessionKindOf(row) as RomeSessionType };
   }
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back

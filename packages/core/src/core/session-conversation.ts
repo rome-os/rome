@@ -1,14 +1,12 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
+import type { RecordedChat } from "../agent/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("session-conversation");
 
-export interface RecordedConversation {
-  id: string;
-  name: string;
-  type: RomeSessionType;
-}
+/** The chat a session recorded. The session reads it through its repository. */
+export type RecordedConversation = RecordedChat;
 
 /**
  * The conversation a session's row recorded, when it still exists. A deleted
