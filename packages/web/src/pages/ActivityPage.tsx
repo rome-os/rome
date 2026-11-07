@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
+import { PageShell, PageBody } from "@/shell/PageShell";
+import { ActivityHeader } from "./ActivityHeader";
 import type { ApprovalStatus, ApprovalType } from "@rome/api-types/approvals";
 
 export interface Approval {
@@ -706,9 +707,16 @@ export function PendingApprovalsCallout({
 export default function ActivityPage({
   viewSwitch,
   initialFilter = "all",
+  renderFrame = (header, body) => (
+    <>
+      {header}
+      {body}
+    </>
+  ),
 }: {
   viewSwitch?: ReactNode;
   initialFilter?: StatusFilter;
+  renderFrame?: (header: ReactNode, body: ReactNode) => ReactNode;
 } = {}) {
   const { t } = useTranslation("activity");
   const approvalsQuery = useApprovals();
@@ -823,41 +831,38 @@ export default function ActivityPage({
     return `exec-${item.data.rootExecution.rootExecutionId}`;
   };
 
-  return (
+  return renderFrame(
+    <ActivityHeader
+      title={t("page.title")}
+      viewSwitch={viewSwitch}
+      actions={
+        <>
+          <span className="flex items-center gap-2 text-aux text-muted-foreground">
+            <span
+              className="h-1.5 w-1.5 rounded-full bg-success"
+              style={{
+                animation: "rome-activity-breathe 2.4s ease-in-out infinite",
+              }}
+              aria-hidden="true"
+            />
+            <span>{t("page.liveUpdated", { when: updatedLabel })}</span>
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void fetchData();
+              void approvalsQuery.refetch();
+            }}
+          >
+            {t("page.refresh")}
+          </Button>
+        </>
+      }
+    />,
     <PageShell>
       <PageBody>
-        <PageHeader
-          title={t("page.title")}
-          description={
-            <span className="flex items-center gap-2">
-              <span
-                className="h-1.5 w-1.5 rounded-full bg-success"
-                style={{
-                  animation: "rome-activity-breathe 2.4s ease-in-out infinite",
-                }}
-                aria-hidden="true"
-              />
-              <span>{t("page.liveUpdated", { when: updatedLabel })}</span>
-            </span>
-          }
-          actions={
-            <>
-              {viewSwitch}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void fetchData();
-                  void approvalsQuery.refetch();
-                }}
-              >
-                {t("page.refresh")}
-              </Button>
-            </>
-          }
-        />
-
         {/* Stats */}
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <StatTile
@@ -963,6 +968,6 @@ export default function ActivityPage({
           </>
         )}
       </PageBody>
-    </PageShell>
+    </PageShell>,
   );
 }

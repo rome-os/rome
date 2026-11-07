@@ -43,6 +43,8 @@ export interface FollowEvent {
   labels: string[];
   /** When it reached Rome, epoch milliseconds. */
   at: number;
+  /** Whose follow it came through. Absent is the guardian. Never shown to triage. */
+  owner?: string;
 }
 
 export type TriageDecisionKind = "important" | "digest" | "ignore";

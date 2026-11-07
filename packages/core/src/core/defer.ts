@@ -29,6 +29,9 @@ export interface DeferContext {
   /** Exact runtime session to resume when the one-off routine fires. */
   sessionId: string;
   channelContext?: ThreadContext;
+  /** Whose the thread's chat is, so the wake-up reaches that person even
+   *  after the chat is gone. */
+  ownerKey?: string;
 }
 
 export interface DeferDeps {
@@ -196,6 +199,7 @@ function buildResumeArgs(
     threadId: channelContext?.threadId,
     channelUserId: channelContext?.channelUserId,
     agentName: context.agentName ?? "main",
+    ...(context.ownerKey ? { ownerKey: context.ownerKey } : {}),
     ...prompt,
   };
 }

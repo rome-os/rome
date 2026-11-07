@@ -32,6 +32,7 @@ function setup() {
       return [
         {
           chatId: null,
+          owner: "guardian",
           taskIds: tasks.map((task) => task.taskId),
           prompt: tasks.map((task) => task.taskId).join(","),
           quiet: tasks.every((task) => task.quiet),
@@ -312,6 +313,7 @@ describe("TaskEventCoalescer", () => {
       render: async (tasks) =>
         tasks.map((task) => ({
           chatId: task.taskId === "a" ? "topic-1" : null,
+          owner: "guardian",
           taskIds: [task.taskId],
           prompt: task.taskId,
           quiet: false,
@@ -336,7 +338,9 @@ describe("TaskEventCoalescer", () => {
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
       isEnabled: async () => false,
-      render: async () => [{ chatId: null, taskIds: ["a"], prompt: "x", quiet: false }],
+      render: async () => [
+        { chatId: null, owner: "guardian", taskIds: ["a"], prompt: "x", quiet: false },
+      ],
       deliver: async ({ prompt }) => {
         delivered.push(prompt);
         return true;
@@ -355,8 +359,8 @@ describe("TaskEventCoalescer", () => {
       now: () => Date.now(),
       isEnabled: async () => true,
       render: async () => [
-        { chatId: "topic-1", taskIds: ["a"], prompt: "a", quiet: false },
-        { chatId: null, taskIds: ["b"], prompt: "b", quiet: false },
+        { chatId: "topic-1", owner: "guardian", taskIds: ["a"], prompt: "a", quiet: false },
+        { chatId: null, owner: "guardian", taskIds: ["b"], prompt: "b", quiet: false },
       ],
       deliver: async ({ chatId }) => {
         if (chatId === "topic-1") throw new Error("no runtime");
@@ -384,13 +388,16 @@ describe("TaskEventCoalescer", () => {
             ? [
                 {
                   chatId: "topic-1",
+                  owner: "guardian",
                   taskIds: topic.map((t) => t.taskId),
                   prompt: topic.map((t) => t.taskId).join(","),
                   quiet: false,
                 },
               ]
             : []),
-          ...(main.length ? [{ chatId: null, taskIds: ["c"], prompt: "c", quiet: true }] : []),
+          ...(main.length
+            ? [{ chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c", quiet: true }]
+            : []),
         ];
       },
       deliver: async (delivery) => {
@@ -404,8 +411,8 @@ describe("TaskEventCoalescer", () => {
     coalescer.mark(quiet("c"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(delivered).toEqual([
-      { chatId: "topic-1", taskIds: ["a", "b"], prompt: "a,b", quiet: false },
-      { chatId: null, taskIds: ["c"], prompt: "c", quiet: true },
+      { chatId: "topic-1", owner: "guardian", taskIds: ["a", "b"], prompt: "a,b", quiet: false },
+      { chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c", quiet: true },
     ]);
   });
 });

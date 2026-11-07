@@ -27,6 +27,8 @@ import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
+import { mainChatIdOf } from "./owner.js";
+import { createConciergeOwners } from "./owners.js";
 import {
   CONCIERGE_ACCOUNT,
   CONCIERGE_AGENT_ID,
@@ -86,7 +88,8 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
 }
 
 /** The line that opens every Concierge turn's input in the main chat. */
-const MAIN_LINE = '<concierge_chat id="concierge" name="Concierge" main="true"/>\n\n';
+const MAIN_LINE =
+  '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian"/>\n\n';
 
 /** What the Concierge has already said in its running turn, unless a test says it has not. */
 const ACKNOWLEDGEMENT: Row = {
@@ -564,10 +567,10 @@ describe("Concierge tools", () => {
         brief: "Fix it",
         project: join(root, "rome-oss"),
       });
-      expect(s.chats.startChat).toHaveBeenCalledWith({
-        agentName: undefined,
-        projectPath: "rome-oss",
-      });
+      expect(s.chats.startChat).toHaveBeenCalledWith(
+        { agentName: undefined, projectPath: "rome-oss" },
+        "guardian",
+      );
     } finally {
       rs.unstubAllEnvs();
       rmSync(root, { recursive: true, force: true });
@@ -1141,7 +1144,7 @@ describe("Concierge task anchors", () => {
 
   it("forwards a task chat without a task row without creating one", async () => {
     const s = setup();
-    const chatId = await s.chats.startChat({});
+    const chatId = await s.chats.startChat({}, "guardian");
     await s.deps.webchatRepo.setSessionTrigger(chatId, {
       triggerKind: TASK_CHAT_TRIGGER_KIND,
       triggerName: null,
@@ -1843,6 +1846,7 @@ describe("Concierge system turns", () => {
     const service = new ConciergeService({
       sessionRepository: { current: async () => session },
       webchatRepo: { getSession: async () => null },
+      settingsRepo: { get: async () => null },
       runBackendTurn: async (params: BackendTurnParams) => {
         turns.push(params);
         return outcome;
@@ -2083,7 +2087,70 @@ describe("Concierge chat", () => {
       "gpt-6-luna",
       undefined,
       CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      {},
     );
+  });
+
+  it("creates a visitor's own main chat on first open, owned by them", async () => {
+    const { service, createSession } = serviceWith(codexOnly, false);
+    const id = await service.ensureChatId("visitor:acct-ann");
+    expect(id).toBe(mainChatIdOf("visitor:acct-ann"));
+    expect(id).toMatch(/^concierge-v-[0-9a-f]{24}$/);
+    expect(createSession).toHaveBeenCalledWith(
+      id,
+      "Concierge",
+      undefined,
+      undefined,
+      "gpt-6-luna",
+      undefined,
+      CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
+    );
+  });
+
+  it("opens every turn with the person the chat serves, who may be a visitor", async () => {
+    const allowed = new Set(["ann@example.com"]);
+    const owners = createConciergeOwners({
+      settingsRepo: {
+        get: (async (key: string) => (key === "guardianName" ? "Eric" : null)) as never,
+      },
+      visitorProfiles: {
+        getMany: async (ids: readonly string[]) =>
+          new Map(
+            ids.includes("acct-ann")
+              ? [["acct-ann", { email: "ann@example.com", avatarUrl: null }]]
+              : [],
+          ),
+      },
+      dashboardAccess: { isCloudEmailAllowed: (email: string) => allowed.has(email) },
+    });
+    const annMain = mainChatIdOf("visitor:acct-ann");
+    const service = new ConciergeService({
+      settingsRepo: { get: async () => null },
+      webchatRepo: {
+        getSession: async (id: string) =>
+          id === annMain
+            ? { id, agentName: CONCIERGE_AGENT_ID, ownerKey: "visitor:acct-ann" }
+            : { id, agentName: CONCIERGE_AGENT_ID, ownerKey: null },
+      },
+      owners,
+    } as unknown as ConciergeDeps);
+    expect(await service.turnHeader({ id: annMain, name: "Concierge", main: true })).toBe(
+      `<concierge_chat id="${annMain}" name="Concierge" main="true"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
+    );
+    expect(await service.turnHeader({ id: "concierge", name: "Concierge", main: true })).toBe(
+      '<concierge_chat id="concierge" name="Concierge" main="true"/>\n<concierge_owner role="guardian" name="Eric"/>',
+    );
+    // A visitor is served while on the dashboard allow-list, the guardian always.
+    expect(await service.isServed("visitor:acct-ann")).toBe(true);
+    expect(await service.isServed("visitor:acct-unknown")).toBe(false);
+    allowed.clear();
+    expect(await service.isServed("visitor:acct-ann")).toBe(false);
+    expect(await service.isServed("guardian")).toBe(true);
   });
 
   it("leaves an existing chat and its model alone", async () => {
@@ -2666,6 +2733,7 @@ describe("Concierge chats", () => {
       channel: "webchat",
       threadId: TOPIC_CHAT,
       prompt: "⏰ Time's up: watch task:abc",
+      ownerKey: "guardian",
     };
     expect(await s.service.resolveTurn(wakeUp)).toMatchObject({
       threadId: TOPIC_CHAT,
@@ -2682,6 +2750,30 @@ describe("Concierge chats", () => {
     // A task chat's own wake-up is not the Concierge's, and stays.
     const taskWakeUp = { ...wakeUp, agentName: "main" };
     expect(await s.service.resolveTurn(taskWakeUp)).toEqual(taskWakeUp);
+  });
+
+  it("sends a visitor's wake-up for a deleted topic chat to their main chat, and drops one that records no owner", async () => {
+    const s = setup({ startEvents: false });
+    const owner = "visitor:acct-ann";
+    const main = mainChatIdOf(owner);
+    s.sessions.set(main, {
+      ...s.sessions.get(CONCIERGE_CHAT),
+      id: main,
+      ownerKey: owner,
+    });
+    // Its topic chat is gone, as when its project folder was deleted with it.
+    const wakeUp = {
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: "runtime-topic",
+      channel: "webchat",
+      threadId: "ann-topic",
+      prompt: "⏰ Time's up",
+      ownerKey: owner,
+    };
+    expect(await s.service.resolveTurn(wakeUp)).toMatchObject({ threadId: main });
+    // Nothing says whose it was: it reaches nobody's chat, the guardian's included.
+    const { ownerKey: _ownerKey, ...unowned } = wakeUp;
+    await expect(s.service.resolveTurn(unowned)).rejects.toThrow("no owner");
   });
 
   it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
@@ -2717,11 +2809,11 @@ describe("Concierge chats", () => {
 
   it("delivers to a live Concierge chat, and to the main chat for one archived, gone, or not a Concierge chat", async () => {
     const s = setup({ startEvents: false });
-    expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(TOPIC_CHAT);
-    expect(await s.service.deliveryChat(null)).toBe(CONCIERGE_CHAT);
-    expect(await s.service.deliveryChat("gone")).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat(TOPIC_CHAT, "guardian")).toBe(TOPIC_CHAT);
+    expect(await s.service.deliveryChat(null, "guardian")).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat("gone", "guardian")).toBe(CONCIERGE_CHAT);
     s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
-    expect(await s.service.deliveryChat(TOPIC_CHAT)).toBe(CONCIERGE_CHAT);
+    expect(await s.service.deliveryChat(TOPIC_CHAT, "guardian")).toBe(CONCIERGE_CHAT);
   });
 
   it("retiring a topic chat moves its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
@@ -2734,6 +2826,7 @@ describe("Concierge chats", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const rows = await s.tasks.listForPanel();
     expect(rows.find((row) => row.title === "Book dentist")?.conciergeChat.main).toBe(true);
+    // A finished row keeps its chat, and its owner with it.
     expect(rows.find((row) => row.title === "Old")?.conciergeChat.id).toBe(TOPIC_CHAT);
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: CONCIERGE_CHAT });
     expect(s.backendTurns.at(-1)?.prompt).toContain(

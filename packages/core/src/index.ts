@@ -40,6 +40,10 @@ import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import {
+  AppActionSchemaCache,
+  appActionSchemaCacheBuild,
+} from "./actions/app-action-schema-cache.js";
+import {
   initTelemetry,
   getTracer,
   shutdown as shutdownTelemetry,
@@ -170,6 +174,8 @@ import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
+import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { createConciergeOwners } from "./concierge/owners.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -230,6 +236,7 @@ import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
 import {
   ensureProfileDevAppsDirInitialized,
+  getProfileAppActionSchemaCachePath,
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
@@ -1086,9 +1093,17 @@ async function main() {
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
+  // Made here so the Concierge can tell whether a visitor is still served;
+  // it is loaded with the other access settings further down.
+  const dashboardAccessState = new DashboardAccessState();
   const concierge = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    owners: createConciergeOwners({
+      settingsRepo,
+      visitorProfiles: new VisitorProfilesRepository(db),
+      dashboardAccess: dashboardAccessState,
+    }),
     webchatRepo,
     sessionRepository,
     aiToolState,
@@ -1318,6 +1333,13 @@ async function main() {
     socketPath: config.hostExecutionSocket,
     enabled: config.hostExecutionEnabled,
   });
+  // Importing every app action module costs seconds of CPU on a small VM, and
+  // boot needs only their schemas. A warm-pool VM boots once before a claim, so
+  // the claim boot finds every schema here.
+  const appActionSchemaCache = await AppActionSchemaCache.load(
+    getProfileAppActionSchemaCachePath(),
+    appActionSchemaCacheBuild(getBuildInfo()),
+  );
   const appActionReload = await registerAppActions(
     actionLoader,
     actionRegistry,
@@ -1335,21 +1357,30 @@ async function main() {
       cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
+    { schemaCache: appActionSchemaCache },
   );
 
   appCatalog.subscribe(
-    createAppActionsSubscriber(actionLoader, actionRegistry, appCatalog, appActionDeps, {
-      db,
-      actionEngine,
-      routinesRepo,
-      repositories: appRuntimeRepositories,
-      favorService,
-      appConnections,
-      hostExecution,
-      feedback: feedbackClient,
-      cloudProfile: cloudProfileClient,
-      agentNames: agentNameResolver,
-    }),
+    createAppActionsSubscriber(
+      actionLoader,
+      actionRegistry,
+      appCatalog,
+      appActionDeps,
+      {
+        db,
+        actionEngine,
+        routinesRepo,
+        repositories: appRuntimeRepositories,
+        favorService,
+        appConnections,
+        hostExecution,
+        feedback: feedbackClient,
+        cloudProfile: cloudProfileClient,
+        agentNames: agentNameResolver,
+      },
+      undefined,
+      appActionSchemaCache,
+    ),
   );
   const favorRequirementSync = new FavorRequirementSync({
     favorService,
@@ -1909,7 +1940,6 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessState = new DashboardAccessState();
   try {
     await dashboardAccessState.load(db);
   } catch (err) {

@@ -11,7 +11,6 @@ import {
   EmptyStateIcon,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 
 const PROMPT_KEYS = [
   "concierge.empty.prompts.weather",
@@ -64,7 +63,14 @@ const TOPIC_STARTERS: ReadonlyArray<{ key: "life" | "work" | "trip"; icon: Lucid
  * is for, three starters that send themselves as its first message, and
  * a way back to the main chat for a one-off question.
  */
-export function ConciergeTopicEmptyState({ onStart }: { onStart: (prompt: string) => void }) {
+export function ConciergeTopicEmptyState({
+  mainChatId,
+  onStart,
+}: {
+  /** The signed-in person's main Concierge chat, which the back link opens. */
+  mainChatId: string;
+  onStart: (prompt: string) => void;
+}) {
   const { t } = useTranslation("chat");
   const titleId = useId();
   // One hero line, a description at reading size, and the starters as the
@@ -116,7 +122,7 @@ export function ConciergeTopicEmptyState({ onStart }: { onStart: (prompt: string
         <p className="mt-8 text-ui text-muted-foreground">
           {t("concierge.topicEmpty.justAsk")}{" "}
           <Link
-            to={`/chat/${CONCIERGE_CHAT_ID}`}
+            to={`/chat/${mainChatId}`}
             className="whitespace-nowrap text-foreground underline-offset-4 hover:underline"
           >
             {t("concierge.topicEmpty.backToMain")}
