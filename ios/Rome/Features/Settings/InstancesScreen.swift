@@ -323,7 +323,7 @@ struct RoutinesScreen: View {
         failed = false
         guard let backend = model.workspace?.backend else { return }
         do {
-            routines = try await backend.routines().sorted { ($0.enabled ? 0 : 1, $0.name) < ($1.enabled ? 0 : 1, $1.name) }
+            routines = RoutineList.shown(try await backend.routines())
         } catch {
             failed = true
         }
@@ -356,7 +356,14 @@ struct RoutineRow: View {
                 Text(RoutineText.schedule(routine))
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
+                if routine.lastRunFailed {
+                    Text("Last run failed")
+                        .romeFont(12, .medium)
+                        .foregroundStyle(Palette.destructive)
+                }
             }
+            // A paused routine stays in the list, quieter than the active ones.
+            .opacity(routine.enabled ? 1 : 0.55)
             Spacer()
             Toggle(isOn: Binding(get: { routine.enabled }, set: onToggle)) { EmptyView() }
                 .labelsHidden()
@@ -369,6 +376,33 @@ struct RoutineRow: View {
         }
         .accessibilityElement(children: .combine)
     }
+}
+
+/// Which routines the page lists, in what order. Like the dashboard, it
+/// leaves out one-off routines that are done; it also leaves out routines an
+/// app or the system manages (Concierge follows and digests, the nightly
+/// upgrade check), which the guardian does not run. Paused ones stay, after
+/// the active ones.
+enum RoutineList {
+    static func shown(_ routines: [Routine]) -> [Routine] {
+        routines
+            .filter { $0.managedBy == nil && !isCompletedOneOff($0) }
+            .sorted { ($0.enabled ? 0 : 1, $0.name) < ($1.enabled ? 0 : 1, $1.name) }
+    }
+
+    /// A scheduled routine with no repeat rule that already fired, and whose
+    /// last run is not still going or waiting on an approval.
+    static func isCompletedOneOff(_ routine: Routine) -> Bool {
+        guard routine.trigger?["type"]?.string == "schedule" else { return false }
+        if let rule = routine.trigger?["rrule"]?.string, !rule.isEmpty { return false }
+        guard let fired = routine.lastFiredAt, fired != .null else { return false }
+        let status = routine.lastRun?.status
+        return status != "running" && status != "pending_approval"
+    }
+}
+
+extension Routine {
+    var lastRunFailed: Bool { lastRun?.status == "error" }
 }
 
 enum RoutineText {

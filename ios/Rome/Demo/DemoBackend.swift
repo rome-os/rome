@@ -224,6 +224,10 @@ final class DemoBackend: RomeBackend {
         Routine(id: "r2", name: "price_watch", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(9 * 3600))),
         Routine(id: "r3", name: "weekly_report", enabled: false, trigger: .object(["type": .string("schedule"), "localTime": .string("09:00"), "rrule": .string("FREQ=WEEKLY;BYDAY=MO")]), nextRunAt: nil),
         Routine(id: "r4", name: "dream", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("03:00"), "rrule": .string("FREQ=DAILY;INTERVAL=3")]), nextRunAt: nil, managedBy: "dream"),
+        // Listed with "Last run failed".
+        Routine(id: "r5", name: "notion_sync", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("07:00"), "rrule": .string("FREQ=DAILY")]), nextRunAt: RomeDate.string(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!.addingTimeInterval(7 * 3600)), lastRun: .init(status: "error")),
+        // A one-off that already ran: hidden, as on the dashboard.
+        Routine(id: "r6", name: "dentist_reminder", enabled: true, trigger: .object(["type": .string("schedule"), "localTime": .string("10:00")]), nextRunAt: nil, lastFiredAt: .string("2026-11-01T10:00:00Z"), lastRun: .init(status: "success")),
     ]
 
     func sendFeedback(_ text: String) async throws {

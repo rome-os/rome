@@ -646,6 +646,16 @@
         }
       }
     },
+    "Last run failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次运行失败"
+          }
+        }
+      }
+    },
     "Loading approval…" : {
       "localizations" : {
         "zh-Hans" : {

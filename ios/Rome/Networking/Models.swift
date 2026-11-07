@@ -226,6 +226,12 @@ struct AIToolsStatus: Codable, Sendable {
 
 /// One row of `GET /routines`.
 struct Routine: Codable, Identifiable, Hashable, Sendable {
+    /// The latest run, which `GET /routines` adds to each row.
+    struct LastRun: Codable, Hashable, Sendable {
+        /// `success`, `error`, `running`, `pending_approval` or `cancelled`.
+        var status: String
+    }
+
     let id: String
     var name: String
     var enabled: Bool
@@ -233,6 +239,9 @@ struct Routine: Codable, Identifiable, Hashable, Sendable {
     var nextRunAt: String?
     var managedBy: String?
     var actionName: String?
+    /// When it last fired; its type is not relied on, only whether it is set.
+    var lastFiredAt: JSONValue?
+    var lastRun: LastRun?
 }
 
 // MARK: - Trace
