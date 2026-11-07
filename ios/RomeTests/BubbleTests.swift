@@ -63,16 +63,16 @@ import UIKit
 @Suite struct BackToBottomTests {
     let height: CGFloat = 600
 
-    @Test func showsPastTwoScreens() {
-        #expect(!BackToBottom.shows(false, distance: 1100, height: height))
-        #expect(BackToBottom.shows(false, distance: 1201, height: height))
+    @Test func showsPastOneScreen() {
+        #expect(!BackToBottom.shows(false, distance: 550, height: height))
+        #expect(BackToBottom.shows(false, distance: 601, height: height))
     }
 
     @Test func hidesOnlyWellInsideTheLine() {
-        // Between 1.7 and 2 screens it keeps what it was: no flicker.
-        #expect(BackToBottom.shows(true, distance: 1100, height: height))
-        #expect(!BackToBottom.shows(false, distance: 1100, height: height))
-        #expect(!BackToBottom.shows(true, distance: 1000, height: height))
+        // Between 0.6 and 1 screen it keeps what it was: no flicker.
+        #expect(BackToBottom.shows(true, distance: 450, height: height))
+        #expect(!BackToBottom.shows(false, distance: 450, height: height))
+        #expect(!BackToBottom.shows(true, distance: 350, height: height))
     }
 
     @Test func nothingBeforeTheListIsMeasured() {

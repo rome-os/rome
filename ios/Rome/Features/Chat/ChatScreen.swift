@@ -440,6 +440,9 @@ struct TranscriptList<Row: View>: View {
     /// Until then, new last rows scroll into view: the refetch after a return
     /// or a push tap lands a moment after it.
     @State private var catchUpUntil: Date?
+    /// A finger is on the list: an older page waits, so the rows under it
+    /// never move. A glide does not hold it back.
+    @State private var fingerDown = false
 
     var body: some View {
         let rows = store.rows
@@ -455,6 +458,9 @@ struct TranscriptList<Row: View>: View {
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
+                            // Before iOS 18, an early row coming into view asks for
+                            // the older page ahead of the top (iOS 18 reads the offset).
+                            .onAppear { if index < 6 { Task { await store.loadOlder() } } }
                             .background {
                                 if let highlighted, item.id.hasPrefix(highlighted + ":") {
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -481,9 +487,12 @@ struct TranscriptList<Row: View>: View {
                 .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace))
             }
             .coordinateSpace(.named(Self.scrollSpace))
-            .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest, jumping: $jumping, legacy: legacyScroll, handle: scrollHandle))
-            .onAppear { legacyScroll.attach(following: $following, atRest: $atRest, bottomVisible: $bottomVisible, jumping: $jumping) }
-            .onChange(of: store.olderPage != nil && atRest && !jumping) { _, ready in
+            .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest, jumping: $jumping, fingerDown: $fingerDown, legacy: legacyScroll, handle: scrollHandle))
+            .onAppear { legacyScroll.attach(following: $following, atRest: $atRest, bottomVisible: $bottomVisible, jumping: $jumping, fingerDown: $fingerDown) }
+            // The page goes in as soon as it is here, a glide included: its
+            // offset shift keeps the rows in view where they are. Before iOS
+            // 18 there is no shift, so it waits for the scroll to rest.
+            .onChange(of: store.olderPage != nil && !jumping && (Self.placesInGlide ? !fingerDown : atRest)) { _, ready in
                 if ready { Task { await store.placeOlderPage() } }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -563,11 +572,26 @@ struct TranscriptList<Row: View>: View {
             }
             .animation(.easeOut(duration: 0.2), value: BackToBottom.visible(far: showsBackToBottom, unseen: unseen, following: following))
             .animation(.easeOut(duration: 0.2), value: unseen > 0)
-            .modifier(DistanceFromBottom(visibleHeight: visibleHeight, showing: $showsBackToBottom))
+            .modifier(DistanceFromBottom(visibleHeight: visibleHeight, showing: $showsBackToBottom, bottomVisible: $bottomVisible, onNearTop: {
+                Task { await store.loadOlder() }
+            }, onContentChange: { old, new in
+                // An older page went in above the rows in view: move the offset
+                // by what the content grew and the scroll did not follow, so the
+                // rows stay where they are, mid-glide too.
+                guard store.placingOlder else { return }
+                let grew = new.contentHeight - old.contentHeight
+                let followed = new.offset - old.offset
+                if grew > 1 && abs(grew - followed) > 1 { scrollHandle.shift(by: grew - followed) }
+            }))
         }
     }
 
     private static var scrollSpace: String { "transcript" }
+
+    private static var placesInGlide: Bool {
+        if #available(iOS 18, *) { return true }
+        return false
+    }
 
     private static var anchorFollowsBottom: Bool {
         if #available(iOS 18, *) { return true }
@@ -588,7 +612,8 @@ struct TranscriptList<Row: View>: View {
         if gliding || !bottomVisible { jumping = true }
         following = true
         unseen = 0
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        // Eases out onto the bottom: a spring would run past it and back.
+        withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo("bottom", anchor: .bottom) }
     }
 }
 
@@ -604,6 +629,7 @@ private struct FollowBottom: ViewModifier {
     let holdOlder: Bool
     @Binding var atRest: Bool
     @Binding var jumping: Bool
+    @Binding var fingerDown: Bool
     let legacy: LegacyScrollMonitor
     let handle: ScrollHandle
     /// A finger is on the list. Read only before iOS 18.
@@ -613,11 +639,14 @@ private struct FollowBottom: ViewModifier {
         if #available(iOS 18, *) {
             content
                 // The role nearest the scroll view wins over the general anchor.
-                .defaultScrollAnchor(following || holdOlder ? .bottom : .top, for: .sizeChanges)
+                // An older page placed above is held by its own offset shift
+                // (`ScrollHandle.shift`), which works in a glide as well.
+                .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
                 .defaultScrollAnchor(.bottom)
                 .onScrollPhaseChange { old, phase, context in
                     transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public), container \(context.geometry.containerSize.height, privacy: .public), insets \(context.geometry.contentInsets.top, privacy: .public)/\(context.geometry.contentInsets.bottom, privacy: .public), visible \(context.geometry.visibleRect.height, privacy: .public)")
                     atRest = phase == .idle || phase == .animating
+                    if fingerDown != (phase == .interacting) { fingerDown = phase == .interacting }
                     switch phase {
                     case .interacting:
                         // A drag owns the scroll: nothing moves it from under the finger.
@@ -662,6 +691,14 @@ final class ScrollHandle {
     /// The glide was stopped to jump to the bottom: the rest that follows is
     /// not where the guardian left the list.
     var stoppedForJump = false
+
+    /// Moves the content by `dy` without stopping a glide: what an older page
+    /// added above the rows in view.
+    func shift(by dy: CGFloat) {
+        guard let view else { return }
+        view.contentOffset.y += dy
+        transcriptScrollLog.notice("shifted by \(dy, privacy: .public) to \(view.contentOffset.y, privacy: .public)")
+    }
 
     /// Stops a drag's glide where it is. Returns whether one was moving.
     func stop() -> Bool {
@@ -713,12 +750,14 @@ private final class LegacyScrollMonitor {
     private var atRest: Binding<Bool>?
     private var bottomVisible: Binding<Bool>?
     private var jumping: Binding<Bool>?
+    private var fingerBinding: Binding<Bool>?
     private var userMoved = false
     private var fingerDown = false
     private var settle: Task<Void, Never>?
 
-    func attach(following: Binding<Bool>, atRest: Binding<Bool>, bottomVisible: Binding<Bool>, jumping: Binding<Bool>) {
+    func attach(following: Binding<Bool>, atRest: Binding<Bool>, bottomVisible: Binding<Bool>, jumping: Binding<Bool>, fingerDown: Binding<Bool>) {
         self.jumping = jumping
+        fingerBinding = fingerDown
         self.following = following
         self.atRest = atRest
         self.bottomVisible = bottomVisible
@@ -726,6 +765,7 @@ private final class LegacyScrollMonitor {
 
     func finger(down: Bool) {
         fingerDown = down
+        if fingerBinding?.wrappedValue != down { fingerBinding?.wrappedValue = down }
         if down {
             userMoved = true
             following?.wrappedValue = false
@@ -784,12 +824,12 @@ private struct LegacyContentMoves: ViewModifier {
 /// visible area before. Appearing and disappearing would not tell, because a
 /// lazy stack keeps it alive off screen.
 /// When the back-to-bottom button shows: once the newest rows are more than
-/// two screens below, and until they are back within 1.7, so it does not
+/// a screen below, and until they are back within 0.6 of one, so it does not
 /// flicker at the line.
 enum BackToBottom {
     static func shows(_ showing: Bool, distance: CGFloat, height: CGFloat) -> Bool {
         guard height > 0 else { return false }
-        return distance > height * (showing ? 1.7 : 2)
+        return distance > height * (showing ? 0.6 : 1)
     }
 
     /// How far the content's end is below the visible area, the bars' and
@@ -842,14 +882,42 @@ private struct BackToBottomGlyph: View {
 
 /// From iOS 18, the scroll's own geometry tells how far the bottom is.
 private struct DistanceFromBottom: ViewModifier {
+    struct Reading: Equatable {
+        var nearTop: Bool
+        var contentHeight: CGFloat
+        var distance: CGFloat
+        var offset: CGFloat
+    }
+
     let visibleHeight: CGFloat
     @Binding var showing: Bool
+    /// The bottom marker at least half on screen, from the offset: the
+    /// marker's own visibility can report it seen at the top after a page lands.
+    @Binding var bottomVisible: Bool
+    /// Within 1.5 screens of the top of what is loaded: time to fetch the older page.
+    var onNearTop: () -> Void = {}
+    var onContentChange: (Reading, Reading) -> Void = { _, _ in }
 
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
-            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
-                BackToBottom.distance(contentHeight: geometry.contentSize.height, offset: geometry.contentOffset.y, topInset: geometry.contentInsets.top, visibleHeight: geometry.containerSize.height)
-            } action: { _, distance in
+            // One reading for both ends: two on one view do not both fire.
+            content.onScrollGeometryChange(for: Reading.self) { geometry in
+                Reading(
+                    nearTop: geometry.contentOffset.y + geometry.contentInsets.top < geometry.containerSize.height * 1.5,
+                    // A page that lands while still near the top asks for the next.
+                    contentHeight: geometry.contentSize.height,
+                    distance: BackToBottom.distance(contentHeight: geometry.contentSize.height, offset: geometry.contentOffset.y, topInset: geometry.contentInsets.top, visibleHeight: geometry.containerSize.height),
+                    offset: geometry.contentOffset.y
+                )
+            } action: { old, new in
+                if abs(new.contentHeight - old.contentHeight) > 50 {
+                    transcriptScrollLog.notice("content \(old.contentHeight, privacy: .public) -> \(new.contentHeight, privacy: .public), offset \(old.offset, privacy: .public) -> \(new.offset, privacy: .public)")
+                }
+                if old.contentHeight != new.contentHeight { onContentChange(old, new) }
+                let atBottom = new.distance < BottomMarker.height / 2
+                if atBottom != bottomVisible { bottomVisible = atBottom }
+                if new.nearTop && (!old.nearTop || old.contentHeight != new.contentHeight) { onNearTop() }
+                let distance = new.distance
                 let next = BackToBottom.shows(showing, distance: distance, height: visibleHeight)
                 if next != showing {
                     transcriptScrollLog.notice("back-to-bottom \(next ? "shows" : "hides", privacy: .public) at distance \(distance, privacy: .public)")
@@ -863,6 +931,7 @@ private struct DistanceFromBottom: ViewModifier {
 }
 
 private struct BottomMarker: View {
+    static let height: CGFloat = 14
     @Binding var visible: Bool
     let viewportBottom: CGFloat
     let space: String
@@ -873,12 +942,12 @@ private struct BottomMarker: View {
 
     var body: some View {
         if #available(iOS 18, *) {
+            // Whether it is on screen comes from the scroll's geometry.
             Color.clear
-                .frame(height: 14)
-                .onScrollVisibilityChange(threshold: 0.5) { visible = $0 }
+                .frame(height: Self.height)
         } else {
             Color.clear
-                .frame(height: 14)
+                .frame(height: Self.height)
                 // The position lives here, so a scrolled frame redraws only this view.
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.frame(in: .named(space)).midY
