@@ -10,8 +10,9 @@
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too. The guardian's phone app marks its
-// socket with a header; a chat it subscribes to counts as watched
-// (`PhoneWatching`), which holds back the Concierge's push there.
+// socket with a header and holds `chat.watch:<id>` for the chat on its screen;
+// that chat counts as watched (`PhoneWatching`), which holds back the
+// Concierge's push there. Its data subscriptions never count.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -19,6 +20,7 @@ import {
   APP_CATALOG_TOPIC,
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
+  CHAT_WATCH_TOPIC_PREFIX,
   CONCIERGE_TASKS_TOPIC,
   LIVE_EVENTS_CLIENT_HEADER,
   liveEventsClientMessageSchema,
@@ -65,7 +67,8 @@ type Topic =
   | { kind: "chat.status" }
   | { kind: "apps.catalog" }
   | { kind: "concierge.tasks" }
-  | { kind: "chat.session"; sessionId: string };
+  | { kind: "chat.session"; sessionId: string }
+  | { kind: "chat.watch"; sessionId: string };
 
 function parseTopic(topic: string): Topic | null {
   if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
@@ -74,6 +77,10 @@ function parseTopic(topic: string): Topic | null {
   if (topic.startsWith(CHAT_SESSION_TOPIC_PREFIX)) {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
+  }
+  if (topic.startsWith(CHAT_WATCH_TOPIC_PREFIX)) {
+    const sessionId = topic.slice(CHAT_WATCH_TOPIC_PREFIX.length);
+    if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.watch", sessionId };
   }
   return null;
 }
@@ -142,7 +149,9 @@ export function attachLiveEventsServer(
     // Whose Concierge todo list and private chats this socket may read.
     const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
     const exists = async (topic: Topic): Promise<boolean> =>
-      topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId, owner) : true;
+      topic.kind === "chat.session" || topic.kind === "chat.watch"
+        ? sources.hasChatSession(topic.sessionId, owner)
+        : true;
 
     const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
       switch (topic.kind) {
@@ -152,17 +161,14 @@ export function attachLiveEventsServer(
           return sources.subscribeAppCatalog(emit);
         case "concierge.tasks":
           return sources.subscribeConciergeTasks(owner, emit);
-        case "chat.session": {
-          const stop = sources.subscribeChatSession(topic.sessionId, emit);
-          // The guardian's phone on this chat: what the Concierge says here
-          // is read on the phone, so it is not pushed to it.
-          if (!phone || caller.kind !== "guardian" || !phoneWatching) return stop;
-          const unwatch = phoneWatching.watch(topic.sessionId);
-          return () => {
-            unwatch();
-            stop();
-          };
-        }
+        case "chat.session":
+          return sources.subscribeChatSession(topic.sessionId, emit);
+        case "chat.watch":
+          // The chat on the guardian's phone: what the Concierge says there is
+          // read on the phone, so it is not pushed to it. Anyone else's watch
+          // is held and counts for nothing.
+          if (!phone || caller.kind !== "guardian" || !phoneWatching) return () => {};
+          return phoneWatching.watch(topic.sessionId);
       }
     };
 

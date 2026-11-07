@@ -4,7 +4,7 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 
 ## Components
 
-- **Instance** — runs the agent and the notification action, and the Concierge's turns. Decides *whether* to notify and *what* the body says. Knows which chats the guardian's phone app holds open on the live-events socket.
+- **Instance** — runs the agent and the notification action, and the Concierge's turns. Decides *whether* to notify and *what* the body says. Knows which chat the guardian's phone app shows, from its watch on the live-events socket.
 - **Rome Cloud** — the central push broker. Owns device registration, the push-provider credentials (APNs for iOS, FCM for Android), and the delivery fan-out.
 - **APNs / FCM** — the platform push services (Apple's APNs for iOS, Google's FCM for Android), and the only path to the physical device.
 
@@ -22,7 +22,7 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 
 - **A Concierge turn pushes its first message, once: a proactive turn, and the reply to a message the guardian sent.** The reminder after a turn, the quota recovery and the "chat retired" notice never push, nor does the reply to an automated sender. Only the guardian's own Concierge chats push, since Rome Cloud delivers to the guardian's devices: a visitor's Concierge never does. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
 
-- **Nothing pushes for a chat the guardian's phone app shows.** The phone app marks its live-events socket with the `x-rome-client: phone` upgrade header. While that socket, signed in as the guardian, subscribes to a chat's session topic, the chat counts as watched, and nothing the Concierge says there pushes. The dashboard never counts: a browser cannot set the header. The phone unsubscribes and closes the socket as it leaves the foreground, so the count drops at once. A phone killed or cut off without that goodbye counts until the socket's ping drops it, and a reply in that window does not push.
+- **Nothing pushes for a chat the guardian's phone app shows.** The phone app marks its live-events socket with the `x-rome-client: phone` upgrade header and holds the `chat.watch:<chatId>` topic for the one chat on its screen, none under a sheet or its drawer. While that socket, signed in as the guardian, holds a chat's watch, the chat counts as watched, and nothing the Concierge says there pushes. The phone's other subscriptions follow chats it does not show and never count. The dashboard never counts either: a browser cannot set the header. The phone moves the watch as the chat on screen changes, and drops it and closes the socket as it leaves the foreground, so the count drops at once. A phone killed or cut off without that goodbye counts until the socket's ping drops it, and a reply in that window does not push.
 
 - **A Concierge push carries only the Concierge's own words.** Its body is what the Concierge wrote in that message, its text or a forward's intro, or else a fixed line in the guardian's language. Forwarded or quoted text, a task's title and a chat's name never become the body, since any of them may come from a task's output and hold a code or password.
 

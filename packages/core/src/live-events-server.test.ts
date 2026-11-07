@@ -366,30 +366,32 @@ describe("live events WebSocket", () => {
     ).toMatchObject({ data: { sessionId: "sess-running", running: false } });
   });
 
-  it("counts a chat as watched while the guardian's phone subscribes to it", async () => {
+  it("counts only the chat the guardian's phone watches, never its data subscriptions", async () => {
     await deps.webchatRepo.createSession("sess-a", "A");
     await deps.webchatRepo.createSession("sess-b", "B");
     const phone = await connect({ "x-rome-client": "phone" });
-    await phone.subscribe("chat.session:sess-a");
+    // The phone follows B's data (its name, its rows) but shows A.
+    await phone.subscribe("chat.session:sess-b");
+    await phone.subscribe("chat.watch:sess-a");
     expect(phoneWatching.isWatching("sess-a")).toBe(true);
     expect(phoneWatching.isWatching("sess-b")).toBe(false);
 
-    // The dashboard on the same chat never counts.
-    const web = await connect();
-    await web.subscribe("chat.session:sess-b");
-    expect(phoneWatching.isWatching("sess-b")).toBe(false);
-
-    // The phone's goodbye: unsubscribing, or closing, stops the count at once.
-    phone.send({ type: "unsubscribe", topic: "chat.session:sess-a" });
+    // The chat on screen moves to B: the watch moves with it.
+    phone.send({ type: "unsubscribe", topic: "chat.watch:sess-a" });
+    await phone.subscribe("chat.watch:sess-b");
     await rs.waitFor(() => expect(phoneWatching.isWatching("sess-a")).toBe(false));
-    await phone.subscribe("chat.session:sess-b");
     expect(phoneWatching.isWatching("sess-b")).toBe(true);
+
+    // The phone's goodbye: closing stops the count at once.
     await phone.close();
     await rs.waitFor(() => expect(phoneWatching.isWatching("sess-b")).toBe(false));
   });
 
-  it("never counts a visitor's socket as the guardian's phone", async () => {
+  it("never counts a watch from the dashboard or a visitor", async () => {
     await deps.webchatRepo.createSession("sess-a", "A");
+    const web = await connect();
+    await web.subscribe("chat.watch:sess-a");
+    expect(phoneWatching.isWatching("sess-a")).toBe(false);
     const visitor = await connect({
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -398,7 +400,8 @@ describe("live events WebSocket", () => {
       origin: "http://rome.example",
       "x-rome-client": "phone",
     });
-    await visitor.subscribe("chat.session:sess-a");
+    visitor.send({ type: "subscribe", topic: "chat.watch:sess-a" });
+    await visitor.next((m) => m.topic === "chat.watch:sess-a");
     expect(phoneWatching.isWatching("sess-a")).toBe(false);
   });
 

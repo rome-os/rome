@@ -107,6 +107,23 @@ describe("ConciergePush", () => {
     expect(sent).toEqual([{ body: "reply", level: "active", chatId: "elsewhere" }]);
   });
 
+  it("follows the phone's watch: the chat on screen skips, any other pushes, again once it moves", async () => {
+    const { PhoneWatching } = await import("../lib/phone-watching.js");
+    const watching = new PhoneWatching();
+    const { push, sent } = pushWith({ watching: (chatId) => watching.isWatching(chatId) });
+    const unwatchA = watching.watch("A");
+    push.said({ turnId: "t1", chatId: "B", ownWords: "reply in B", level: "active" });
+    await settle();
+    unwatchA();
+    const unwatchB = watching.watch("B");
+    push.said({ turnId: "t2", chatId: "B", ownWords: "read on screen", level: "active" });
+    await settle();
+    unwatchB();
+    push.said({ turnId: "t3", chatId: "B", ownWords: "after leaving", level: "active" });
+    await settle();
+    expect(sent.map((content) => content.body)).toEqual(["reply in B", "after leaving"]);
+  });
+
   it("pushes nothing in quiet hours", async () => {
     const { push, sent } = pushWith({ quietUntil: Date.now() + 60_000 });
     push.said({ turnId: "t1", chatId: "c", ownWords: "hi", level: "active" });

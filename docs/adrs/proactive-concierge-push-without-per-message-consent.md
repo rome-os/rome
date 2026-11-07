@@ -21,7 +21,7 @@ The instance pushes the first message of every Concierge turn the guardian did n
 
 *2026-11-07.* A guardian who sends a message and locks the phone missed the reply: a turn the guardian started never pushed. Now the reply to the guardian's own message pushes its first message with an alert, under the same rules: once per turn, the Concierge's own words, quiet hours, the guardian's own chats. The reply to an automated sender does not push, nor do the reminder, the quota recovery and the "chat retired" notice.
 
-No turn pushes while the guardian's phone app shows its chat. The phone marks its live-events socket with the `x-rome-client: phone` upgrade header, and a chat its socket subscribes to counts as watched. This holds for proactive turns too: what the phone shows needs no push. The dashboard never counts, since a browser cannot set that header, so a guardian reading on a computer still gets the push on the phone. The phone says goodbye as it leaves the foreground: it unsubscribes and closes the socket, and the count drops at once. A phone killed or cut off without the goodbye counts until the socket's ping drops it, and a reply in that window does not push. That gap is accepted. A reply's first message can now show on the lock screen too, so the Concierge is told to keep any secret, even one the guardian asked for, out of it and give it in a later message.
+No turn pushes while the guardian's phone app shows its chat. The phone marks its live-events socket with the `x-rome-client: phone` upgrade header and holds the `chat.watch:<chatId>` topic for the one chat on its screen. Only that watch counts: the phone also follows other chats' data (topic chat names, the main chat), and counting those would swallow their pushes while the app is open. This holds for proactive turns too: what the phone shows needs no push. The dashboard never counts, since a browser cannot set that header, so a guardian reading on a computer still gets the push on the phone. The phone moves the watch as the chat on screen changes, and says goodbye as it leaves the foreground: it drops the watch and closes the socket, and the count drops at once. A phone killed or cut off without the goodbye counts until the socket's ping drops it, and a reply in that window does not push. That gap is accepted. A reply's first message can now show on the lock screen too, so the Concierge is told to keep any secret, even one the guardian asked for, out of it and give it in a later message.
 
 ## Alternatives
 
@@ -44,7 +44,7 @@ A turn pushes even when the guardian has the chat open on a computer, but not wh
 Future diffs must respect:
 
 - The instance decides when a turn pushes, from how the turn started and whether the phone shows the chat, never from the text of its input or output.
-- Only the phone app's socket counts as watching, and only while it is signed in as the guardian. A diff that lets the dashboard hold back a push reopens this record.
+- Only the phone app's socket counts as watching, only through its `chat.watch:` topic, and only while it is signed in as the guardian. A diff that lets the dashboard, or a data subscription, hold back a push reopens this record.
 - Only the guardian's own Concierge pushes. A visitor's Concierge chats are private to the visitor, and the push reaches the guardian's devices.
 - One push per turn, the turn's first message. A diff that pushes each message reopens this record.
 - Quiet hours suppress the push and keep the message in the chat. Nothing queues the push for later.
