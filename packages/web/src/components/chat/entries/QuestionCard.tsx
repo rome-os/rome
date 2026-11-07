@@ -18,6 +18,9 @@ interface Question {
   question: string;
   type: "single" | "multi" | "text";
   options?: string[];
+  defaults?: string[];
+  defaultText?: string;
+  optionDescriptions?: Record<string, string>;
   /** single/multi only: also show a free-text box beneath the options. */
   freeText?: boolean;
   /** Question may be left blank without blocking submit. */
@@ -27,6 +30,8 @@ interface Question {
 interface Answer {
   questionId: string;
   value: string;
+  /** Lossless parts when a multi answer contains the display separator. */
+  values?: string[];
 }
 
 /** How a multi-choice answer joins its selected options into one string value. */
@@ -36,7 +41,7 @@ const MULTI_SEP = ", ";
  * An option can wrap, so it takes the `sm` step as a floor rather than as a
  * fixed height. One line sits under that floor, so the box is the step exactly
  * and the Button's own `items-center` centres the label; two lines outgrow it
- * and the box follows the text. Vertical padding is deliberately absent — any
+ * and the box follows the text. Plain options have no vertical padding — any
  * step big enough to see would push a single line past the floor and off the
  * scale, and the line box's half-leading already separates a wrapped label from
  * the border.
@@ -52,6 +57,13 @@ function splitMulti(value: string): string[] {
     .filter(Boolean);
 }
 
+/** An option's own description, ignoring keys inherited from `Object.prototype`
+ * (an option may be labeled `__proto__` or `constructor`). */
+function descriptionOf(q: Question, option: string): string | undefined {
+  const descriptions = q.optionDescriptions;
+  return descriptions && Object.hasOwn(descriptions, option) ? descriptions[option] : undefined;
+}
+
 function parseQuestions(props: Record<string, unknown> | undefined): Question[] {
   const raw = props?.questions;
   if (!Array.isArray(raw)) return [];
@@ -65,7 +77,31 @@ function parseQuestions(props: Record<string, unknown> | undefined): Question[] 
       : undefined;
     const freeText = (type === "single" || type === "multi") && o.freeText === true;
     const optional = o.optional === true;
-    return [{ id: o.id, question: o.question, type, options, freeText, optional }];
+    const defaults = Array.isArray(o.defaults)
+      ? o.defaults.filter((x): x is string => typeof x === "string" && (options ?? []).includes(x))
+      : undefined;
+    const defaultText = typeof o.defaultText === "string" ? o.defaultText : undefined;
+    const optionDescriptions =
+      o.optionDescriptions && typeof o.optionDescriptions === "object"
+        ? Object.fromEntries(
+            Object.entries(o.optionDescriptions).filter(
+              ([label, description]) => options?.includes(label) && typeof description === "string",
+            ),
+          )
+        : undefined;
+    return [
+      {
+        id: o.id,
+        question: o.question,
+        type,
+        options,
+        freeText,
+        optional,
+        defaults,
+        defaultText,
+        optionDescriptions,
+      },
+    ];
   });
 }
 
@@ -76,7 +112,11 @@ function answersFromResult(result: Record<string, unknown> | undefined): Answer[
     if (!a || typeof a !== "object") return [];
     const o = a as Record<string, unknown>;
     if (typeof o.questionId !== "string" || typeof o.value !== "string") return [];
-    return [{ questionId: o.questionId, value: o.value }];
+    const values =
+      Array.isArray(o.values) && o.values.every((v) => typeof v === "string")
+        ? (o.values as string[])
+        : undefined;
+    return [{ questionId: o.questionId, value: o.value, values }];
   });
 }
 
@@ -101,11 +141,17 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
   // typed-own free-text remainder. The chosen options of a multi live in `picks`.
   const [drafts, setDrafts] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
+    if (!resolved) {
+      for (const q of questions) {
+        if (q.type === "single" && q.defaults?.length) init[q.id] = q.defaults[0];
+        if (q.type === "text" && q.defaultText !== undefined) init[q.id] = q.defaultText;
+      }
+    }
     for (const a of priorAnswers) {
       const q = questions.find((x) => x.id === a.questionId);
       if (q?.type === "multi") {
         const opts = q.options ?? [];
-        const extra = splitMulti(a.value).filter((s) => !opts.includes(s));
+        const extra = (a.values ?? splitMulti(a.value)).filter((s) => !opts.includes(s));
         if (extra.length) init[q.id] = extra.join(MULTI_SEP);
       } else {
         init[a.questionId] = a.value;
@@ -115,11 +161,16 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
   });
   const [picks, setPicks] = useState<Record<string, string[]>>(() => {
     const init: Record<string, string[]> = {};
+    if (!resolved) {
+      for (const q of questions) {
+        if (q.type === "multi" && q.defaults) init[q.id] = [...new Set(q.defaults)];
+      }
+    }
     for (const a of priorAnswers) {
       const q = questions.find((x) => x.id === a.questionId);
       if (q?.type !== "multi") continue;
       const opts = q.options ?? [];
-      const chosen = splitMulti(a.value).filter((s) => opts.includes(s));
+      const chosen = (a.values ?? splitMulti(a.value)).filter((s) => opts.includes(s));
       if (chosen.length) init[q.id] = chosen;
     }
     return init;
@@ -153,7 +204,9 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
       if (q.type === "multi") {
         const typed = (drafts[q.id] ?? "").trim();
         const parts = [...(picks[q.id] ?? []), ...(typed ? [typed] : [])];
-        return parts.length ? [{ questionId: q.id, value: parts.join(MULTI_SEP) }] : [];
+        // Keep the display value readable, but retain parts when splitting it would lose labels.
+        const values = parts.some((part) => part.includes(MULTI_SEP)) ? { values: parts } : {};
+        return parts.length ? [{ questionId: q.id, value: parts.join(MULTI_SEP), ...values }] : [];
       }
       const value = (drafts[q.id] ?? "").trim();
       return value ? [{ questionId: q.id, value }] : [];
@@ -189,7 +242,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                 (() => {
                   const multi = q.type === "multi";
                   const options = q.options ?? [];
-                  const stacked = options.some((o) => o.length > 32);
+                  const stacked = options.some((o) => o.length > 32 || descriptionOf(q, o));
                   return (
                     <div
                       className={
@@ -200,6 +253,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                         const selected = multi
                           ? (picks[q.id] ?? []).includes(opt)
                           : drafts[q.id] === opt;
+                        const description = descriptionOf(q, opt);
                         return (
                           <Button
                             key={opt}
@@ -213,9 +267,29 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                                 ? togglePick(q.id, opt)
                                 : setDrafts((d) => ({ ...d, [q.id]: opt }))
                             }
-                            className={cn(OPTION, stacked && "w-full text-left")}
+                            className={cn(
+                              OPTION,
+                              stacked && "w-full text-left",
+                              description && "py-2",
+                            )}
                           >
-                            {opt}
+                            {description ? (
+                              <span className="flex min-w-0 flex-col gap-1">
+                                <span>{opt}</span>{" "}
+                                <span
+                                  className={cn(
+                                    "text-aux",
+                                    selected
+                                      ? "text-primary-foreground/80"
+                                      : "text-muted-foreground",
+                                  )}
+                                >
+                                  {description}
+                                </span>
+                              </span>
+                            ) : (
+                              opt
+                            )}
                           </Button>
                         );
                       })}
