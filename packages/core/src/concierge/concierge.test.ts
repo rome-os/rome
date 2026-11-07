@@ -1994,6 +1994,22 @@ describe("Concierge pushes", () => {
     expect(JSON.stringify(s.pushes)).not.toContain("7291");
   });
 
+  it("pushes nothing from a visitor's Concierge, whose turns the guardian's phone must not show", async () => {
+    const s = setup();
+    s.sessions.set("visitor-topic", {
+      id: "visitor-topic",
+      name: "Ann's calendar",
+      triggerKind: null,
+      agentName: CONCIERGE_AGENT_ID,
+      ownerKey: "visitor:acct-ann",
+    });
+    s.turnIn("visitor-topic");
+    s.pushLevel("active");
+    await sayIn(s, "Your 3pm moved.");
+    expect(s.pushes).toEqual([]);
+    expect(s.messages.get("visitor-topic")).toHaveLength(1);
+  });
+
   it("pushes nothing for a turn the guardian started", async () => {
     const s = setup();
     await sayIn(s, "Here are three flights.");

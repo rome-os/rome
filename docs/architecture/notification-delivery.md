@@ -20,7 +20,7 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 
 - **A push level and a chat are routing data, never shown.** A request may say whether the push alerts (`active`) or arrives silently (`passive`), and which chat a tap opens. Neither is displayed, so the body stays the only content the guardian reads. Only the instance itself sets them. The agent-facing action supplies a body alone.
 
-- **A Concierge turn the guardian did not start pushes its first message, once.** A turn the guardian started never pushes, and neither does the reminder after it. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
+- **A Concierge turn the guardian did not start pushes its first message, once.** A turn the guardian started never pushes, and neither does the reminder after it. Only the guardian's own Concierge chats push, since Rome Cloud delivers to the guardian's devices: a visitor's Concierge never does. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
 
 - **A Concierge push carries only the Concierge's own words.** Its body comes from what the Concierge wrote itself, or from the title it gave a task, or from a fixed line. Text it forwards or quotes from a task never becomes the body, since that text may hold a code or password the Concierge would not repeat.
 

@@ -6,7 +6,7 @@ rs.mock("../logger.js", () => ({
   createLogger: () => ({ info: logged, warn: logged, error: logged, debug: logged }),
 }));
 
-const { ConciergePush, PUSH_BODY_MAX_CHARS, pushBody } = await import("./push.js");
+const { ConciergePush, pushBody } = await import("./push.js");
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -22,6 +22,7 @@ function pushWith(
       },
     },
     quietUntil: async () => options.quietUntil ?? null,
+    pushesFor: async (chatId) => chatId !== "visitor-chat",
   });
   return { push, sent };
 }
@@ -65,6 +66,13 @@ describe("ConciergePush", () => {
   it("pushes nothing for a turn without a level", async () => {
     const { push, sent } = pushWith();
     push.said({ turnId: "t1", chatId: "c", ownWords: "hi", level: undefined });
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it("pushes nothing for a chat that is not the guardian's", async () => {
+    const { push, sent } = pushWith();
+    push.said({ turnId: "t1", chatId: "visitor-chat", ownWords: "hi", level: "active" });
     await settle();
     expect(sent).toEqual([]);
   });

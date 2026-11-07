@@ -187,13 +187,19 @@ export class ConciergeService {
 
   constructor(readonly deps: ConciergeDeps) {
     this.push = deps.notify
-      ? new ConciergePush({ notify: deps.notify, quietUntil: (at) => this.quietUntil(at) })
+      ? new ConciergePush({
+          notify: deps.notify,
+          quietUntil: (at) => this.quietUntil(at),
+          pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
+        })
       : null;
   }
 
   /**
-   * The Concierge said `text` in a chat. The first message of a turn with a
-   * push level also goes to the guardian's phone, outside quiet hours.
+   * The Concierge said something in a chat. The first message of a turn with a
+   * push level in one of the guardian's chats also goes to the guardian's
+   * phone, outside quiet hours. A visitor's Concierge never pushes: Rome Cloud
+   * delivers only to the guardian's devices.
    */
   said(said: SaidInTurn): void {
     this.push?.said(said);
@@ -201,7 +207,7 @@ export class ConciergeService {
 
   /** When the guardian's quiet window `at` falls in ends, or null outside it. */
   private async quietUntil(at: number): Promise<number | null> {
-    const quietHours = (await this.attachedFollowing?.rules())?.quietHours;
+    const quietHours = (await this.attachedFollowing?.rules(GUARDIAN_OWNER))?.quietHours;
     if (!quietHours) return null;
     return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(this.deps.settingsRepo));
   }

@@ -72,6 +72,8 @@ export interface ConciergePushDeps {
   notify: { send(content: SystemNotifyContent): Promise<SendOutcome> };
   /** When the quiet window `at` falls in ends, or null outside quiet hours. */
   quietUntil: (at: number) => Promise<number | null>;
+  /** Whether a message in this chat may reach the guardian's phone: only one of their own chats. */
+  pushesFor: (chatId: string) => Promise<boolean>;
   now?: () => number;
 }
 
@@ -118,6 +120,7 @@ export class ConciergePush {
   }
 
   private async send({ turnId, chatId, ownWords }: SaidInTurn, level: NotifyLevel): Promise<void> {
+    if (!(await this.deps.pushesFor(chatId))) return;
     if ((await this.deps.quietUntil(this.now())) !== null) {
       log.info("concierge push held back by quiet hours", { turnId, chatId });
       return;

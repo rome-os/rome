@@ -33,6 +33,7 @@ A turn the guardian did not start pushes even when the guardian has the chat ope
 Future diffs must respect:
 
 - The instance decides when a turn pushes, from how the turn started, never from the text of its input or output.
+- Only the guardian's own Concierge pushes. A visitor's Concierge chats are private to the visitor, and the push reaches the guardian's devices.
 - One push per turn, the turn's first message. A diff that pushes each message reopens this record.
 - Quiet hours suppress the push and keep the message in the chat. Nothing queues the push for later.
 - `send_notification` keeps its rule. The agent-facing action and this push stay separate paths.
