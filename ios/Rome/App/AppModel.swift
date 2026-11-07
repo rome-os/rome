@@ -13,6 +13,34 @@ final class TokenBox: Sendable {
     }
 }
 
+/// Decides when coming back to the foreground means the screens may be behind.
+/// A trip to the background always does; a moment inactive (a system alert,
+/// Notification Center pulled over the app) does once it lasts a second.
+struct ForegroundGate {
+    static let shortest: TimeInterval = 1
+    private var leftAt: Date?
+    private var wentBackground = false
+
+    mutating func resignedActive(at date: Date) {
+        if leftAt == nil { leftAt = date }
+    }
+
+    mutating func enteredBackground(at date: Date) {
+        if leftAt == nil { leftAt = date }
+        wentBackground = true
+    }
+
+    /// True when the screens should refetch.
+    mutating func becameActive(at date: Date) -> Bool {
+        defer {
+            leftAt = nil
+            wentBackground = false
+        }
+        guard let leftAt else { return false }
+        return wentBackground || date.timeIntervalSince(leftAt) >= Self.shortest
+    }
+}
+
 /// Everything that belongs to one opened instance.
 @MainActor
 @Observable
@@ -29,6 +57,13 @@ final class Workspace {
     private(set) var unreadAtOpen = 0
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
+    /// Goes up when Chat must show its newest rows: a tapped push.
+    private(set) var latestRequest = 0
+
+    func showLatest() {
+        latestRequest += 1
+        concierge.resync()
+    }
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String) {
         self.backend = backend
@@ -119,6 +154,7 @@ final class AppModel {
     }
     private let token = TokenBox()
     private var refreshing = false
+    private var foreground = ForegroundGate()
 
     init() {
         let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
@@ -342,6 +378,26 @@ final class AppModel {
         await workspace.start()
     }
 
+    // MARK: Foreground
+
+    func appWillResignActive() {
+        foreground.resignedActive(at: .now)
+    }
+
+    func appDidEnterBackground() {
+        foreground.enteredBackground(at: .now)
+        workspace?.backend.events.pause()
+    }
+
+    /// Back in front: what the screens show may be behind, whether or not the
+    /// app was suspended, so they refetch and the socket starts over.
+    func appDidBecomeActive() {
+        Task { await push.refresh() }
+        if foreground.becameActive(at: .now) {
+            workspace?.backend.events.resume()
+        }
+    }
+
     // MARK: Pushes
 
     /// A tapped push: its instance, then its Concierge. It waits while no
@@ -365,7 +421,7 @@ final class AppModel {
             conciergeRequest += 1
             // The push is news the chat may not hold yet: the socket can still
             // be reconnecting, or never paused if the tap came over the open app.
-            workspace?.concierge.resync()
+            workspace?.showLatest()
         }
     }
 

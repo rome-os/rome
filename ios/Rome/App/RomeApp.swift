@@ -4,7 +4,6 @@ import UserNotifications
 @main
 struct RomeApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @Environment(\.scenePhase) private var scenePhase
 
     private var model: AppModel { delegate.model }
 
@@ -13,15 +12,6 @@ struct RomeApp: App {
             RootView()
                 .environment(model)
                 .task { await model.launch() }
-                .onChange(of: scenePhase) { _, phase in
-                    switch phase {
-                    case .background: model.workspace?.backend.events.pause()
-                    case .active:
-                        model.workspace?.backend.events.resume()
-                        Task { await model.push.refresh() }
-                    default: break
-                    }
-                }
         }
     }
 }
@@ -34,7 +24,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Before launch ends, so the tap that launched the app is delivered.
         UNUserNotificationCenter.current().delegate = self
+        observeForeground()
         return true
+    }
+
+    /// UIKit's own notifications, not SwiftUI's scene phase: every trip away
+    /// and back must reach the model, or the chat stays on what it showed.
+    private func observeForeground() {
+        let center = NotificationCenter.default
+        let model = model
+        center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { model.appWillResignActive() }
+        }
+        center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { model.appDidEnterBackground() }
+        }
+        center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { model.appDidBecomeActive() }
+        }
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

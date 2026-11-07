@@ -105,14 +105,16 @@ final class LiveEventsSocket: LiveEventSource {
         disconnect()
     }
 
-    /// Listeners refetch right away, before the socket is back: a socket that
-    /// is slow, refused or dead must not keep the screen on what it showed
-    /// before the app went away. They refetch again as the server confirms
+    /// The app is back in front. Listeners refetch right away, before the
+    /// socket is back: a socket that is slow, refused or dead must not keep
+    /// the screen on what it showed before. The socket starts over even if it
+    /// was never paused, since one that sat through a suspension can look open
+    /// and deliver nothing. Listeners refetch again as the server confirms
     /// each topic, which covers what was sent in between.
     func resume() {
-        guard paused else { return }
         paused = false
         guard !subscriptions.isEmpty else { return }
+        resync.dropped()
         for subscription in Array(subscriptions.values) { subscription.handler(.reconnected) }
         connect()
     }
