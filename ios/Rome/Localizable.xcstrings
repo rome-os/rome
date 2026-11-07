@@ -1157,16 +1157,6 @@
         }
       }
     },
-    "Plan my weekend trip and check the weather" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "帮我规划周末出行，顺便看看天气"
-          }
-        }
-      }
-    },
     "Reject" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1706,6 +1696,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "提交"
+          }
+        }
+      }
+    },
+    "Summarize this week's AI news" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我总结本周的 AI 新闻"
           }
         }
       }

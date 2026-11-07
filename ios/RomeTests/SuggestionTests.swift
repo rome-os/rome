@@ -11,7 +11,7 @@ import Testing
     @Test func offersTheThreeApprovedStarters() {
         // Tests run in English.
         #expect(Suggestion.all.map(\.text) == [
-            "Plan my weekend trip and check the weather",
+            "Summarize this week's AI news",
             "Watch my Gmail inbox for me",
             "What can you watch for me?",
         ])
@@ -47,6 +47,6 @@ import Testing
         let workspace = Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test")
         _ = await workspace.startTopicChat(firstMessage: Suggestion.all[0].text)
         await settle()
-        #expect(backend.calls == ["start", "send topic-1 Plan my weekend trip and check the weather"])
+        #expect(backend.calls == ["start", "send topic-1 Summarize this week's AI news"])
     }
 }

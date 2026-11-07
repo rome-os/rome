@@ -9,7 +9,7 @@ struct Suggestion: Identifiable, Hashable, Sendable {
 
     static var all: [Suggestion] {
         [
-            Suggestion(id: "trip", systemImage: "point.topleft.down.to.point.bottomright.curvepath", text: String(localized: "Plan my weekend trip and check the weather")),
+            Suggestion(id: "news", systemImage: "newspaper", text: String(localized: "Summarize this week's AI news")),
             Suggestion(id: "gmail", systemImage: "envelope", text: String(localized: "Watch my Gmail inbox for me")),
             Suggestion(id: "watch", systemImage: "dot.radiowaves.left.and.right", text: String(localized: "What can you watch for me?")),
         ]
