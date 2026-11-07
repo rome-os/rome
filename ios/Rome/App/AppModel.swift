@@ -53,6 +53,13 @@ final class Workspace {
     private(set) var accountLabel: String
     let tasks: TasksStore
     let concierge: TranscriptStore
+    /// The topic chats, for the drawer.
+    let topics: TopicChatsStore
+    /// Each opened topic chat's transcript, kept while the instance is open so
+    /// coming back to a chat does not load it from the top again.
+    @ObservationIgnored private var topicStores: [String: TranscriptStore] = [:]
+    /// Goes up per topic chat when it must show its newest rows: a tapped push.
+    private(set) var topicLatest: [String: Int] = [:]
     private(set) var conciergeState: ConciergeState = .loading
     private(set) var unreadAtOpen = 0
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
@@ -72,10 +79,37 @@ final class Workspace {
         self.accountLabel = accountLabel
         tasks = TasksStore(backend: backend)
         concierge = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        topics = TopicChatsStore(backend: backend)
+    }
+
+    func topicStore(_ chatId: String) -> TranscriptStore {
+        if let store = topicStores[chatId] { return store }
+        let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)
+        topicStores[chatId] = store
+        return store
+    }
+
+    /// Starts a topic chat, then sends it its first message, in that order.
+    /// Nothing exists on the server before this. Returns the new chat's id, or
+    /// nil when the chat could not be started.
+    func startTopicChat(firstMessage text: String) async -> String? {
+        guard let chat = try? await backend.startTopicChat() else { return nil }
+        topics.add(chat)
+        let store = topicStore(chat.id)
+        store.start()
+        store.send(text)
+        return chat.id
+    }
+
+    /// A tapped push for a topic chat: its newest rows, fetched again.
+    func showLatest(inTopic chatId: String) {
+        topicLatest[chatId, default: 0] += 1
+        topicStore(chatId).resync()
     }
 
     func start() async {
         tasks.start()
+        topics.start()
         Task { if let name = try? await backend.me(), !name.isEmpty { accountLabel = name } }
         await openConcierge()
     }
@@ -107,6 +141,8 @@ final class Workspace {
     func stop() {
         tasks.stop()
         concierge.stop()
+        topics.stop()
+        for store in topicStores.values { store.stop() }
         backend.events.pause()
     }
 }
@@ -138,7 +174,7 @@ final class AppModel {
     /// Shown once after the app picked an instance among several on its own.
     var autoOpenHint: String?
     /// Goes up when a tapped push asks the shell to show Chat.
-    private(set) var conciergeRequest = 0
+    private(set) var chatRequest = ChatRequest(serial: 0, topicId: nil)
     /// A tapped push waiting for an instance to open.
     private var pendingPush: PushTarget?
 
@@ -415,14 +451,28 @@ final class AppModel {
         }
         switch PushRoute.decide(target, currentInstanceID: currentInstanceID, instances: instances) {
         case .switchTo(let instance):
-            // The same path as the instances page; the new shell opens on Chat.
+            // The same path as the instances page. The push waits again, so
+            // the opened instance shows its chat.
+            pendingPush = target
             await switchInstance(to: instance)
         case .openConcierge:
-            conciergeRequest += 1
+            let topic = await topicChat(for: target)
+            chatRequest = ChatRequest(serial: chatRequest.serial + 1, topicId: topic)
             // The push is news the chat may not hold yet: the socket can still
             // be reconnecting, or never paused if the tap came over the open app.
-            workspace?.showLatest()
+            if let topic { workspace?.showLatest(inTopic: topic) } else { workspace?.showLatest() }
         }
+    }
+
+    /// The topic chat a push names, when this account has it; otherwise the
+    /// main chat (nil). A chat started since the list was read is fetched.
+    private func topicChat(for target: PushTarget) async -> String? {
+        guard let workspace, let chatId = target.chatId, chatId != conciergeChatID else { return nil }
+        var topics = workspace.topics.chats
+        if !topics.contains(where: { $0.id == chatId }), let all = try? await workspace.backend.conciergeChats() {
+            topics = TopicChatsStore.topics(in: all)
+        }
+        return PushRoute.topicChat(for: target, topics: topics)
     }
 
     /// The instance restarted on its new release: open it fresh, so the chat,

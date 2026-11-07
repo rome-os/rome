@@ -11,6 +11,10 @@ enum MainSection: Hashable {
     case chat
     case routines
     case search
+    /// A Concierge topic chat.
+    case topic(String)
+    /// A blank topic chat, which creates its chat on the first send.
+    case newTopic(UUID)
 }
 
 /// Pages pushed inside the Settings sheet.
@@ -34,6 +38,10 @@ struct MainShell: View {
     /// which gets only the final translation.
     @State private var dragAxis: DragAxis?
     @State private var showTasks = false
+    /// The Concierge chat whose tasks the sheet lists.
+    @State private var tasksChatId = conciergeChatID
+    /// A blank topic chat that started its chat keeps its view under the new id.
+    @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
     @State private var settingsPath: [SettingsRoute] = []
     #if DEBUG
@@ -54,6 +62,10 @@ struct MainShell: View {
                     section: section,
                     onSection: { picked in
                         show(picked)
+                        closeDrawer()
+                    },
+                    onNewTopic: {
+                        show(.newTopic(UUID()))
                         closeDrawer()
                     },
                     // The sheet rises over the open drawer, and the drawer is still
@@ -101,7 +113,7 @@ struct MainShell: View {
             .gesture(drawerDrag(width: width), including: drawerOpen ? .all : .subviews)
         }
         .sheet(isPresented: $showTasks) {
-            TasksSheet(store: workspace.tasks) { task in
+            TasksSheet(store: workspace.tasks, chatId: tasksChatId) { task in
                 openTask(task)
             }
             .presentationDetents([.medium, .large])
@@ -119,7 +131,7 @@ struct MainShell: View {
                 // so show its content in the same frame a large-detent sheet has.
                 ZStack(alignment: .bottom) {
                     Color.black.ignoresSafeArea()
-                    TasksSheet(store: workspace.tasks) { _ in }
+                    TasksSheet(store: workspace.tasks, chatId: tasksChatId) { _ in }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
                         .padding(.top, 64)
@@ -139,6 +151,16 @@ struct MainShell: View {
         }
         #endif
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
+        .onChange(of: drawerOpen) { _, open in
+            if open { workspace.topics.refresh() }
+        }
+        // A tapped push for this instance: its chat in front, nothing over it.
+        .onChange(of: model.chatRequest) { _, request in
+            showTasks = false
+            showSettings = false
+            closeDrawer()
+            show(request.topicId.map(MainSection.topic) ?? .chat)
+        }
         .overlay(alignment: .top) {
             if model.sessionExpired {
                 TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
@@ -149,13 +171,6 @@ struct MainShell: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
-        // A tapped push for this instance: Chat in front, nothing over it.
-        .onChange(of: model.conciergeRequest) {
-            showTasks = false
-            showSettings = false
-            closeDrawer()
-            show(.chat)
-        }
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in
             switch command {
@@ -191,7 +206,10 @@ struct MainShell: View {
             ChatScreen(
                 workspace: workspace,
                 onMenu: { openDrawer() },
-                onTasks: { showTasks = true },
+                onTasks: {
+                    tasksChatId = conciergeChatID
+                    showTasks = true
+                },
                 onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) }
             )
             .opacity(section == .chat ? 1 : 0)
@@ -202,16 +220,44 @@ struct MainShell: View {
                 EmptyView()
             case .routines:
                 RoutinesScreen(onMenu: { openDrawer() })
+            case .topic(let chatId):
+                topicScreen(chatId: chatId)
+                    .id(startedTopics[chatId]?.uuidString ?? chatId)
+            case .newTopic(let key):
+                topicScreen(chatId: nil, key: key)
+                    .id(key.uuidString)
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
                     if hit.session.id == conciergeChatID {
                         show(.chat)
+                    } else if workspace.topics.chat(hit.session.id) != nil {
+                        show(.topic(hit.session.id))
                     } else {
                         path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
                     }
                 }
             }
         }
+    }
+
+    private func topicScreen(chatId: String?, key: UUID? = nil) -> some View {
+        TopicChatScreen(
+            workspace: workspace,
+            chatId: chatId,
+            onMenu: { openDrawer() },
+            onTasks: { id in
+                // A blank chat has no tasks yet; its sheet shows the empty state.
+                tasksChatId = id ?? ""
+                showTasks = true
+            },
+            onOpenChat: { id, title in path.append(.taskChat(chatId: id, title: title)) },
+            onCreated: { id in
+                if let key { startedTopics[id] = key }
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { section = .topic(id) }
+            }
+        )
     }
 
     /// Swaps the stack's root with no motion of its own; the drawer's slide is
@@ -253,7 +299,7 @@ struct MainShell: View {
             try? await Task.sleep(for: .milliseconds(250))
             if let chat = task.chat {
                 path = [.taskChat(chatId: chat.id, title: chat.name)]
-            } else if let message = task.sourceMessageId {
+            } else if let message = task.sourceMessageId, TasksStore.belongs(task, toChat: conciergeChatID) {
                 path = []
                 workspace.focusMessageID = message
             }

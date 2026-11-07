@@ -327,18 +327,6 @@ struct TopBanner: View {
     }
 }
 
-/// "Coming soon".
-struct ComingSoonTag: View {
-    var body: some View {
-        Text("Coming soon")
-            .romeFont(12, .medium)
-            .foregroundStyle(Palette.sub)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Palette.fill, in: Capsule())
-    }
-}
-
 /// Initial-letter avatar on the primary tint.
 struct InitialAvatar: View {
     let text: String

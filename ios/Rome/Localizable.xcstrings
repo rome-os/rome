@@ -21,16 +21,6 @@
         }
       }
     },
-    "%@, coming soon" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@，即将推出"
-          }
-        }
-      }
-    },
     "%@, settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -93,6 +83,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分钟前"
+          }
+        }
+      }
+    },
+    "%lld unread" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条未读"
           }
         }
       }
@@ -243,16 +243,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
-          }
-        }
-      }
-    },
-    "Coming soon" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将推出"
           }
         }
       }
@@ -767,12 +757,32 @@
         }
       }
     },
+    "New chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新聊天"
+          }
+        }
+      }
+    },
     "New messages" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "新消息"
+          }
+        }
+      }
+    },
+    "New topic chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新的话题聊天"
           }
         }
       }
@@ -1796,6 +1806,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "明天 %@"
+          }
+        }
+      }
+    },
+    "Topic chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "话题聊天"
           }
         }
       }

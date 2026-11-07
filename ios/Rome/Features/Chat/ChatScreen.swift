@@ -21,7 +21,11 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(needsYou: workspace.tasks.needsYouCount, onMenu: onMenu, onTasks: onTasks)
+                ChatHeader(title: Text("Chat"), needsYou: workspace.tasks.needsYouCount(inChat: conciergeChatID), onMenu: {
+                    // The keyboard would stay up over the drawer.
+                    composerFocused = false
+                    onMenu()
+                }, onTasks: onTasks)
                 banners
             }
         }
@@ -118,7 +122,7 @@ struct ChatScreen: View {
                     get: { workspace.focusMessageID },
                     set: { workspace.focusMessageID = $0 }
                 ), latestRequest: workspace.latestRequest) { row, previous in
-                    rowView(row)
+                    ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
                         .padding(.top, TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
@@ -127,9 +131,16 @@ struct ChatScreen: View {
             }
         }
     }
+}
 
-    @ViewBuilder
-    private func rowView(_ row: TranscriptRow) -> some View {
+/// One row of a Concierge chat, the main chat or a topic chat.
+struct ConciergeRow: View {
+    let row: TranscriptRow
+    let store: TranscriptStore
+    let tasks: TasksStore
+    let onOpenChat: (String, String) -> Void
+
+    var body: some View {
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
@@ -138,8 +149,8 @@ struct ChatScreen: View {
         case .agentText(_, let text, let long, let forwardedFrom, let position):
             AgentBubble(text: text, long: long, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
         case .taskCard(_, let chatId, let title):
-            let name = workspace.tasks.title(forChat: chatId, fallback: title)
-            TaskCard(title: name, tone: workspace.tasks.tone(forChat: chatId)) {
+            let name = tasks.title(forChat: chatId, fallback: title)
+            TaskCard(title: name, tone: tasks.tone(forChat: chatId)) {
                 onOpenChat(chatId, name)
             }
         case .typing:
@@ -154,6 +165,7 @@ struct ChatScreen: View {
 
 /// The floating header: menu, title, tasks with its needs-you badge.
 struct ChatHeader: View {
+    let title: Text
     let needsYou: Int
     let onMenu: () -> Void
     let onTasks: () -> Void
@@ -164,7 +176,8 @@ struct ChatHeader: View {
                 MenuGlyph()
             }
             Spacer()
-            Text("Chat")
+            title
+                .lineLimit(1)
                 .romeFont(17, .semibold)
                 .tracking(-0.4)
                 .padding(.horizontal, 18)

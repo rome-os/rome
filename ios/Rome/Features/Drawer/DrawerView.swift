@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Board 2: search, Chat and Routines, the coming-soon entries, and the account row.
+/// Board 2: search, Chat and Routines, the topic chats, and the account row.
 struct DrawerView: View {
     let workspace: Workspace
     let section: MainSection
     let onSection: (MainSection) -> Void
+    let onNewTopic: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -33,20 +34,42 @@ struct DrawerView: View {
             }
             .padding(.top, 22)
 
-            Text("Coming soon")
-                .romeFont(13, .semibold)
-                .foregroundStyle(Palette.sub)
+            Rectangle()
+                .fill(Palette.hair)
+                .frame(height: 0.5)
                 .padding(.horizontal, 12)
-                .padding(.top, 26)
-                .padding(.bottom, 8)
+                .padding(.top, 14)
 
-            VStack(spacing: 2) {
-                ComingSoonItem(title: "Apps", systemImage: "square.grid.2x2")
-                ComingSoonItem(title: "Memory", systemImage: "archivebox")
-                ComingSoonItem(title: "Activity", systemImage: "waveform.path.ecg")
+            HStack {
+                Text("Topic chats")
+                    .romeFont(13, .semibold)
+                    .foregroundStyle(Palette.sub)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button(action: onNewTopic) {
+                    Image(systemName: "plus")
+                        .romeFont(16, .semibold)
+                        .foregroundStyle(Palette.fg)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScaleStyle())
+                .accessibilityLabel("New topic chat")
             }
+            .padding(.leading, 12)
+            .padding(.top, 6)
 
-            Spacer()
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(workspace.topics.chats) { chat in
+                        TopicItem(chat: chat, selected: section == .topic(chat.id)) {
+                            onSection(.topic(chat.id))
+                        }
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: .infinity)
 
             Button(action: onSettings) {
                 HStack(spacing: 12) {
@@ -118,23 +141,44 @@ private struct DrawerItem<Icon: View>: View {
     }
 }
 
-private struct ComingSoonItem: View {
-    let title: String
-    let systemImage: String
+/// One topic chat: its name and how many replies wait unread.
+private struct TopicItem: View {
+    let chat: ConciergeChat
+    let selected: Bool
+    let action: () -> Void
+
+    private var unread: Int { chat.unread ?? 0 }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .romeFont(16)
-                .frame(width: 22)
-            Text(title).romeFont(17)
-            Spacer()
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Text(verbatim: TopicChatsStore.title(chat))
+                    .romeFont(16, selected ? .semibold : .regular)
+                    .foregroundStyle(Palette.fg)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if unread > 0 {
+                    Text(verbatim: "\(unread)")
+                        .romeFont(12, .bold, monospacedDigits: true)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 20, minHeight: 20)
+                        .background(Palette.primary, in: Capsule())
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Palette.elevated)
+                        .softElevation(radius: 14)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .foregroundStyle(Palette.sub)
-        .opacity(0.75)
-        .padding(.horizontal, 12)
-        .frame(height: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), coming soon")
+        .buttonStyle(PressScaleStyle(scale: 0.98))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityValue(unread > 0 ? Text("\(unread) unread") : Text(verbatim: ""))
     }
 }

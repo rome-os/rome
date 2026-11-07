@@ -63,8 +63,16 @@ final class TasksStore {
         self.backend = backend
     }
 
-    var needsYouCount: Int {
-        tasks.filter { $0.state == .needsUser && $0.archivedAt == nil }.count
+    /// The rows waiting on the guardian that Concierge chat `chatId` started.
+    func needsYouCount(inChat chatId: String) -> Int {
+        tasks.filter { $0.state == .needsUser && $0.archivedAt == nil && Self.belongs($0, toChat: chatId) }.count
+    }
+
+    /// Whether a row came from Concierge chat `chatId`. A row from an older
+    /// server names no chat; it belongs to the main one.
+    nonisolated static func belongs(_ task: ConciergeTask, toChat chatId: String) -> Bool {
+        let source = task.conciergeChat.map { $0.main ? conciergeChatID : $0.id } ?? conciergeChatID
+        return source == chatId
     }
 
     func start() {
@@ -148,8 +156,8 @@ final class TasksStore {
 
     /// The groups, in order, without empty ones. Finished rows older than seven
     /// days are counted in `hidden` unless `showAllDone`.
-    func groups(showAllDone: Bool, now: Date = .now) -> [TaskGroup] {
-        TasksStore.group(tasks, showAllDone: showAllDone, now: now)
+    func groups(inChat chatId: String, showAllDone: Bool, now: Date = .now) -> [TaskGroup] {
+        TasksStore.group(tasks.filter { Self.belongs($0, toChat: chatId) }, showAllDone: showAllDone, now: now)
     }
 
     nonisolated static func group(_ tasks: [ConciergeTask], showAllDone: Bool, now: Date) -> [TaskGroup] {

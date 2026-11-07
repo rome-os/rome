@@ -3,6 +3,8 @@ import SwiftUI
 /// Board 5: the Concierge's tasks, grouped by what they need from the guardian.
 struct TasksSheet: View {
     let store: TasksStore
+    /// The Concierge chat whose tasks it lists: the main chat or a topic chat.
+    let chatId: String
     let onOpen: (ConciergeTask) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -26,7 +28,7 @@ struct TasksSheet: View {
             .padding(.trailing, 12)
             .frame(height: 54)
 
-            let groups = store.groups(showAllDone: showAllDone)
+            let groups = store.groups(inChat: chatId, showAllDone: showAllDone)
             if !store.loaded {
                 Spacer()
                 Spinner(size: 20, color: Palette.sub)

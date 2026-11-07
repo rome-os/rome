@@ -1,11 +1,11 @@
 import Foundation
 
-/// Where a tapped push leads: an instance and, later, one Concierge chat.
+/// Where a tapped push leads: an instance and one of its Concierge chats.
 /// Rome Cloud adds `rome.instanceId`; the instance sends `chatId`.
 struct PushTarget: Equatable, Sendable {
     var instanceId: String
-    /// A Concierge topic chat. The app has only the main Concierge chat so far,
-    /// so this is read and kept for when it has more.
+    /// The Concierge chat the message was said in: `concierge` for the main
+    /// chat, else a topic chat.
     var chatId: String?
 
     init(instanceId: String, chatId: String? = nil) {
@@ -38,6 +38,24 @@ enum PushRoute: Equatable {
         else { return .openConcierge }
         return .switchTo(instance)
     }
+}
+
+extension PushRoute {
+    /// The topic chat a push opens: its `chatId` when that is one of the
+    /// guardian's topic chats. The main chat or an unknown id gives nil, and
+    /// the main Chat opens.
+    static func topicChat(for target: PushTarget, topics: [ConciergeChat]) -> String? {
+        guard let chatId = target.chatId, chatId != conciergeChatID,
+              topics.contains(where: { $0.id == chatId && !$0.main })
+        else { return nil }
+        return chatId
+    }
+}
+
+/// Asks the shell to show a Concierge chat: a topic chat, or the main one (nil).
+struct ChatRequest: Equatable {
+    let serial: Int
+    let topicId: String?
 }
 
 /// The APNs environment this build's tokens belong to.
