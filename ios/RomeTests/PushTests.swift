@@ -120,8 +120,8 @@ import Testing
         let push = center(registry, system)
         await push.launch()
         #expect(system.registered == 0)
-        system.answer = .on
-        await push.turnOn()
+        system.promptAnswer = .on
+        await push.setEnabled(true)
         #expect(system.prompted == 1)
         #expect(system.registered == 1)
         await push.didRegister(deviceToken: Data([0xAB]))
@@ -170,6 +170,94 @@ import Testing
     }
 }
 
+@MainActor @Suite struct NotificationSwitchTests {
+    private func center(_ registry: FakeRegistry, _ system: FakeSystem, defaults: UserDefaults = UserDefaults(suiteName: "push-\(UUID())")!) -> PushCenter {
+        PushCenter(registry: registry, system: system, defaults: defaults, store: .memory())
+    }
+
+    @Test func onWhenUndecidedAsksAndStaysOnWhenAllowed() async {
+        let registry = FakeRegistry()
+        let system = FakeSystem(.notSet)
+        system.promptAnswer = .on
+        let push = center(registry, system)
+        await push.setEnabled(true)
+        #expect(system.prompted == 1)
+        #expect(push.isOn)
+        #expect(system.registered == 1)
+        #expect(!push.needsSystemSettings)
+    }
+
+    @Test func onWhenUndecidedSpringsBackWhenDenied() async {
+        let system = FakeSystem(.notSet)
+        system.promptAnswer = .off
+        let push = center(FakeRegistry(), system)
+        await push.setEnabled(true)
+        #expect(system.prompted == 1)
+        #expect(!push.isOn)
+        #expect(system.registered == 0)
+        #expect(push.needsSystemSettings)
+    }
+
+    @Test func onWhenTheSystemSaidNoPointsToSettingsWithoutAsking() async {
+        let system = FakeSystem(.off)
+        let push = center(FakeRegistry(), system)
+        await push.setEnabled(true)
+        #expect(system.prompted == 0)
+        #expect(!push.isOn)
+        #expect(push.needsSystemSettings)
+        // Turned on in the Settings app, then back in the app.
+        system.answer = .on
+        await push.launch()
+        #expect(push.isOn)
+        #expect(!push.needsSystemSettings)
+        #expect(system.registered == 1)
+    }
+
+    @Test func onWhenAllowedRegisters() async {
+        let registry = FakeRegistry()
+        let system = FakeSystem(.on)
+        let push = center(registry, system)
+        await push.setEnabled(false)
+        await push.setEnabled(true)
+        #expect(push.isOn)
+        #expect(system.registered == 1)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        #expect(registry.calls == ["register ab"])
+    }
+
+    @Test func offUnregistersAndRemembers() async {
+        let registry = FakeRegistry()
+        let system = FakeSystem(.on)
+        let defaults = UserDefaults(suiteName: "push-\(UUID())")!
+        let push = center(registry, system, defaults: defaults)
+        await push.launch()
+        await push.didRegister(deviceToken: Data([0xAB]))
+        await push.setEnabled(false)
+        #expect(registry.calls == ["register ab", "unregister ab"])
+        #expect(!push.isOn)
+        // The system permission is left alone.
+        #expect(push.permission == .on)
+        #expect(system.prompted == 0)
+        // The next launch keeps it off and registers nothing.
+        let relaunched = center(registry, system, defaults: defaults)
+        let registeredBefore = system.registered
+        await relaunched.launch()
+        await relaunched.didRegister(deviceToken: Data([0xAB]))
+        #expect(!relaunched.enabledByUser)
+        #expect(!relaunched.isOn)
+        #expect(system.registered == registeredBefore)
+        #expect(registry.calls == ["register ab", "unregister ab"])
+    }
+
+    @Test func offHidesTheChatOffer() async {
+        let push = center(FakeRegistry(), FakeSystem(.notSet))
+        await push.refresh()
+        #expect(push.offersPrompt())
+        await push.setEnabled(false)
+        #expect(!push.offersPrompt())
+    }
+}
+
 @MainActor
 private final class FakeRegistry: DeviceRegistry {
     var signedIn = true
@@ -192,13 +280,18 @@ private final class FakeRegistry: DeviceRegistry {
 @MainActor
 private final class FakeSystem: NotificationSystem {
     var answer: PushPermission
+    /// What the guardian picks in the system prompt; nil leaves it undecided.
+    var promptAnswer: PushPermission?
     var prompted = 0
     var registered = 0
 
     init(_ answer: PushPermission) { self.answer = answer }
 
     func permission() async -> PushPermission { answer }
-    func requestAuthorization() async { prompted += 1 }
+    func requestAuthorization() async {
+        prompted += 1
+        if answer == .notSet, let promptAnswer { answer = promptAnswer }
+    }
     func registerForRemoteNotifications() { registered += 1 }
 }
 
