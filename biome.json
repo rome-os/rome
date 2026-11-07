@@ -237,6 +237,26 @@
       }
     },
     {
+      "includes": ["packages/core/src/agent/infrastructure/*/*/*/*/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["..", "../**", "@/**"],
+                    "message": "agent/infrastructure/ is nested deeper than its boundary overrides in biome.json cover; add an override for this depth. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/apps/packaging/**/*.ts"],
       "linter": {
         "rules": {
