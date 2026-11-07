@@ -21,8 +21,9 @@ import {
   shapedResult,
   type AnswerShape,
   type ReadAnswerShape,
+  type TurnAttribution,
+  type TurnUsageReporting,
 } from "../agent/index.js";
-import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import {
   NO_ROME_TOOLS,
@@ -105,18 +106,7 @@ import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from 
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
 import { enterSession } from "../telemetry-context.js";
-import {
-  getTracer,
-  modelPromptCacheMetric,
-  modelSessionOpenMetric,
-  modelTurnTtftMetric,
-  sessionAcquireMetric,
-  sessionDurationMetric,
-  startRomeSpan,
-  withRomeSpan,
-  recordModelTurnMetrics,
-  type ModelMetricAttribution,
-} from "../telemetry.js";
+import { getTracer, startRomeSpan, withRomeSpan } from "../telemetry.js";
 import {
   context,
   SpanStatusCode,
@@ -139,7 +129,6 @@ import {
   createAgentTurnRef,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
-import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 import type { SessionToolsProvider } from "./session-tools.js";
@@ -388,7 +377,6 @@ export interface AgentSessionManager {
 
 interface ManagerDeps {
   agentLoader: AgentCatalog;
-  appCatalog?: Pick<AppCatalog, "get">;
   sessionRepository: SessionRepository;
   systemPrompts: SystemPrompts;
   actionRegistry: ActionRegistry;
@@ -412,8 +400,8 @@ interface ManagerDeps {
   turnMiddleware?: TurnMiddlewareChain;
   /** Resolve the effective reset policy from the existing external thread identity. */
   resolveProviderSessionReset?: (ref: ChatRef) => Promise<ProviderSessionResetPolicy>;
-  /** Receives every turn this manager's sessions finish, forked turns included. */
-  usageRecorder?: TurnUsageSink;
+  /** Hears how sessions are served and how every turn goes, forked turns included. */
+  turnUsage: TurnUsageReporting;
   /** What the named channel's surface supports, or null for a name no channel
    *  has. A null result reads as a messaging channel. */
   channelSurface: (channel: string) => ChannelSurface | null;
@@ -611,10 +599,9 @@ export function createAgentSessionManager(
     const isSubagentForMetric = init?.isSubagent ?? isSubagent;
     const recordAcquire = (outcome: "reuse" | "cold" | "reopen" | "coalesced") => {
       span.setAttribute("outcome", outcome);
-      sessionAcquireMetric().add(1, {
-        outcome,
-        "agent.name": key.agentName,
-        is_subagent: isSubagentForMetric,
+      deps.turnUsage.sessionServed(outcome, {
+        agentName: key.agentName,
+        isSubagent: isSubagentForMetric,
       });
     };
     const existing = sessions.get(k);
@@ -914,9 +901,7 @@ async function openSession(
 ): Promise<AgentSessionImpl> {
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
-  const owningApp = agent.ownerType === "app" ? deps.appCatalog?.get(agent.ownerId) : undefined;
-  const appStoreListingId =
-    owningApp?.source.mode === "appstore" ? owningApp.source.listingId : undefined;
+  const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
 
   // Try to resume an existing SDK session through the stable channelThreadKey.
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
@@ -1388,9 +1373,10 @@ async function openSession(
       },
       () => resolution.modelProvider.openSession(params),
     );
-    modelSessionOpenMetric().record(Date.now() - openStartMs, {
+    deps.turnUsage.modelSessionOpened({
       provider: resolution.modelProvider.id,
       resumed,
+      durationMs: Date.now() - openStartMs,
     });
     lastOpenParams = params;
     sourceSessionTools = sessionTools;
@@ -1619,7 +1605,7 @@ async function openSession(
     systemPrompt,
     workingDir,
     buildForkOpenParams,
-    appStoreListingId,
+    owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
     isNewSession,
@@ -1669,8 +1655,8 @@ interface ImplArgs {
   workingDir: string;
   /** Builds the open params for a forked turn's session (mode-aware). */
   buildForkOpenParams: BuildForkOpenParams;
-  /** Rome Cloud App Store listing id of the app owning the agent, when installed from the store. */
-  appStoreListingId?: string;
+  /** The app that owns the agent, when an app does. */
+  owningAppId?: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
@@ -1884,7 +1870,7 @@ class AgentSessionImpl implements AgentSession {
   private systemPrompt: string;
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;
-  private metricAttribution: ModelMetricAttribution;
+  private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
   private subscribers = new Map<string, AgentSessionSubscriber>();
@@ -1968,10 +1954,7 @@ class AgentSessionImpl implements AgentSession {
     this.systemPrompt = args.systemPrompt;
     this.workingDir = args.workingDir;
     this.buildForkOpenParams = args.buildForkOpenParams;
-    this.metricAttribution = {
-      agentName: args.key.agentName,
-      appStoreListingId: args.appStoreListingId,
-    };
+    this.attribution = { agentName: args.key.agentName, owningAppId: args.owningAppId };
     this.threadContext = args.threadContext;
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
@@ -2151,7 +2134,7 @@ class AgentSessionImpl implements AgentSession {
           continue;
         }
         if (msg.type === "result" || msg.type === "error") {
-          recordModelTurnMetrics(msg.accounting, this.metricAttribution);
+          this.deps.turnUsage.modelTurnAccounted(msg.accounting, this.attribution);
           await this.inputs.seal(sink.turnId);
         }
         // Time-to-first-token: the first *text* event of the turn (a text_delta
@@ -2169,10 +2152,11 @@ class AgentSessionImpl implements AgentSession {
         ) {
           sink.ttftRecorded = true;
           const ttftMs = Date.now() - sink.modelTurnStartMs;
-          modelTurnTtftMetric().record(ttftMs, {
-            "model.id": this.modelSession.model,
-            "agent.name": this.key.agentName,
-            is_subagent: this.isSubagent,
+          this.deps.turnUsage.firstTextProduced({
+            model: this.modelSession.model,
+            agentName: this.key.agentName,
+            isSubagent: this.isSubagent,
+            afterMs: ttftMs,
           });
           this.currentModelSpan?.setAttribute("ttft_ms", ttftMs);
         }
@@ -2363,10 +2347,10 @@ class AgentSessionImpl implements AgentSession {
         // cache and pays full prompt-processing latency on turn one. Tracking
         // hit/miss across many turns confirms whether summon's fresh-key opens
         // are consistently cache-cold vs. the warm guardian thread.
-        modelPromptCacheMetric().add(1, {
-          outcome: (u.cacheReadTokens ?? 0) > 0 ? "hit" : "miss",
-          "model.id": this.modelSession.model,
-          is_subagent: this.isSubagent,
+        this.deps.turnUsage.promptCacheChecked({
+          model: this.modelSession.model,
+          isSubagent: this.isSubagent,
+          hit: (u.cacheReadTokens ?? 0) > 0,
         });
       }
       if (outbound.type === "error") {
@@ -2418,9 +2402,7 @@ class AgentSessionImpl implements AgentSession {
       }
       agentSpan.end();
       this.currentAgentSpan = null;
-      sessionDurationMetric().record(Date.now() - this.currentTurnStartMs, {
-        "agent.name": this.key.agentName,
-      });
+      this.deps.turnUsage.turnTimed(this.key.agentName, Date.now() - this.currentTurnStartMs);
     }
     this.currentTurnCtx = null;
   }
@@ -2444,11 +2426,10 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private recordTurnUsage(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
-    const recorder = this.deps.usageRecorder;
-    if (!recorder || sink.usageRecorded) return;
+    if (sink.usageRecorded) return;
     sink.usageRecorded = true;
     const accounting = terminal.accounting;
-    recorder.recordTurn({
+    this.deps.turnUsage.turnEnded({
       turnId: sink.turnId,
       romeSessionId: sink.romeSessionId,
       romeSessionType: sink.romeSessionType,
@@ -2870,7 +2851,7 @@ class AgentSessionImpl implements AgentSession {
               const { msg, reasoningEffort } = splitProviderFacts(event);
               if (msg.type === "result" || msg.type === "error") {
                 forkReasoningEffort = reasoningEffort;
-                recordModelTurnMetrics(msg.accounting, this.metricAttribution);
+                this.deps.turnUsage.modelTurnAccounted(msg.accounting, this.attribution);
               }
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
@@ -2937,7 +2918,7 @@ class AgentSessionImpl implements AgentSession {
     } finally {
       // A consumer that abandons the stream before its terminal leaves the
       // turn with no outcome, which the lifecycle vocabulary calls stopped.
-      this.deps.usageRecorder?.recordTurn({
+      this.deps.turnUsage.turnEnded({
         turnId,
         romeSessionId: forkSessionId,
         romeSessionType: "fork",
@@ -3574,9 +3555,7 @@ class AgentSessionImpl implements AgentSession {
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();
         this.currentAgentSpan = null;
-        sessionDurationMetric().record(Date.now() - this.currentTurnStartMs, {
-          "agent.name": this.key.agentName,
-        });
+        this.deps.turnUsage.turnTimed(this.key.agentName, Date.now() - this.currentTurnStartMs);
       }
       if (this.currentModelSpan === modelSpan) {
         modelSpan.end();

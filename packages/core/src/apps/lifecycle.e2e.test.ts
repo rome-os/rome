@@ -1,4 +1,4 @@
-import { readAnswerShape } from "../agent/index.js";
+import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -502,6 +502,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     capabilityDiscovery: new CapabilityDiscovery(),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
+    turnUsage: new TurnUsageReporter(),
     channelSurface: testChannelSurface,
   });
 

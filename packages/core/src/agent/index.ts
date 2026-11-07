@@ -43,6 +43,13 @@ export { ActiveSessionExistsError, type SessionRepository } from "./domain/sessi
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
+export type {
+  ReportedAgent,
+  SessionServed,
+  TurnAttribution,
+  TurnUsageFacts,
+  TurnUsageReporting,
+} from "./domain/turn-usage-reporting.js";
 export {
   endedTurn,
   type AgentTurnFailedBeforeStart,
@@ -167,6 +174,10 @@ export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repos
 export { SkillLoader } from "./infrastructure/skill-loader.js";
 export { AgentLoader } from "./infrastructure/agent-loader.js";
 export { readAnswerShape } from "./infrastructure/answer-shape.js";
+export {
+  TurnUsageReporter,
+  type TurnUsageReporterDeps,
+} from "./infrastructure/turn-usage-reporter.js";
 export {
   AppTurnHooks,
   type TurnLifecycleHookLoadFailure,

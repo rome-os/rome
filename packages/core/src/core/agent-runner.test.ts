@@ -1,4 +1,4 @@
-import { readAnswerShape } from "../agent/index.js";
+import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
@@ -93,7 +93,7 @@ import type {
   ProviderSessionResetPolicy,
   TurnMiddlewareContext,
 } from "@rome-os/app-runtime";
-import type { TurnUsageFacts } from "../usage/recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -2209,7 +2209,6 @@ describe("AgentRunner", () => {
     const turnStreams = createAgentTurnStreamRegistry();
     return {
       agentLoader,
-      appCatalog,
       sessionRepository,
       systemPrompts,
       actionRegistry,
@@ -2220,6 +2219,7 @@ describe("AgentRunner", () => {
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
       readAnswerShape,
+      turnUsage: new TurnUsageReporter({ apps: appCatalog }),
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
@@ -2320,7 +2320,9 @@ describe("AgentRunner", () => {
         {
           ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
           turnMiddleware,
-          usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+          turnUsage: new TurnUsageReporter({
+            usage: { recordTurn: (facts) => recorded.push(facts) },
+          }),
         },
         { keepAliveAcrossTurns: true },
       );

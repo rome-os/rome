@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { UsageEvent } from "./events.js";
-import { UsageRecorder, type TurnUsageFacts } from "./recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
+import { UsageRecorder } from "./recorder.js";
 
 const finishedAt = new Date("2026-10-06T12:00:00.000Z");
 
