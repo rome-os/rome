@@ -1,6 +1,6 @@
 # Proactive Concierge messages push without per-message consent
 
-- **Status**: Accepted, amended 2026-11-07 (replies push; a chat the phone shows does not)
+- **Status**: Accepted, amended 2026-11-07 (replies push, but not in a chat the phone shows)
 - **Date**: 2026-11-06
 - **Architecture**: [Notification delivery](../architecture/notification-delivery.md)
 - **Amends**: [The notification body is sender-supplied](sender-supplied-notification-body-over-contentless-push.md)
