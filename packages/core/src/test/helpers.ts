@@ -38,7 +38,7 @@ import { createActiveSubagentRegistry } from "../core/active-subagent-registry.j
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
@@ -777,7 +777,7 @@ export async function buildTestDeps(
     actionEngine,
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
     channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,

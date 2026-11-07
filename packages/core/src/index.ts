@@ -149,7 +149,7 @@ import { ActionExecutionsRepository } from "./db/repositories/action-executions.
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { AgentLoader, requireAgent } from "./agent/index.js";
+import { AgentLoader, AppTurnHooks, requireAgent, TurnListeners } from "./agent/index.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
@@ -195,7 +195,6 @@ import { startConciergeEvents } from "./concierge/events.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
-import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
@@ -917,11 +916,11 @@ async function main() {
     favorService,
     appConnections,
   };
-  const lifecycleDispatcher = createAgentLifecycleDispatcher({
-    appRuntimeServices: lifecycleAppRuntimeServices,
-  });
+  const appTurnHooks = new AppTurnHooks({ appRuntimeServices: lifecycleAppRuntimeServices });
+  // Rome's own listeners hear each turn before the app hooks do.
+  const turnListeners = new TurnListeners(appTurnHooks);
   // Turn-middleware onion. Shares the same app-runtime services as the
-  // lifecycle dispatcher (the `agentRunner` field is filled in below, before
+  // app lifecycle hooks (the `agentRunner` field is filled in below, before
   // any hook is loaded), so a scripted-conversation middleware can summon real
   // agents and reach its own app DB.
   const turnMiddlewareChain = createTurnMiddlewareChain({
@@ -1109,7 +1108,7 @@ async function main() {
       actionEngine,
       capabilityDiscovery,
       skillCatalog,
-      lifecycleDispatcher,
+      turnLifecycle: turnListeners,
       webchatRepo,
       // Catch-up reads what was said where the session stands from Chats.
       turnLinks: chatsWired.links,
@@ -1155,20 +1154,22 @@ async function main() {
 
   const skillReviewInterval = Number(process.env.SKILL_REVIEW_INTERVAL ?? 10);
   if (skillReviewInterval > 0) {
-    lifecycleDispatcher.onFinished((event) => {
-      if (
-        isCoreMainAgentId(event.turn.agentName) &&
-        event.metrics.toolCallCount >= skillReviewInterval &&
-        !event.metrics.skillWritten
-      ) {
-        // No person asked for the review, so it runs outside the finished
-        // turn's request scope and carries no actor.
-        withoutSessionActor(() =>
-          actionEngine.run("skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
-        ).catch((err) => {
-          log.warn("skill review failed", { error: String(err) });
-        });
-      }
+    turnListeners.listen({
+      ended: (event) => {
+        if (
+          isCoreMainAgentId(event.turn.agentName) &&
+          event.metrics.toolCallCount >= skillReviewInterval &&
+          !event.metrics.skillWritten
+        ) {
+          // No person asked for the review, so it runs outside the finished
+          // turn's request scope and carries no actor.
+          withoutSessionActor(() =>
+            actionEngine.run("skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
+          ).catch((err) => {
+            log.warn("skill review failed", { error: String(err) });
+          });
+        }
+      },
     });
   }
 
@@ -1208,7 +1209,7 @@ async function main() {
     },
   });
 
-  startConciergeEvents(concierge, lifecycleDispatcher);
+  startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
     routines: routinesRepo,
@@ -1482,7 +1483,7 @@ async function main() {
   const reloadLifecycleHooks = await registerCatalogHookLoad({
     sourcePrefix: "lifecycle",
     warnMessage: "some agent lifecycle hooks failed to initialize",
-    load: () => lifecycleDispatcher.loadFromCatalog(appCatalog),
+    load: () => appTurnHooks.loadFromCatalog(appCatalog),
     failureSource: (failure) => `lifecycle:${failure.hookName}:${failure.path}`,
   });
 

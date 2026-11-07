@@ -16,8 +16,8 @@ describe("Model accounts refresh wiring", () => {
       if (
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.expression.getText(source) === "lifecycleDispatcher" &&
-        node.expression.name.text === "onFinished"
+        node.expression.expression.getText(source) === "turnListeners" &&
+        node.expression.name.text === "listen"
       ) {
         const inspect = (child: ts.Node): void => {
           if (ts.isIdentifier(child) && child.text === "modelAccounts") {

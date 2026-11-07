@@ -23,7 +23,7 @@ import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { readWebchatMessages } from "../chats/dashboard/webchat.js";
-import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
+import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
@@ -337,12 +337,9 @@ function setup(
     startConciergeEvents(
       service,
       {
-        onFinished: (listener) => {
-          listeners.push(listener);
-          return () => {};
-        },
-        onFailedBeforeStart: (listener) => {
-          failedBeforeStartListeners.push(listener);
+        listen: (listener: TurnLifecycleListener) => {
+          if (listener.ended) listeners.push(listener.ended);
+          if (listener.couldNotStart) failedBeforeStartListeners.push(listener.couldNotStart);
           return () => {};
         },
       },

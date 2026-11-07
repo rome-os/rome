@@ -9,7 +9,7 @@ import {
   type ModelRunParams,
 } from "../core/agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
@@ -108,7 +108,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     actionEngine,
     capabilityDiscovery: new CapabilityDiscovery(),
     skillCatalog: new SkillLoader(artifactIdentity),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
     channelSurface: testChannelSurface,
   });
   const runner = new AgentRunner(manager, agentLoader);

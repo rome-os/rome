@@ -8,9 +8,11 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/help
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "../agent/index.js";
 import {
+  AppTurnHooks,
+  TurnListeners,
   type AgentTurnFailedBeforeStart,
-  createAgentLifecycleDispatcher,
-} from "./agent-lifecycle.js";
+  type TurnLifecycle,
+} from "../agent/index.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -102,7 +104,7 @@ describe("agent model pins through AgentSessionManager", () => {
   function createManager(
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
-    lifecycleDispatcher = createAgentLifecycleDispatcher(),
+    turnLifecycle: TurnLifecycle = new TurnListeners(new AppTurnHooks()),
   ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
@@ -126,7 +128,7 @@ describe("agent model pins through AgentSessionManager", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
-        lifecycleDispatcher,
+        turnLifecycle,
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },
@@ -285,11 +287,13 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("tells in-process listeners once of a later turn that fails before it starts", async () => {
-    const lifecycle = createAgentLifecycleDispatcher();
+    const lifecycle = new TurnListeners(new AppTurnHooks());
     const finished: string[] = [];
     const failedBeforeStart: AgentTurnFailedBeforeStart[] = [];
-    lifecycle.onFinished((event) => finished.push(event.turn.turnId));
-    lifecycle.onFailedBeforeStart((event) => failedBeforeStart.push(event));
+    lifecycle.listen({
+      ended: (event) => finished.push(event.turn.turnId),
+      couldNotStart: (event) => failedBeforeStart.push(event),
+    });
     const session = await createManager(false, false, lifecycle).acquire(key, {
       workingDir: directory,
     });

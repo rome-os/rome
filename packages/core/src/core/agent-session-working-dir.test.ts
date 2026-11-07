@@ -7,7 +7,7 @@ import { ActionRegistryImpl } from "../actions/registry.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import { AgentLoader } from "../agent/index.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
@@ -84,7 +84,7 @@ describe("AgentSessionManager working dirs", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },

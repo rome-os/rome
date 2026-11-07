@@ -43,6 +43,12 @@ export { ActiveSessionExistsError, type SessionRepository } from "./domain/sessi
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export {
+  endedTurn,
+  type AgentTurnFailedBeforeStart,
+  type TurnLifecycle,
+  type TurnLifecycleListener,
+} from "./domain/turn-lifecycle.js";
+export {
   requireAgent,
   type Agent,
   type AgentCatalog,
@@ -140,6 +146,11 @@ export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { SkillLoader } from "./infrastructure/skill-loader.js";
 export { AgentLoader } from "./infrastructure/agent-loader.js";
+export {
+  AppTurnHooks,
+  type TurnLifecycleHookLoadFailure,
+} from "./infrastructure/app-turn-hooks.js";
+export { TurnListeners } from "./infrastructure/turn-listeners.js";
 
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
 import { AgentLoader } from "../agent/index.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import type { RomeToolGroup, RomeTools } from "../agent/index.js";
@@ -499,7 +499,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     actionEngine,
     skillCatalog: harness.skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
     channelSurface: testChannelSurface,
   });
 
