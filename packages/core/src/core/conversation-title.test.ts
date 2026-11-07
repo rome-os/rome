@@ -9,7 +9,7 @@ import {
   createConversationTitleGenerator,
   normalizeConversationTitle,
 } from "./conversation-title.js";
-import type { ModelResolver } from "./model-resolver.js";
+import type { ModelResolver } from "../agent/index.js";
 
 function resultSession(title: string): ModelSession {
   return rawResultSession(JSON.stringify({ title }), { title });
@@ -35,7 +35,7 @@ function generatorFor(session: ModelSession) {
     openSession: rs.fn(async () => session),
   };
   const modelResolver: ModelResolver = {
-    getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+    resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
   };
   return createConversationTitleGenerator(modelResolver);
 }
@@ -53,7 +53,7 @@ describe("conversation title generation", () => {
       }),
     };
     const modelResolver: ModelResolver = {
-      getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+      resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
     };
 
     const title = await createConversationTitleGenerator(modelResolver).generate(
@@ -61,7 +61,7 @@ describe("conversation title generation", () => {
     );
 
     expect(title).toBe("Q4 launch planning");
-    expect(modelResolver.getModelProvider).toHaveBeenCalledWith({ tier: "small" });
+    expect(modelResolver.resolve).toHaveBeenCalledWith({ kind: "tier", tier: "small" });
     expect(openParams).toMatchObject({
       config: {
         model: "small-model",
@@ -133,7 +133,7 @@ describe("conversation title generation", () => {
       openSession: rs.fn(async () => session),
     };
     const modelResolver: ModelResolver = {
-      getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+      resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
     };
     const firstMessage = `${"a".repeat(CONVERSATION_TITLE_INPUT_MAX_LENGTH)}SHOULD_NOT_APPEAR`;
 
@@ -168,7 +168,7 @@ describe("conversation title generation", () => {
         openSession,
       };
       const modelResolver: ModelResolver = {
-        getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+        resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
       };
       const pending = createConversationTitleGenerator(modelResolver, { timeoutMs: 10 }).generate(
         "Name this chat",

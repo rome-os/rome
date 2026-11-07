@@ -18,7 +18,7 @@ import {
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
+import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";

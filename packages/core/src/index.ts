@@ -168,6 +168,8 @@ import {
   CodexAppServerManager,
   CodexAppServerProvider,
   createModelAccounts,
+  createModelResolver,
+  createTierModelsSetting,
   DrizzleSessionRepository,
   codexLoginKind,
   SharedCodexAccountService,
@@ -177,7 +179,6 @@ import {
   createPromptSources,
   createSystemPrompts,
 } from "./agent/index.js";
-import { createModelResolver } from "./core/model-resolver.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
@@ -901,8 +902,9 @@ async function main() {
   const modelResolver = createModelResolver({
     accounts: modelAccounts,
     providers: [anthropicProvider, codexProvider],
-    settingsRepo,
+    tierModels: createTierModelsSetting(settingsRepo),
     codexLogins: codexAccountService,
+    log: createLogger("model-resolver"),
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
   const lifecycleAppRuntimeServices: RomeAppRuntimeServices = {

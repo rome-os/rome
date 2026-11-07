@@ -39,7 +39,7 @@ import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { createTestSystemPrompts } from "../system-prompts.js";
-import { createModelResolver } from "../../core/model-resolver.js";
+import { createModelResolver } from "../../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";

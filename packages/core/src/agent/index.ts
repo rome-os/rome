@@ -36,11 +36,8 @@ export type {
 export { codexLoginKind } from "./domain/model-login.js";
 export { providerAvailability } from "./domain/provider-availability.js";
 export {
-  resolveModel,
-  type ModelResolutionFacts,
-  type ModelResolutionFailure,
+  modelResolutionRequest,
   type ModelResolutionRequest,
-  type TierModels,
 } from "./domain/model-resolution.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
@@ -111,6 +108,14 @@ export {
   type ModelAccounts,
   type ModelAccountChange,
 } from "./application/model-accounts.js";
+export {
+  createModelResolver,
+  ModelResolutionError,
+  toModelResolutionErrorPayload,
+  type ModelResolution,
+  type ModelResolutionErrorPayload,
+  type ModelResolver,
+} from "./application/model-resolver.js";
 export type {
   McpServerConfig,
   ModelSessionConfig,
@@ -147,3 +152,7 @@ export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";
 export { romeCreditsProxyRoutes } from "./infrastructure/model/codex/rome-credits-proxy-route.js";
+export {
+  createTierModelsSetting,
+  TIER_MODEL_MAPPINGS_SETTING_KEY,
+} from "./infrastructure/settings/tier-models-setting.js";

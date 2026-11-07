@@ -10,7 +10,7 @@ import {
 } from "../core/agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { createModelResolver } from "../core/model-resolver.js";
+import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillLoader } from "../agent/index.js";
