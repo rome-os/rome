@@ -14,9 +14,9 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 Whose subscription an agent's turns run under when Rome credits is not the payer: the guardian's Codex (ChatGPT) account today. Rome never acts or chats as this account, so it is not a [connection](connections.md#connection) and has no connected account. Its alternative, Rome credits, has no external account at all.
 
 - The guardian **authorizes** Rome to run models under the account, in a browser or by entering a device code, may **cancel** an authorization still in progress, and **revokes** it to take it back. Signing in to Rome is a different act ([Connections](connections.md#connection)) and never authorizes an account.
-- The account is unauthorized, authorizing or authorized. An authorized account can be **expired**, as a [grant](connections.md#grant) can, when the provider stops accepting it; authorizing again fixes it.
+- The account is unauthorized, authorizing or authorized. An authorized account can be **expired**, as a [grant](connections.md#grant) can, when the provider stops accepting it. Authorizing again fixes it.
 - The account reports its own status and usage. Rome reads them and derives neither.
-- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex adapter. The dashboard calls it; an agent's run never does.
+- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex adapter. The dashboard calls it. An agent's run never does.
 
 ## Payer
 
