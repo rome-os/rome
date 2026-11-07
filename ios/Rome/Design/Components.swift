@@ -19,6 +19,13 @@ struct GlassCircleButton<Label: View>: View {
     }
 }
 
+/// How much page color covers a floating control's glass, so text that
+/// scrolls behind it blurs out.
+enum Frost {
+    /// The composer, and the controls that sit with it.
+    static let composer = 0.8
+}
+
 extension View {
     /// The system glass behind a floating control: Liquid Glass on iOS 26 and
     /// later, a thin material with a hairline before it. `frost` tints it with
@@ -26,8 +33,12 @@ extension View {
     @ViewBuilder
     func glassSurface<S: InsettableShape>(_ shape: S, interactive: Bool = false, frost: Double = 0) -> some View {
         if #available(iOS 26, *) {
-            let glass: Glass = frost > 0 ? .regular.tint(Palette.bg.opacity(frost)) : .regular
-            glassEffect(interactive ? glass.interactive() : glass, in: shape)
+            // The frost is a blur and the page color above the glass, not its
+            // tint: iOS 27 draws a tinted glass far clearer than iOS 26 does,
+            // and text behind read through it.
+            background(Palette.bg.opacity(frost), in: shape)
+                .background(frost > 0 ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.clear), in: shape)
+                .glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         } else {
             background(Palette.bg.opacity(frost), in: shape)
                 .background(frost > 0 ? .regularMaterial : .ultraThinMaterial, in: shape)

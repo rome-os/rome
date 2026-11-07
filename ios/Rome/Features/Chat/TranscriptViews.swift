@@ -454,7 +454,7 @@ struct Composer: View {
         // Frosted glass: the transcript behind blurs out so the placeholder
         // reads. In light the glass alone barely parts from the page, so it
         // keeps an edge.
-        .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: 0.65)
+        .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
         .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
         .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)

@@ -765,7 +765,7 @@ private struct BackToBottomGlyph: View {
             .romeFont(16, .semibold)
             .foregroundStyle(Palette.fg)
             .frame(width: 40, height: 40)
-            .glassSurface(Circle(), interactive: true, frost: 0.65)
+            .glassSurface(Circle(), interactive: true, frost: Frost.composer)
             .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
             .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
             .overlay(alignment: .topTrailing) {
