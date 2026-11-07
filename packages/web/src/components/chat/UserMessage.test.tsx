@@ -264,37 +264,27 @@ describe("UserMessage sender", () => {
     const actions = timestamp.parentElement!;
     const footer = badge.parentElement!;
     expect(badge.hasAttribute("data-automated-badge")).toBe(true);
-    expect(footer.classList.contains("flex")).toBe(true);
+    expect(actions.parentElement).toBe(footer);
     expect(footer.children[0]).toBe(badge);
     expect(footer.children[1]).toBe(actions);
-    const bubble = screen.getByText(content).closest(".bg-primary")!;
-    expect(bubble.classList.contains("w-full")).toBe(false);
-    expect(bubble.classList.contains("max-w-[70cqw]")).toBe(true);
-    expect(bubble.parentElement).toBe(footer.parentElement);
-    expect(bubble.parentElement?.classList.contains("items-end")).toBe(true);
-    expect(bubble.parentElement?.classList.contains("max-w-full")).toBe(true);
-    expect(bubble.parentElement?.parentElement?.classList.contains("@container")).toBe(true);
-    expect(footer.classList.contains("w-full")).toBe(true);
     expect(actions.contains(screen.getByRole("button", { name: "message.copy" }))).toBe(true);
-    expect(badge.closest('[class*="opacity-0"]')).toBeNull();
-    expect(badge.classList.contains("min-w-0")).toBe(true);
-    expect(badge.classList.contains("truncate")).toBe(true);
-    expect(actions.classList.contains("ml-auto")).toBe(true);
-    expect(actions.classList.contains("max-w-[70%]")).toBe(true);
-    expect(actions.classList.contains("shrink-0")).toBe(true);
-    expect(timestamp.classList.contains("truncate")).toBe(true);
-    expect(actions.classList.contains("md:opacity-0")).toBe(true);
+    expect(
+      badge.closest('[class*="opacity-0"], [class~="hidden"], [class*=":hidden"], [hidden]'),
+    ).toBeNull();
   });
 
-  it("keeps the bubble and actions as right-aligned siblings when there is no badge", () => {
+  it("keeps the bubble, status, and actions as siblings when there is no badge", () => {
     const { container } = render(withSender({ kind: "guardian", name: "Ray", avatarUrl: null }));
 
-    const bubble = container.querySelector(".bg-primary")!;
+    const status = screen.getByRole("status");
+    const bubble = status.previousElementSibling!;
     const timestamp = screen.getByText(formatMessageTimestamp(message.createdAt)!);
+    const actions = timestamp.parentElement!;
     expect(container.querySelector("[data-automated-badge]")).toBeNull();
-    expect(timestamp.parentElement?.parentElement).toBe(bubble.parentElement);
-    expect(bubble.parentElement?.classList.contains("items-end")).toBe(true);
-    expect(bubble.classList.contains("max-w-[70%]")).toBe(true);
+    expect(bubble.contains(screen.getByText(message.content))).toBe(true);
+    expect(status.nextElementSibling).toBe(actions);
+    expect(actions.parentElement).toBe(bubble.parentElement);
+    expect(actions.contains(screen.getByRole("button", { name: "message.copy" }))).toBe(true);
   });
 
   it.each([

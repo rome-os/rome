@@ -58,7 +58,7 @@ export const UserMessage = memo(
         className={cn(
           "flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100",
           // Reserve badge space even when an older timestamp includes a full date.
-          own && sourceBadge ? "ml-auto max-w-[70%] shrink-0" : "mt-1",
+          own && sourceBadge ? "ml-auto max-w-[70cqw] shrink-0" : "mt-1",
           own
             ? "-mr-[var(--control-action-offset-sm)]"
             : "-ml-[var(--control-action-offset-sm)] flex-row-reverse justify-end",
