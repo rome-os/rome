@@ -378,6 +378,8 @@ struct TranscriptList<Row: View>: View {
     @State private var unseen = 0
     @State private var highlighted: String?
     @State private var visibleHeight: CGFloat = 0
+    /// The guardian is far above the newest rows: the back-to-bottom button shows.
+    @State private var showsBackToBottom = false
     @State private var legacyScroll = LegacyScrollMonitor()
     /// The bottom was on screen when the app left the foreground.
     @State private var leftAtBottom = false
@@ -412,7 +414,11 @@ struct TranscriptList<Row: View>: View {
                     if let footer {
                         footer
                     }
-                    BottomMarker(visible: $bottomVisible, viewportBottom: visibleHeight, space: Self.scrollSpace)
+                    BottomMarker(visible: $bottomVisible, viewportBottom: visibleHeight, space: Self.scrollSpace) { distance in
+                        // Before iOS 18 the marker's frame tells how far the bottom is.
+                        let next = BackToBottom.shows(showsBackToBottom, distance: distance, height: visibleHeight)
+                        if next != showsBackToBottom { showsBackToBottom = next }
+                    }
                         .id("bottom")
                 }
                 .padding(.horizontal, Metrics.pagePadding)
@@ -499,9 +505,28 @@ struct TranscriptList<Row: View>: View {
                     .buttonStyle(PressScaleStyle())
                     .padding(.bottom, 10)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if showsBackToBottom {
+                    // Outside the scroll's content, so a tap mid-glide reaches it.
+                    Button {
+                        scrollToBottom(proxy)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .romeFont(16, .semibold)
+                            .foregroundStyle(Palette.fg)
+                            .frame(width: 40, height: 40)
+                            .glassSurface(Circle(), interactive: true)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(PressScaleStyle(scale: 0.9))
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Scroll to the latest message")
+                    .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: unseen > 0 && !following)
+            .animation(.easeOut(duration: 0.2), value: showsBackToBottom)
+            .modifier(DistanceFromBottom(visibleHeight: visibleHeight, showing: $showsBackToBottom))
         }
     }
 
@@ -654,10 +679,41 @@ private struct LegacyContentMoves: ViewModifier {
 /// from the scroll view on iOS 18 and later, from its frame against the
 /// visible area before. Appearing and disappearing would not tell, because a
 /// lazy stack keeps it alive off screen.
+/// When the back-to-bottom button shows: once the newest rows are more than
+/// two screens below, and until they are back within 1.7, so it does not
+/// flicker at the line.
+enum BackToBottom {
+    static func shows(_ showing: Bool, distance: CGFloat, height: CGFloat) -> Bool {
+        guard height > 0 else { return false }
+        return distance > height * (showing ? 1.7 : 2)
+    }
+}
+
+/// From iOS 18, the scroll's own geometry tells how far the bottom is.
+private struct DistanceFromBottom: ViewModifier {
+    let visibleHeight: CGFloat
+    @Binding var showing: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height
+            } action: { _, distance in
+                let next = BackToBottom.shows(showing, distance: distance, height: visibleHeight)
+                if next != showing { showing = next }
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct BottomMarker: View {
     @Binding var visible: Bool
     let viewportBottom: CGFloat
     let space: String
+    /// Before iOS 18: how far below the visible area the bottom is.
+    var onDistance: (CGFloat) -> Void = { _ in }
     /// Read only before iOS 18.
     @State private var midY: CGFloat = .infinity
 
@@ -674,6 +730,7 @@ private struct BottomMarker: View {
                     proxy.frame(in: .named(space)).midY
                 } action: { midY = $0 }
                 .onChange(of: midY <= viewportBottom, initial: true) { _, onScreen in visible = onScreen }
+                .onChange(of: midY) { _, y in onDistance(y - viewportBottom) }
         }
     }
 }
