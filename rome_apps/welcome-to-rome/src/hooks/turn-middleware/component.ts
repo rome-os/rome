@@ -40,12 +40,12 @@ export function emitComponent(
 // only trusts a `builtin: true` core card when the emitting tool is `ask_question`
 // and it resolves to `appId: "core"` / `componentId: "question-card"`
 // (packages/core/src/api/routes/webchat.ts), so a scripted turn reproduces the
-// exact `ask_question` facade output. Answers return next turn as
+// exact `ask_question` tool output. Answers return next turn as
 // `{ answers: [{ questionId, value }] }` (parsed via readResolutionJson).
 const ASK_QUESTION_TOOL = "ask_question";
 
-/** One question in a built-in ask_question card. Mirrors the core facade schema
- *  (packages/core/src/core/mcp-facade.ts). */
+/** One question in a built-in ask_question card. Mirrors the schema of the Rome tool
+ *  in packages/core/src/agent/application/ask-user-tools.ts. */
 export interface AskQuestion {
   /** Stable id; the answer references it. */
   id: string;
