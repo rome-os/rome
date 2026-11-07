@@ -8,9 +8,9 @@ const requireAtRuntime = createRequire(import.meta.url);
  * same module on every later call. Use it for a package most processes never
  * touch, such as a chat channel's SDK.
  *
- * A static or dynamic `import` would not defer the load in the Docker image:
- * its bundler hoists every external package import to the top of the bundle.
- * It leaves this runtime require alone.
+ * Synchronous, so callers such as constructors need not become async. The
+ * Docker image's bundler leaves this runtime require alone, while it hoists a
+ * static import of the package to the top of the bundle.
  */
 export function requireOnFirstUse<T>(specifier: string): () => T {
   let loaded: T | undefined;
