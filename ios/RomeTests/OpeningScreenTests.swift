@@ -29,6 +29,14 @@ import Testing
         }
     }
 
+    @Test func theSignInMascotOnlyBlinks() {
+        // Between blinks it is at rest; mid-blink only the eyes move.
+        #expect(MascotPose.blinkOnly(time: 2) == .rest)
+        let blink = MascotPose.blinkOnly(time: 4.5 + 0.09)
+        #expect(blink.eyeScale < 0.15)
+        #expect(blink.glance == 0 && blink.nod == 0 && blink.tilt == 0)
+    }
+
     @Test func theIconPathsParse() {
         for data in [MascotPaths.headFill, MascotPaths.headRing, MascotPaths.body, MascotPaths.screen, MascotPaths.leftEye, MascotPaths.rightEye] {
             let bounds = SVGPath.parse(data).boundingRect
