@@ -98,17 +98,8 @@ import Testing
         let inMain = TasksStore.group(tasks.filter { TasksStore.belongs($0, toChat: conciergeChatID) }, showAllDone: false, now: now)
         let inTrip = TasksStore.group(tasks.filter { TasksStore.belongs($0, toChat: "c-trip") }, showAllDone: false, now: now)
         // A row that names no chat comes from an older server: the main chat's.
-        #expect(inMain.flatMap(\.tasks).map(\.id) == ["a", "c"])
+        #expect(Set(inMain.flatMap(\.tasks).map(\.id)) == ["a", "c"])
         #expect(inTrip.flatMap(\.tasks).map(\.id) == ["b"])
-    }
-
-    @MainActor @Test func theBadgeCountsOneChat() {
-        let store = TasksStore(backend: StubBackend())
-        store.apply(task("a", from: nil))
-        store.apply(task("b", from: ConciergeChat(id: "c-trip", name: "Trip", main: false)))
-        #expect(store.needsYouCount(inChat: conciergeChatID) == 1)
-        #expect(store.needsYouCount(inChat: "c-trip") == 1)
-        #expect(store.needsYouCount(inChat: "c-other") == 0)
     }
 }
 

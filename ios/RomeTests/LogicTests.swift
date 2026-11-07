@@ -13,15 +13,24 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     var nowMs: Double { now.timeIntervalSince1970 * 1000 }
 
-    @Test func groupsInOrderAndSkipsEmptyAndArchived() {
+    @Test func twoGroupsInOrderWithoutArchived() {
         let groups = TasksStore.group([
             task("done", .done, updated: nowMs, completed: nowMs),
-            task("needs", .needsUser, updated: nowMs),
+            task("needs", .needsUser, updated: nowMs - 60_000),
             task("gone", .doing, updated: nowMs, archived: nowMs),
             task("doing", .doing, updated: nowMs),
+            task("next", .next, updated: nowMs - 120_000),
+            task("watching", .watching, updated: nowMs - 30_000),
         ], showAllDone: false, now: now)
-        #expect(groups.map(\.key) == [.needsYou, .doing, .done])
-        #expect(groups[1].tasks.map(\.id) == ["doing"])
+        #expect(groups.map(\.key) == [.inProgress, .done])
+        // Waiting on the guardian first, then the latest update.
+        #expect(groups[0].tasks.map(\.id) == ["needs", "doing", "watching", "next"])
+        #expect(groups[1].tasks.map(\.id) == ["done"])
+    }
+
+    @Test func onlyDoneLeavesTheProgressGroupOut() {
+        let groups = TasksStore.group([task("done", .done, updated: nowMs, completed: nowMs)], showAllDone: false, now: now)
+        #expect(groups.map(\.key) == [.done])
     }
 
     @Test func oldFinishedRowsHideBehindShowMore() {
@@ -37,13 +46,35 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         #expect(all.first?.tasks.map(\.id) == ["old"])
     }
 
-    @Test func nextFollowsRankThenCreation() {
+    @Test func severalWaitingOnesSortByLatestUpdate() {
         let groups = TasksStore.group([
-            task("b", .next, updated: 2, rank: nil),
-            task("a", .next, updated: 3, rank: 1),
-            task("c", .next, updated: 1, rank: nil),
+            task("old", .needsUser, updated: 1),
+            task("doing", .doing, updated: 5),
+            task("new", .needsUser, updated: 3),
         ], showAllDone: false, now: now)
-        #expect(groups.first?.tasks.map(\.id) == ["a", "c", "b"])
+        #expect(groups.first?.tasks.map(\.id) == ["new", "old", "doing"])
+    }
+
+    @Test func theMutedLineSaysOneThing() {
+        let waiting = task("w", .needsUser, updated: nowMs - 2 * 3_600_000)
+        #expect(TasksStore.rowLine(waiting, status: .waiting, now: now) == "Waiting on you")
+        let failed = task("f", .doing, updated: nowMs)
+        #expect(TasksStore.rowLine(failed, status: .failed, now: now) == "Didn't finish")
+        let doing = task("d", .doing, updated: nowMs - 2 * 3_600_000)
+        #expect(TasksStore.rowLine(doing, status: .plain, now: now) == RelativeTime.ago(Date(timeIntervalSince1970: (nowMs - 2 * 3_600_000) / 1000), now: now))
+        // A finished row counts from when it finished.
+        let done = task("x", .done, updated: nowMs, completed: nowMs - 86_400_000)
+        #expect(TasksStore.rowLine(done, status: .plain, now: now) == RelativeTime.ago(Date(timeIntervalSince1970: (nowMs - 86_400_000) / 1000), now: now))
+    }
+
+    @Test func rowStatusIsWaitingFailedOrPlain() {
+        let failedChat = ChatSession(id: "c", name: "c", running: false, lastTurnFailed: true)
+        let runningChat = ChatSession(id: "c", name: "c", running: true, lastTurnFailed: true)
+        #expect(TasksStore.rowStatus(task("w", .needsUser, updated: 1), chat: nil) == .waiting)
+        #expect(TasksStore.rowStatus(task("f", .doing, updated: 1), chat: failedChat) == .failed)
+        #expect(TasksStore.rowStatus(task("r", .doing, updated: 1), chat: runningChat) == .plain)
+        #expect(TasksStore.rowStatus(task("n", .next, updated: 1), chat: nil) == .plain)
+        #expect(TasksStore.rowStatus(task("d", .done, updated: 1, completed: 1), chat: failedChat) == .plain)
     }
 
     @MainActor @Test func olderUpsertsAreIgnoredAndArchivedRowsLeave() {
