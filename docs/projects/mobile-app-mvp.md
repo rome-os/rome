@@ -69,7 +69,7 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 ## Composer drafts
 
-- [x] Done (`e243ef56`, `662da7fb`; Appearance `9a3b3703`, `32b6bf7b`): 167 Mac Catalyst tests pass; checked on the Simulator (kill + relaunch restores text and photo; Dark switches an open sheet at once and sticks). Screenshots: notes folder `review-drafts-appearance/`. Independent review running.
+- [x] Done (`e243ef56`, `662da7fb`; Appearance `9a3b3703`, `32b6bf7b`): 167 Mac Catalyst tests pass; checked on the Simulator (kill + relaunch restores text and photo; Dark switches an open sheet at once and sticks). Screenshots: notes folder `review-drafts-appearance/`. Independent review: Appearance clean; 7 draft fixes sent back (a restored failed send comes back after clearing, a task chat's failed send lost on leaving, a blank topic chat's first send unprotected, older failed sends dropped, a possible double send after a lost reply, disk writes per keystroke on the main thread, path edge cases). Due before the update page.
 - [x] One local draft per chat (instance + chat: main, topic, task chats): text and photos, saved on each edit, restored on reopen and after a relaunch; cleared when a send succeeds, kept when it fails; wiped on sign-out; a blank topic chat's draft goes with it if never sent. No drawer marker (user, 2026-11-06). Queued to the iOS app worker after batch I–O.
 
 ## Appearance
