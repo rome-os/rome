@@ -149,7 +149,13 @@ import { ActionExecutionsRepository } from "./db/repositories/action-executions.
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { AgentLoader, AppTurnHooks, requireAgent, TurnListeners } from "./agent/index.js";
+import {
+  AgentLoader,
+  AppTurnHooks,
+  readAnswerShape,
+  requireAgent,
+  TurnListeners,
+} from "./agent/index.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
@@ -1109,6 +1115,7 @@ async function main() {
       capabilityDiscovery,
       skillCatalog,
       turnLifecycle: turnListeners,
+      readAnswerShape,
       webchatRepo,
       // Catch-up reads what was said where the session stands from Chats.
       turnLinks: chatsWired.links,

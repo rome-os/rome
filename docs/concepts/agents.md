@@ -92,6 +92,7 @@ provider's native structured-output API.
   `structuredOutput`. `content` is that value's JSON serialization. Missing,
   invalid, or retry-exhausted provider output fails the turn.
 - An `outputSchema` turn may not park on an interaction.
+- The rule a turn's result must meet is `shapedResult` in [`packages/core/src/agent/domain/answer-shape.ts`](../../packages/core/src/agent/domain/answer-shape.ts), which checks the answer through the `AnswerShape` port.
 
 **Not to be confused with:**
 

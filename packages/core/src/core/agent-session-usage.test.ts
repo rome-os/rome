@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -157,6 +158,7 @@ describe("AgentSession turn usage", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
         channelSurface: testChannelSurface,
         turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },

@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -778,6 +779,7 @@ export async function buildTestDeps(
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
     channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,

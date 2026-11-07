@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../../agent/index.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -284,6 +285,7 @@ async function buildHarness(
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: new TurnListeners(new AppTurnHooks()),
+      readAnswerShape,
       channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
