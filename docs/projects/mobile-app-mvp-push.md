@@ -67,3 +67,20 @@ Screenshots are in the shared notes folder, `push-simulator/`.
 - Concierge topic chats: `chatId` is parsed but not used until the app has them.
 - Switching instances from a tap is checked only through demo data, which cannot open a second instance. The first real check needs Rome Cloud and two running instances.
 - On the phone: check that Off in Settings opens Rome's notification page, not the Settings root.
+
+## Stale chat after opening a push (from the iPhone run)
+
+The user's report: the push arrived, a tap opened Concierge, and the chat still showed the old content while the web dashboard had the new message.
+
+- **What was wrong.** Coming back to the foreground told the stores to refetch only when the socket received its first frame. The local server always sends `subscribed`, so on a healthy socket this worked: a local resume test showed the missed message before any change. A socket that is slow, refused or never opens sends no frame, and nothing refetched. That fits the phone, whose socket goes through Rome Cloud. Separately, a store on two topics reloaded twice per reconnect.
+- **Fix** (`5edca3ef`, `37695337`):
+  - Resume asks every listener to refetch right away. A connection after a drop or a pause asks again as the server confirms each held topic, which covers what was sent between the fetch and the subscription.
+  - A 401 on the socket upgrade goes to the session refresh instead of retrying with the old cookie.
+  - Stores share one reload per burst, plus one for requests that come while it runs.
+  - A tapped push for the open instance refetches Concierge itself, because the tap can arrive before the app is active, or over the open app with no pause at all.
+- **Tests** (`85a5a7d1`): resume with no frame refetches; resume without a pause does not; a reconnect after a drop owes each held topic once, also after a failed attempt; a healthy connection owes nothing; a burst reloads once; requests during a reload add exactly one; a resumed chat shows a message stored while away; the task list refreshes once per burst. 82 pass on Mac Catalyst.
+- **Simulator**, against a local Rome (`ROME_PROFILE=ios-test`), each with a message posted while the app was in the background:
+  - Healthy socket, resume from the icon: the missed message shows.
+  - Socket refused by a proxy that passes REST and answers 503 to the upgrade, resume from the icon: the missed message shows (one messages fetch, one task-list fetch).
+  - The same refused socket, a push for instance `local` opened from Notification Center: the missed message shows (two messages fetches: resume and tap).
+- **Not confirmed.** Why the phone's socket gave no frame is not known; the fix does not depend on it. If the phone's live updates also stop while the app stays open, the socket through Rome Cloud needs a look of its own. Another possible cause is still open: a proactive message said in a Concierge topic chat would never show in the main chat. The push's `chatId` from the phone run would rule that out.
