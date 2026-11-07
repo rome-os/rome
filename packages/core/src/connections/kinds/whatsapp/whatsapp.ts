@@ -1,15 +1,9 @@
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  downloadMediaMessage,
-  jidNormalizedUser,
-  areJidsSameUser,
-  isJidGroup,
-  type AuthenticationState,
-  type WAMessage,
-  type WASocket,
-  type Contact,
-  type Chat,
+import type {
+  AuthenticationState,
+  WAMessage,
+  WASocket,
+  Contact,
+  Chat,
 } from "@whiskeysockets/baileys";
 
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
@@ -35,6 +29,11 @@ import {
   refuseReplies,
   textToSend,
 } from "../../outbound/send-refusals.js";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+
+// Baileys loads when WhatsApp is first used, not with every boot.
+const baileys =
+  requireOnFirstUse<typeof import("@whiskeysockets/baileys")>("@whiskeysockets/baileys");
 
 const log = createLogger("whatsapp");
 
@@ -70,7 +69,7 @@ export type WhatsAppAuthProvider = () => Promise<{
 /** Socket-construction seam. Production uses Baileys directly; route-level
  * contract tests replace only this network boundary and keep the adapter,
  * setup coroutine, HTTP routes, and setup runtime real. */
-export type WhatsAppSocketFactory = typeof makeWASocket;
+export type WhatsAppSocketFactory = typeof import("@whiskeysockets/baileys").default;
 
 /**
  * The WhatsApp transport over a Baileys linked-device socket. Inbound messages
@@ -107,12 +106,12 @@ export class WhatsAppAdapter {
    */
   constructor(
     private config: { authStatePath: string } | { authProvider: WhatsAppAuthProvider },
-    private readonly socketFactory: WhatsAppSocketFactory = makeWASocket,
+    private readonly socketFactory: WhatsAppSocketFactory = (...args) => baileys().default(...args),
   ) {
     this.authProvider =
       "authProvider" in config
         ? config.authProvider
-        : () => useMultiFileAuthState(config.authStatePath);
+        : () => baileys().useMultiFileAuthState(config.authStatePath);
   }
 
   async start(): Promise<void> {
@@ -209,7 +208,7 @@ export class WhatsAppAdapter {
         this.connectedPhoneNumber = null;
         const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output
           ?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const shouldReconnect = statusCode !== baileys().DisconnectReason.loggedOut;
         if (shouldReconnect && !this.stopped) {
           log.warn("disconnected, reconnecting", { delay: this.reconnectDelay, statusCode });
           const delay = this.reconnectDelay;
@@ -222,7 +221,7 @@ export class WhatsAppAdapter {
               });
             });
           }, delay);
-        } else if (statusCode === DisconnectReason.loggedOut) {
+        } else if (statusCode === baileys().DisconnectReason.loggedOut) {
           // The device was unlinked WhatsApp-side: the session credential is
           // dead and no reconnect can recover it. The registry maps this to
           // CredentialRejected{ session }; the adapter's transient reconnect
@@ -384,13 +383,13 @@ export class WhatsAppAdapter {
   /** Our own phone-number address (`<pn>@s.whatsapp.net`), device stripped. */
   private selfPnJid(): string | null {
     const id = this.sock?.user?.id;
-    return id ? jidNormalizedUser(id) : null;
+    return id ? baileys().jidNormalizedUser(id) : null;
   }
 
   /** Our own LID address (`<lid>@lid`), device stripped, when WhatsApp reports one. */
   private selfLidJid(): string | null {
     const lid = this.sock?.user?.lid;
-    return lid ? jidNormalizedUser(lid) : null;
+    return lid ? baileys().jidNormalizedUser(lid) : null;
   }
 
   /**
@@ -401,7 +400,10 @@ export class WhatsAppAdapter {
   private isSelfJid(jid: string): boolean {
     const pn = this.selfPnJid();
     const lid = this.selfLidJid();
-    return (pn != null && areJidsSameUser(jid, pn)) || (lid != null && areJidsSameUser(jid, lid));
+    return (
+      (pn != null && baileys().areJidsSameUser(jid, pn)) ||
+      (lid != null && baileys().areJidsSameUser(jid, lid))
+    );
   }
 
   /**
@@ -416,8 +418,8 @@ export class WhatsAppAdapter {
    * Groups pass through untouched.
    */
   private canonicalJid(jid: string): string {
-    if (!jid || isJidGroup(jid)) return jid;
-    const normalized = jidNormalizedUser(jid);
+    if (!jid || baileys().isJidGroup(jid)) return jid;
+    const normalized = baileys().jidNormalizedUser(jid);
     if (this.isSelfJid(normalized)) return this.selfPnJid() ?? normalized;
     return normalized;
   }
@@ -506,7 +508,7 @@ export class WhatsAppAdapter {
 
     let data: Buffer;
     try {
-      const stream = await downloadMediaMessage(raw, "stream", {});
+      const stream = await baileys().downloadMediaMessage(raw, "stream", {});
       data = await readAttachmentByteStream(stream);
     } catch (err) {
       if (!isAttachmentTooLargeError(err)) throw err;

@@ -1,12 +1,9 @@
 import { platformOf } from "../../platform.js";
-import {
-  createLarkChannel,
-  type CardActionEvent,
-  Domain,
-  type LarkChannel,
+import type {
+  CardActionEvent,
+  LarkChannel,
   LarkChannelError,
-  LoggerLevel,
-  type NormalizedMessage as LarkMessage,
+  NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import {
@@ -29,6 +26,11 @@ import type {
   MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+
+// The Lark SDK loads when a Feishu connection first needs it, not with every boot.
+const larkSdk =
+  requireOnFirstUse<typeof import("@larksuiteoapi/node-sdk")>("@larksuiteoapi/node-sdk");
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
@@ -79,7 +81,7 @@ export interface FeishuConfig {
  * state; every other websocket/transport failure is a `Disconnected`.
  */
 export function isFeishuAuthError(err: unknown): boolean {
-  if (err instanceof LarkChannelError && err.code === "permission_denied") return true;
+  if (err instanceof larkSdk().LarkChannelError && err.code === "permission_denied") return true;
   const code = extractFeishuErrorCode(err);
   if (code !== null && FEISHU_AUTH_ERROR_CODES.has(code)) return true;
   const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
@@ -167,17 +169,17 @@ export class FeishuAdapter {
   constructor(
     config: FeishuConfig,
     createChannel: CreateLarkChannel = (c) =>
-      createLarkChannel({
+      larkSdk().createLarkChannel({
         appId: c.appId,
         appSecret: c.appSecret,
-        domain: c.domain === "lark" ? Domain.Lark : Domain.Feishu,
+        domain: c.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
         transport: "websocket",
         outbound: { markdownConverter: "builtin" },
         // Populate `raw` on normalized events so the inbound message's `raw`
         // carries the real wire-level payload (e.g. for media not surfaced in
         // the normal shape).
         includeRawEvent: true,
-        loggerLevel: LoggerLevel.warn,
+        loggerLevel: larkSdk().LoggerLevel.warn,
       }),
   ) {
     this.channel = createChannel(config);
