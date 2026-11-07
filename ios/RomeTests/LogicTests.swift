@@ -493,14 +493,17 @@ final class StubBackend: RomeBackend {
 
     /// Picked apps first in their order, then the ones opened last, then the rest.
     @Test func pickedThenRecentThenTheRest() {
-        let chosen = WidgetSlots.choose(picked: ["c", "a"], recent: ["e", "b"], apps: Self.list)
-        #expect(chosen.map(\.id) == ["c", "a", "e", "b", "d", "f", "g", "h"])
+        #expect(WidgetSlots.choose(picked: ["c"], recent: ["e"], apps: Self.list).map(\.id) == ["c", "e", "a", "b"])
+        #expect(WidgetSlots.choose(picked: ["c", "a"], recent: ["e", "b"], apps: Self.list).map(\.id) == ["c", "a", "e", "b"])
+        // More picks than spots: the first four win.
+        #expect(WidgetSlots.choose(picked: ["j", "i", "h", "g", "f"], recent: ["a"], apps: Self.list).map(\.id) == ["j", "i", "h", "g"])
     }
 
-    /// Each app once, eight at most, and only apps the list still has.
+    /// Each app once, four at most, and only apps the list still has.
     @Test func dedupedCappedAndCurrent() {
         let chosen = WidgetSlots.choose(picked: ["b", "gone", "b"], recent: ["b", "a", "gone"], apps: Self.list)
-        #expect(chosen.map(\.id) == ["b", "a", "c", "d", "e", "f", "g", "h"])
+        #expect(chosen.map(\.id) == ["b", "a", "c", "d"])
+        #expect(WidgetSlots.small == 4)
         #expect(Set(chosen.map(\.id)).count == chosen.count)
         #expect(WidgetSlots.choose(picked: [], recent: [], apps: Array(Self.list.prefix(3))).map(\.id) == ["a", "b", "c"])
         #expect(WidgetSlots.choose(picked: ["a"], recent: [], apps: []).isEmpty)

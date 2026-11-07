@@ -112,12 +112,13 @@ struct AppShelfStore: Sendable {
 
 /// Which apps fill the widget's slots.
 enum WidgetSlots {
-    static let medium = 8
+    /// The small widget's 2×2 grid.
+    static let small = 4
 
     /// The apps the guardian picked, in their order, then the ones opened
     /// last, then the rest of the list: each once, only apps the list still
     /// has, at most `limit`.
-    static func choose(picked: [String], recent: [String], apps: [ShelfApp], limit: Int = medium) -> [ShelfApp] {
+    static func choose(picked: [String], recent: [String], apps: [ShelfApp], limit: Int = small) -> [ShelfApp] {
         let byId = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         var chosen: [ShelfApp] = []

@@ -20,7 +20,7 @@ struct AppsWidget: Widget {
         }
         .configurationDisplayName("Apps")
         .description("Open your Rome apps from the home screen.")
-        .supportedFamilies([.systemMedium])
+        .supportedFamilies([.systemSmall])
     }
 }
 
@@ -31,8 +31,8 @@ struct ChooseAppsIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Choose apps"
     static let description = IntentDescription("Pick the apps to show. Spots left over show the apps you opened last.")
 
-    // The widget's eight spots (`WidgetSlots.medium`).
-    @Parameter(title: "Apps", size: [.systemMedium: 8])
+    // The widget's four spots (`WidgetSlots.small`).
+    @Parameter(title: "Apps", size: [.systemSmall: 4])
     var apps: [ShelfAppEntity]?
 }
 
@@ -125,28 +125,29 @@ struct AppsWidgetView: View {
     }
 }
 
-/// Rows of four, as on the Apps page: one row for up to four apps, else two.
+/// A 2×2 grid; one app or two keep the top row, as on a home screen.
 private struct AppsGrid: View {
     let instanceId: String
     let apps: [ShelfApp]
     let icons: [String: UIImage]
 
     private var rows: [[ShelfApp]] {
-        stride(from: 0, to: apps.count, by: 4).map { Array(apps[$0..<min($0 + 4, apps.count)]) }
+        stride(from: 0, to: apps.count, by: 2).map { Array(apps[$0..<min($0 + 2, apps.count)]) }
     }
 
-    private var iconSize: CGFloat { rows.count > 1 ? 46 : 56 }
+    /// Two rows of icon and name fill the small family's height.
+    private static let iconSize: CGFloat = 46
 
     var body: some View {
-        VStack(spacing: rows.count > 1 ? 8 : 0) {
-            ForEach(rows.indices, id: \.self) { index in
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(0..<4, id: \.self) { column in
-                        if column < rows[index].count {
+        VStack(spacing: 8) {
+            ForEach(0..<2, id: \.self) { index in
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(0..<2, id: \.self) { column in
+                        if index < rows.count, column < rows[index].count {
                             cell(rows[index][column])
                         } else {
-                            // No height of its own, or it would stretch the row.
-                            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
+                            // An empty spot keeps the grid's shape.
+                            Color.clear.frame(maxWidth: .infinity).frame(height: Self.iconSize + 16)
                         }
                     }
                 }
@@ -158,7 +159,8 @@ private struct AppsGrid: View {
     @ViewBuilder
     private func cell(_ app: ShelfApp) -> some View {
         let content = VStack(spacing: 4) {
-            WidgetAppIcon(app: app, image: icons[app.id], size: iconSize)
+            WidgetAppIcon(app: app, image: icons[app.id], size: Self.iconSize)
+            // One line, cut at the end: a small widget's half is about 60 pt wide.
             Text(verbatim: app.name)
                 .font(.system(size: 11))
                 .foregroundStyle(WidgetColors.label)
