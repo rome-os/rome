@@ -71,6 +71,18 @@ enum SnapshotRunner {
                 model.debugCommand = .route([.taskChat(chatId: "chat-notion", title: "同步 Notion 数据库")])
             }
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
+            await capture("27-settings-notifications-on", style: styleName, in: directory, wait: 1.2) {
+                model.push.debugSet(permission: .on, dismissedAt: .now)
+                model.debugCommand = .settings(nil)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.4))
+                    model.debugCommand = .settings([])
+                }
+            }
+            await capture("28-settings-notifications-note", style: styleName, in: directory, wait: 1.2) {
+                model.push.debugSet(permission: .off, dismissedAt: .now, needsSystemSettings: true)
+            }
+            model.push.debugSet(permission: .notSet, dismissedAt: .now)
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
             model.debugCommand = .settings(nil)
             await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.routines) }
