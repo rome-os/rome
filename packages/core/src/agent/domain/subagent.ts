@@ -8,7 +8,8 @@ import type { AgentName, SessionId } from "./session.js";
 
 /** The id of a session's dashboard record (`rome_sessions.id`). For a
  *  subagent's session it equals the agent session's id. For a dashboard
- *  chat's own session it does not. */
+ *  chat's own session it does not. Like `SessionId`, the alias names the id
+ *  for the reader, and the compiler does not tell the two apart. */
 export type SessionRecordId = string;
 
 /** A subagent this agent may hand work to. */

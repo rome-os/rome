@@ -58,7 +58,7 @@ One call a turn makes to a subagent. The subagent's session has that turn as its
 - One turn of the subagent's session answers the call. The session is a fresh one, or one that the same parent started before for the same subagent in the same project. Any other resume is refused.
 - The call ends completed with an output, failed with an error, or cancelled. The output is the turn's structured output when it has one, and its result text when not. A turn that ended interrupted is cancelled.
 - Cancelling the calling turn cancels its open calls.
-- In code, the rules are in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
+- In code, the rules for the request, a resume and the outcome are in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
 
 ## System prompt
 
