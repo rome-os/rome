@@ -93,7 +93,7 @@ Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pa
 
 ## Later
 
-- [ ] Server thumbnails: the instance serves a resized image (e.g. `/api/projects/asset?path=…&w=600`), and the app fetches that for bubbles instead of the full original. Today the app downloads the original and decodes a 600/900 px thumbnail into a 64 MB memory cache; the asset route sends `Cache-Control: no-store`, so nothing survives a relaunch. The user chose this over an on-device disk cache (2026-11-06). Needs an instance change and release.
+- [ ] Server thumbnails: the instance serves a resized image (e.g. `/api/projects/asset?path=…&w=600`), and the app fetches that for bubbles instead of the full original. Today the app downloads the original and decodes a 600/900 px thumbnail into a 64 MB memory cache; the asset route sends `Cache-Control: no-store`, so nothing survives a relaunch. The user chose this over an on-device disk cache (2026-11-06). Needs an instance change and release. Issue: rome-os/rome#1815.
 
 ## Next
 
