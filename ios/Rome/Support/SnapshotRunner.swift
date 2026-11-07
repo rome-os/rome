@@ -123,6 +123,10 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.6))
             model.dynamicTypeOverride = .xxLarge
             await capture("19-chat-xxl", style: styleName, in: directory, wait: 2) { model.openDemo() }
+            // Accessibility text: the sign-in and update pages scroll above their buttons.
+            model.dynamicTypeOverride = .accessibility3
+            await capture("35-login-ax3", style: styleName, in: directory, wait: 1) { model.debugSetPhase(.signedOut) }
+            await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {

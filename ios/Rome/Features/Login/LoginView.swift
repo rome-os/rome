@@ -6,25 +6,50 @@ struct LoginView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @State private var showDebugMenu = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ZStack {
-            Palette.bg
-            // Where the launch and opening screens draw it, so the logo never moves.
-            Mascot(blinks: true)
-                .frame(width: Mascot.width)
-                .overlay(alignment: .top) {
-                    center
-                        .frame(width: 320)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+        Group {
+            if typeSize.isAccessibilitySize {
+                // Large text: the page scrolls, and the button keeps its own room.
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Mascot(blinks: true).frame(width: 64)
+                        center
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 48)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity)
                 }
-        }
-        .ignoresSafeArea()
-        .overlay(alignment: .bottom) {
-            bottom
-                .padding(.horizontal, 20)
-                .padding(.bottom, 18)
+                .background(Palette.bg.ignoresSafeArea())
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    bottom
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 18)
+                        .background(Palette.bg)
+                }
+            } else {
+                ZStack {
+                    Palette.bg
+                    // Where the launch and opening screens draw it, so the logo never moves.
+                    Mascot(blinks: true)
+                        .frame(width: Mascot.width)
+                        .overlay(alignment: .top) {
+                            center
+                                .frame(width: 320)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+                        }
+                }
+                .ignoresSafeArea()
+                .overlay(alignment: .bottom) {
+                    bottom
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 18)
+                }
+            }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.9), value: model.phase)
         .animation(.easeOut(duration: 0.2), value: model.signInError)

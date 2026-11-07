@@ -6,33 +6,68 @@ struct UpdateScreen: View {
     @Environment(AppModel.self) private var model
     @State private var showInstances = false
     @State private var confirmSignOut = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var updater: InstanceUpdater { model.update }
 
+    private var statusLine: String? { UpdateGate.statusLine(updater.state, progress: updater.progress) }
+
     var body: some View {
-        ZStack {
-            Palette.bg
-            // The mascot stays exactly where the opening screen has it; the
-            // text hangs below it.
-            Mascot(alive: isWaiting)
-                .frame(width: Mascot.width)
-                .overlay(alignment: .top) {
-                    center
-                        .frame(width: 320)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+        Group {
+            if typeSize.isAccessibilitySize {
+                // Large text: the page scrolls, and the buttons keep their own room.
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Mascot(alive: isWaiting).frame(width: 64)
+                        center
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
                 }
+                .background(Palette.bg.ignoresSafeArea())
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    topBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    bottom
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 18)
+                        .background(Palette.bg)
+                }
+            } else {
+                ZStack {
+                    Palette.bg
+                    // The mascot stays exactly where the opening screen has it; the
+                    // text hangs below it.
+                    Mascot(alive: isWaiting)
+                        .frame(width: Mascot.width)
+                        .overlay(alignment: .top) {
+                            center
+                                .frame(width: 320)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+                        }
+                }
+                .ignoresSafeArea()
+                .overlay(alignment: .top) {
+                    topBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                }
+                .overlay(alignment: .bottom) {
+                    bottom
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 18)
+                }
+            }
         }
-        .ignoresSafeArea()
-        .overlay(alignment: .top) {
-            topBar
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-        }
-        .overlay(alignment: .bottom) {
-            bottom
-                .padding(.horizontal, 20)
-                .padding(.bottom, 18)
+        // VoiceOver hears each step of the update as it comes.
+        .onChange(of: statusLine) { _, line in
+            if let line { AccessibilityNotification.Announcement(line).post() }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.9), value: updater.state)
         .animation(.easeInOut(duration: 0.25), value: updater.progress)
@@ -83,7 +118,7 @@ struct UpdateScreen: View {
         case .starting, .updating:
             VStack(spacing: 12) {
                 LoadingDots()
-                if let line = UpdateGate.statusLine(updater.state, progress: updater.progress) {
+                if let line = statusLine {
                     Text(line)
                         .romeFont(17, .semibold)
                         .contentTransition(.opacity)
