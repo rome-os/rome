@@ -78,4 +78,20 @@ import UIKit
     @Test func nothingBeforeTheListIsMeasured() {
         #expect(!BackToBottom.shows(false, distance: 5000, height: 0))
     }
+
+    /// Something new while reading just above the bottom: the button shows at once.
+    @Test func showsWithUnseenAtAShortDistance() {
+        let far = BackToBottom.shows(false, distance: 200, height: height)
+        #expect(!BackToBottom.visible(far: far, unseen: 0, following: false))
+        #expect(BackToBottom.visible(far: far, unseen: 1, following: false))
+        // At the bottom, new rows just show; no button.
+        #expect(!BackToBottom.visible(far: far, unseen: 1, following: true))
+        #expect(BackToBottom.visible(far: true, unseen: 0, following: false))
+    }
+
+    @Test func theDotClearsOnceTheListFollowsAgain() {
+        // A tap and a scroll down by hand both end in following.
+        #expect(BackToBottom.unseen(2, following: false) == 2)
+        #expect(BackToBottom.unseen(2, following: true) == 0)
+    }
 }

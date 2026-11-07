@@ -357,8 +357,8 @@ struct CenteredMessage: View {
 }
 
 /// A transcript that follows its bottom while the guardian is there, loads
-/// older pages at the top, and offers a "New messages" pill when something
-/// arrives while they read further up.
+/// older pages at the top, and offers a back-to-bottom button far up, with a
+/// dot when something arrives while they read above it.
 struct TranscriptList<Row: View>: View {
     let store: TranscriptStore
     var composerFocused = false
@@ -448,7 +448,7 @@ struct TranscriptList<Row: View>: View {
                 proxy.size.height
             } action: { visibleHeight = $0 }
             .onChange(of: following) { _, now in
-                if now { unseen = 0 }
+                unseen = BackToBottom.unseen(unseen, following: now)
             }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
@@ -496,51 +496,23 @@ struct TranscriptList<Row: View>: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if unseen > 0 && !following {
-                    Button {
-                        scrollToBottom(proxy)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("New messages")
-                            Image(systemName: "arrow.down").romeFont(12, .bold)
-                        }
-                        .romeFont(14, .semibold)
-                        .foregroundStyle(Palette.fg)
-                        .padding(.horizontal, 14)
-                        .frame(height: 36)
-                        .background(Palette.elevated, in: Capsule())
-                        .softElevation(radius: 18)
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .padding(.bottom, 10)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if showsBackToBottom {
+                if BackToBottom.visible(far: showsBackToBottom, unseen: unseen, following: following) {
                     // Outside the scroll's content, so a tap mid-glide reaches it.
                     Button {
                         transcriptScrollLog.notice("back-to-bottom tapped, phase \(atRest ? "rest" : "moving", privacy: .public)")
                         scrollToBottom(proxy)
                     } label: {
-                        // Near-opaque like the composer, so a bubble behind
-                        // never reads through it.
-                        Image(systemName: "arrow.down")
-                            .romeFont(16, .semibold)
-                            .foregroundStyle(Palette.fg)
-                            .frame(width: 40, height: 40)
-                            .background(Palette.elevated, in: Circle())
-                            .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
-                            .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
+                        BackToBottomGlyph(dot: unseen > 0)
                     }
                     .buttonStyle(PressScaleStyle(scale: 0.9))
                     // About 12 pt above the composer, with the list's own inset.
                     .padding(.bottom, 4)
-                    .accessibilityLabel("Scroll to the latest message")
+                    .accessibilityLabel(unseen > 0 ? Text("New messages. Scroll to the latest message") : Text("Scroll to the latest message"))
                     .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: unseen > 0 && !following)
-            .animation(.easeOut(duration: 0.2), value: showsBackToBottom)
+            .animation(.easeOut(duration: 0.2), value: BackToBottom.visible(far: showsBackToBottom, unseen: unseen, following: following))
+            .animation(.easeOut(duration: 0.2), value: unseen > 0)
             .modifier(DistanceFromBottom(visibleHeight: visibleHeight, showing: $showsBackToBottom))
         }
     }
@@ -768,6 +740,47 @@ enum BackToBottom {
     static func shows(_ showing: Bool, distance: CGFloat, height: CGFloat) -> Bool {
         guard height > 0 else { return false }
         return distance > height * (showing ? 1.7 : 2)
+    }
+
+    /// Far from the bottom, or at any distance once something new arrived
+    /// while the guardian reads above it.
+    static func visible(far: Bool, unseen: Int, following: Bool) -> Bool {
+        far || (unseen > 0 && !following)
+    }
+
+    /// The dot's count: gone once the list follows the bottom again, after a
+    /// tap or a scroll down by hand.
+    static func unseen(_ count: Int, following: Bool) -> Int {
+        following ? 0 : count
+    }
+}
+
+/// The arrow on the composer's glass, with a dot while something new waits below.
+private struct BackToBottomGlyph: View {
+    let dot: Bool
+    @Environment(\.pageBackground) private var pageBackground
+
+    var body: some View {
+        Image(systemName: "arrow.down")
+            .romeFont(16, .semibold)
+            .foregroundStyle(Palette.fg)
+            .frame(width: 40, height: 40)
+            .glassSurface(Circle(), interactive: true, frost: 0.65)
+            .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+            .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+            .overlay(alignment: .topTrailing) {
+                if dot {
+                    Circle()
+                        .fill(Palette.primary)
+                        .frame(width: 10, height: 10)
+                        .padding(2)
+                        .background(pageBackground, in: Circle())
+                        .offset(x: 2, y: -2)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
     }
 }
 

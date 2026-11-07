@@ -911,12 +911,12 @@
         }
       }
     },
-    "New messages" : {
+    "New messages. Scroll to the latest message" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "新消息"
+            "value" : "有新消息，回到最新消息"
           }
         }
       }

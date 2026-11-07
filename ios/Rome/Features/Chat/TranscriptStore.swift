@@ -113,8 +113,8 @@ final class TranscriptStore {
                 olderPage = nil
             }
             merge(page.messages)
-            // Replies a refetch brings count like live ones: the list offers
-            // "New messages" to a guardian reading further up.
+            // Replies a refetch brings count like live ones: the list marks
+            // the back-to-bottom button for a guardian reading further up.
             if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
                 arrivals += 1
             }
