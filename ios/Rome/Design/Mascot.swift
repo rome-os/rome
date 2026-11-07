@@ -15,21 +15,41 @@ struct Mascot: View {
     /// The width the opening and launch screens draw it at.
     static let width: CGFloat = 96
 
+    /// Seconds between blinks when it only blinks.
+    static let blinkEvery: Duration = .seconds(4.5)
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var eyesClosed = false
 
     /// Still with Reduce Motion, and in snapshot runs.
-    private var moves: Bool {
+    private var canMove: Bool {
         #if DEBUG
         if SnapshotRunner.directory != nil { return false }
         #endif
-        return (alive || blinks) && !reduceMotion
+        return !reduceMotion
     }
 
     var body: some View {
-        TimelineView(.animation(paused: !moves)) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            let pose = !moves ? .rest : alive ? MascotPose(time: time) : MascotPose.blinkOnly(time: time)
-            figure(pose)
+        Group {
+            if alive && canMove {
+                // While something loads: frames at a modest rate, the paths parsed once.
+                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                    figure(MascotPose(time: context.date.timeIntervalSinceReferenceDate))
+                }
+            } else {
+                // Still between blinks: nothing redraws until the next one.
+                figure(eyesClosed ? .blink : .rest)
+                    .task(id: blinks && canMove) {
+                        guard blinks && canMove else { return }
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: Self.blinkEvery)
+                            guard !Task.isCancelled else { return }
+                            withAnimation(.easeIn(duration: 0.09)) { eyesClosed = true }
+                            try? await Task.sleep(for: .milliseconds(90))
+                            withAnimation(.easeOut(duration: 0.09)) { eyesClosed = false }
+                        }
+                    }
+            }
         }
         .aspectRatio(Self.viewBox, contentMode: .fit)
         .accessibilityHidden(true)
@@ -90,13 +110,8 @@ struct MascotPose: Equatable {
         tilt = 1.4 * sin(2 * .pi * time / 2.4 + 0.6)
     }
 
-    /// Only the blink, a little less often: still, but not lifeless.
-    static func blinkOnly(time: TimeInterval) -> MascotPose {
-        let blinkEvery = 4.5, blinkLength = 0.18
-        let intoBlink = time.truncatingRemainder(dividingBy: blinkEvery)
-        guard intoBlink < blinkLength else { return .rest }
-        return MascotPose(eyeScale: 1 - 0.92 * sin(.pi * intoBlink / blinkLength))
-    }
+    /// The eyes shut, the rest still: the middle of a blink.
+    static let blink = MascotPose(eyeScale: 0.08)
 
     init(eyeScale: CGFloat = 1, glance: CGFloat = 0, nod: CGFloat = 0, tilt: Double = 0) {
         self.eyeScale = eyeScale
@@ -134,11 +149,24 @@ struct SVGShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         let scale = min(rect.width / viewBox.width, rect.height / viewBox.height)
-        return SVGPath.parse(data).applying(CGAffineTransform(scaleX: scale, y: scale).translatedBy(x: rect.minX / scale, y: rect.minY / scale))
+        return SVGPath.cached(data).applying(CGAffineTransform(scaleX: scale, y: scale).translatedBy(x: rect.minX / scale, y: rect.minY / scale))
     }
 }
 
 enum SVGPath {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var parsed: [String: Path] = [:]
+
+    /// Each path parsed once, however often it is drawn.
+    static func cached(_ data: String) -> Path {
+        lock.lock()
+        defer { lock.unlock() }
+        if let path = parsed[data] { return path }
+        let path = parse(data)
+        parsed[data] = path
+        return path
+    }
+
     /// Parses absolute M, L, H, V, C and Z commands.
     static func parse(_ data: String) -> Path {
         var path = Path()

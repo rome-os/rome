@@ -30,11 +30,16 @@ import Testing
     }
 
     @Test func theSignInMascotOnlyBlinks() {
-        // Between blinks it is at rest; mid-blink only the eyes move.
-        #expect(MascotPose.blinkOnly(time: 2) == .rest)
-        let blink = MascotPose.blinkOnly(time: 4.5 + 0.09)
+        // Mid-blink only the eyes move.
+        let blink = MascotPose.blink
         #expect(blink.eyeScale < 0.15)
         #expect(blink.glance == 0 && blink.nod == 0 && blink.tilt == 0)
+    }
+
+    @Test func eachPathIsParsedOnce() {
+        let first = SVGPath.cached(MascotPaths.body)
+        #expect(first == SVGPath.parse(MascotPaths.body))
+        #expect(SVGPath.cached(MascotPaths.body) == first)
     }
 
     @Test func theIconPathsParse() {
