@@ -23,6 +23,9 @@ export interface Question {
   question: string;
   type: "single" | "multi" | "text";
   options?: string[];
+  defaults?: string[];
+  defaultText?: string;
+  optionDescriptions?: Record<string, string>;
   freeText?: boolean;
   optional?: boolean;
   [field: string]: unknown;
@@ -75,6 +78,45 @@ export function parseAskQuestionInput(
         };
       }
     }
+    if (o.defaults !== undefined) {
+      if (
+        o.type === "text" ||
+        !Array.isArray(o.defaults) ||
+        !o.defaults.every(
+          (value) => typeof value === "string" && (o.options as string[]).includes(value),
+        ) ||
+        (o.type === "single" && o.defaults.length > 1)
+      ) {
+        return {
+          ok: false,
+          error: `ask_question.questions[${i}].defaults must be an array of existing option labels (at most one for single-choice, choice questions only)`,
+        };
+      }
+    }
+    if (o.defaultText !== undefined && (o.type !== "text" || typeof o.defaultText !== "string")) {
+      return {
+        ok: false,
+        error: `ask_question.questions[${i}].defaultText must be a string on a text question`,
+      };
+    }
+    if (o.optionDescriptions !== undefined) {
+      const descriptions = o.optionDescriptions;
+      if (
+        o.type === "text" ||
+        !descriptions ||
+        typeof descriptions !== "object" ||
+        Array.isArray(descriptions) ||
+        !Object.entries(descriptions).every(
+          ([label, description]) =>
+            (o.options as string[]).includes(label) && typeof description === "string",
+        )
+      ) {
+        return {
+          ok: false,
+          error: `ask_question.questions[${i}].optionDescriptions must map existing option labels to strings (choice questions only)`,
+        };
+      }
+    }
   }
   return { ok: true, questions: questions as Question[] };
 }
@@ -92,10 +134,19 @@ function askQuestionsToPromptText(questions: readonly Question[]): string {
         hasOptions && Array.isArray(q.options)
           ? q.options.filter((o): o is string => typeof o === "string")
           : [];
-      if (!options.length) return text;
+      if (!options.length) {
+        return typeof q.defaultText === "string"
+          ? `${text}\nDefault: ${q.defaultText || "(empty)"}`
+          : text;
+      }
       // multi-choice: tell the guardian they can name more than one.
       const head = q.type === "multi" ? `${text} (pick any that apply)` : text;
-      const lines = options.map((o) => `- ${o}`);
+      const defaults = Array.isArray(q.defaults) ? q.defaults : [];
+      const descriptions = q.optionDescriptions as Record<string, string> | undefined;
+      const lines = options.map((o) => {
+        const description = descriptions && Object.hasOwn(descriptions, o) ? descriptions[o] : "";
+        return `- ${o}${defaults.includes(o) ? " (default)" : ""}${description ? ` — ${description}` : ""}`;
+      });
       // freeText choice: tell the guardian they can also answer freely.
       if (hasOptions && q.freeText === true) lines.push("- (or describe your own)");
       return `${head}\n${lines.join("\n")}`;

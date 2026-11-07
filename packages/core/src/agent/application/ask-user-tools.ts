@@ -154,6 +154,22 @@ export function askUserTools(input: {
                   items: { type: "string" },
                   description: "Required for single and multi; the choices. Ignored for text.",
                 },
+                defaults: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Choice questions only: option labels selected at first. Single allows at most one, multi allows zero or more. Every label must be in options.",
+                },
+                defaultText: {
+                  type: "string",
+                  description: "Text questions only: initial text the guardian can edit.",
+                },
+                optionDescriptions: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "Choice questions only: short explanations keyed by existing option labels. Answers still use the labels, not the descriptions.",
+                },
                 freeText: {
                   type: "boolean",
                   description:

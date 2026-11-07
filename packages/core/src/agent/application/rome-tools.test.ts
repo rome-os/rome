@@ -42,11 +42,70 @@ async function handlerText(widgetsShow: boolean): Promise<string> {
 describe("ask_question", () => {
   it("relays the questions as prose where no widget shows", async () => {
     const text = await handlerText(false);
-    expect(text).not.toContain("pendingInteraction");
+    expect(text).toBe(
+      "This surface cannot render an interactive UI. Ask the guardian the " +
+        "following as a plain message, then wait for their reply before doing " +
+        "anything else:\n\nWhich weekend?\n- This\n- Next\n\nWhich city?",
+    );
     expect(text).toContain("Which weekend?");
     expect(text).toContain("- This");
     expect(text).toContain("- Next");
     expect(text).toContain("Which city?");
+  });
+
+  it("relays defaults and option descriptions as readable prose", async () => {
+    const input = {
+      questions: [
+        {
+          id: "kinds",
+          question: "Which events?",
+          type: "multi",
+          options: ["Reviews", "Issues"],
+          defaults: ["Reviews"],
+          optionDescriptions: {
+            Reviews: "Requests for review.",
+            Issues: "New issues in the repository.",
+          },
+        },
+        {
+          id: "scope",
+          question: "Which scope?",
+          type: "single",
+          options: ["Mine", "All"],
+          defaults: ["Mine"],
+        },
+        {
+          id: "preference",
+          question: "Anything else?",
+          type: "text",
+          optional: true,
+          defaultText: "Billing only",
+        },
+        {
+          id: "people",
+          question: "Ignore which people?",
+          type: "text",
+          optional: true,
+          defaultText: "",
+        },
+      ],
+    };
+    const prose = (await askQuestion(false, input)) as { content: { text: string }[] };
+    expect(prose.content[0].text).toContain(
+      "Which events? (pick any that apply)\n- Reviews (default) — Requests for review.\n- Issues — New issues in the repository.\n\nWhich scope?\n- Mine (default)\n- All\n\nAnything else? (optional)\nDefault: Billing only\n\nIgnore which people? (optional)\nDefault: (empty)",
+    );
+    const card = (await askQuestion(true, input)) as { content: { text: string }[] };
+    expect(JSON.parse(card.content[0].text).render.props).toEqual(input);
+  });
+
+  it("fails closed before rendering or relaying malformed defaults", async () => {
+    for (const surface of [true, false]) {
+      const result = await askQuestion(surface, {
+        questions: [{ id: "q", question: "Pick", type: "single", options: ["A"], defaults: ["B"] }],
+      });
+      expect(result).toMatchObject({ isError: true });
+      expect(JSON.stringify(result)).not.toContain("pendingInteraction");
+    }
   });
 
   it("returns the built-in question-card payload where a widget shows", async () => {
