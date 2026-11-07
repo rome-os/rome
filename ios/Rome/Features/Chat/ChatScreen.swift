@@ -73,7 +73,7 @@ struct ChatScreen: View {
             }
             if offersPush {
                 PushPromptCard(
-                    onTurnOn: { Task { await model.push.turnOn() } },
+                    onTurnOn: { Task { await model.push.setEnabled(true) } },
                     onNotNow: { model.push.notNow() }
                 )
                 .padding(.horizontal, Metrics.pagePadding)

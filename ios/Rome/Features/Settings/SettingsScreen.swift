@@ -103,6 +103,7 @@ struct SettingsScreen: View {
     @State private var usage: AIToolsStatus?
     @State private var confirmSignOut = false
     @State private var showFeedback = false
+    @State private var notificationsOn = false
 
     var body: some View {
         ScrollView {
@@ -117,21 +118,18 @@ struct SettingsScreen: View {
                 }
                 .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
-                    Button(action: openNotifications) {
-                        SettingsRow(systemImage: "bell", title: "Notifications") {
-                            HStack(spacing: 8) {
-                                if let state = notificationsState {
-                                    Text(state)
-                                        .romeFont(17)
-                                        .foregroundStyle(Palette.sub)
-                                }
-                                Image(systemName: model.push.permission == .notSet ? "chevron.right" : "arrow.up.right")
-                                    .romeFont(13, .semibold)
-                                    .foregroundStyle(Palette.sub)
-                            }
-                        }
+                    SettingsRow(systemImage: "bell", title: "Notifications") {
+                        Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: setNotifications))
+                            .labelsHidden()
+                            .tint(Palette.primary)
                     }
-                    .buttonStyle(RowPressStyle())
+                    .accessibilityElement(children: .combine)
+                    if model.push.needsSystemSettings {
+                        SystemSettingsNote {
+                            if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                        }
+                        .transition(.opacity)
+                    }
                     Button {
                         if let url = model.webURL { openURL(url) }
                     } label: {
@@ -183,7 +181,13 @@ struct SettingsScreen: View {
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task { usage = try? await workspace.backend.aiTools() }
-        .task { await model.push.refresh() }
+        .task {
+            await model.push.refresh()
+            notificationsOn = model.push.isOn
+        }
+        // The guardian may change it in the Settings app and come back.
+        .onChange(of: model.push.isOn) { _, on in notificationsOn = on }
+        .animation(.easeOut(duration: 0.2), value: model.push.needsSystemSettings)
         .confirmationDialog("After signing out, sign in with Rome Cloud to open Rome again.", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { Task { await model.signOut() } }
         }
@@ -226,21 +230,13 @@ struct SettingsScreen: View {
         .accessibilityHint("Switches instances.")
     }
 
-    private var notificationsState: LocalizedStringKey? {
-        switch model.push.permission {
-        case .on: return "On"
-        case .off: return "Off"
-        case .notSet: return "Not set"
-        case nil: return nil
-        }
-    }
-
-    /// Not set asks here; on or off is changed in the Settings app.
-    private func openNotifications() {
-        if model.push.permission == .notSet {
-            Task { await model.push.turnOn() }
-        } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-            openURL(url)
+    /// The switch moves at once and settles on what the system and the
+    /// preference allow, so it springs back when the system says no.
+    private func setNotifications(_ on: Bool) {
+        notificationsOn = on
+        Task {
+            await model.push.setEnabled(on)
+            withAnimation { notificationsOn = model.push.isOn }
         }
     }
 
@@ -248,6 +244,29 @@ struct SettingsScreen: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "\(version) (\(build))"
+    }
+}
+
+/// Under the Notifications row when the system has notifications off for
+/// the app: only the Settings app can turn them back on.
+private struct SystemSettingsNote: View {
+    let open: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Turn on notifications in Settings")
+                .romeFont(14)
+                .foregroundStyle(Palette.sub)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Open Settings", action: open)
+                .romeFont(14, .semibold)
+                .foregroundStyle(Palette.primaryText)
+                .buttonStyle(PressScaleStyle())
+        }
+        .padding(.leading, 56)
+        .padding(.trailing, 14)
+        .padding(.bottom, 12)
     }
 }
 

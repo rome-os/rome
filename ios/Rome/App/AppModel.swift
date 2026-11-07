@@ -428,7 +428,8 @@ final class AppModel {
     /// Back in front: what the screens show may be behind, whether or not the
     /// app was suspended, so they refetch and the socket starts over.
     func appDidBecomeActive() {
-        Task { await push.refresh() }
+        // Notifications turned on in the Settings app register this phone.
+        Task { await push.launch() }
         if foreground.becameActive(at: .now) {
             workspace?.backend.events.resume()
         }

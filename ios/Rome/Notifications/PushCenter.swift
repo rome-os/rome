@@ -43,11 +43,19 @@ struct PushTokenStore {
 final class PushCenter {
     private enum Defaults {
         static let promptDismissedAt = "pushPromptDismissedAt"
+        static let enabled = "pushEnabled"
     }
 
     /// Unknown until the system answers.
     private(set) var permission: PushPermission?
     private(set) var promptDismissedAt: Date?
+    /// The app's own switch, on unless the guardian turned it off in Settings.
+    /// Off, this phone is not on Rome Cloud's list and no push arrives; the
+    /// system permission is left as it is.
+    private(set) var enabledByUser: Bool
+    /// The guardian turned the switch on, but the system has notifications
+    /// off for this app: only the Settings app can change that.
+    private(set) var needsSystemSettings = false
 
     @ObservationIgnored private let registry: DeviceRegistry
     @ObservationIgnored private let system: NotificationSystem
@@ -70,28 +78,54 @@ final class PushCenter {
         self.defaults = defaults
         self.store = store
         promptDismissedAt = defaults.object(forKey: Defaults.promptDismissedAt) as? Date
+        enabledByUser = defaults.object(forKey: Defaults.enabled) as? Bool ?? true
     }
 
+    /// What the Settings switch shows: the system allows notifications and
+    /// the guardian has not turned them off here.
+    var isOn: Bool { permission == .on && enabledByUser }
+
     func offersPrompt(now: Date = .now) -> Bool {
-        guard let permission else { return false }
+        guard let permission, enabledByUser else { return false }
         return PushPrompt.shouldOffer(permission: permission, dismissedAt: promptDismissedAt, now: now)
     }
 
-    /// On every launch: read the permission and, when it is on, get a token.
+    /// On every launch and return to the foreground: read the permission and,
+    /// when notifications are on, get a token.
     func launch() async {
         await refresh()
-        if permission == .on { system.registerForRemoteNotifications() }
+        if isOn { system.registerForRemoteNotifications() }
     }
 
     /// The guardian may change it in the Settings app at any time.
     func refresh() async {
+        #if DEBUG
+        if debugFrozen { return }
+        #endif
         permission = await system.permission()
+        if permission != .off { needsSystemSettings = false }
     }
 
-    /// "Turn on": the system prompt, then a token if the guardian allowed it.
-    func turnOn() async {
-        await system.requestAuthorization()
-        await launch()
+    /// The Settings switch. On asks the system when it has not been asked,
+    /// and registers this phone once allowed; when the system has said no, it
+    /// stays off and points to the Settings app. Off removes this phone from
+    /// Rome Cloud's list.
+    func setEnabled(_ on: Bool) async {
+        enabledByUser = on
+        defaults.set(on, forKey: Defaults.enabled)
+        if on {
+            await refresh()
+            if permission == .notSet { await system.requestAuthorization() }
+            await launch()
+            needsSystemSettings = permission == .off
+        } else {
+            needsSystemSettings = false
+            if let registered = sentToken ?? store.load(), registry.canRegisterDevice {
+                try? await registry.unregisterDevice(token: registered)
+            }
+            sentToken = nil
+            store.save(nil)
+        }
     }
 
     /// "Not now": the offer stays away for a week.
@@ -108,7 +142,7 @@ final class PushCenter {
     /// Sends this launch's token to Rome Cloud once it accepts one. A refusal
     /// stays quiet; the next launch or sign-in tries again.
     func upload() async {
-        guard let token, token != sentToken, registry.canRegisterDevice else { return }
+        guard enabledByUser, let token, token != sentToken, registry.canRegisterDevice else { return }
         do {
             try await registry.registerDevice(.current(token: token))
             sentToken = token
@@ -131,9 +165,15 @@ final class PushCenter {
 
     #if DEBUG
     /// Snapshot runs show the offer whatever the Mac's settings say.
-    func debugSet(permission: PushPermission?, dismissedAt: Date? = nil) {
+    /// Set by the snapshot runner, so the Mac's own permission does not
+    /// replace the state it draws.
+    @ObservationIgnored private var debugFrozen = false
+
+    func debugSet(permission: PushPermission?, dismissedAt: Date? = nil, needsSystemSettings: Bool = false) {
+        debugFrozen = true
         self.permission = permission
         promptDismissedAt = dismissedAt
+        self.needsSystemSettings = needsSystemSettings
     }
     #endif
 }
