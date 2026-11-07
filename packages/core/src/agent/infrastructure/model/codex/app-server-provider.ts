@@ -28,7 +28,6 @@ import type {
   ProviderId,
   ModelPosition,
   ThreadStart,
-  ModelFunding,
 } from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
@@ -83,7 +82,7 @@ import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./com
 import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
 import type { LearnsRefusedModels } from "./account-service.js";
-import type { CodexLoginChoice } from "../../../domain/model-login.js";
+import type { CodexLoginChoice, ModelLoginKind } from "../../../domain/model-login.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -447,8 +446,8 @@ interface CodexAppServerProviderOptions {
    * once it has started, so the spawn does not compete with boot for CPU.
    */
   warmup?: boolean;
-  /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
-  funding?: () => ModelFunding;
+  /** The login kind Codex runs on now. AgentSession reads it when it sends each turn. */
+  loginKind?: () => ModelLoginKind | undefined;
 }
 
 interface CodexFailureClassification {
@@ -722,7 +721,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
     let lastCheckpointId: string | undefined;
-    const funding = this.options.funding;
+    const loginKind = this.options.loginKind;
     const dynamicToolOutputs = new Map<string, RomeToolResult>();
     const usageByTurnId = new Map<
       string,
@@ -739,8 +738,8 @@ export class CodexAppServerProvider implements ModelProvider {
           threadId ?? (params.thread.kind === "resume" ? params.thread.modelThreadId : undefined)
         );
       },
-      get funding(): ModelFunding | undefined {
-        return funding?.();
+      get loginKind(): ModelLoginKind | undefined {
+        return loginKind?.();
       },
     } as ModelSession;
 
@@ -1499,7 +1498,7 @@ export class CodexAppServerProvider implements ModelProvider {
               throw new Error(contaminatedReason);
             },
             interrupt: async (reason) => await interruptOwnerTurn(forkOwnerId, reason),
-            funding,
+            loginKind,
           });
         }
 

@@ -86,7 +86,7 @@ import {
 } from "./model-resolver.js";
 import { isConciergeAgent } from "../concierge/service.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import type { ModelSelectionId } from "../agent/index.js";
+import type { ModelLoginKind, ModelSelectionId } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
@@ -134,7 +134,6 @@ import {
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
 import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
-import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
@@ -1795,8 +1794,8 @@ interface TurnSink {
   outputSchemaSuspended: boolean;
   /** The id the provider named the turn with, if it did. */
   modelTurnId?: string;
-  /** Funding of the provider session that executes this turn. */
-  funding?: UsageFunding;
+  /** The login kind of the provider session that executes this turn. */
+  loginKind?: ModelLoginKind;
   usageRecorded: boolean;
 }
 
@@ -2543,7 +2542,7 @@ class AgentSessionImpl implements AgentSession {
       }),
       provider: this.modelSession.providerId,
       model: this.modelSession.model,
-      funding: sink.funding,
+      loginKind: sink.loginKind,
       providerTurnId: sink.modelTurnId,
       accounting,
       durationMs:
@@ -2884,8 +2883,8 @@ class AgentSessionImpl implements AgentSession {
     // a terminal. Mirror the failTurn handling of regular turns by
     // synthesizing the error terminal here.
     let forkSession: ModelSession | undefined;
-    let sourceFunding: UsageFunding | undefined;
-    let forkFunding: UsageFunding | undefined;
+    let sourceLoginKind: ModelLoginKind | undefined;
+    let forkLoginKind: ModelLoginKind | undefined;
     let forkModelTurnId: string | undefined;
     let forkReasoningEffort: string | undefined;
     let disposeForkResources: (() => Promise<void>) | undefined;
@@ -2919,7 +2918,7 @@ class AgentSessionImpl implements AgentSession {
             }
             await this.ensureModelSessionForTurn();
             const sourceModelSession = this.modelSession;
-            sourceFunding = sourceModelSession.funding;
+            sourceLoginKind = sourceModelSession.loginKind;
             sourceModelThreadId = sourceModelSession.modelThreadId;
             if (!this.modelProvider) throw new Error("a code-backed agent session cannot fork");
             const { sourceCheckpoint } = input;
@@ -2971,7 +2970,7 @@ class AgentSessionImpl implements AgentSession {
         );
         disposeForkResources = forkOpen.dispose;
         forkSession = await modelProvider.openSession(forkOpen.params);
-        forkFunding = forkSession.funding;
+        forkLoginKind = forkSession.loginKind;
         await forkSession.sendUserInput({
           text: input.prompt,
           reasoningEffort: input.reasoningEffort,
@@ -3066,7 +3065,7 @@ class AgentSessionImpl implements AgentSession {
         status: terminalSeen || status !== "completed" ? status : "stopped",
         provider: forkSession?.providerId ?? this.modelSession.providerId,
         model: forkSession?.model ?? this.modelSession.model,
-        funding: forkFunding ?? sourceFunding,
+        loginKind: forkSession ? forkLoginKind : sourceLoginKind,
         providerTurnId: forkModelTurnId,
         accounting: terminalAccounting,
         durationMs: Date.now() - startMs,
@@ -3595,8 +3594,8 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            // The funding this turn is sent under; Codex holds a queued turn to it.
-            sink.funding = this.modelSession.funding;
+            // The login kind this turn is sent under; Codex holds a queued turn to it.
+            sink.loginKind = this.modelSession.loginKind;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,
@@ -3604,8 +3603,8 @@ class AgentSessionImpl implements AgentSession {
               reasoningEffort: mwInput.reasoningEffort,
               injectedToolResult: input.injectedToolResult,
             });
-            // Taking the input may have replaced a Claude query, and its funding.
-            sink.funding = this.modelSession.funding;
+            // Taking the input may have replaced a Claude query, and its login kind.
+            sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
             if (this.deps.turnLinks && unseenLineIds.length > 0) {
               try {

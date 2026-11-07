@@ -106,8 +106,8 @@ export function createReopeningSession(args: {
     get model(): string {
       return query.model;
     },
-    get funding() {
-      return query.funding;
+    get loginKind() {
+      return query.loginKind;
     },
     get modelThreadId() {
       return query.modelThreadId;

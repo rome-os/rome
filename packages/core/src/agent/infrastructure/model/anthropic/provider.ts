@@ -23,8 +23,8 @@ import type {
   ModelSessionEvent,
   ModelTurnActivityEvent,
   ModelPosition,
-  ModelFunding,
 } from "../../../domain/model-port.js";
+import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
@@ -49,7 +49,6 @@ import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth
 import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
-import { anthropicFunding } from "./funding.js";
 import { claudeLoginFrom } from "./login.js";
 import {
   compileOutputSchema,
@@ -443,7 +442,7 @@ export class AnthropicProvider implements ModelProvider {
   private async buildQueryContext(): Promise<{
     env: Record<string, string | undefined>;
     authRevokedSource: AnthropicAuthRevokedSource | null;
-    funding: ModelFunding;
+    loginKind: ModelLoginKind;
   }> {
     const [credentials, timezone] = await Promise.all([
       getStoredAnthropicCompatibleCredentials(this.options.settingsRepo),
@@ -489,7 +488,7 @@ export class AnthropicProvider implements ModelProvider {
     return {
       env,
       authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, login),
-      funding: anthropicFunding(login),
+      loginKind: login.kind,
     };
   }
 
@@ -1096,7 +1095,7 @@ export class AnthropicProvider implements ModelProvider {
     const session: ClaudeQuerySession = {
       providerId,
       model: effectiveModel,
-      funding: queryContext.funding,
+      loginKind: queryContext.loginKind,
       get ended(): boolean {
         return closed || abortController.signal.aborted;
       },

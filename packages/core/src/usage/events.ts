@@ -2,13 +2,9 @@
 // Contract: docs/concepts/rome-cloud.md#usage-reporting.
 
 import type { AgentTurnStatus } from "@rome-os/app-runtime";
-import type { ModelFunding } from "../agent/index.js";
 
 /** Where the work came from. Subagent and fork turns take their root's kind. */
 export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
-
-/** Who paid the model provider for a turn, as the provider reported it. */
-export type UsageFunding = ModelFunding;
 
 /**
  * What set the work off: a person, a schedule, an event or webhook, or
@@ -27,7 +23,8 @@ export interface TurnUsageEvent {
   status: AgentTurnStatus;
   provider: string;
   model: string | null;
-  funding: UsageFunding;
+  /** Rome Cloud's word for the turn's login kind. */
+  funding: "rome_credits" | "byok" | "subscription" | "unknown";
   /** The provider's own turn id. Rome Cloud joins credit charges on it. */
   providerTurnId: string | null;
   inputTokens: number;

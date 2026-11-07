@@ -5,6 +5,7 @@
 // docs/domains/agents.md carries the language.
 
 import type { StoredAnthropicCompatibleCredentials } from "@rome/api-types/anthropic-compatible-providers";
+import type { ModelAccountReport } from "./model-account-report.js";
 import type {
   ModelAuthorizationState,
   ModelBrowserAuthorization,
@@ -51,6 +52,22 @@ export function claudeLogin(facts: { stored: boolean; environment: boolean }): C
 export interface ModelProviderLogins {
   /** Takes the guardian's login back. */
   revoke(): Promise<void>;
+}
+
+/** The three kinds of login, the same across providers. */
+export type ModelLoginKind = CodexLogin["kind"] | ClaudeLogin["kind"];
+
+/**
+ * The login kind of a Codex turn. Unset when the guardian's own login is
+ * unread, logged out, or its account reports no account type.
+ */
+export function codexLoginKind(
+  login: CodexLogin,
+  report: ModelAccountReport | undefined,
+): ModelLoginKind | undefined {
+  if (login.kind !== "subscription") return login.kind;
+  const loggedOut = report?.state === "unauthorized" || report?.state === "expired";
+  return report?.account.accountType && !loggedOut ? login.kind : undefined;
 }
 
 /** Everything that logs Rome in to Codex. */
