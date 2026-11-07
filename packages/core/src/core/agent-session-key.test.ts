@@ -1,10 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
+import { storeForkParent, storeSubagentParent } from "../agent/index.js";
 import {
   adhocSessionKey,
-  forkSessionKey,
   parseSessionKey,
   sessionKeyChannel,
-  subagentSessionKey,
   webchatConversationOfKey,
   webchatSessionKey,
 } from "./agent-session-key.js";
@@ -14,12 +13,6 @@ import {
 describe("agent session keys", () => {
   it("spells webchat keys as stored rows expect", () => {
     expect(webchatSessionKey("chat-1")).toBe("webchat:chat-1");
-  });
-
-  it("nests subagent and fork keys under their parent", () => {
-    expect(subagentSessionKey("webchat:chat-1")).toMatch(/^webchat:chat-1:subagent:[0-9a-f-]{36}$/);
-    expect(subagentSessionKey("webchat:chat-1")).not.toBe(subagentSessionKey("webchat:chat-1"));
-    expect(forkSessionKey("webchat:chat-1", "fork-1")).toBe("webchat:chat-1#fork:fork-1");
   });
 
   it("gives each ad-hoc run a fresh key under its agent", () => {
@@ -37,17 +30,8 @@ describe("parseSessionKey", () => {
     expect(webchatConversationOfKey("webchat:chat-1")).toBe("chat-1");
   });
 
-  it("reads subagent and fork keys back to their parent", () => {
-    const key = subagentSessionKey(forkSessionKey("webchat:chat-1", "fork-1"));
-    const parsed = parseSessionKey(key);
-    expect(parsed).toMatchObject({
-      kind: "subagent",
-      parent: {
-        kind: "fork",
-        forkSessionId: "fork-1",
-        parent: { kind: "webchat", chatId: "chat-1" },
-      },
-    });
+  it("gives a subagent's or a fork's session its root's channel, and no conversation of its own", () => {
+    const key = storeSubagentParent(storeForkParent("webchat:chat-1", "fork-1"));
     expect(webchatConversationOfKey(key)).toBeUndefined();
     expect(sessionKeyChannel(key)).toBe("webchat");
   });
