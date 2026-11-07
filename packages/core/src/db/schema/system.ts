@@ -702,6 +702,12 @@ export const conciergeTasks = sqliteTable(
      */
     chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
     /**
+     * Whose Concierge the row is: "guardian" or "visitor:<account>". Set when
+     * the row is made, from the chat it is made in, and never changed, so it
+     * outlives that chat.
+     */
+    ownerKey: text("owner_key").notNull().default("guardian"),
+    /**
      * The Concierge chat message the row points back to, in Chats. Cleared when
      * the message goes, and the panel then offers no jump. The text is never
      * copied.
@@ -740,8 +746,13 @@ export const conciergeFollowItems = sqliteTable(
   "concierge_follow_items",
   {
     id: text("id").primaryKey(),
-    /** The event's stable id from its connection, so a repeat is kept once. */
+    /** The event's stable id from its connection, so a repeat is kept once per owner. */
     eventId: text("event_id").notNull(),
+    /**
+     * Whose follow kept it: "guardian" or "visitor:<account>". The same event
+     * followed by two people is kept, and told, once for each.
+     */
+    ownerKey: text("owner_key").notNull().default("guardian"),
     source: text("source").notNull(),
     kind: text("kind").notNull(),
     target: text("target").notNull(),
@@ -753,7 +764,8 @@ export const conciergeFollowItems = sqliteTable(
     url: text("url"),
     /**
      * The Concierge chat its follow reported to when triage kept it. Null is
-     * the main chat. No reference: a chat that is gone reports to the main chat.
+     * the guardian's main chat. No reference: a chat that is gone reports to
+     * its owner's main chat.
      */
     chatId: text("chat_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -763,7 +775,7 @@ export const conciergeFollowItems = sqliteTable(
     digestedAt: integer("digested_at", { mode: "timestamp_ms" }),
   },
   (table) => [
-    uniqueIndex("idx_concierge_follow_items_event").on(table.eventId),
+    uniqueIndex("idx_concierge_follow_items_owner_event").on(table.ownerKey, table.eventId),
     index("idx_concierge_follow_items_digest").on(table.digestedAt),
   ],
 );

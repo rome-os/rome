@@ -5,12 +5,9 @@ import { hostname } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { context } from "@opentelemetry/api";
+import { suppressTracing } from "@opentelemetry/core";
 import { createLogger } from "../logger.js";
-import {
-  initTelemetry,
-  shutdown as shutdownTelemetry,
-  withTracingSuppressed,
-} from "../telemetry.js";
 import {
   parseDaemonActionRequest,
   type DaemonActionRequest,
@@ -29,12 +26,39 @@ const log = createLogger("daemon");
 // flush timeout during shutdown. Mirrors the worker's bound in
 // `actions/worker.ts`.
 const SHUTDOWN_FLUSH_TIMEOUT_MS = 5_000;
+// Short enough that Rome's first healthy answer is seen within a fraction of a
+// second: the hosted claim waits on this daemon's readiness.
+const START_HEALTH_POLL_MS = 250;
 
+// The telemetry module loads the OpenTelemetry SDK, which costs about a second
+// of CPU on a small VM. The daemon loads it only after spawning Rome, so Rome's
+// boot does not wait behind it.
+let telemetry: Promise<typeof import("../telemetry.js")> | undefined;
+
+function loadTelemetry(): Promise<typeof import("../telemetry.js")> {
+  telemetry ??= import("../telemetry.js").then((module) => {
+    module.initTelemetry();
+    return module;
+  });
+  return telemetry;
+}
+
+// Never rejects: a telemetry load that failed was already logged, and one still
+// loading counts against the same flush bound.
 async function flushTelemetry(): Promise<void> {
+  if (!telemetry) return;
+  const flushed = telemetry.then(
+    (module) => module.shutdown(),
+    () => undefined,
+  );
   await Promise.race([
-    shutdownTelemetry(),
+    flushed,
     new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT_MS)),
   ]);
+}
+
+function withTracingSuppressed<T>(fn: () => Promise<T>): Promise<T> {
+  return context.with(suppressTracing(context.active()), fn);
 }
 
 interface ServiceCommand {
@@ -215,7 +239,8 @@ class ManagedServiceRunner {
     };
   }
 
-  async start(reason: string): Promise<void> {
+  /** Spawns the service and resolves once it answers healthy. `onSpawned` runs right after the spawn. */
+  async start(reason: string, onSpawned?: () => void): Promise<void> {
     if (this.child) {
       return;
     }
@@ -232,6 +257,7 @@ class ManagedServiceRunner {
 
     this.child = child;
     this.lastStartedAt = new Date().toISOString();
+    onSpawned?.();
 
     child.once("exit", (code, signal) => {
       const wasExpected = this.expectedExit;
@@ -344,7 +370,7 @@ class ManagedServiceRunner {
       if (await withTracingSuppressed(() => this.probeHealth())) {
         return;
       }
-      await delay(2_000);
+      await delay(START_HEALTH_POLL_MS);
     }
     throw new Error(`${this.name} did not become healthy within ${this.command.startTimeoutMs}ms`);
   }
@@ -390,10 +416,10 @@ export class HealthCheckDaemon {
     };
   }
 
-  async start(): Promise<void> {
+  async start(options: { onRomeSpawned?: () => void } = {}): Promise<void> {
     this.startedAt = Date.now();
     await this.startHttpServer();
-    await this.services.rome.start("startup");
+    await this.services.rome.start("startup", options.onRomeSpawned);
     try {
       await this.hostFilesystem.restore();
     } catch (error) {
@@ -783,8 +809,6 @@ function createDaemonConfig(): DaemonConfig {
 }
 
 export async function main(): Promise<void> {
-  initTelemetry();
-
   const daemon = new HealthCheckDaemon(createDaemonConfig());
 
   const shutdown = async (signal: string) => {
@@ -797,11 +821,20 @@ export async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  await daemon.start();
+  await daemon.start({
+    onRomeSpawned: () => {
+      void loadTelemetry().catch((error) => {
+        log.error("telemetry init failed", { error });
+      });
+    },
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch(async (error) => {
+    // A failure before Rome spawned never loaded telemetry, so load it here to
+    // export the fatal log.
+    await loadTelemetry().catch(() => undefined);
     log.error("daemon fatal", { error });
     await flushTelemetry();
     process.exit(1);

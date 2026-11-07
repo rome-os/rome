@@ -1,5 +1,6 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
+import { canOpenSql, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "../../concierge/privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -11,6 +12,7 @@ import {
   gt,
   gte,
   inArray,
+  notInArray,
   isNotNull,
   isNull,
   like,
@@ -262,6 +264,13 @@ export interface EnsureRomeSessionInput {
   trigger?: RomeAgentTraceTriggerMetadata;
   /** Lineage for 'fork' sessions: the rome session the fork branched from. */
   parentSessionId?: string | null;
+  /**
+   * The dashboard chat a session serves a turn of without being its child,
+   * as an agent an action starts from that chat. The session takes that
+   * chat's owner and privacy as a child does, and is not made when the chat
+   * is gone.
+   */
+  servesSessionId?: string | null;
   /** The turn on the parent session that triggered the fork. */
   parentTurnId?: string | null;
 }
@@ -364,6 +373,8 @@ const sessionSelectFields = {
   // The sidebar groups a device-folder chat under its folder, not its project.
   deviceFolder: romeSessions.deviceFolder,
   agentName: romeSessions.agentName,
+  // Read to keep a Concierge or task chat from everyone but its owner.
+  ownerKey: romeSessions.ownerKey,
   triggerKind: romeSessions.triggerKind,
   archivedAt: romeSessions.archivedAt,
   pinnedAt: romeSessions.pinnedAt,
@@ -381,6 +392,10 @@ const sessionSelectFields = {
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
+
+/** The chats `owner` may open; no condition when the caller does not filter. */
+const visibleTo = (owner: string | null | undefined) =>
+  owner === undefined ? undefined : canOpenSql(romeSessions, owner);
 
 // Whether the session's latest turn ended in an error, read from the
 // `turn_end` block of its newest trace. A turn still running has no
@@ -990,43 +1005,68 @@ export class WebChatRepository {
     });
   }
 
+  /**
+   * Saves a session row unless it exists. A child session (a fork, a
+   * subagent: anything naming `parentSessionId`), and a session made to serve
+   * a turn of a chat (`servesSessionId`), is saved in one transaction with
+   * the read of that chat, and takes its owner, and its privacy when it is
+   * private. A chat that no longer exists makes this throw and saves nothing,
+   * so no such session is ever made without them.
+   */
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
     // A chat is a channel row on the webchat channel, at its own address,
     // whichever of the two types the caller names it by.
     const chat =
       input.type === "webchat" || (input.type === "channel" && input.sourceChannel === "webchat");
-    await this.db
-      .insert(romeSessions)
-      .values({
-        id: input.id,
-        ownerKey: await this.getSessionOwnerKey(input.parentSessionId),
-        name: input.name,
-        personaId: null,
-        projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
-        projectPath: input.projectPath ?? null,
-        deviceFolder: input.deviceFolder ?? null,
-        largeModelSelection: null,
-        agentName: input.agentName,
-        type: storedSessionType(input.type),
-        sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
-        sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
-        sourceThreadName: input.sourceThreadName ?? null,
-        sourceThreadType: input.sourceThreadType ?? null,
-        triggerKind: input.trigger?.triggerKind ?? null,
-        triggerName: input.trigger?.triggerName ?? null,
-        triggerActionName: input.trigger?.triggerActionName ?? null,
-        triggerExecutionId: input.trigger?.triggerExecutionId ?? null,
-        rootActionExecutionId: input.trigger?.rootActionExecutionId ?? null,
-        parentActionExecutionId: input.trigger?.parentActionExecutionId ?? null,
-        parentSessionId: input.parentSessionId ?? null,
-        parentTurnId: input.parentTurnId ?? null,
-        handoffSpec: null,
-        createdAt: now,
-        activityAt: now,
-        lastSeenActivityAt: chat ? now : null,
-      })
-      .onConflictDoNothing({ target: romeSessions.id });
+    const row = (parent: typeof romeSessions.$inferSelect | null) => ({
+      id: input.id,
+      ownerKey: parent?.ownerKey ?? null,
+      name: input.name,
+      personaId: null,
+      projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
+      projectPath: input.projectPath ?? null,
+      deviceFolder: input.deviceFolder ?? null,
+      largeModelSelection: null,
+      agentName: input.agentName,
+      type: storedSessionType(input.type),
+      sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
+      sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
+      sourceThreadName: input.sourceThreadName ?? null,
+      sourceThreadType: input.sourceThreadType ?? null,
+      triggerKind:
+        privateOwnerOf(parent) !== null
+          ? PRIVATE_CHILD_TRIGGER_KIND
+          : (input.trigger?.triggerKind ?? null),
+      triggerName: input.trigger?.triggerName ?? null,
+      triggerActionName: input.trigger?.triggerActionName ?? null,
+      triggerExecutionId: input.trigger?.triggerExecutionId ?? null,
+      rootActionExecutionId: input.trigger?.rootActionExecutionId ?? null,
+      parentActionExecutionId: input.trigger?.parentActionExecutionId ?? null,
+      parentSessionId: input.parentSessionId ?? null,
+      parentTurnId: input.parentTurnId ?? null,
+      handoffSpec: null,
+      createdAt: now,
+      activityAt: now,
+      lastSeenActivityAt: chat ? now : null,
+    });
+    const parentId = input.parentSessionId ?? input.servesSessionId;
+    if (!parentId) {
+      await this.db.insert(romeSessions).values(row(null)).onConflictDoNothing({
+        target: romeSessions.id,
+      });
+      return;
+    }
+    // `transaction` is synchronous on better-sqlite3: nothing can delete the
+    // parent between this read and the insert.
+    this.db.transaction((tx) => {
+      const parent = tx.select().from(romeSessions).where(eq(romeSessions.id, parentId)).get();
+      if (!parent) throw new Error(`Parent Rome session "${parentId}" was not found`);
+      tx.insert(romeSessions)
+        .values(row(parent))
+        .onConflictDoNothing({ target: romeSessions.id })
+        .run();
+    });
   }
 
   async ensureChannelChat(input: {
@@ -1394,7 +1434,12 @@ export class WebChatRepository {
   }
 
   /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
-  async listSessions(status: "active" | "archived" | "all" = "active", ownerKey?: string | null) {
+  /** `visibleTo` keeps only the chats that owner may open. */
+  async listSessions(
+    status: "active" | "archived" | "all" = "active",
+    ownerKey?: string | null,
+    visibleToOwner?: string | null,
+  ) {
     // Only top-level guardian chats. Handoff child sessions are reached through
     // their parent's handoff card, not the sidebar. `status` filters on the
     // reversible archive flag: "active" (default, preserves prior behavior)
@@ -1414,6 +1459,7 @@ export class WebChatRepository {
       .from(romeSessions)
       .where(
         and(
+          visibleTo(visibleToOwner),
           isWebchatChat,
           archivePredicate,
           ownerKey === undefined
@@ -1435,14 +1481,18 @@ export class WebChatRepository {
    * text. Returns at most one match per session — its most recent matching
    * message — ordered by message recency, capped at `sessionLimit` sessions.
    */
-  async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
+  /** `visibleTo` keeps only the chats that owner may open, before the limit. */
+  async searchSessionMessages(
+    query: string,
+    options: { sessionLimit?: number; visibleTo?: string | null } = {},
+  ) {
     return this.searchSessionRows(query, options, ["user", "assistant", "notification"]);
   }
 
   /** {@link searchSessionMessages} over the sessions' own rows of `roles`. */
   protected async searchSessionRows(
     query: string,
-    options: { sessionLimit?: number },
+    options: { sessionLimit?: number; visibleTo?: string | null },
     roles: readonly ("user" | "assistant" | "notification")[],
   ) {
     const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
@@ -1459,7 +1509,14 @@ export class WebChatRepository {
       .select({ message: webchatMessageSelectFields, session: this.sessionFields() })
       .from(romeAgentMessages)
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
-      .where(and(isWebchatChat, inArray(romeAgentMessages.role, [...roles]), ...likePredicates))
+      .where(
+        and(
+          isWebchatChat,
+          visibleTo(options.visibleTo),
+          inArray(romeAgentMessages.role, [...roles]),
+          ...likePredicates,
+        ),
+      )
       .orderBy(desc(romeAgentMessages.createdAt), desc(romeAgentMessages.id))
       .limit(SEARCH_MESSAGE_SCAN_LIMIT);
 
@@ -1533,7 +1590,7 @@ export class WebChatRepository {
 
   async listSessionsByProjectPath(
     projectPath: string,
-    options: { cursor?: string; limit?: number } = {},
+    options: { cursor?: string; limit?: number; visibleTo?: string | null } = {},
   ) {
     const limit = Math.max(1, options.limit ?? 50);
     const cursor = decodeProjectSessionCursor(options.cursor);
@@ -1552,7 +1609,13 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
+    const visible = visibleTo(options.visibleTo);
+    const predicates = [
+      eq(romeSessions.projectPath, projectPath),
+      isWebchatChat,
+      visible,
+      cursorPredicate,
+    ];
 
     const rows = await this.db
       .select(this.sessionFields())
@@ -1569,7 +1632,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat));
+      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat, visible));
 
     return {
       nextCursor,
@@ -1578,7 +1641,9 @@ export class WebChatRepository {
     };
   }
 
-  async listSessionsPage(options: { cursor?: string; limit?: number } = {}) {
+  async listSessionsPage(
+    options: { cursor?: string; limit?: number; visibleTo?: string | null } = {},
+  ) {
     const limit = Math.max(1, options.limit ?? 50);
     const cursor = decodeProjectSessionCursor(options.cursor);
     const cursorPredicate = cursor
@@ -1596,7 +1661,8 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [isWebchatChat, cursorPredicate];
+    const visible = visibleTo(options.visibleTo);
+    const predicates = [isWebchatChat, visible, cursorPredicate];
 
     const rows = await this.db
       .select(this.sessionFields())
@@ -1613,7 +1679,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(isWebchatChat);
+      .where(and(isWebchatChat, visible));
 
     return {
       nextCursor,
@@ -2802,6 +2868,26 @@ export class WebChatRepository {
         SELECT id FROM rome_sessions WHERE project_path = ${projectPath}
       )`,
     );
+  }
+
+  /** The chat a turn ran in, by any of its stored messages; null when none is stored yet. */
+  async sessionIdOfTurn(turnId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ sessionId: romeAgentMessages.sessionId })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.turnId, turnId))
+      .limit(1);
+    return row?.sessionId ?? null;
+  }
+
+  /** The chat a stored message belongs to, or null. */
+  async sessionIdOfMessage(messageId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ sessionId: romeAgentMessages.sessionId })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, messageId))
+      .limit(1);
+    return row?.sessionId ?? null;
   }
 
   async hasTurnInSession(sessionId: string, turnId: string): Promise<boolean> {

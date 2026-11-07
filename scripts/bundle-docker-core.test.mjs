@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { bundledAssets, dockerBundleOptions } from "./bundle-docker-core.mjs";
+import { bundledAssets, dockerBundleOptions, splitBundleOptions } from "./bundle-docker-core.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -43,6 +43,19 @@ for (const endpoint of [undefined, "http://chrome:9333"]) {
     assert.equal(output, endpoint ?? "");
   });
 }
+
+test("the daemon bundle loads the OpenTelemetry SDK only from its telemetry chunk", async (t) => {
+  const outdir = await mkdtemp(join(tmpdir(), "rome-compiled-daemon-"));
+  t.after(() => rm(outdir, { recursive: true, force: true }));
+  await build({
+    ...splitBundleOptions(join(root, "packages/core/src/daemon/index.ts"), outdir),
+    logLevel: "silent",
+  });
+
+  const entry = await readFile(join(outdir, "index.js"), "utf8");
+  assert.doesNotMatch(entry, /^import .* from "@opentelemetry\/sdk-node";$/m);
+  assert.match(entry, /import\("\.\/chunks\/telemetry-[A-Z0-9]+\.js"\)/);
+});
 
 test("the relocated Caddy generator runs without Core workspace dependencies", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "rome-compiled-caddy-"));

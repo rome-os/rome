@@ -3,8 +3,11 @@
 // workers over IpcRpc. Workers call `agent.session.runTurn` and consume the
 // returned `agent.turn:<turnId>` stream.
 
+import { canOpen } from "../concierge/privacy.js";
+import { readerOwner } from "../chats/dashboard/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
-import type { IpcRpc } from "../actions/ipc.js";
+import type { IpcCallContext, IpcRpc } from "../actions/ipc.js";
+import { type ParsedSessionKey, parseSessionKey } from "./agent-session-key.js";
 import type {
   ChatId,
   CurrentActionContext,
@@ -95,6 +98,43 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private runLineDeps?: RunLineDeps,
   ) {}
 
+  /**
+   * Whether the action that asked to resume `session` may: every dashboard
+   * chat the session runs in (its own, its parent's, a fork's or subagent's
+   * row) must exist and be one its caller may open.
+   */
+  private async callerMayResume(session: AgentSession, ctx: IpcCallContext): Promise<boolean> {
+    if (!this.webchatRepo) return true;
+    const repo = this.webchatRepo;
+    const caller = ctx.callerActionContext;
+    const thread = caller?.channelContext;
+    const owner = await readerOwner(repo, {
+      actor: caller?.actor,
+      chatId: thread?.channel === "webchat" && thread.threadId ? thread.threadId : null,
+    });
+    const required: string[] = [];
+    const known = new Set<string>([session.sessionId]);
+    if (session.conversation?.origin === "recorded") known.add(session.conversation.id);
+    const collect = (key: ParsedSessionKey) => {
+      if (key.kind === "webchat") required.push(key.chatId);
+      if (key.kind === "subagent") collect(key.parent);
+      if (key.kind === "fork") {
+        known.add(key.forkSessionId);
+        collect(key.parent);
+      }
+    };
+    collect(parseSessionKey(session.key.channelThreadKey));
+    for (const chatId of required) {
+      const chat = await repo.getSession(chatId);
+      if (!chat || !canOpen(chat, owner)) return false;
+    }
+    for (const chatId of known) {
+      const chat = await repo.getSession(chatId);
+      if (chat && !canOpen(chat, owner)) return false;
+    }
+    return true;
+  }
+
   attach(rpc: IpcRpc, child: ChildProcess): void {
     if (this.actionWorkerCoordinator) {
       registerActionSubprocessHost(rpc, this.actionWorkerCoordinator, child);
@@ -143,6 +183,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           session = req.sessionId
             ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
             : await this.manager.acquire(req.key, init);
+          // A session resumed by its id runs in its own chats, so the caller
+          // must be one who may open them, as on the dashboard's routes.
+          if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
+            throw new Error(`Agent session "${req.sessionId}" was not found`);
+          }
         } catch (err) {
           log.warn("agent.session.manager.acquire failed", {
             ...baseLogFields,
@@ -253,10 +298,21 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
           try {
             for await (const msg of handle.events) {
+              // Recorded first, so a turn that opens its conversation has its
+              // row before its stream can be asked for.
+              if (recorder) {
+                await recordAgentTraceBestEffort(recorder, msg, log, {
+                  turnId: handle.turnId,
+                  source: "agent-session-bridge",
+                });
+              }
               if (!liveStream && msg.type === "turn_start" && this.turnStreams) {
                 try {
                   liveStream = this.turnStreams.register({
                     sessionId: msg.sessionId,
+                    // The conversation the turn is recorded in; the session id
+                    // is the agent's runtime session, not a chat.
+                    chatId: romeSessionId,
                     turnId: msg.turnId,
                     agentName: session.key.agentName,
                     ...(thread?.connectionId
@@ -278,12 +334,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 }
               }
               liveStream?.publish(msg);
-              if (recorder) {
-                await recordAgentTraceBestEffort(recorder, msg, log, {
-                  turnId: handle.turnId,
-                  source: "agent-session-bridge",
-                });
-              }
               stream.send(msg);
             }
             stream.close();

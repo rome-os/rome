@@ -13,6 +13,7 @@ function activeTurn(initiatorId = "user-1") {
   const interrupt = rs.fn(async () => undefined);
   const stream = turns.register({
     sessionId: "session-1",
+    chatId: "session-1",
     turnId: "turn-1",
     agentName: "main",
     conversation: ref,
