@@ -1,4 +1,3 @@
-import type { ArtifactIdentityContext } from "../apps/artifact-id.js";
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
@@ -35,7 +34,7 @@ import type { AppManager } from "../apps/manager.js";
 import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
-import type { AgentCatalog, AgentLoader } from "../agent/index.js";
+import type { Agent, AgentCatalog, AgentLoader } from "../agent/index.js";
 import type { SkillCatalog } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -144,8 +143,8 @@ export interface ApiDeps {
   routineRunsRepo: RoutineRunsRepository;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
-  /** The apps context's artifact identity, for reading names stored before ids were canonical. */
-  artifactIdentity: ArtifactIdentityContext;
+  /** The agents under every name they have had, for reading names stored before ids were canonical. */
+  agentsByName: () => ReadonlyMap<string, Agent>;
   /** Social card PNGs rendered by apps/og/subscriber.ts. */
   ogImageStore: OgImageStore;
   /** AppManager — sole writer for install/uninstall/setEnabled. */

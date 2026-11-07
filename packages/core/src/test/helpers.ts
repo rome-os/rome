@@ -21,6 +21,7 @@ import type {
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
 import { AgentLoader } from "../agent/index.js";
+import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
 import { SkillLoader } from "../agent/index.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import {
@@ -898,7 +899,7 @@ export async function buildTestDeps(
     appStore,
     actionRegistry,
     agentLoader,
-    artifactIdentity,
+    agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
     accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),

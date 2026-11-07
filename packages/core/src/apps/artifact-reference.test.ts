@@ -1,12 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { createArtifactReferenceResolver } from "./artifact-reference.js";
-import { buildAgent } from "../test/helpers.js";
 
 describe("createArtifactReferenceResolver", () => {
   it("resolves an agent reference through the agent registry", () => {
-    const find = rs.fn(() => buildAgent("workflow-studio:designer"));
+    const canonicalAgentName = rs.fn(() => "workflow-studio:designer");
     const resolve = createArtifactReferenceResolver({
-      agentLoader: { find, list: () => [] },
+      canonicalAgentName,
       actionRegistry: { getCanonicalName: rs.fn() },
     });
 
@@ -16,13 +15,13 @@ describe("createArtifactReferenceResolver", () => {
         value: "workflow-studio:designer",
       }),
     ).toBe("workflow-studio:designer");
-    expect(find).toHaveBeenCalledWith("workflow-studio:designer");
+    expect(canonicalAgentName).toHaveBeenCalledWith("workflow-studio:designer");
   });
 
   it("resolves an action reference through the action registry", () => {
     const getCanonicalName = rs.fn(() => "workflow-studio:validate-design");
     const resolve = createArtifactReferenceResolver({
-      agentLoader: { find: rs.fn(), list: () => [] },
+      canonicalAgentName: rs.fn(),
       actionRegistry: { getCanonicalName },
     });
 
@@ -37,7 +36,7 @@ describe("createArtifactReferenceResolver", () => {
 
   it("rejects an action reference missing from the registry", () => {
     const resolve = createArtifactReferenceResolver({
-      agentLoader: { find: rs.fn(), list: () => [] },
+      canonicalAgentName: rs.fn(),
       actionRegistry: { getCanonicalName: rs.fn(() => undefined) },
     });
 

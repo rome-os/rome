@@ -149,7 +149,8 @@ import { ActionExecutionsRepository } from "./db/repositories/action-executions.
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { AgentLoader } from "./agent/index.js";
+import { AgentLoader, requireAgent } from "./agent/index.js";
+import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
@@ -1248,7 +1249,7 @@ async function main() {
   });
   const cloudProfileClient = new CloudProfileClient(() => proveIdentity());
   const resolveArtifactReference = createArtifactReferenceResolver({
-    agentLoader,
+    canonicalAgentName: (name) => requireAgent(agentLoader, name).name,
     actionRegistry,
   });
   // What apps get of the chat settings, with the chat ids an app built for
@@ -2027,7 +2028,7 @@ async function main() {
       routinesRepo,
       routineRunsRepo,
       appCatalog,
-      artifactIdentity,
+      agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
       appManager,
       romeCloudListings,
       appStore,

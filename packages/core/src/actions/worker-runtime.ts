@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../host-execution/service.js";
 import { getDb } from "../db/index.js";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader, requireAgent } from "../agent/index.js";
 import { ActionRegistryImpl } from "./registry.js";
 import { ActionLoader } from "./loader.js";
 import { ActionEngine } from "./engine.js";
@@ -198,7 +198,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const agentRunner = new RpcAgentRunner(undefined, chatsWired.replies);
   const resolveArtifactReference = createArtifactReferenceResolver({
-    agentLoader,
+    canonicalAgentName: (name) => requireAgent(agentLoader, name).name,
     actionRegistry,
   });
 

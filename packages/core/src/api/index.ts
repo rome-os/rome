@@ -1,4 +1,3 @@
-import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
 import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
@@ -220,8 +219,7 @@ export function buildApp(
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db, "chats"),
     agentLoader: deps.agentLoader,
-    agentsByName: () =>
-      agentsByLegacyName(deps.agentLoader.list(), deps.artifactIdentity.legacyBindings),
+    agentsByName: deps.agentsByName,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
       readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),
