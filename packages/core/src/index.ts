@@ -161,13 +161,14 @@ import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js"
 import { AgentRunner } from "./core/agent-runner.js";
 import {
   AnthropicProvider,
+  ClaudeAccount,
   CodexAppServerManager,
   CodexAppServerProvider,
+  createModelAvailability,
   DrizzleSessionRepository,
   SharedCodexAccountService,
   romeCreditsProxyRoutes,
 } from "./agent/index.js";
-import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
@@ -874,58 +875,46 @@ async function main() {
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
-  let syncRomeCreditsPayer = (): void => {};
-  let refreshRomeCredits = (): void => {};
-  const aiToolState = createAIToolState({
-    settingsRepo,
-    // The first refresh spawns the Codex app-server, which competes with boot
+  const claudeAccount = new ClaudeAccount({ settingsRepo });
+  const modelAvailability = createModelAvailability({
+    accounts: { openai: codexAccountService, anthropic: claudeAccount },
+    // The first read spawns the Codex app-server, which competes with boot
     // for CPU on a small VM. It runs once Rome has started, with the warmup.
     startRefresh: false,
-    probes: {
-      codexStatus: () => codexAccountService.status(),
-      codexUsage: () => codexAccountService.usage(),
-    },
-    onCodexLoginChanged: () => syncRomeCreditsPayer(),
-    onCodexRefreshed: () => refreshRomeCredits(),
+    log: createLogger("model-availability"),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
-    aiToolState,
+    availability: modelAvailability,
     appServerManager: codexAppServerManager,
   });
-  syncRomeCreditsPayer = () => romeCreditsPayer.sync();
-  refreshRomeCredits = () => void romeCreditsPayer.refresh();
+  const syncRomeCreditsPayer = (): void => romeCreditsPayer.sync();
   const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
   romeCreditsPayer.sync();
-  const unsubscribeCodexAccountChanged = codexAccountService.onChanged(() => {
-    void aiToolState.refresh("openai").catch((err) => {
-      log.warn("Codex account change refresh failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+  // The Codex authorization drives the payer, and each settled read of the
+  // account re-reads the credits.
+  const unsubscribeAvailabilityChanged = modelAvailability.onChanged((provider, change) => {
+    if (provider !== "openai") return;
+    if (change === "authorization") syncRomeCreditsPayer();
+    else void romeCreditsPayer.refresh();
   });
-  const anthropicProvider = new AnthropicProvider({
-    settingsRepo,
-    onAuthRevoked: () => aiToolState.markAuthRevoked("anthropic"),
-    onQuotaExhausted: (until) => aiToolState.markQuotaExhausted("anthropic", until),
-  });
+  const anthropicProvider = new AnthropicProvider({ settingsRepo, account: claudeAccount });
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
+    account: codexAccountService,
     warmup: false,
-    onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
-    onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
     onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
-      const account = aiToolState.get().codex;
+      const codex = modelAvailability.read().openai;
       return codexFunding({
         defaultProvider: codexAppServerManager.getDefaultProvider(),
-        accountType: account.accountType,
-        loggedIn: account.loggedIn,
+        accountType: codex?.account.accountType,
+        loggedIn: codex ? codex.state !== "unauthorized" && codex.state !== "expired" : undefined,
       });
     },
   });
   const modelResolver = createModelResolver({
-    aiToolState,
+    availability: modelAvailability,
     providers: [anthropicProvider, codexProvider],
     settingsRepo,
     romeCreditsPayer,
@@ -1112,7 +1101,7 @@ async function main() {
     }),
     webchatRepo,
     sessionRepository,
-    aiToolState,
+    availability: modelAvailability,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
@@ -1325,12 +1314,12 @@ async function main() {
     notify: notifyClient,
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its availability reads
-    // the same AiToolState the model resolver gates on.
+    // the same model availability the model resolver gates on.
     imageGeneration: createImageGenerationService({
       providers: [
         createCodexImageGenerationProvider({
           agentRunner,
-          getCodexState: () => aiToolState.get().codex,
+          getCodexAvailability: () => modelAvailability.read().openai,
         }),
       ],
     }),
@@ -2070,8 +2059,9 @@ async function main() {
       agentRunner,
       activeSubagentRegistry,
       agentTurnStreamRegistry,
-      aiToolState,
+      modelAvailability,
       codexAccountService,
+      claudeAccount,
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       publicAccessState,
       dashboardAccessState,
@@ -2224,8 +2214,8 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   });
-  void aiToolState.refresh().catch((err) => {
-    log.warn("initial AI tool state refresh failed", {
+  void modelAvailability.refresh().catch((err) => {
+    log.warn("initial model availability refresh failed", {
       error: err instanceof Error ? err.message : String(err),
     });
   });
@@ -2342,15 +2332,15 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
-    unsubscribeCodexAccountChanged();
+    unsubscribeAvailabilityChanged();
     unsubscribeInstanceTokenChanged();
     unsubscribeInstanceLinked();
     romeCreditsPayer.close();
+    modelAvailability.close();
+    shutdownLog.info("model availability stopped");
     codexAccountService.close();
-    shutdownLog.info("Codex account service stopped");
-
-    aiToolState.close();
-    shutdownLog.info("AI tool state stopped");
+    claudeAccount.close();
+    shutdownLog.info("model accounts stopped");
 
     codexProvider.close();
     shutdownLog.info("Codex app-server stopped");

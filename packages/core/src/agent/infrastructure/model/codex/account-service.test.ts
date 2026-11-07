@@ -1,5 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import {
+  RESTRICTED_PLAN_DENIED_MODELS,
   SharedCodexAccountService,
   type SharedCodexAccountServiceOptions,
 } from "./account-service.js";
@@ -89,6 +91,7 @@ describe("SharedCodexAccountService", () => {
       planType: "pro",
       accountType: "pro",
       email: "live@example.com",
+      usageLimited: true,
     });
     await expect(service.usage()).resolves.toMatchObject({
       source: "codex app-server",
@@ -99,6 +102,100 @@ describe("SharedCodexAccountService", () => {
       { method: "account/read", params: { refreshToken: true } },
       { method: "account/rateLimits/read", params: undefined },
     ]);
+    service.close();
+  });
+
+  it("reports what the plan withholds and whether the provider limits usage", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue(
+      "account/read",
+      { account: { type: "chatgpt", email: "free@example.com", planType: "free" } },
+      { account: { type: "chatgpt", email: "plus@example.com", planType: "plus" } },
+      { account: { type: "apiKey" } },
+    );
+    const service = createService(rpc);
+    await expect(service.status()).resolves.toMatchObject({
+      usageLimited: true,
+      modelsDenied: RESTRICTED_PLAN_DENIED_MODELS,
+    });
+    const plus = await service.status();
+    expect(plus).toMatchObject({ usageLimited: true });
+    expect(plus).not.toHaveProperty("modelsDenied");
+    const apiKey = await service.status();
+    expect(apiKey).toMatchObject({ usageLimited: false });
+    expect(apiKey).not.toHaveProperty("modelsDenied");
+  });
+
+  it("holds a refused turn until a usage read after the hold shows capacity", async () => {
+    let now = Date.parse("2026-11-07T00:00:00.000Z");
+    const rpc = new FakeAccountRpc();
+    const capacity = {
+      rateLimits: { primary: { usedPercent: 10 }, secondary: { usedPercent: 10 } },
+    };
+    rpc.queue("account/read", ...Array(2).fill({ account: { type: "chatgpt", planType: "pro" } }));
+    rpc.queue("account/rateLimits/read", capacity, capacity);
+    const service = createService(rpc, { now: () => now });
+    const changed = rs.fn();
+    service.onChanged(changed);
+
+    service.refusedTurn({ kind: "usage", until: "2026-11-07T03:00:00.000Z" });
+    expect(changed).toHaveBeenCalledTimes(1);
+    // The usage read in the hold shows capacity but describes the account
+    // before the refused turn.
+    await expect(service.availability()).resolves.toMatchObject({
+      state: "usage_limit_reached",
+      usageLimitUntil: "2026-11-07T03:00:00.000Z",
+    });
+    now += USAGE_REFUSAL_HOLD_MS;
+    await expect(service.availability()).resolves.toMatchObject({ state: "available" });
+  });
+
+  it("drops a refusal when an authorization completes, since it may name another account", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/login/start", {
+      type: "chatgptDeviceCode",
+      loginId: "device-1",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    });
+    rpc.queue("account/read", ...Array(2).fill({ account: { type: "chatgpt", planType: "pro" } }));
+    const inThreeDays = new Date(Date.now() + 3 * 24 * 3_600_000).toISOString();
+    rpc.queue(
+      "account/rateLimits/read",
+      {
+        rateLimits: {
+          primary: { usedPercent: 10 },
+          secondary: { usedPercent: 100, resetsAt: Date.parse(inThreeDays) / 1000 },
+        },
+      },
+      new Error("app-server restarting"),
+    );
+    const service = createService(rpc);
+    service.refusedTurn({ kind: "usage" });
+    await expect(service.availability()).resolves.toMatchObject({ state: "usage_limit_reached" });
+    await service.startDeviceAuthorization();
+    rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
+    // The first read of the new account fails its usage read; the old
+    // account's limit does not carry over to it.
+    await expect(service.availability()).resolves.toMatchObject({
+      state: "available",
+      usage: { error: "app-server restarting" },
+    });
+    service.close();
+  });
+
+  it("reports a usage read the app-server never answers as an error read", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: { type: "chatgpt", planType: "pro" } });
+    const never = new Promise<never>(() => {});
+    const request = rpc.request.bind(rpc);
+    rpc.request = ((method: string, params?: unknown) =>
+      method === "account/rateLimits/read" ? never : request(method, params)) as typeof rpc.request;
+    const service = createService(rpc, { usageTimeoutMs: 5 });
+    await expect(service.availability()).resolves.toMatchObject({
+      state: "available",
+      usage: { error: "Codex rate limit read timed out after 5ms" },
+    });
     service.close();
   });
 

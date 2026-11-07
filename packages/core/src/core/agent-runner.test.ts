@@ -92,20 +92,17 @@ import type { TurnUsageFacts } from "../usage/recorder.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import {
+  availabilityOf,
+  bothAvailable,
+  fakeAvailability,
+  RESTRICTED_PLAN,
+} from "../test/kit/model-availability.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
     providers,
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    availability: fakeAvailability(bothAvailable()),
   });
 }
 
@@ -4852,12 +4849,12 @@ describe("AgentRunner", () => {
       await manager.shutdown();
 
       const codexLoggedOut = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("available"),
       };
       const loggedOutResolver = createModelResolver({
         providers: [anthropic, openai],
-        aiToolState: { get: () => codexLoggedOut, refresh: async () => codexLoggedOut },
+        availability: fakeAvailability(() => codexLoggedOut),
       });
       const loggedOutManager = createAgentSessionManager(managerDeps(loggedOutResolver));
 
@@ -4982,8 +4979,8 @@ describe("AgentRunner", () => {
   describe("per-turn model resolution", () => {
     it("does not replay a failed turn and selects the other provider on the next turn", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       let codexTurns = 0;
       let claudeTurns = 0;
@@ -4996,7 +4993,7 @@ describe("AgentRunner", () => {
             "openai",
             async function* () {
               codexTurns += 1;
-              state.codex.quotaExhausted = true;
+              state.openai = availabilityOf("usage_limit_reached");
               yield { type: "error", error: "Codex quota exhausted", code: "usage_limit" };
             },
             params,
@@ -5022,7 +5019,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex, claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5051,8 +5048,8 @@ describe("AgentRunner", () => {
 
     it("reopens a provider backend after an auth-revoked terminal", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
@@ -5065,7 +5062,7 @@ describe("AgentRunner", () => {
             "openai",
             async function* () {
               if (openNumber === 1) {
-                state.codex.loggedIn = false;
+                state.openai = availabilityOf("unauthorized");
                 yield {
                   type: "error",
                   error: "Codex credentials were revoked",
@@ -5082,7 +5079,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5100,7 +5097,7 @@ describe("AgentRunner", () => {
 
       // Simulate a completed re-login. The next turn must not reuse the model
       // session that observed the revoked credential.
-      state.codex.loggedIn = true;
+      state.openai = availabilityOf("available");
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
@@ -5115,8 +5112,8 @@ describe("AgentRunner", () => {
 
     it("reopens the same provider when an unpinned session's resolved model changes and keeps its native thread", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
@@ -5144,7 +5141,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5155,7 +5152,7 @@ describe("AgentRunner", () => {
       });
       await collectMessages(session.sendTurn({ prompt: "Sol" }).events);
 
-      state.codex.solAccess = false;
+      state.openai = availabilityOf("available", RESTRICTED_PLAN);
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
@@ -5167,8 +5164,8 @@ describe("AgentRunner", () => {
 
     it("records the pin of the model that actually ran after an unpinned backend swap", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       const codex: ModelProvider = {
         id: "openai",
@@ -5197,7 +5194,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex, claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5213,7 +5210,7 @@ describe("AgentRunner", () => {
 
       // Codex quota exhausts; the unpinned session re-resolves to Claude and
       // the first successful turn pins the model that actually ran.
-      state.codex.quotaExhausted = true;
+      state.openai = availabilityOf("usage_limit_reached");
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
       expect(await sessionRepository.session(session.sessionId)).toMatchObject({
         provider: "anthropic",
@@ -5259,13 +5256,13 @@ describe("AgentRunner", () => {
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5281,7 +5278,7 @@ describe("AgentRunner", () => {
       // Sol access arrives mid-session. Tier resolution would now map large →
       // Sol, but the pinned session must keep running Terra on the same
       // backend — no close/reopen, no model switch.
-      state.codex.solAccess = true;
+      state.openai = availabilityOf("available");
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
@@ -5293,8 +5290,8 @@ describe("AgentRunner", () => {
 
     it("a pinned session keeps its model after the tier mapping changes", async () => {
       const state = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("unauthorized"),
+        anthropic: availabilityOf("available"),
       };
       let tierModelMappings: unknown = { anthropic: { large: FABLE_MODEL } };
       const opens: ModelSessionParams[] = [];
@@ -5314,7 +5311,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
         settingsRepo: {
           get: async <T = unknown>(key: string): Promise<T | null> =>
             key === "tierModelMappings" ? (tierModelMappings as T) : null,
@@ -5345,8 +5342,8 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session fails the turn with the structured resolution error", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       const opens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
@@ -5366,7 +5363,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens), claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5381,7 +5378,7 @@ describe("AgentRunner", () => {
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
-      state.codex.solAccess = false;
+      state.openai = availabilityOf("available", RESTRICTED_PLAN);
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
       expect(second.find((message) => message.type === "error")).toMatchObject({
         code: "model_unavailable",
@@ -5390,8 +5387,8 @@ describe("AgentRunner", () => {
       });
 
       // Provider-level outage (quota) fails the same way.
-      state.codex.solAccess = true;
-      state.codex.quotaExhausted = true;
+      state.openai = availabilityOf("available");
+      state.openai = availabilityOf("usage_limit_reached");
       const third = await collectMessages(session.sendTurn({ prompt: "third" }).events);
       expect(third.find((message) => message.type === "error")).toMatchObject({
         code: "model_provider_unavailable",
@@ -5406,13 +5403,13 @@ describe("AgentRunner", () => {
 
     it("a legacy session (NULL pin) resolves by tier, then pins on its next successful turn", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const seeded = Session.create("test-main", { continuityKey: "telegram:legacy-row" });
       // A pre-cutover row: provider + thread persisted, model NULL.
@@ -5442,13 +5439,13 @@ describe("AgentRunner", () => {
 
     it("a new session of another agent on the same thread resolves its own tier (no pin inheritance)", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available", RESTRICTED_PLAN),
+        anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       // The main agent's session on this thread is pinned to Sol.
       const seeded = Session.create("test-main", { continuityKey: "webchat:shared-thread" });
@@ -5481,13 +5478,13 @@ describe("AgentRunner", () => {
 
     it("a resumed session runs on its pin even when tier resolution would pick another model", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
       const firstManager = createAgentSessionManager(managerDeps(modelResolver));
       const first = await firstManager.acquire({
@@ -5500,7 +5497,7 @@ describe("AgentRunner", () => {
 
       // Entitlements improved while the session was cold. Tier resolution
       // would now pick Sol; the pin keeps the resume on Terra.
-      state.codex.solAccess = true;
+      state.openai = availabilityOf("available");
       const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(resumedManager, agentLoader);
       await collectMessages(
@@ -5517,14 +5514,14 @@ describe("AgentRunner", () => {
 
     it("an explicit selection overrides the pin and re-pins to the selected model", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
 
       // A session already pinned to Codex Terra.
@@ -5563,13 +5560,13 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session becomes usable again through an explicit selection", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: availabilityOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
 
       // A session pinned to Sol, whose access is now lost: the pin strands it.
@@ -5619,14 +5616,14 @@ describe("AgentRunner", () => {
 
     it("a legacy resume honors a persisted selection whose provider differs from the stored provider", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
@@ -5676,14 +5673,14 @@ describe("AgentRunner", () => {
 
     it("a legacy resume without a thread context reads the selection through its key", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
@@ -5728,14 +5725,14 @@ describe("AgentRunner", () => {
 
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: availabilityOf("available"),
+        anthropic: availabilityOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        availability: fakeAvailability(() => state),
       });
 
       // The parent chat stores a Claude selection. Its subagent's legacy row

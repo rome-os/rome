@@ -38,6 +38,7 @@ import { DrizzleSessionRepository, type SessionRepository } from "../agent/index
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -102,8 +103,8 @@ function createProvider(id: ProviderId) {
 
 function healthyState() {
   return {
-    codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-    claude: { loggedIn: true, quotaExhausted: false },
+    openai: availabilityOf("available"),
+    anthropic: availabilityOf("available"),
   };
 }
 
@@ -151,7 +152,7 @@ describe("continuation notice through AgentSessionManager", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          availability: fakeAvailability(() => state),
           romeCreditsPayer: { isUsingRomeCredits: () => false },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
@@ -442,14 +443,13 @@ describe("continuation notice through AgentSessionManager", () => {
     }
     if (concierge) {
       const raw = healthyState();
-      raw.claude.quotaExhausted = source === "anthropic";
-      raw.codex.quotaExhausted = source === "openai";
+      raw[source] = availabilityOf("usage_limit_reached");
       await webchatRepo.updateSessionLargeModelSelection(chatId, from);
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
         agentSessionManager: manager,
-        aiToolState: { get: () => raw },
+        availability: fakeAvailability(() => raw),
       } as unknown as ConciergeDeps);
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);

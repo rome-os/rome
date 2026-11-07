@@ -45,9 +45,8 @@ import type { SessionRepository } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
-import type { AIToolState } from "../core/ai-tool-state.js";
 import type { Hono } from "hono";
-import type { ModelAccount } from "../agent/index.js";
+import type { ModelAccount, ModelAccountAuthorization, ModelAvailability } from "../agent/index.js";
 import type { PublicAccessState } from "../lib/public-access-state.js";
 import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
 import type { RelayDrainer } from "../relay/drainer.js";
@@ -195,9 +194,12 @@ export interface ApiDeps {
   agentRunner: AgentRunnerInterface;
   activeSubagentRegistry: ActiveSubagentRegistry;
   agentTurnStreamRegistry: AgentTurnStreamRegistry;
-  aiToolState: AIToolState;
+  /** Whether a run can use each model provider now, from the accounts' own reports. */
+  modelAvailability: ModelAvailability;
   /** The guardian's Codex account, served by the shared app-server. */
-  codexAccountService: ModelAccount;
+  codexAccountService: ModelAccount & ModelAccountAuthorization;
+  /** The guardian's Claude account, read from the Claude CLI and Rome's stored credentials. */
+  claudeAccount: ModelAccount;
   /** Codex's loopback route to Rome credits, built by the composition root. */
   romeCreditsProxy: Hono;
   /**

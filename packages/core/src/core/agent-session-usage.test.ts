@@ -19,10 +19,11 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import type { AIToolStateValue } from "./ai-tool-state.js";
+import type { ModelAvailabilityState } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
+import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
 
 /** Lets the run finish sending, so what follows happens during the turn. */
 const turnUnderway = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -61,7 +62,7 @@ describe("AgentSession turn usage", () => {
   let onSend: (() => void) | undefined;
   // Whether the model resolver sees Rome credits paying.
   let resolverUsesRomeCredits: boolean;
-  let state: AIToolStateValue;
+  let state: ModelAvailabilityState;
   let providerCalls: number;
 
   beforeEach(async () => {
@@ -120,8 +121,8 @@ describe("AgentSession turn usage", () => {
       },
     };
     state = {
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: availabilityOf("available"),
+      anthropic: availabilityOf("unauthorized"),
     };
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -143,7 +144,7 @@ describe("AgentSession turn usage", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          availability: fakeAvailability(() => state),
           romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),

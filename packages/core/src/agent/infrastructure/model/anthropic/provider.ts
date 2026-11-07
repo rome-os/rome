@@ -27,6 +27,7 @@ import type {
 } from "../../../domain/model-port.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
+import type { LearnsRefusedTurns } from "../refused-turn.js";
 import { anthropicStop } from "../../../../core/stop-reason.js";
 import { AsyncMessageQueue } from "./async-message-queue.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
@@ -134,16 +135,14 @@ function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLeve
 interface AnthropicProviderOptions {
   settingsRepo?: Pick<SettingsRepository, "get">;
   env?: NodeJS.ProcessEnv;
-  /** Update runtime auth state before an auth-revoked terminal is exposed. */
-  onAuthRevoked?: () => Promise<void> | void;
-  /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
-  onQuotaExhausted?: (until?: string) => void;
+  /** The account this provider runs under, told of each turn the provider refuses. */
+  account?: LearnsRefusedTurns;
 }
 
 /** Persist the revoked-credential marker before exposing the failed terminal. */
 async function persistAnthropicAuthRevoked(
   source: AnthropicAuthRevokedSource | null,
-  onAuthRevoked: AnthropicProviderOptions["onAuthRevoked"],
+  account: LearnsRefusedTurns | undefined,
 ): Promise<void> {
   // Raw environment credentials have no Rome-managed login surface or stable
   // source marker, so keep their 401 as a plain provider error.
@@ -155,13 +154,7 @@ async function persistAnthropicAuthRevoked(
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  try {
-    await onAuthRevoked?.();
-  } catch (err) {
-    log.warn("failed to update AI tool state after anthropic auth revocation", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  account?.refusedTurn({ kind: "credential" });
 }
 
 function readPositiveNumber(value: unknown): number | undefined {
@@ -552,8 +545,7 @@ export class AnthropicProvider implements ModelProvider {
     const providerId = this.id;
     // Captured for the events generator below (a plain `async function*` with no
     // `this`): update runtime state before classified terminals become observable.
-    const onAuthRevoked = this.options.onAuthRevoked;
-    const onQuotaExhausted = this.options.onQuotaExhausted;
+    const account = this.options.account;
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const queryProcess = createClaudeQueryProcess();
@@ -987,13 +979,13 @@ export class AnthropicProvider implements ModelProvider {
               // valid was rejected server-side. Stamp `auth_revoked` and persist
               // the marker so the next state refresh can downgrade the badge.
               if (isAnthropicUsageLimitError(errors) || isAnthropicUsageLimitError(errorText)) {
-                onQuotaExhausted?.(anthropicUsageLimitReset(errorText));
+                account?.refusedTurn({ kind: "usage", until: anthropicUsageLimitReset(errorText) });
                 terminal = { type: "error", error: errorText, code: "usage_limit", accounting };
               } else if (
                 isAnthropicAuthRevokedError(errors) ||
                 isAnthropicAuthRevokedError(errorText)
               ) {
-                await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
+                await persistAnthropicAuthRevoked(authRevokedSource, account);
                 terminal = {
                   type: "error",
                   error: errorText,
@@ -1075,7 +1067,7 @@ export class AnthropicProvider implements ModelProvider {
         // the marker instead of rethrowing a raw 401 up the events loop.
         if (isAnthropicUsageLimitError(err)) {
           running = false;
-          onQuotaExhausted?.();
+          account?.refusedTurn({ kind: "usage" });
           yield {
             type: "error",
             error: err instanceof Error ? err.message : String(err),
@@ -1085,7 +1077,7 @@ export class AnthropicProvider implements ModelProvider {
         }
         if (isAnthropicAuthRevokedError(err)) {
           running = false;
-          await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
+          await persistAnthropicAuthRevoked(authRevokedSource, account);
           yield {
             type: "error",
             error: err instanceof Error ? err.message : String(err),

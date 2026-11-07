@@ -21,6 +21,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("AgentSession turn push level", () => {
@@ -69,10 +70,7 @@ describe("AgentSession turn push level", () => {
         );
       },
     };
-    const state = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: true, quotaExhausted: false },
-    };
+
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("push level test prompt");
@@ -86,7 +84,10 @@ describe("AgentSession turn push level", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          availability: fakeAvailability({
+            anthropic: availabilityOf("available"),
+            openai: availabilityOf("unauthorized"),
+          }),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),

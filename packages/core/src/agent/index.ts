@@ -17,6 +17,7 @@ export {
 } from "./domain/session.js";
 export type {
   ModelAccount,
+  ModelAccountAuthorization,
   ModelAccountStatus,
   ModelAccountUsage,
   ModelAuthorizationMode,
@@ -30,11 +31,36 @@ export { ActiveSessionExistsError, type SessionRepository } from "./domain/sessi
 export type { ModelTier } from "./domain/model-tier.js";
 export { matchesModelAlias, stripLegacyReasoningSuffix } from "./domain/model-alias.js";
 export {
+  CODEX_LUNA_MODEL,
+  CODEX_SOL_MODEL,
+  CODEX_TERRA_MODEL,
   isModelSelectionId,
   MODEL_SELECTIONS,
   type ModelSelection,
   type ModelSelectionId,
 } from "./domain/model-selection.js";
+export {
+  accountAllowsModel,
+  currentAvailability,
+  providerAuthorized,
+  providerUsable,
+  type AccountedProviderId,
+  type ModelAvailabilityState,
+  type ProviderAvailability,
+  type ProviderAvailabilityState,
+} from "./domain/provider-availability.js";
+export {
+  sameProviderTarget,
+  soleProviderAtUsageLimit,
+  usageSwitchTarget,
+  type UsageSwitchTarget,
+} from "./domain/usage-switch.js";
+export {
+  createModelAvailability,
+  type CreateModelAvailabilityOptions,
+  type ModelAvailability,
+  type ModelAvailabilityChange,
+} from "./application/model-availability.js";
 export type {
   McpServerConfig,
   ModelFunding,
@@ -64,6 +90,7 @@ export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repos
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.
 export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js";
+export { ClaudeAccount } from "./infrastructure/model/anthropic/account.js";
 export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";

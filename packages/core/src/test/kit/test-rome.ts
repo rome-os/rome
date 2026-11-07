@@ -40,6 +40,7 @@ import { AgentLoader } from "../../core/agent-loader.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
+import { bothAvailable, fakeAvailability } from "./model-availability.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
@@ -242,16 +243,7 @@ async function buildHarness(
   const model = new FakeModel();
   const modelResolver = createModelResolver({
     providers: [model],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    availability: fakeAvailability(bothAvailable()),
   });
 
   const actionRegistry = new ActionRegistryImpl();
