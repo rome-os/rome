@@ -13,14 +13,19 @@ function fakeAccount(initial: ModelAccountStatus) {
   let status = initial;
   let usage: ModelAccountUsage | null = null;
   const pendingStatus: Array<(status: ModelAccountStatus) => void> = [];
+  const pendingUsage: Array<(usage: ModelAccountUsage | null) => void> = [];
   let holdStatus = false;
+  let holdUsage = false;
   const listeners = new Set<() => void>();
   const account: ModelAccount = {
     status: rs.fn(() => {
       if (!holdStatus) return Promise.resolve(status);
       return new Promise<ModelAccountStatus>((resolve) => pendingStatus.push(resolve));
     }),
-    usage: rs.fn(async () => usage),
+    usage: rs.fn(() => {
+      if (!holdUsage) return Promise.resolve(usage);
+      return new Promise<ModelAccountUsage | null>((resolve) => pendingUsage.push(resolve));
+    }),
     async revoke() {},
     onChanged(listener) {
       listeners.add(listener);
@@ -41,6 +46,13 @@ function fakeAccount(initial: ModelAccountStatus) {
     },
     hold() {
       holdStatus = true;
+    },
+    holdUsage() {
+      holdUsage = true;
+    },
+    releaseUsage(answer: ModelAccountUsage | null) {
+      holdUsage = false;
+      pendingUsage.shift()?.(answer);
     },
     /** Answers the oldest held status read with the status at the time it was asked. */
     release(answer: ModelAccountStatus) {
@@ -179,6 +191,29 @@ describe("createModelAvailability", () => {
     await settle();
     expect(codex.statusReads()).toBe(2);
     expect(availability.read().openai).toMatchObject({ state: "usage_limit_reached" });
+    availability.close();
+  });
+
+  it("lands an authorization change as soon as the status answers, before the usage read settles", async () => {
+    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const availability = createModelAvailability({
+      accounts: { openai: codex.account },
+      startRefresh: false,
+      refreshIntervalMs: null,
+      now: () => readAt,
+    });
+    await availability.refresh();
+    const changes: string[] = [];
+    availability.onChanged((provider, change) => changes.push(`${provider}:${change}`));
+    codex.holdUsage();
+    codex.set({ loggedIn: false, needsReauth: true });
+    const read = availability.refresh("openai");
+    await settle();
+    expect(availability.read().openai).toMatchObject({ state: "expired" });
+    expect(changes).toEqual(["openai:authorization"]);
+    codex.releaseUsage(null);
+    await read;
+    expect(changes).toEqual(["openai:authorization", "openai:refreshed"]);
     availability.close();
   });
 

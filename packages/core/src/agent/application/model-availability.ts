@@ -5,7 +5,11 @@
 // domain/provider-availability.ts; this module holds the state and drives
 // the reads.
 
-import type { ModelAccount } from "../domain/model-account.js";
+import type {
+  ModelAccount,
+  ModelAccountStatus,
+  ModelAccountUsage,
+} from "../domain/model-account.js";
 import type { ProviderId } from "../domain/model-port.js";
 import {
   availabilityFromAccount,
@@ -103,9 +107,25 @@ export function createModelAvailability(
     }
   };
 
-  const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
+  const store = (
+    provider: ProviderId,
+    status: ModelAccountStatus,
+    usage: ModelAccountUsage | null,
+  ): void => {
     const previous = stored[provider];
-    const [status, usage] = await Promise.allSettled([account.status(), account.usage()]);
+    const next: ProviderAvailability = availabilityFromAccount(status, usage, now(), previous);
+    stored[provider] = next;
+    if (providerAuthorized(previous) !== providerAuthorized(next)) emit(provider, "authorization");
+  };
+
+  /**
+   * Reads status and usage together. The status lands as soon as it answers,
+   * with the usage last read, so an authorization change never waits on a
+   * usage read that may stall. The usage is folded in when it settles.
+   */
+  const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
+    const usagePending = account.usage();
+    const status = await Promise.allSettled([account.status()]).then(([result]) => result);
     if (closed) return;
     if (status.status === "rejected") {
       log?.warn("model account status read failed", {
@@ -113,8 +133,14 @@ export function createModelAvailability(
         error: status.reason instanceof Error ? status.reason.message : String(status.reason),
       });
     }
-    const readStatus = status.status === "fulfilled" ? status.value : previous?.account;
-    if (!readStatus) return;
+    const readStatus = status.status === "fulfilled" ? status.value : stored[provider]?.account;
+    if (!readStatus) {
+      await Promise.allSettled([usagePending]);
+      return;
+    }
+    store(provider, readStatus, stored[provider]?.usage ?? null);
+    const [usage] = await Promise.allSettled([usagePending]);
+    if (closed) return;
     const readUsage =
       usage.status === "fulfilled"
         ? usage.value
@@ -123,14 +149,7 @@ export function createModelAvailability(
             source: "usage read",
             error: usage.reason instanceof Error ? usage.reason.message : String(usage.reason),
           };
-    const next: ProviderAvailability = availabilityFromAccount(
-      readStatus,
-      readUsage,
-      now(),
-      previous,
-    );
-    stored[provider] = next;
-    if (providerAuthorized(previous) !== providerAuthorized(next)) emit(provider, "authorization");
+    store(provider, readStatus, readUsage);
   };
 
   const refreshProvider = (provider: ProviderId, account: ModelAccount): Promise<void> => {

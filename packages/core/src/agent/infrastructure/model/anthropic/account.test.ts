@@ -57,6 +57,8 @@ describe("ClaudeAccount", () => {
     now += USAGE_REFUSAL_HOLD_MS;
     await account.usage();
     await expect(account.status()).resolves.not.toHaveProperty("usageLimitUntil");
+    // Ending the refusal is a change too: a status read alongside may have carried it.
+    expect(changed).toHaveBeenCalledTimes(3);
   });
 
   it("drops a refusal once its end has passed, however often it is read", async () => {

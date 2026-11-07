@@ -308,7 +308,9 @@ export class SharedCodexAccountService
       this.refusal &&
       usageReadClearsRefusal(this.refusal, readAt)
     ) {
+      // A status read alongside this one may have carried the refusal.
       this.refusal = undefined;
+      this.emitAccountChanged();
     }
     return usage;
   }

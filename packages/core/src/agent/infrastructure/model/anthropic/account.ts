@@ -153,7 +153,9 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
       this.refusal &&
       usageReadClearsRefusal(this.refusal, readAt)
     ) {
+      // A status read alongside this one may have carried the refusal.
       this.refusal = undefined;
+      this.emitChanged();
     }
     return usage;
   }
