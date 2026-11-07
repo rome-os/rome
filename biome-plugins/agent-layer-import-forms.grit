@@ -9,12 +9,23 @@ or {
     $spec <: r"`.*agent/(?:domain|application|infrastructure)/.*`",
     register_diagnostic(span=$t, message="Write this dynamic import's path as a string literal, so the boundary rules in biome.json can check it.")
   },
-  JsModuleSource() as $s where {
-    $s <: r"[\"'](?:\./\.\..*|.*/\./.*|(?:.*/)?(?:[^./\"'][^/]*|\.[^./][^/]*)/\.\.(?:/.*)?)[\"']",
-    register_diagnostic(span=$s, message="Write this import path without `.` or `name/..` segments, so the boundary rules in biome.json can check it.")
+  `import($spec, $opts)` as $t where {
+    $spec <: r"`.*agent/(?:domain|application|infrastructure)/.*`",
+    register_diagnostic(span=$t, message="Write this dynamic import's path as a string literal, so the boundary rules in biome.json can check it.")
   },
-  `import($spec)` as $t where {
-    $spec <: r"[\"'](?:\./\.\..*|.*/\./.*|(?:.*/)?(?:[^./\"'][^/]*|\.[^./][^/]*)/\.\.(?:/.*)?)[\"']",
-    register_diagnostic(span=$spec, message="Write this import path without `.` or `name/..` segments, so the boundary rules in biome.json can check it.")
+  JsModuleSource() as $s where {
+    $s <: r"[\"'](?:\.|@/).*[\"']",
+    not $s <: r"[\"'](?:\./|(?:\.\./)+|@/)(?:(?:[^/.\"'`]|\.[^/.\"'`])[^/\"'`]*/)*(?:[^/.\"'`]|\.[^/.\"'`])[^/\"'`]*[\"']",
+    register_diagnostic(span=$s, message="Write this import path in normal form, with no `.`, `name/..` or empty segments, so the boundary rules in biome.json can check it.")
+  },
+  `import($spec)` where {
+    $spec <: r"[\"'](?:\.|@/).*[\"']",
+    not $spec <: r"[\"'](?:\./|(?:\.\./)+|@/)(?:(?:[^/.\"'`]|\.[^/.\"'`])[^/\"'`]*/)*(?:[^/.\"'`]|\.[^/.\"'`])[^/\"'`]*[\"']",
+    register_diagnostic(span=$spec, message="Write this import path in normal form, with no `.`, `name/..` or empty segments, so the boundary rules in biome.json can check it.")
+  },
+  `import($spec, $opts)` where {
+    $spec <: r"[\"'](?:\.|@/).*[\"']",
+    not $spec <: r"[\"'](?:\./|(?:\.\./)+|@/)(?:(?:[^/.\"'`]|\.[^/.\"'`])[^/\"'`]*/)*(?:[^/.\"'`]|\.[^/.\"'`])[^/\"'`]*[\"']",
+    register_diagnostic(span=$spec, message="Write this import path in normal form, with no `.`, `name/..` or empty segments, so the boundary rules in biome.json can check it.")
   }
 }
