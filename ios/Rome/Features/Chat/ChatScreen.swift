@@ -31,6 +31,7 @@ struct ChatScreen: View {
             }
         }
         .pageBackground()
+        .composerDraft(workspace.drafts, chat: conciergeChatID, text: $draft, attachments: attachments)
         .toolbar(.hidden, for: .navigationBar)
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in

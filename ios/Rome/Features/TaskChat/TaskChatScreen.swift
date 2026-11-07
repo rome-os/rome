@@ -38,6 +38,7 @@ struct TaskChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar { header }
         .background(Palette.bg.ignoresSafeArea())
+        .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let store {
@@ -65,6 +66,7 @@ struct TaskChatScreen: View {
         .onAppear {
             if store == nil {
                 store = TranscriptStore(sessionId: chatId, kind: .task, backend: workspace.backend)
+                store?.drafts = ChatDrafts(store: workspace.drafts, chat: chatId)
             }
             // Starting again after a return reloads and resubscribes; it is a no-op while running.
             store?.start()

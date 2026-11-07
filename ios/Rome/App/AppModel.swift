@@ -72,19 +72,25 @@ final class Workspace {
         concierge.resync()
     }
 
-    init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String) {
+    /// What the guardian left in each chat's composer, on this phone.
+    let drafts: DraftStore
+
+    init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
         self.instanceName = instanceName
         self.host = host
         self.accountLabel = accountLabel
+        self.drafts = drafts ?? DraftStore(instance: host)
         tasks = TasksStore(backend: backend)
         concierge = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        concierge.drafts = ChatDrafts(store: self.drafts, chat: conciergeChatID)
         topics = TopicChatsStore(backend: backend)
     }
 
     func topicStore(_ chatId: String) -> TranscriptStore {
         if let store = topicStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)
+        store.drafts = ChatDrafts(store: drafts, chat: chatId)
         topicStores[chatId] = store
         return store
     }
@@ -127,6 +133,7 @@ final class Workspace {
     }
 
     func start() async {
+        drafts.discardBlankChats()
         tasks.start()
         topics.start()
         Task { if let name = try? await backend.me(), !name.isEmpty { accountLabel = name } }
@@ -289,7 +296,7 @@ final class AppModel {
     func openInstance(preferring id: String?, showHint: Bool) async {
         do {
             let list = try await cloud.listInstances()
-            instances = list
+            take(list)
             let running = list.filter(\.isRunning)
             let remembered = UserDefaults.standard.string(forKey: Defaults.lastInstance)
             let chosen = running.first { $0.id == id } ?? running.first { $0.id == remembered } ?? running.first
@@ -356,7 +363,7 @@ final class AppModel {
 
     private func reconnectWhenRunning(_ id: String) async {
         guard let list = try? await cloud.listInstances() else { return }
-        instances = list
+        take(list)
         if let instance = list.first(where: { $0.id == id }), instance.isRunning {
             await connect(to: instance, keepUpdate: true)
         }
@@ -371,7 +378,14 @@ final class AppModel {
     }
 
     func refreshInstances() async {
-        if let list = try? await cloud.listInstances() { instances = list }
+        if let list = try? await cloud.listInstances() { take(list) }
+    }
+
+    /// Rome Cloud's list of the account's instances. Drafts of an instance
+    /// that is gone go with it.
+    private func take(_ list: [CloudInstance]) {
+        instances = list
+        DraftStore.removeInstances(keeping: Set(list.map(\.host)))
     }
 
     func retry() async {
@@ -385,6 +399,7 @@ final class AppModel {
         token.token = nil
         pendingPush = nil
         await push.signOut { await cloud.signOut() }
+        DraftStore.removeAll()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         instances = []
         currentInstanceID = nil

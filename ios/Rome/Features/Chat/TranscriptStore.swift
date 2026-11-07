@@ -49,6 +49,8 @@ final class TranscriptStore {
     private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
+    /// Where a send is kept until the server takes it.
+    var drafts: ChatDrafts?
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
 
@@ -299,6 +301,8 @@ final class TranscriptStore {
     }
 
     private func deliver(inputId: String, text: String, images: [ComposerImage]) {
+        // Kept as the chat's draft until the server takes it.
+        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images) }
         Task {
             do {
                 let turn = try await backend.send(
@@ -311,6 +315,7 @@ final class TranscriptStore {
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
                     pending[index].state = .sent
                 }
+                if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: inputId) }
                 // The server does not announce the guardian's own input, so fetch it.
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))

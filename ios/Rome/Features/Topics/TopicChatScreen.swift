@@ -6,6 +6,8 @@ import SwiftUI
 struct TopicChatScreen: View {
     let workspace: Workspace
     let chatId: String?
+    /// Whose draft the composer keeps: the chat, or the blank chat until it exists.
+    let draftKey: String
     let onMenu: () -> Void
     let onTasks: (String?) -> Void
     let onOpenChat: (String, String) -> Void
@@ -66,6 +68,7 @@ struct TopicChatScreen: View {
             }
         }
         .pageBackground()
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
@@ -83,7 +86,11 @@ struct TopicChatScreen: View {
         .onAppear { store?.start() }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
-        .onDisappear { store?.stop() }
+        .onDisappear {
+            store?.stop()
+            // Left blank, the chat is never made, and its draft goes with it.
+            if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }
+        }
     }
 
     @ViewBuilder

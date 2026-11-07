@@ -223,10 +223,10 @@ struct MainShell: View {
             case .routines:
                 RoutinesScreen(onMenu: { openDrawer() })
             case .topic(let chatId):
-                topicScreen(chatId: chatId)
+                topicScreen(chatId: chatId, draftKey: chatId)
                     .id(startedTopics[chatId]?.uuidString ?? chatId)
             case .newTopic(let key):
-                topicScreen(chatId: nil, key: key)
+                topicScreen(chatId: nil, key: key, draftKey: DraftStore.blankChat(key))
                     .id(key.uuidString)
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
@@ -242,10 +242,11 @@ struct MainShell: View {
         }
     }
 
-    private func topicScreen(chatId: String?, key: UUID? = nil) -> some View {
+    private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
             workspace: workspace,
             chatId: chatId,
+            draftKey: draftKey,
             onMenu: { openDrawer() },
             onTasks: { id in
                 // A blank chat has no tasks yet; its sheet shows the empty state.
