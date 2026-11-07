@@ -30,6 +30,18 @@ export type {
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export type { Skill, SkillCatalog } from "./domain/skill.js";
+export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
+export { widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
+export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
+export { createPromptSources } from "./infrastructure/prompt-sources.js";
+export {
+  buildContinuationBlock,
+  buildDeviceFolderBlock,
+  buildThreadContextBlock,
+  buildWorkspaceContextSection,
+  FETCH_CHANNEL_HISTORY_ACTION,
+  type WorkspaceContextSnapshot,
+} from "./domain/prompt.js";
 export {
   buildSlashSkillPrompt,
   parseSlashSkillInvocation,

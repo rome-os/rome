@@ -24,17 +24,16 @@ import {
   type SessionRepository,
   type Skill,
   type SkillCatalog,
-  resolveAgentPolicy,
-} from "../agent/index.js";
-import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
-import {
+  type SystemPrompts,
   buildContinuationBlock,
-  buildInteractiveSurfaceGuidanceSection,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
-  type PromptBuilder,
-} from "./prompt-builder.js";
+  resolveAgentPolicy,
+  widgetDrawingFor,
+} from "../agent/index.js";
+import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
+import { projectRelativePath } from "../webchat/projects.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
@@ -391,7 +390,7 @@ interface ManagerDeps {
   agentLoader: AgentLoader;
   appCatalog?: Pick<AppCatalog, "get">;
   sessionRepository: SessionRepository;
-  promptBuilder: PromptBuilder;
+  systemPrompts: SystemPrompts;
   actionRegistry: ActionRegistry;
   modelResolver: ModelResolver;
   actionEngine: ActionEngine;
@@ -1069,21 +1068,16 @@ async function openSession(
       openingChannel,
     });
   }
-  const supportsInteractiveSurface =
-    !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards && !opts.isSubagent;
+  const widgets = widgetDrawingFor({
+    placeDrawsCards: !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards,
+    isSubagent: !!opts.isSubagent,
+  });
+  const supportsInteractiveSurface = widgets === "card";
 
-  const baseSystemPrompt = [
-    deps.promptBuilder.build(config, {
-      ownerType: metadata.ownerType,
-      contextSuffix: init.contextSuffix,
-    }),
-    supportsInteractiveSurface && metadata.ownerType === "core"
-      ? buildInteractiveSurfaceGuidanceSection()
-      : null,
-  ]
-    .filter((section): section is string => !!section)
-    .join("\n\n---\n\n");
-  const systemPrompt = baseSystemPrompt;
+  const systemPrompt = deps.systemPrompts.build(
+    { ...config, owner: metadata.ownerType },
+    { contextSuffix: init.contextSuffix, widgets },
+  );
 
   // The registry's `getForAgent` is the single resolution point for what this
   // agent may call — its allow-list, or everything for "*". Both the model-facing catalog and the execution gate
@@ -3516,7 +3510,11 @@ class AgentSessionImpl implements AgentSession {
       // replaced it on another provider, has not seen the block yet.
       if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
-        const block = buildThreadContextBlock(tc, this.workingDir);
+        const projectPath = this.workingDir?.trim();
+        const block = buildThreadContextBlock(tc, {
+          path: projectPath,
+          relativePath: projectPath ? projectRelativePath(projectPath) : null,
+        });
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
         }

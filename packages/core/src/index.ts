@@ -152,7 +152,6 @@ import { ExecutionJournalRepository } from "./db/repositories/execution-journal.
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { AgentLoader } from "./core/agent-loader.js";
-import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
@@ -176,6 +175,8 @@ import {
   SkillLoader,
   romeCreditsProxyRoutes,
   resolveAgentPolicy,
+  createPromptSources,
+  createSystemPrompts,
 } from "./agent/index.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
@@ -634,7 +635,7 @@ async function main() {
 
   // Every Talk channel is owned by the ConnectionRegistry, which starts each
   // transport from its grant. Only `emailSettings` is read here, for the
-  // prompt-builder's "our own provisioned inbox address" hint (the
+  // system prompt's "our own provisioned inbox address" hint (the
   // emailAdapterRef fallback below).
   const emailSettings = await settingsRepo.get<EmailSettings>("email");
   if (emailSettings?.enabled) {
@@ -800,26 +801,14 @@ async function main() {
   // runtime context surface Rome's own provisioned inbox address, which is read
   // live when the prefix is cached on the first turn (after boot/provision).
   let emailAdapterRef: EmailAdapter | null = null;
-  const promptBuilder = new PromptBuilder(
-    appCatalog,
-    // The provisioned inbox address lives on the live adapter (built from the
-    // `inbox` grant); no settings fallback — the row carries pure config only.
-    () => emailAdapterRef?.getAddress() || undefined,
-    () => getConfiguredInstanceOrigin() ?? undefined,
-  );
-
-  // The cached system-prompt prefix bakes in app-derived context — the
-  // "# Installed Apps" list (from `appCatalog.listResolved()`, which already
-  // excludes disabled apps), each app's description carrying its key
-  // actions/skills. That snapshot is taken on the first turn and never
-  // recomputed on its own, so a runtime enable/disable/install/uninstall would
-  // otherwise linger in the prompt until the next restart (e.g. a disabled app
-  // staying in "# Installed Apps"). Drop the cache on every catalog change so
-  // the next turn rebuilds the prefix from the current resolved set. Registered
-  // after boot on purpose: the prefix isn't cached until the first turn, so the
-  // boot-time refresh storm needs no invalidation.
-  appCatalog.subscribe(function promptPrefixCacheInvalidator() {
-    promptBuilder.invalidateAll();
+  const systemPrompts = createSystemPrompts({
+    sources: createPromptSources({
+      apps: appCatalog,
+      // The provisioned inbox address lives on the live adapter (built from the
+      // `inbox` grant); no settings fallback — the row carries pure config only.
+      emailAddress: () => emailAdapterRef?.getAddress() || undefined,
+      publicOrigin: () => getConfiguredInstanceOrigin() ?? undefined,
+    }),
   });
 
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
@@ -1130,7 +1119,7 @@ async function main() {
       agentLoader,
       appCatalog,
       sessionRepository,
-      promptBuilder,
+      systemPrompts,
       actionRegistry,
       modelResolver,
       actionEngine,
@@ -1594,7 +1583,7 @@ async function main() {
       });
     },
     mailProvider,
-    // Keep the prompt-builder's "our own inbox address" ref pointed at the
+    // Keep the system prompt's "our own inbox address" ref pointed at the
     // current email epoch (birth, relock/re-authorize, Disconnected rebuild).
     onEmailAdapterBuilt: (adapter) => {
       emailAdapterRef = adapter;

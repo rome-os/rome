@@ -33,7 +33,7 @@ import {
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { SkillLoader } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
@@ -139,15 +139,15 @@ describe("continuation notice through AgentSessionManager", () => {
       inputSchema: { type: "object", properties: {} },
       execute: async () => ({ status: "ok", data: {} }),
     } as never);
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Continuation test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
         webchatRepo,
-        promptBuilder,
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({

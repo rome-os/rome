@@ -22,6 +22,20 @@ Know-how an agent reads and follows. An agent has the skills its installed apps 
 
 - In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts).
 
+## System prompt
+
+What the model reads before the conversation. It is built when a run opens the agent's session, and kept across reopens and forks of the model's session.
+
+- An app's agent gets exactly the prompt it declares. A core agent gets its declared prompt, the charter, its identity and what Rome tells every core agent, with memory and project summaries when its [agent policy](#agent-policy) loads them.
+- In code, the rules are in [`packages/core/src/agent/domain/system-prompt.ts`](../../packages/core/src/agent/domain/system-prompt.ts).
+
+## Prompt
+
+The words a turn was asked, plus what Rome adds about where the turn stands: where the chat is, what the guardian has open, the device folder and what the agent has not seen.
+
+- What Rome adds can change from turn to turn, so it stays in the prompt and never in the system prompt.
+- In code, the blocks Rome adds are in [`packages/core/src/agent/domain/prompt.ts`](../../packages/core/src/agent/domain/prompt.ts).
+
 ## Model provider account
 
 Whose subscription an agent's turns run under when Rome credits is not the payer: the guardian's Codex (ChatGPT) account today. Rome never acts or chats as this account, so it is not a [connection](connections.md#connection) and has no connected account. Its alternative, Rome credits, has no external account at all.

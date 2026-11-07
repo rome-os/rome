@@ -11,7 +11,7 @@ import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import type { RomeToolGroup, RomeTools } from "../agent/index.js";
 import { createModelResolver } from "../core/model-resolver.js";
 import { bothAvailable, fakeAvailability } from "../test/kit/model-availability.js";
@@ -478,7 +478,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   const agentName = "test-all-actions";
 
   const sessionRepository = new DrizzleSessionRepository(harness.db, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({
     providers: [provider],
@@ -493,7 +493,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   const manager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
-    promptBuilder,
+    systemPrompts,
     actionRegistry: harness.actionRegistry,
     modelResolver,
     actionEngine,

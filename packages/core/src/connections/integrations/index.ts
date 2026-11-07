@@ -71,7 +71,7 @@ export interface BuiltinConnectionDeps {
   mailProvider: MailProvider;
   /** Optional email dep mirrored from index.ts (whoami resolver). */
   emailOwnerEmailResolver?: () => Promise<string | undefined>;
-  /** Keeps index.ts's prompt-builder "our own inbox address" ref pointed at the
+  /** Keeps index.ts's system prompt "our own inbox address" ref pointed at the
    *  CURRENT email epoch (birth/relock/backoff rebuild). */
   onEmailAdapterBuilt?: (adapter: EmailAdapter) => void;
   /** DB handle for the Rome Cloud-OAuth grant setups (github/slack/google):

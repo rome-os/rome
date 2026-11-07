@@ -60,7 +60,8 @@ rs.mock("../paths.js", () => ({
   getProfileInstalledAppsDir: rs.fn(() => "/tmp/agent-runner-test/installed-apps"),
 }));
 
-import { PromptBuilder } from "./prompt-builder.js";
+import type { SystemPrompts } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
   ModelProvider,
@@ -136,7 +137,7 @@ describe("AgentRunner", () => {
   let agentLoader: AgentLoader;
   let artifactIdentity: ArtifactIdentityContext;
   let sessionRepository: SessionRepository;
-  let promptBuilder: PromptBuilder;
+  let systemPrompts: SystemPrompts;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
   let mockProvider: MockModelProvider;
@@ -152,7 +153,7 @@ describe("AgentRunner", () => {
     await agentLoader.loadAll(FIXTURES_DIR);
 
     sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
-    promptBuilder = new PromptBuilder();
+    systemPrompts = createTestSystemPrompts();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
     mockProvider = new MockModelProvider();
@@ -2266,7 +2267,7 @@ describe("AgentRunner", () => {
       agentLoader,
       appCatalog,
       sessionRepository,
-      promptBuilder,
+      systemPrompts,
       actionRegistry,
       modelResolver,
       actionEngine,
@@ -4163,7 +4164,7 @@ describe("AgentRunner", () => {
   });
 
   describe("prompt building", () => {
-    it("calls promptBuilder.build() with correct config and contextSuffix", async () => {
+    it("calls systemPrompts.build() with correct config and contextSuffix", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
       const runner = createRunner(provider);
 
