@@ -422,10 +422,19 @@ final class DemoBackend: RomeBackend {
         ]
 
         // A topic chat about one trip.
+        let hotel = "projects/demo/trip/hotel.jpg"
+        assets[hotel] = UIGraphicsImageRenderer(size: CGSize(width: 800, height: 520)).image { context in
+            UIColor(red: 0.62, green: 0.74, blue: 0.86, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 800, height: 520))
+            UIColor(red: 0.55, green: 0.38, blue: 0.28, alpha: 1).setFill()
+            context.fill(CGRect(x: 160, y: 180, width: 480, height: 340))
+            UIColor(red: 0.95, green: 0.88, blue: 0.7, alpha: 1).setFill()
+            for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
+        }.jpegData(compressionQuality: 0.8)
         messages["topic-trip"] = [
             user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
             agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
-            agent("酒店比较好了：河原町那家离车站最近，价格中等。要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
+            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/\(hotel))\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"

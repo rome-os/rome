@@ -13,6 +13,8 @@ enum DebugCommand: Equatable {
     case settings([SettingsRoute]?)
     /// Puts sample photos in Chat's composer.
     case composerPhotos(Int)
+    /// The photo viewer on a demo image, or closed.
+    case photoViewer(Bool)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -96,6 +98,9 @@ enum SnapshotRunner {
             await capture("24-topic-chat", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-trip")) }
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            await capture("34-photo-viewer", style: styleName, in: directory, wait: 2) { model.debugCommand = .photoViewer(true) }
+            model.debugCommand = .photoViewer(false)
+            try? await Task.sleep(for: .seconds(0.4))
             await capture("15-task-answered", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
             }

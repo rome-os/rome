@@ -47,6 +47,7 @@ struct MainShell: View {
     #if DEBUG
     @State private var sheetPreview = false
     @State private var settingsPreview = false
+    @State private var photoViewerPreview = false
     #endif
 
     var body: some View {
@@ -140,6 +141,10 @@ struct MainShell: View {
                 }
                 .ignoresSafeArea()
             }
+            if photoViewerPreview {
+                // Snapshot runs only: the viewer in place of its full-screen cover.
+                PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg")], start: 0)
+            }
             if settingsPreview {
                 // Snapshot runs only, for the same reason.
                 ZStack(alignment: .bottom) {
@@ -186,6 +191,8 @@ struct MainShell: View {
             case .settings(let routes):
                 settingsPath = routes ?? []
                 if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
+            case .photoViewer(let open):
+                photoViewerPreview = open
             case .composerPhotos, nil: break
             }
         }
