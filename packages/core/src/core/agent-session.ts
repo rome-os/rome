@@ -38,7 +38,7 @@ import {
   type AgentActions,
   type DeferInput,
   type RomeTool,
-  type RomeToolsOptions,
+  type RomeTools,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import { projectRelativePath } from "../webchat/projects.js";
@@ -1284,34 +1284,39 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
-  // What the Rome tools are made of for this session. Captured on open so an
-  // exact fork rebuilds the same catalog with its own callbacks.
-  // What depends on whether the session has a speaker. `provided` is the session
-  // tools provider's answer, served before `propose_routine`.
-  const speakerToolParams = (refs: TurnExecRefs, hasSpeaker: boolean, provided: RomeTool[]) => ({
-    widgetsShow: showsWidgets(widgets, hasSpeaker),
-    sessionTools: [
-      ...provided,
-      ...proposeRoutineTools({
-        widgets,
-        hasSpeaker,
-        gate: routineActivation,
-        runAction: makeRunAction(refs),
-      }),
-    ],
-  });
-  const liveToolParams: RomeToolsOptions = {
-    actions: agentActions(sessionExecRefs),
-    skills: deps.skillCatalog,
-    subagents: { tools: subagentTools, run: makeExecuteSubagent(sessionExecRefs) },
-    log,
-    defer: deferTool(sessionExecRefs),
-    ...speakerToolParams(sessionExecRefs, true, []),
-  };
+  // The Rome tools a session serves, bound to the refs that run them. The live
+  // session has a speaker; a fork has none, refuses the provider's tools and may
+  // have no `defer`, but its catalog still matches its source's.
+  const romeTools = (
+    refs: TurnExecRefs,
+    session: { hasSpeaker: boolean; providedTools: readonly RomeTool[]; defers: boolean },
+  ) =>
+    createRomeTools({
+      actions: agentActions(refs),
+      skills: deps.skillCatalog,
+      subagents: { tools: subagentTools, run: makeExecuteSubagent(refs) },
+      // Without a speaker, action results that hand back a widget take their
+      // plain-text forms. Otherwise the tool result claims a card was shown
+      // while nothing mounted and the fork dead-ends.
+      widgetsShow: showsWidgets(widgets, session.hasSpeaker),
+      log,
+      defer: session.defers ? deferTool(refs) : undefined,
+      sessionTools: [
+        ...session.providedTools,
+        ...proposeRoutineTools({
+          widgets,
+          hasSpeaker: session.hasSpeaker,
+          gate: routineActivation,
+          runAction: makeRunAction(refs),
+        }),
+      ],
+    });
+  const liveRomeTools = (providedTools: readonly RomeTool[]) =>
+    romeTools(sessionExecRefs, { hasSpeaker: true, providedTools, defers: true });
 
   const buildSessionParams = (
     resolution: ModelResolution,
-    toolParams: RomeToolsOptions,
+    tools: RomeTools,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): ModelSessionParams => ({
@@ -1330,7 +1335,7 @@ async function openSession(
       env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
       maxTurns: config.maxTurns,
     },
-    tools: createRomeTools(toolParams),
+    tools,
     // A thread resumes only on the provider that named it; another provider
     // starts a new one.
     thread:
@@ -1344,10 +1349,8 @@ async function openSession(
   // identity by construction: a field added to ModelSessionParams flows into
   // exact forks without a second hand-maintained list.
   let lastOpenParams: ModelSessionParams | undefined;
-  let lastToolParams: RomeToolsOptions | undefined;
-  // Held apart from `lastToolParams`, because a fork refuses these outright
-  // and rebuilds `propose_routine` itself.
-  let lastProvidedTools: RomeTool[] = [];
+  // The session tools provider's last answer, which a fork refuses outright.
+  let lastProvidedTools: readonly RomeTool[] = [];
 
   const openModelSession = async (
     resolution: ModelResolution,
@@ -1363,10 +1366,12 @@ async function openSession(
       getThreadContext: sessionExecRefs.getThreadContext,
       getTurnPushLevel: () => impl.currentTurnPushLevelRef,
     });
-    const toolParams: RomeToolsOptions = providedTools?.length
-      ? { ...liveToolParams, ...speakerToolParams(sessionExecRefs, true, providedTools) }
-      : liveToolParams;
-    const params = buildSessionParams(resolution, toolParams, resumeProviderId, resumeThreadId);
+    const params = buildSessionParams(
+      resolution,
+      liveRomeTools(providedTools ?? []),
+      resumeProviderId,
+      resumeThreadId,
+    );
     const resumed = params.thread.kind === "resume";
     const openStartMs = Date.now();
     const session = await withRomeSpan(
@@ -1384,7 +1389,6 @@ async function openSession(
       resumed,
     });
     lastOpenParams = params;
-    lastToolParams = toolParams;
     lastProvidedTools = providedTools ?? [];
     return session;
   };
@@ -1425,7 +1429,7 @@ async function openSession(
         dispose: async () => {},
       };
     }
-    if (!lastOpenParams || !lastToolParams) {
+    if (!lastOpenParams) {
       // Only reachable for sessions that never opened a provider query
       // (code-backed) — and those refuse fork() before this factory runs.
       throw new Error("Exact fork requires a live provider session");
@@ -1505,15 +1509,10 @@ async function openSession(
         config: { ...liveOpenParams.config, model: fork.model },
         // The same catalog as the live session, run through fresh fork-bound
         // callbacks, never the source's per-turn closures.
-        tools: createRomeTools({
-          ...lastToolParams,
-          actions: agentActions(refs),
-          subagents: { tools: subagentTools, run: makeExecuteSubagent(refs) },
-          defer: fork.continuable ? undefined : deferTool(refs),
-          // A fork has no speaker, so action results that hand back a widget
-          // take their plain-text forms. Otherwise the tool result claims a card
-          // was shown while nothing mounted and the fork dead-ends.
-          ...speakerToolParams(refs, false, detachSessionTools(lastProvidedTools)),
+        tools: romeTools(refs, {
+          hasSpeaker: false,
+          providedTools: detachSessionTools(lastProvidedTools),
+          defers: !fork.continuable,
         }),
       },
       projectProviderMessage: async (msg) => {
@@ -1584,7 +1583,7 @@ async function openSession(
           },
           model: "code-backed",
         },
-        liveToolParams,
+        liveRomeTools([]),
       ),
     });
   } else {

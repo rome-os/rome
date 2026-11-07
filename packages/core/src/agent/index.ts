@@ -124,11 +124,10 @@ export type {
   RomeToolGroup,
   RomeToolResult,
   RomeTools,
-  ModelToolCallId,
 } from "./domain/rome-tools.js";
 export type { Subagents } from "./domain/subagent.js";
 export { detachSessionTools, NO_ROME_TOOLS } from "./domain/rome-tools.js";
-export { createRomeTools, type RomeToolsOptions } from "./application/rome-tools.js";
+export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { SkillLoader } from "./infrastructure/skill-loader.js";

@@ -175,28 +175,24 @@ export function searchActions(
   limit: number | undefined,
 ): ActionSummary[] {
   const normalizedLimit = normalizeSearchLimit(limit);
-  const matcher = createSearchMatcher(queryText);
+  const matches = createSearchMatcher(queryText);
   const sortedActions = [...actionCatalog].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
 
-  if (!matcher) {
+  if (!matches) {
     return sortedActions.slice(0, normalizedLimit).map(toActionSummary);
   }
 
   return sortedActions
     .map((action) => {
       const haystack = buildActionSearchText(action);
-      if (!matcher.matches(haystack)) {
+      if (!matches(haystack)) {
         return null;
       }
 
-      let score = 1;
-      score += matcher.scoreName(action.name);
-      score += matcher.scoreDescription(action.description);
-      if (matcher.kind === "regex") {
-        score += 1;
-      }
+      // A match in the name ranks above one in the description.
+      const score = (matches(action.name) ? 5 : 0) + (matches(action.description) ? 3 : 0);
 
       return { action, score };
     })

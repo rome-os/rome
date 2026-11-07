@@ -7,13 +7,6 @@ export const SEARCH_LIMIT_DESCRIPTION =
   `Optional. Recommended: omit this parameter to use the default of ${DEFAULT_SEARCH_LIMIT}. ` +
   `If provided, use an integer from 1 to ${MAX_SEARCH_LIMIT}.`;
 
-interface SearchMatcher {
-  kind: "regex";
-  matches(text: string): boolean;
-  scoreName(text: string): number;
-  scoreDescription(text: string): number;
-}
-
 export function normalizeSearchLimit(limit: number | undefined): number {
   if (typeof limit !== "number" || !Number.isFinite(limit)) {
     return DEFAULT_SEARCH_LIMIT;
@@ -64,17 +57,13 @@ function compileSearchRegex(queryText: string): RegExp {
   }
 }
 
-export function createSearchMatcher(queryText: string): SearchMatcher | null {
+/** Whether a text matches the query; null for an empty query, which matches everything. */
+export function createSearchMatcher(queryText: string): ((text: string) => boolean) | null {
   const trimmed = queryText.trim();
   if (!trimmed) {
     return null;
   }
 
   const regex = compileSearchRegex(trimmed);
-  return {
-    kind: "regex",
-    matches: (text) => matchesRegex(regex, text),
-    scoreName: (text) => (matchesRegex(regex, text) ? 5 : 0),
-    scoreDescription: (text) => (matchesRegex(regex, text) ? 3 : 0),
-  };
+  return (text) => matchesRegex(regex, text);
 }

@@ -2,7 +2,7 @@
 // `defer`, and the session's own tools after them.
 
 import type { AgentPolicy } from "../domain/agent-policy.js";
-import { askQuestionToolOutput, normalizeAskQuestionForCard } from "../domain/ask-question.js";
+import { askQuestionToolOutput, parseAskQuestionInput } from "../domain/ask-question.js";
 import type { DeferInput } from "../domain/defer.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
@@ -167,15 +167,12 @@ export function askUserTools(input: {
           },
         },
       },
-      handler: async (input) => {
-        const result = normalizeAskQuestionForCard(input);
-        if (!result.ok) {
-          return { content: [{ type: "text", text: result.error }], isError: true };
-        }
-        const output = askQuestionToolOutput(result.questions, widgetsShow);
-        const text = typeof output === "string" ? output : JSON.stringify(output);
-        return { content: [{ type: "text", text }] };
-      },
+      handler: (input) =>
+        run("ask_question", input, async () => {
+          const result = parseAskQuestionInput(input);
+          if (!result.ok) throw new Error(result.error);
+          return askQuestionToolOutput(result.questions, widgetsShow);
+        }),
     },
   ];
   // `defer` injects an inbound message rather than drawing a widget, so it is

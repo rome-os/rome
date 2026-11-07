@@ -51,26 +51,25 @@ export function searchSkills(
   limit: number | undefined,
 ): SkillSummary[] {
   const normalizedLimit = normalizeSearchLimit(limit);
-  const matcher = createSearchMatcher(queryText);
+  const matches = createSearchMatcher(queryText);
   const sortedSkills = [...skillCatalog].sort((left, right) => left.name.localeCompare(right.name));
 
-  if (!matcher) {
+  if (!matches) {
     return sortedSkills.slice(0, normalizedLimit).map(toSkillSummary);
   }
 
   return sortedSkills
     .map((skill) => {
       const haystack = [skill.name, skill.description, ...(skill.tools ?? [])].join(" ");
-      if (!matcher.matches(haystack)) {
+      if (!matches(haystack)) {
         return null;
       }
 
-      let score = 1;
-      score += matcher.scoreName(skill.name);
-      score += matcher.scoreDescription(skill.description);
-      if (matcher.kind === "regex" && (skill.tools ?? []).some((tool) => matcher.matches(tool))) {
-        score += 1;
-      }
+      // A name ranks above a description, which ranks above a tool.
+      const score =
+        (matches(skill.name) ? 5 : 0) +
+        (matches(skill.description) ? 3 : 0) +
+        ((skill.tools ?? []).some((tool) => matches(tool)) ? 1 : 0);
 
       return { skill, score };
     })

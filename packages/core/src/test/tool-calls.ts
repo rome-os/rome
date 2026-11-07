@@ -9,9 +9,10 @@ import {
   type RomeToolDefinition,
   type RomeToolResult,
   type RomeTools,
-  type RomeToolsOptions,
   type Subagents,
 } from "../agent/index.js";
+
+type RomeToolsOptions = Parameters<typeof createRomeTools>[0];
 
 export interface TestRomeToolsOptions extends Partial<Omit<RomeToolsOptions, "subagents">> {
   subagentTools?: readonly RomeToolDefinition[];
