@@ -25,6 +25,7 @@ import {
   OWNER_NAME,
   OWNER_URL,
   profileDom,
+  relationshipVariantsLayout,
 } from "./connect-test-fixtures.mjs";
 
 const options = { expectedName: OWNER_NAME, ownerVanity: "jane-doe" };
@@ -182,6 +183,60 @@ test("Message beside the owner's own Connect stays connectable", async () => {
   assert.equal(verdict.blockReason, "verified");
   assert.equal(verdict.method, "header_button");
   assert.deepEqual(page.clicks, []);
+});
+
+test("a hidden first-degree variant never outranks the visible second-degree header", async () => {
+  const hiddenFirst = [
+    "<span hidden>1st degree connection</span>",
+    '<div hidden><span class="dist-value">1st</span></div>',
+    '<span style="display: none">· 1st</span>',
+    '<span style="visibility: hidden">· 1st</span>',
+  ];
+  const visibleSecond = [
+    '<span class="dist-value">2nd</span>',
+    '<span class="visually-hidden">2nd degree connection</span>',
+  ];
+  for (const hidden of hiddenFirst) {
+    for (const badges of [
+      [hidden, ...visibleSecond],
+      [...visibleSecond, hidden],
+    ]) {
+      const { page, probe, verdict } = await classify(relationshipVariantsLayout(badges));
+      assert.equal(probe.degree, "2nd", hidden);
+      assert.equal(probe.firstDegree, false, hidden);
+      assert.equal(probe.connectAvailable, true, hidden);
+      assert.equal(verdict.blockReason, "verified", hidden);
+      assert.equal(verdict.method, "header_button", hidden);
+      assert.deepEqual(page.clicks, [], hidden);
+    }
+  }
+});
+
+test("a hidden second-degree variant leaves a visible first-degree badge in force", async () => {
+  const { probe, verdict } = await classify(
+    relationshipVariantsLayout([
+      "<span hidden>2nd degree connection</span>",
+      '<span aria-label="1st degree connection">· 1st</span>',
+    ]),
+  );
+  assert.equal(probe.degree, "1st");
+  assert.equal(probe.firstDegree, true);
+  assert.equal(verdict.blockReason, "already_connected");
+});
+
+test("conflicting visible degree badges are unverified, never already connected", async () => {
+  for (const badges of [
+    ['<span class="dist-value">1st</span>', '<span class="dist-value">2nd</span>'],
+    ['<span class="dist-value">2nd</span>', '<span aria-label="1st degree connection">·</span>'],
+  ]) {
+    const { page, probe, verdict } = await classify(relationshipVariantsLayout(badges));
+    assert.equal(probe.firstDegree, true, badges.join(""));
+    assert.equal(verdict.ok, false, badges.join(""));
+    assert.equal(verdict.safety, "unsafe_block", badges.join(""));
+    assert.equal(verdict.connectable, null, badges.join(""));
+    assert.equal(verdict.blockReason, "connection_degree_conflict", badges.join(""));
+    assert.deepEqual(page.clicks, [], badges.join(""));
+  }
 });
 
 test("only the owner's invitation link is captured", async () => {

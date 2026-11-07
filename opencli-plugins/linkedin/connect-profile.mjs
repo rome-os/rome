@@ -222,9 +222,12 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
 
   if (mode === "probe") {
     const owned = header ? ownedBy(header) : () => false;
+    // LinkedIn can keep markup for another relationship in the header without showing it, so
+    // only rendered badges count. Visually hidden accessibility text is still rendered.
+    const shown = (el) => visible(el) && getComputedStyle(el).visibility !== "hidden";
     const degrees = new Set();
     for (const el of header ? [header, ...header.querySelectorAll("*")] : []) {
-      if (!owned(el)) continue;
+      if (!owned(el) || !shown(el)) continue;
       const value = clean(el.textContent);
       const badge =
         (value.length <= 80 &&
@@ -529,6 +532,13 @@ export function assessConnectability(probe, menu, expectedName, expectedProfileU
   }
   if (!probe.headerFound) return result(block("unsafe_block", "owner_header_not_found"));
   // The degree badge is read from the owner header only, so it outranks any Connect control.
+  // A header that shows first degree beside another degree proves neither.
+  const degrees = String(probe.degree ?? "")
+    .split(",")
+    .filter(Boolean);
+  if (probe.firstDegree && degrees.some((degree) => degree !== "1st")) {
+    return result(block("unsafe_block", "connection_degree_conflict"));
+  }
   if (probe.firstDegree || menu?.removeConnection) {
     return result(block("routine_non_connectable", "already_connected", false));
   }
