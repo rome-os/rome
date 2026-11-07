@@ -1,0 +1,5 @@
+language js
+
+TsImportType() as $t where {
+  register_diagnostic(span=$t, message="Use a top-level `import type` so the import boundary rules can check it.")
+}

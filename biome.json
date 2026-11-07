@@ -118,7 +118,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["..", "../*", "../infrastructure/**", "../../**", "@/**"],
+                    "group": ["..", "../**", "!../domain/**", "@/**"],
                     "message": "agent/application/ imports only agent/domain/, agent/application/ and packages. See DEVELOPMENT.md#established-patterns."
                   }
                 ]
@@ -272,6 +272,17 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/**"],
+      "plugins": ["./biome-plugins/no-inline-import-type.grit"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noUnusedTemplateLiteral": "error"
           }
         }
       }
