@@ -1081,6 +1081,10 @@ async function main() {
       return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
+  // Real push sender in the main process (holds the durable instance token);
+  // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
+  // `notify.send` back to this same instance. The Concierge pushes through it too.
+  const notifyClient = new NotifyClient();
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
@@ -1104,6 +1108,7 @@ async function main() {
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
+    notify: notifyClient,
   });
   const agentSessionManager = createAgentSessionManager(
     {
@@ -1240,10 +1245,6 @@ async function main() {
     appConnections,
   );
 
-  // Real push sender in the main process (holds the durable instance token);
-  // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
-  // `notify.send` back to this same instance.
-  const notifyClient = new NotifyClient();
   // Learn whether this boot's release version differs from the last completed
   // boot's — the dashboard reads the result via /api/build-info. The stored
   // version is committed after "Rome started" below.

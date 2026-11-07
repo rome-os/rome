@@ -152,8 +152,8 @@ describe("backend turn delivery", () => {
     ).toBe("failed");
   });
 
-  it("asks the runner to keep a turn's input only when the caller labels it", async () => {
-    const run = async (options?: { inputLabel?: string }) => {
+  it("asks the runner to keep a turn's input only when the caller labels it, and hands on its push level", async () => {
+    const run = async (options?: { inputLabel?: string; pushLevel?: "active" | "passive" }) => {
       const agentRunner = createMockAgentRunner([
         [
           { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
@@ -190,6 +190,8 @@ describe("backend turn delivery", () => {
     });
     // A task event, a nudge or a defer resume passes no label and keeps no input.
     expect(await run()).not.toHaveProperty("inputLabel");
+    expect(await run({ pushLevel: "passive" })).toMatchObject({ pushLevel: "passive" });
+    expect(await run()).not.toHaveProperty("pushLevel");
   });
 
   it("passes a quiet turn's option to the webchat runtime, and nothing for an ordinary one", async () => {
