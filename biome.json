@@ -65,7 +65,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/core/**"],
+      "includes": ["packages/**"],
       "linter": {
         "rules": {
           "style": {
@@ -80,6 +80,154 @@
                       "**/agent/infrastructure/**"
                     ],
                     "message": "Import a layered context through its index.ts, never from its domain/, application/ or infrastructure/. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/domain/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["..", "../**", "@/**"],
+                    "message": "agent/domain/ imports only agent/domain/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/application/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["..", "../*", "../infrastructure/**", "../../**", "@/**"],
+                    "message": "agent/application/ imports only agent/domain/, agent/application/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/infrastructure/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../index",
+                      "../index.*",
+                      "../application/**",
+                      "@/agent/index",
+                      "@/agent/index.*",
+                      "@/agent/application/**"
+                    ],
+                    "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/infrastructure/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../../index",
+                      "../../index.*",
+                      "../../application/**",
+                      "@/agent/index",
+                      "@/agent/index.*",
+                      "@/agent/application/**"
+                    ],
+                    "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/infrastructure/*/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../../../index",
+                      "../../../index.*",
+                      "../../../application/**",
+                      "@/agent/index",
+                      "@/agent/index.*",
+                      "@/agent/application/**"
+                    ],
+                    "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/infrastructure/*/*/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../../../../index",
+                      "../../../../index.*",
+                      "../../../../application/**",
+                      "@/agent/index",
+                      "@/agent/index.*",
+                      "@/agent/application/**"
+                    ],
+                    "message": "agent/infrastructure/ never imports agent/application/ or agent/index.ts. See DEVELOPMENT.md#established-patterns."
                   }
                 ]
               }
