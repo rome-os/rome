@@ -32,6 +32,8 @@ xcrun devicectl device process launch --device <device-id> --terminate-existing 
 
 Installing works on a locked phone, but launching does not: it fails with "Locked", so unlock the phone first.
 
+A phone keeps an installed app's team. A build signed by another team is refused with "MismatchedApplicationIdentifierEntitlement", so delete the app from the phone first; that also deletes its sign-in. The first launch right after installing from a new team can fail with "Application failed preflight checks"; launch again.
+
 ## Release to TestFlight
 
 Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome", HTTPS to `https://romeos.cc` only, and no demo data, snapshot runner, debug environment variables or Mac Catalyst. Debug builds are `cc.romeos.mobile.dev`, named "Rome Dev", so both can sit on one phone. `MARKETING_VERSION` is in `Config/Base.xcconfig`.
