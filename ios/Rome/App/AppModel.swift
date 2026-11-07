@@ -261,6 +261,7 @@ final class AppModel {
         instances.first { $0.id == currentInstanceID }.flatMap { URL(string: $0.origin) }
     }
     private let token = TokenBox()
+    private let languageSync = LanguageSync()
     private var refreshing = false
     private var foreground = ForegroundGate()
 
@@ -474,6 +475,7 @@ final class AppModel {
 
     private func open(_ workspace: Workspace) async {
         self.workspace = workspace
+        syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
         // reopened workspace attaches, and would cancel the reopen with it.
         update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
@@ -511,10 +513,24 @@ final class AppModel {
     /// app was suspended, so they refetch and the socket starts over.
     func appDidBecomeActive() {
         appearance.apply()
+        syncLanguage()
         // Notifications turned on in the Settings app register this phone.
         Task { await push.launch() }
         if foreground.becameActive(at: .now) {
             workspace?.backend.events.resume()
+        }
+    }
+
+    /// The app's language as iOS resolved it, sent to the instance when the
+    /// guardian changed it since last time.
+    private func syncLanguage() {
+        guard let workspace else { return }
+        let backend = workspace.backend
+        let current = LanguageSync.code(Bundle.main.preferredLocalizations.first)
+        Task {
+            await languageSync.check(host: workspace.host, current: current, isGuardian: { await backend.isGuardian() }) { code in
+                try await backend.setGuardianLanguage(code)
+            }
         }
     }
 

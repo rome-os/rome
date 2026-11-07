@@ -270,3 +270,62 @@ final class StubBackend: RomeBackend {
         #expect(AppLanguage.name(nil) == "English")
     }
 }
+
+@MainActor
+@Suite struct LanguageSyncTests {
+    private func defaults() -> UserDefaults {
+        let name = "language-sync-\(UUID().uuidString)"
+        return UserDefaults(suiteName: name)!
+    }
+
+    @Test func mapsToTheDashboardsCodes() {
+        #expect(LanguageSync.code("zh-Hans") == "zh-CN")
+        #expect(LanguageSync.code("en") == "en")
+        #expect(LanguageSync.code(nil) == "en")
+    }
+
+    /// A first run or a new instance only remembers: it never overwrites a
+    /// choice made on another device.
+    @Test func theFirstSightDoesNotWrite() async {
+        let sync = LanguageSync(defaults: defaults())
+        var writes: [String] = []
+        await sync.check(host: "a", current: "zh-CN", isGuardian: { true }) { writes.append($0) }
+        #expect(writes.isEmpty)
+    }
+
+    @Test func aChangeWritesOnceAndNoChangeDoesNot() async {
+        let sync = LanguageSync(defaults: defaults())
+        var writes: [String] = []
+        await sync.check(host: "a", current: "en", isGuardian: { true }) { writes.append($0) }
+        await sync.check(host: "a", current: "en", isGuardian: { true }) { writes.append($0) }
+        #expect(writes.isEmpty)
+        await sync.check(host: "a", current: "zh-CN", isGuardian: { true }) { writes.append($0) }
+        await sync.check(host: "a", current: "zh-CN", isGuardian: { true }) { writes.append($0) }
+        #expect(writes == ["zh-CN"])
+        // Each instance remembers its own.
+        await sync.check(host: "b", current: "zh-CN", isGuardian: { true }) { writes.append($0) }
+        #expect(writes == ["zh-CN"])
+    }
+
+    @Test func aFailedWriteIsTriedAgain() async {
+        let sync = LanguageSync(defaults: defaults())
+        var attempts = 0
+        await sync.check(host: "a", current: "en", isGuardian: { true }) { _ in }
+        await sync.check(host: "a", current: "zh-CN", isGuardian: { true }) { _ in
+            attempts += 1
+            throw APIError.network
+        }
+        var writes: [String] = []
+        await sync.check(host: "a", current: "zh-CN", isGuardian: { true }) { writes.append($0) }
+        #expect(attempts == 1)
+        #expect(writes == ["zh-CN"])
+    }
+
+    @Test func aVisitorNeverWrites() async {
+        let sync = LanguageSync(defaults: defaults())
+        var writes: [String] = []
+        await sync.check(host: "a", current: "en", isGuardian: { false }) { writes.append($0) }
+        await sync.check(host: "a", current: "zh-CN", isGuardian: { false }) { writes.append($0) }
+        #expect(writes.isEmpty)
+    }
+}

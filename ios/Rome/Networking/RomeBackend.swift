@@ -53,6 +53,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func search(_ query: String) async throws -> [SearchHit]
     /// The guardian's display name on this instance.
     func me() async throws -> String?
+    /// Whether this session is the instance's guardian, not a visitor.
+    func isGuardian() async -> Bool
+    /// The language the server writes in for the guardian: "en" or "zh-CN".
+    func setGuardianLanguage(_ code: String) async throws
     func routines() async throws -> [Routine]
     func setRoutine(_ id: String, enabled: Bool) async throws
     func sendFeedback(_ text: String) async throws
@@ -183,6 +187,15 @@ final class LiveBackend: RomeBackend {
         return body["displayName"]?.string ?? body["email"]?.string ?? body["userId"]?.string
     }
 
+    func isGuardian() async -> Bool {
+        let body: JSONValue? = try? await client.get("/auth/me")
+        return body?["kind"]?.string == "guardian"
+    }
+
+    func setGuardianLanguage(_ code: String) async throws {
+        try await client.put("/settings", json: .object(["guardianLanguage": .string(code)]))
+    }
+
     func routines() async throws -> [Routine] {
         try await client.get("/routines")
     }
@@ -259,4 +272,10 @@ enum ToolCallExtractor {
         }
         return ""
     }
+}
+
+extension RomeBackend {
+    /// Stand-ins (demo, tests) are no guardian of a real instance.
+    func isGuardian() async -> Bool { false }
+    func setGuardianLanguage(_ code: String) async throws {}
 }
