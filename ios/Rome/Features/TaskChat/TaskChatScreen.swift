@@ -16,21 +16,9 @@ struct TaskChatScreen: View {
 
     private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
 
-    private var tone: TaskTone {
-        if let store, store.running { return .running }
-        return workspace.tasks.tone(forChat: chatId)
-    }
-
-    /// The spinner runs only while the chat runs a turn. A task still being
-    /// worked on between turns shows a still dot.
+    /// The header shows a spinner only while this chat runs a turn. The
+    /// task's own state is left out: it is not reported accurately enough.
     private var spinning: Bool { store?.running == true }
-    /// "Stopped" stands in only while the task still reads as being worked on.
-    /// Once it is done, failed or needs the guardian, that status shows instead.
-    private var stoppedHere: Bool {
-        guard store?.stopped == true, !spinning else { return false }
-        let status = workspace.tasks.tone(forChat: chatId)
-        return status == .running || status == .neutral
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,31 +78,22 @@ struct TaskChatScreen: View {
             GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
                 Image(systemName: "chevron.left").romeFont(17, .semibold)
             }
-            VStack(spacing: 1) {
+            HStack(spacing: 8) {
                 Text(title)
                     .romeFont(16, .semibold)
                     .tracking(-0.3)
                     .lineLimit(1)
-                if spinning || stoppedHere || tone != .neutral {
-                    HStack(spacing: 5) {
-                        if spinning {
-                            Spinner(size: 10, lineWidth: 2.4, color: tone.text, trackOpacity: 0.3)
-                        } else {
-                            Circle().fill(stoppedHere ? Palette.sub : tone.dot).frame(width: 6, height: 6)
-                        }
-                        Text(spinning ? String(localized: "Running") : stoppedHere ? String(localized: "Stopped") : tone.label)
-                    }
-                    .romeFont(12, .medium)
-                    .foregroundStyle(stoppedHere ? Palette.sub : tone.text)
-                    .transition(.opacity)
+                if spinning {
+                    Spinner(size: 12, lineWidth: 2.4, color: Palette.sub, trackOpacity: 0.3)
+                        .transition(.opacity)
+                        .accessibilityLabel("Running")
                 }
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 44)
             .glassSurface(Capsule())
             .frame(maxWidth: .infinity)
-            .animation(.easeInOut(duration: 0.25), value: tone)
-            .animation(.easeInOut(duration: 0.25), value: stoppedHere)
+            .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {
                 Button {
                     if let url = model.webURL?.appending(path: "chat/\(chatId)") { openURL(url) }
