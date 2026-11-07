@@ -79,7 +79,9 @@ struct AppsScreen: View {
     private func load() async {
         failed = false
         do {
-            apps = AppLinks.mine(try await workspace.backend.apps())
+            let mine = AppLinks.mine(try await workspace.backend.apps())
+            apps = mine
+            Task { await workspace.shelve(mine) }
         } catch {
             if apps == nil { failed = true }
         }

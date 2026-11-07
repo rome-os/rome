@@ -188,6 +188,25 @@ struct MainShell: View {
         .onChange(of: showTasks) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         // A tapped push for this instance: its chat in front, nothing over it.
+        .onChange(of: model.widgetRequest) { _, request in
+            guard let link = request.link else { return }
+            showTasks = false
+            showSettings = false
+            closeDrawer()
+            switch link {
+            case .app(_, let appId):
+                show(.apps)
+                let name = AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name
+                path = [.app(InstalledApp(id: appId, displayName: name))]
+            case .apps:
+                show(.apps)
+                path = []
+            case .newApp:
+                show(.chat)
+                path = []
+                workspace.composerPrefill = AppIdea.own.prompt
+            }
+        }
         .onChange(of: model.chatRequest) { _, request in
             showTasks = false
             showSettings = false
