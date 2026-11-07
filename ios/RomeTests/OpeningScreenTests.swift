@@ -36,6 +36,21 @@ import Testing
         #expect(blink.glance == 0 && blink.nod == 0 && blink.tilt == 0)
     }
 
+    /// Taps on the header mascot cycle through its reactions; Reduce Motion only blinks.
+    @Test func tapsCycleThroughReactions() {
+        let taps = (1...6).map { MascotReaction.forTap($0, reduceMotion: false) }
+        #expect(taps == [.blink, .wink, .glance, .nod, .blink, .wink])
+        #expect((1...4).allSatisfy { MascotReaction.forTap($0, reduceMotion: true) == .blink })
+        for reaction in MascotReaction.allCases {
+            let total = reaction.steps.map(\.1).reduce(0, +)
+            #expect(total > 0.15 && total <= 0.35)
+            #expect(reaction.steps.last?.0 == .rest)
+        }
+        // A wink closes one eye only.
+        #expect(MascotReaction.wink.steps.first?.0.rightEyeScale ?? 1 < 0.2)
+        #expect(MascotReaction.wink.steps.first?.0.eyeScale == 1)
+    }
+
     @Test func eachPathIsParsedOnce() {
         let first = SVGPath.cached(MascotPaths.body)
         #expect(first == SVGPath.parse(MascotPaths.body))

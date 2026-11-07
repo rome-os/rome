@@ -208,6 +208,8 @@ struct ChatHeader: View {
     var plainTitle = false
     /// The main Chat: the mascot in the pill, read out as the title.
     var mascotTitle = false
+    @State private var pokes = 0
+    @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
 
     var body: some View {
         HStack {
@@ -218,14 +220,23 @@ struct ChatHeader: View {
                 PlainHeaderTitle(title: title)
             } else if mascotTitle {
                 Spacer()
-                Mascot(blinks: true)
+                Mascot(blinks: true, pokes: pokes)
                     .frame(height: 22)
                     .padding(.horizontal, 22)
                     .frame(height: 44)
                     .glassSurface(Capsule())
+                    // The whole pill: a soft tap and a reaction, nothing else.
+                    .contentShape(Capsule())
+                    .onTapGesture {
+                        haptic.impactOccurred()
+                        haptic.prepare()
+                        pokes += 1
+                    }
+                    .onAppear { haptic.prepare() }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(title)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityRemoveTraits(.isButton)
                 Spacer()
             } else {
                 Spacer()
