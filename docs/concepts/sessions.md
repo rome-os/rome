@@ -210,7 +210,7 @@ A forked turn is a side conversation branched from a live session's full context
 The caller creating the fork chooses one of two modes:
 
 - **Isolated** (the default) — the fork opens with an empty tool surface: no actions, skills, subagents, or builtin tools. It can only read the inherited conversation and answer. This is the right mode for side-channel turns that must not act.
-- **Exact** — the fork opens with the source session's exact configuration, so the conversation prefix the model sees (system prompt, tool catalog, transcript) is identical to the source. Tools remain callable. Anything the fork executes is attributed to the fork's own session and turn — never the source's — and subagent output streams into the fork, not the source conversation. This is the mode for branch-style features that need the fork to behave as a true continuation of the conversation.
+- **Exact** — the fork opens with the source session's exact configuration, so the conversation prefix the model sees (system prompt, tool catalog, transcript) is identical to the source. Tools remain callable. A session tool runs only when the fork can run it on its own, and the others are refused as unavailable in a forked turn ([Session tools](../domains/agents.md#session-tools)). Anything the fork executes is attributed to the fork's own session and turn — never the source's — and subagent output streams into the fork, not the source conversation. This is the mode for branch-style features that need the fork to behave as a true continuation of the conversation.
 
 The caller also chooses how long the fork's provider branch lives:
 

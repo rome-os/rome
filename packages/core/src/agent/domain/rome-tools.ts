@@ -51,17 +51,6 @@ export interface RomeTool extends RomeToolDefinition {
   handler: RomeToolHandler;
 }
 
-/** The same tools with handlers that refuse: a forked turn advertises its source's catalog unchanged. */
-export function detachSessionTools(tools: readonly RomeTool[]): RomeTool[] {
-  return tools.map((tool) => ({
-    ...tool,
-    handler: async () => ({
-      content: [{ type: "text", text: `${tool.name} is unavailable in a forked turn.` }],
-      isError: true,
-    }),
-  }));
-}
-
 export interface RomeTools {
   listTools(group: RomeToolGroup): readonly RomeToolDefinition[];
   /**

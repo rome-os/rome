@@ -37,13 +37,14 @@ import {
   FETCH_CHANNEL_HISTORY_ACTION,
   resolveAgentPolicy,
   createRomeTools,
-  detachSessionTools,
+  forkSessionTools,
   showsWidgets,
   widgetDrawingFor,
   type AgentAction,
   type AgentActions,
   type WakeUp,
   type RomeTool,
+  type RomeToolDefinition,
   subagentToolName,
   type Subagent,
   type RomeTools,
@@ -1283,12 +1284,27 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
+  // `propose_routine`, bound to the refs that run it. With no speaker the
+  // handler refuses, since nothing would mount its card.
+  const proposeRoutine = (refs: TurnExecRefs, session: { hasSpeaker: boolean }) =>
+    proposeRoutineTools({
+      widgets,
+      hasSpeaker: session.hasSpeaker,
+      gate: routineActivation,
+      runAction: makeRunAction(refs),
+    });
+  // The live session's session tools: the provider's answer, then `propose_routine`.
+  const liveSessionTools = (provided: readonly RomeTool[]): RomeTool[] => [
+    ...provided,
+    ...proposeRoutine(sessionExecRefs, { hasSpeaker: true }),
+  ];
+
   // The Rome tools a session serves, bound to the refs that run them. The live
-  // session has a speaker; a fork has none, refuses the provider's tools and may
-  // have no `defer`, but its catalog still matches its source's.
+  // session has a speaker; a fork has none and may have no `defer`, and its
+  // session tools are its source's (`forkSessionTools`).
   const romeTools = (
     refs: TurnExecRefs,
-    session: { hasSpeaker: boolean; providedTools: readonly RomeTool[]; defers: boolean },
+    session: { hasSpeaker: boolean; sessionTools: readonly RomeTool[]; defers: boolean },
   ) =>
     createRomeTools({
       actions: agentActions(refs),
@@ -1300,18 +1316,10 @@ async function openSession(
       widgetsShow: showsWidgets(widgets, session.hasSpeaker),
       log,
       defer: session.defers ? deferTool(refs) : undefined,
-      sessionTools: [
-        ...session.providedTools,
-        ...proposeRoutineTools({
-          widgets,
-          hasSpeaker: session.hasSpeaker,
-          gate: routineActivation,
-          runAction: makeRunAction(refs),
-        }),
-      ],
+      sessionTools: session.sessionTools,
     });
-  const liveRomeTools = (providedTools: readonly RomeTool[]) =>
-    romeTools(sessionExecRefs, { hasSpeaker: true, providedTools, defers: true });
+  const liveRomeTools = (sessionTools: readonly RomeTool[]) =>
+    romeTools(sessionExecRefs, { hasSpeaker: true, sessionTools, defers: true });
 
   const buildSessionParams = (
     resolution: ModelResolution,
@@ -1348,8 +1356,9 @@ async function openSession(
   // identity by construction: a field added to ModelSessionParams flows into
   // exact forks without a second hand-maintained list.
   let lastOpenParams: ModelSessionParams | undefined;
-  // The session tools provider's last answer, which a fork refuses outright.
-  let lastProvidedTools: readonly RomeTool[] = [];
+  // The session tools the live session last opened with. A fork's are these
+  // (`forkSessionTools`); the run carries them until a session's tools are stored.
+  let sourceSessionTools: readonly RomeToolDefinition[] = [];
 
   const openModelSession = async (
     resolution: ModelResolution,
@@ -1365,9 +1374,10 @@ async function openSession(
       getThreadContext: sessionExecRefs.getThreadContext,
       getTurnPushLevel: () => impl.currentTurnPushLevelRef,
     });
+    const sessionTools = liveSessionTools(providedTools ?? []);
     const params = buildSessionParams(
       resolution,
-      liveRomeTools(providedTools ?? []),
+      liveRomeTools(sessionTools),
       resumeProviderId,
       resumeThreadId,
     );
@@ -1388,7 +1398,7 @@ async function openSession(
       resumed,
     });
     lastOpenParams = params;
-    lastProvidedTools = providedTools ?? [];
+    sourceSessionTools = sessionTools;
     return session;
   };
 
@@ -1510,7 +1520,10 @@ async function openSession(
         // callbacks, never the source's per-turn closures.
         tools: romeTools(refs, {
           hasSpeaker: false,
-          providedTools: detachSessionTools(lastProvidedTools),
+          sessionTools: forkSessionTools(
+            sourceSessionTools,
+            proposeRoutine(refs, { hasSpeaker: false }),
+          ),
           defers: !fork.continuable,
         }),
       },
@@ -1582,7 +1595,7 @@ async function openSession(
           },
           model: "code-backed",
         },
-        liveRomeTools([]),
+        liveRomeTools(liveSessionTools([])),
       ),
     });
   } else {
