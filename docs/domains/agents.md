@@ -18,6 +18,12 @@ Whose subscription an agent's turns run under when Rome credits is not the payer
 - The account reports its own status and usage. Rome reads them and derives neither.
 - In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex adapter. The dashboard calls it. An agent's run never does.
 
+## Model selection
+
+A model a guardian picks by name for a chat, such as `claude-sonnet` or `gpt-6-luna`, and the provider that serves it. It is one of a fixed list the agent context owns. Leaving the choice to Rome ("auto" in the dashboard) is not a selection but the absence of one, so the resolver picks by [tier](../concepts/agents.md#model-selection) instead.
+
+- In code it is `ModelSelection` in [`packages/core/src/agent/domain/model-selection.ts`](../../packages/core/src/agent/domain/model-selection.ts). The webchat settings that store a guardian's pick read it from there.
+
 ## Payer
 
 Who pays for a turn: the model provider account or Rome credits, one at a time. The provider that served the turn reports it, and Rome records it as read. In code it is `ModelFunding` on the model port.

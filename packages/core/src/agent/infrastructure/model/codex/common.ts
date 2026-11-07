@@ -6,7 +6,7 @@ import {
   buildAgentAccounting,
   calculateImpliedCostUsd,
 } from "../../../../core/provider-accounting.js";
-import { stripLegacyReasoningSuffix } from "../../../../core/model-alias.js";
+import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 
 /** Token usage for a Codex turn. Mirrors the shape codex emits over the
  *  app-server protocol. */

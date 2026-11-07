@@ -15,9 +15,9 @@ import { CodexAppServerManager } from "./app-server-manager.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 import { ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "../../../../core/model-selector.js";
+import { MODEL_SELECTIONS } from "../../../domain/model-selection.js";
 
-const codexModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
+const codexModels = Object.values(MODEL_SELECTIONS)
   .filter((selection) => selection.providerId === "openai")
   .map((selection) => selection.model);
 

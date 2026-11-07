@@ -1,13 +1,14 @@
 import { describe, expect, it } from "@rstest/core";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "./model-selector.js";
+import { MODEL_SELECTIONS } from "../agent/index.js";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "./provider-accounting.js";
 
 describe("provider-accounting", () => {
   // A model without a pricing rule records no cost at all, and the session
   // shows "API cost unknown". Adding a selectable model must add its price.
-  it.each(
-    Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS),
-  )("prices selectable model $id ($providerId $model)", ({ providerId, model }) => {
+  it.each(Object.values(MODEL_SELECTIONS))("prices selectable model $id ($providerId $model)", ({
+    providerId,
+    model,
+  }) => {
     const cost = calculateImpliedCostUsd(providerId, model, {
       inputTokens: 1_000_000,
       outputTokens: 1_000_000,

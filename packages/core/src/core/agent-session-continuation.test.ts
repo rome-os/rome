@@ -31,7 +31,7 @@ import {
   type AgentSessionManager,
 } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import type { ModelSelectionId } from "./model-selector.js";
+import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";

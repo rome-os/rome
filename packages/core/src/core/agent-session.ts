@@ -78,7 +78,8 @@ import {
 } from "./model-resolver.js";
 import { isConciergeAgent } from "../concierge/service.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
+import type { ModelSelectionId } from "../agent/index.js";
+import { resolveWebchatLargeModelSelection } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";

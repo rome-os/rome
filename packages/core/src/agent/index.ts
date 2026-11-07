@@ -28,6 +28,13 @@ export type {
 } from "./domain/model-account.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export type { ModelTier } from "./domain/model-tier.js";
+export { matchesModelAlias, stripLegacyReasoningSuffix } from "./domain/model-alias.js";
+export {
+  isModelSelectionId,
+  MODEL_SELECTIONS,
+  type ModelSelection,
+  type ModelSelectionId,
+} from "./domain/model-selection.js";
 export type {
   McpServerConfig,
   ModelFunding,

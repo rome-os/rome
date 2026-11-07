@@ -7,8 +7,12 @@ import {
   type AIToolStateValue,
   type ProviderState,
 } from "./ai-tool-state.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
-import { matchesModelAlias, stripLegacyReasoningSuffix } from "./model-alias.js";
+import {
+  matchesModelAlias,
+  MODEL_SELECTIONS,
+  type ModelSelectionId,
+  stripLegacyReasoningSuffix,
+} from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
@@ -305,7 +309,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
-        const selection = WEBCHAT_LARGE_MODEL_SELECTIONS[request.selectionId];
+        const selection = MODEL_SELECTIONS[request.selectionId];
         if (selection.providerId === "openai") await settleServedModels();
         const state = resolutionState();
         const provider = providers.get(selection.providerId);

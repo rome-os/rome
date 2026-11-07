@@ -65,8 +65,8 @@ import {
   normalizeWebchatLargeModelSelectionId,
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
-  type WebchatLargeModelSelection,
 } from "../../core/model-selector.js";
+import type { ModelSelection } from "../../agent/index.js";
 import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
@@ -1697,7 +1697,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const resolveRequestedInitialModelSelection = async (
     requested: unknown,
-  ): Promise<WebchatLargeModelSelection | null> => {
+  ): Promise<ModelSelection | null> => {
     const enabled = await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY);
     if (enabled !== true) {
       return null;
@@ -1723,7 +1723,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     );
   };
 
-  const resolveStoredModelSelection = (stored: unknown): WebchatLargeModelSelection | null => {
+  const resolveStoredModelSelection = (stored: unknown): ModelSelection | null => {
     if (stored === null || stored === undefined) {
       return null;
     }
@@ -1759,7 +1759,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     session: { id: string; largeModelSelection?: string | null },
     messageCount: number,
     requested: unknown,
-  ): Promise<WebchatLargeModelSelection | null> => {
+  ): Promise<ModelSelection | null> => {
     const storedSelection = resolveStoredModelSelection(session.largeModelSelection);
     if (storedSelection) {
       return storedSelection;

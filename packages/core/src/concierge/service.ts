@@ -14,14 +14,10 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { SkillCatalog } from "../core/skill-catalog.js";
-import {
-  resolveWebchatLargeModelSelection,
-  WEBCHAT_LARGE_MODEL_SELECTIONS,
-  type ModelSelectionId,
-} from "../core/model-selector.js";
+import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
-import type { SessionRepository } from "../agent/index.js";
+import { MODEL_SELECTIONS, type ModelSelectionId, type SessionRepository } from "../agent/index.js";
 import {
   quotaSwitchTarget,
   sameProviderTarget,
@@ -440,9 +436,8 @@ export class ConciergeService {
     const target = candidates.find(
       (candidate) =>
         candidate &&
-        (this.leftModels.get(
-          modelKey(WEBCHAT_LARGE_MODEL_SELECTIONS[candidate.selectionId].model),
-        ) ?? 0) <= Date.now(),
+        (this.leftModels.get(modelKey(MODEL_SELECTIONS[candidate.selectionId].model)) ?? 0) <=
+          Date.now(),
     );
     if (!target) return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
@@ -455,7 +450,7 @@ export class ConciergeService {
         to: target.provider,
         reason,
         fromModel,
-        model: WEBCHAT_LARGE_MODEL_SELECTIONS[target.selectionId].model,
+        model: MODEL_SELECTIONS[target.selectionId].model,
       },
     ]);
     return { from, to: target.provider, selectionId: target.selectionId, reason };
