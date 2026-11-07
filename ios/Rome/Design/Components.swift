@@ -19,29 +19,33 @@ struct GlassCircleButton<Label: View>: View {
     }
 }
 
-/// How much page color covers a floating control's glass, so text that
-/// scrolls behind it blurs out.
+/// How much page color lies on a floating control's glass: enough that
+/// text scrolling behind is softened, light enough that the glass shows.
 enum Frost {
     /// The composer, and the controls that sit with it.
-    static let composer = 0.8
+    static var composer: Double {
+        #if DEBUG
+        // Side-by-side checks of strengths, from the scheme or simctl.
+        if let value = ProcessInfo.processInfo.environment["ROME_FROST"].flatMap(Double.init) { return value }
+        #endif
+        return 0.3
+    }
 }
 
 extension View {
     /// The system glass behind a floating control: Liquid Glass on iOS 26 and
-    /// later, a thin material with a hairline before it. `frost` tints it with
-    /// the page's color, so text scrolling behind blurs out.
+    /// later, a thin material with a hairline before it. `frost` lays the
+    /// page's color lightly on top, the glass's edge and blur still showing.
     @ViewBuilder
     func glassSurface<S: InsettableShape>(_ shape: S, interactive: Bool = false, frost: Double = 0) -> some View {
         if #available(iOS 26, *) {
-            // The frost is a blur and the page color above the glass, not its
-            // tint: iOS 27 draws a tinted glass far clearer than iOS 26 does,
-            // and text behind read through it.
+            // A fill above the glass, not its tint: iOS 27 draws a tinted
+            // glass far clearer than iOS 26, a fill looks the same on both.
             background(Palette.bg.opacity(frost), in: shape)
-                .background(frost > 0 ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.clear), in: shape)
                 .glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         } else {
             background(Palette.bg.opacity(frost), in: shape)
-                .background(frost > 0 ? .regularMaterial : .ultraThinMaterial, in: shape)
+                .background(.ultraThinMaterial, in: shape)
                 .overlay(shape.strokeBorder(Palette.hair, lineWidth: 0.5))
                 .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
         }
