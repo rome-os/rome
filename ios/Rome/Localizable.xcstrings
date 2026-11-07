@@ -97,12 +97,12 @@
         }
       }
     },
-    "A newer release just came out. Update to it to keep using the app." : {
+    "A newer release just came out." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "刚刚又发布了新版本。更新到它即可继续使用。"
+            "value" : "刚发布了更新的版本。"
           }
         }
       }
@@ -133,6 +133,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "退出后需要重新用 Rome Cloud 登录。"
+          }
+        }
+      }
+    },
+    "Almost done…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "马上好了…"
           }
         }
       }
@@ -203,6 +213,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "归档"
+          }
+        }
+      }
+    },
+    "Asking Rome Cloud to start the update…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在让 Rome Cloud 开始更新…"
           }
         }
       }
@@ -487,6 +507,16 @@
         }
       }
     },
+    "Downloading %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载 %@…"
+          }
+        }
+      }
+    },
     "Due now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -598,22 +628,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "五"
-          }
-        }
-      }
-    },
-    "From %@ to %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "From %1$@ to %2$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从 %1$@ 更新到 %2$@"
           }
         }
       }
@@ -1351,6 +1365,16 @@
         }
       }
     },
+    "Restarting your Rome…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在重启你的 Rome…"
+          }
+        }
+      }
+    },
     "Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1690,16 +1714,6 @@
         }
       }
     },
-    "Starting update" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在开始更新"
-          }
-        }
-      }
-    },
     "Stop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1831,6 +1845,16 @@
         }
       }
     },
+    "The latest is %@. The app needs the latest Rome." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新版本是 %@。App 需要最新的 Rome。"
+          }
+        }
+      }
+    },
     "The update is taking too long" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1867,16 +1891,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个 Rome 还没准备好。"
-          }
-        }
-      }
-    },
-    "This app works with the latest Rome. Update to keep using it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个 App 需要最新版的 Rome。更新后即可继续使用。"
           }
         }
       }
@@ -2049,16 +2063,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新你的 Rome"
-          }
-        }
-      }
-    },
-    "Updating to %@…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在更新到 %@…"
           }
         }
       }
@@ -2248,6 +2252,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 还没有以 %@ 重新上线。请在 Rome Cloud 中查看，或重试。"
+          }
+        }
+      }
+    },
+    "Your Rome is on %@. The latest is %@. The app needs the latest Rome." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 是 %@，最新版本是 %@。App 需要最新的 Rome。"
           }
         }
       }

@@ -10,23 +10,32 @@ struct UpdateScreen: View {
     private var updater: InstanceUpdater { model.update }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            Palette.bg
+            // The mascot stays exactly where the opening screen has it; the
+            // text hangs below it.
+            Mascot(alive: isWaiting)
+                .frame(width: Mascot.width)
+                .overlay(alignment: .top) {
+                    center
+                        .frame(width: 320)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+                }
+        }
+        .ignoresSafeArea()
+        .overlay(alignment: .top) {
             topBar
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
-            Spacer(minLength: 0)
-            center
-                .padding(.horizontal, 32)
-                .padding(.bottom, 24)
-            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .bottom) {
             bottom
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
-                .frame(minHeight: 120, alignment: .bottom)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.bg.ignoresSafeArea())
         .animation(.spring(response: 0.4, dampingFraction: 0.9), value: updater.state)
+        .animation(.easeInOut(duration: 0.25), value: updater.progress)
         .sheet(isPresented: $showInstances) {
             NavigationStack {
                 InstancesScreen(onSwitched: { showInstances = false })
@@ -71,106 +80,75 @@ struct UpdateScreen: View {
     @ViewBuilder
     private var center: some View {
         switch updater.state {
-        case .updating(let target, _):
-            VStack(spacing: 20) {
-                Spinner(size: 30, lineWidth: 2.6, color: Palette.primary, trackOpacity: 0.16)
-                    .frame(width: 64, height: 64)
-                    .background(Palette.primarySoft, in: Circle())
-                VStack(spacing: 8) {
-                    Text("Updating to \(target)…")
-                        .romeFont(22, .semibold)
-                        .tracking(-0.4)
-                    Text("This can take a few minutes. You can leave the app; it picks up where it left off.")
-                        .romeFont(16)
-                        .lineSpacing(3)
-                        .foregroundStyle(Palette.sub)
+        case .starting, .updating:
+            VStack(spacing: 12) {
+                LoadingDots()
+                if let line = UpdateGate.statusLine(updater.state, progress: updater.progress) {
+                    Text(line)
+                        .romeFont(17, .semibold)
+                        .contentTransition(.opacity)
+                        .id(line)
+                        .transition(.opacity)
                 }
-                .multilineTextAlignment(.center)
+                Text("This can take a few minutes. You can leave the app; it picks up where it left off.")
+                    .romeFont(15)
+                    .lineSpacing(3)
+                    .foregroundStyle(Palette.sub)
             }
-            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
+            .accessibilityElement(children: .combine)
             .transition(.opacity)
         case .failed(let failure):
-            VStack(spacing: 18) {
-                AlertGlyph(size: 26)
-                    .frame(width: 64, height: 64)
-                    .background(Palette.dangerSoft, in: Circle())
-                VStack(spacing: 8) {
-                    switch failure {
-                    case .timedOut(let target):
-                        Text("The update is taking too long").romeFont(22, .semibold).tracking(-0.4)
-                        Text("Your Rome has not come back on \(target). Check it in Rome Cloud, or try again.")
-                            .romeFont(16)
-                            .foregroundStyle(Palette.sub)
-                    case .start(_, _, let message):
-                        Text("Could not start the update").romeFont(22, .semibold).tracking(-0.4)
-                        Text(message)
-                            .romeFont(16)
-                            .foregroundStyle(Palette.sub)
-                    }
+            VStack(spacing: 8) {
+                switch failure {
+                case .timedOut(let target):
+                    Text("The update is taking too long").romeFont(22, .semibold).tracking(-0.4)
+                    Text("Your Rome has not come back on \(target). Check it in Rome Cloud, or try again.")
+                        .romeFont(16)
+                        .foregroundStyle(Palette.sub)
+                case .start(_, _, let message):
+                    Text("Could not start the update").romeFont(22, .semibold).tracking(-0.4)
+                    Text(message)
+                        .romeFont(16)
+                        .foregroundStyle(Palette.sub)
                 }
-                .lineSpacing(3)
-                .multilineTextAlignment(.center)
             }
-            .frame(maxWidth: .infinity)
+            .lineSpacing(3)
+            .multilineTextAlignment(.center)
             .transition(.opacity)
         default:
-            VStack(spacing: 22) {
-                Image(systemName: "arrow.up")
-                    .romeFont(24, .semibold)
-                    .foregroundStyle(Palette.primaryIcon)
-                    .frame(width: 64, height: 64)
-                    .background(Palette.primarySoft, in: Circle())
-                VStack(spacing: 8) {
-                    Text("Update your Rome")
-                        .romeFont(28, .bold)
-                        .tracking(-0.7)
+            VStack(spacing: 8) {
+                Text("Update your Rome")
+                    .romeFont(28, .bold)
+                    .tracking(-0.7)
+                if latestChanged {
+                    Text("A newer release just came out.")
+                        .romeFont(15, .semibold)
+                        .foregroundStyle(Palette.primaryText)
+                }
+                if let release {
                     Group {
-                        if latestChanged {
-                            Text("A newer release just came out. Update to it to keep using the app.")
+                        if let current = release.current {
+                            Text("Your Rome is on \(current). The latest is \(release.latest). The app needs the latest Rome.")
                         } else {
-                            Text("This app works with the latest Rome. Update to keep using it.")
+                            Text("The latest is \(release.latest). The app needs the latest Rome.")
                         }
                     }
                     .romeFont(16)
                     .lineSpacing(3)
                     .foregroundStyle(Palette.sub)
                 }
-                .multilineTextAlignment(.center)
-                versions
             }
-            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
             .transition(.opacity)
-        }
-    }
-
-    /// Current → latest, the latest in the brand color.
-    @ViewBuilder
-    private var versions: some View {
-        if let release = release {
-            HStack(spacing: 10) {
-                Text(verbatim: release.current ?? "—")
-                    .foregroundStyle(Palette.sub)
-                Image(systemName: "arrow.right")
-                    .romeFont(13, .semibold)
-                    .foregroundStyle(Palette.sub)
-                Text(verbatim: release.latest)
-                    .foregroundStyle(Palette.primaryText)
-            }
-            .romeFont(16, .semibold, monospacedDigits: true)
-            .padding(.horizontal, 18)
-            .frame(height: 40)
-            .background(Palette.elevated, in: Capsule())
-            .softElevation(radius: 20)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("From \(release.current ?? "—") to \(release.latest)"))
         }
     }
 
     @ViewBuilder
     private var bottom: some View {
         switch updater.state {
-        case .required, .starting:
-            PrimaryButton(title: "Update now", loadingTitle: "Starting update", loading: isStarting) {
+        case .required:
+            PrimaryButton(title: "Update now") {
                 Task { await updater.updateNow() }
             }
         case .failed:
@@ -204,8 +182,11 @@ struct UpdateScreen: View {
         return false
     }
 
-    private var isStarting: Bool {
-        if case .starting = updater.state { return true }
-        return false
+    /// Waiting on the update: the mascot comes alive.
+    private var isWaiting: Bool {
+        switch updater.state {
+        case .starting, .updating: return true
+        default: return false
+        }
     }
 }

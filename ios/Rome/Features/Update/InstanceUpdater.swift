@@ -52,6 +52,38 @@ enum UpdateGate {
         return now.timeIntervalSince(since) >= upgradeTimeout ? .timedOut : .wait
     }
 
+    /// Where an update stands, as far as the app can see it.
+    enum Progress: Equatable {
+        /// The instance still answers on its old release.
+        case downloading
+        /// The instance cannot be reached: it is restarting.
+        case restarting
+        /// The target release answered.
+        case almostDone
+    }
+
+    static func progress(version: String?, target: String) -> Progress {
+        guard let version else { return .restarting }
+        return version == target ? .almostDone : .downloading
+    }
+
+    /// The update page's one status line while it waits, or nil when it
+    /// does not wait.
+    static func statusLine(_ state: InstanceUpdater.State, progress: Progress) -> String? {
+        switch state {
+        case .starting:
+            return String(localized: "Asking Rome Cloud to start the update…")
+        case .updating(let target, _):
+            switch progress {
+            case .downloading: return String(localized: "Downloading \(target)…")
+            case .restarting: return String(localized: "Restarting your Rome…")
+            case .almostDone: return String(localized: "Almost done…")
+            }
+        default:
+            return nil
+        }
+    }
+
     enum PendingDecision: Equatable {
         case keepWaiting
         /// The instance is on its latest release.
@@ -148,6 +180,8 @@ final class InstanceUpdater {
     }
 
     private(set) var state: State = .idle
+    /// While updating: what the last look at the instance found.
+    private(set) var progress: UpdateGate.Progress = .downloading
 
     var blocking: Bool {
         switch state {
@@ -341,6 +375,7 @@ final class InstanceUpdater {
     private func startPolling(_ pending: PendingUpgrade) {
         poll?.cancel()
         probesSinceCheck = 0
+        progress = .downloading
         state = .updating(target: pending.target, since: pending.since)
         let mine = generation
         poll = Task { [weak self] in
@@ -366,6 +401,7 @@ final class InstanceUpdater {
                     self?.reconnecting = false
                 }
             }
+            progress = .restarting
             if UpdateGate.pollOutcome(version: nil, target: pending.target, from: pending.from, since: pending.since, now: .now) == .timedOut {
                 state = .failed(.timedOut(target: pending.target))
                 return true
@@ -374,8 +410,12 @@ final class InstanceUpdater {
         }
         let version = try? await backend.buildInfo().version
         guard mine == generation else { return true }
+        progress = UpdateGate.progress(version: version, target: pending.target)
         switch UpdateGate.pollOutcome(version: version, target: pending.target, from: pending.from, since: pending.since, now: .now) {
         case .done:
+            // Long enough to read "Almost done…" before the app opens.
+            try? await Task.sleep(for: .milliseconds(800))
+            guard mine == generation else { return true }
             await finish()
             return true
         case .timedOut:
@@ -416,10 +456,11 @@ final class InstanceUpdater {
 
     #if DEBUG
     /// Snapshot runs only: show a state without a server round trip.
-    func debugShow(_ state: State) {
+    func debugShow(_ state: State, progress: UpdateGate.Progress = .downloading) {
         poll?.cancel()
         poll = nil
         self.state = state
+        self.progress = progress
     }
     #endif
 }
