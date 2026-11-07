@@ -15,7 +15,9 @@ A vertical is a part of a domain that can be settled and built on its own, from 
 
 **Take one coupled thing at a time.** Finish a vertical before starting the next. Settle together only what cannot be settled apart, and leave the rest for its turn.
 
-**Give every boundary one responsibility.** One sentence says what a module takes on and what it leaves to its callers. Everything it handles falls inside that sentence, and a caller's case stays with the caller.
+**Give every boundary one responsibility.** One sentence says what a module takes on and what it leaves to its callers. Everything it handles falls inside that sentence, and a caller's case stays with the caller. Judge this from the user's side: a fact enters through the party that learns it, and a user never tells a module what the module should know itself.
+
+**Keep rules in the domain.** A rule that someone who knows the domain would state belongs in the domain layer as a function over values, however deep it sits in a service today. The application layer only drives those rules through ports and holds state over time.
 
 **Let the name carry the meaning.** Use the words people use. One concept has one name and one act has one verb across the context. A reader of a signature can say what it does, when it fails and what stays true afterwards, whoever calls it.
 
@@ -27,7 +29,7 @@ A vertical is a part of a domain that can be settled and built on its own, from 
 
 ## The work
 
-Plan each vertical before any code: its words, its API as a sentence of responsibility and signatures, then what moves, which callers change and the PR boundaries. A fresh subagent, given only the plan, these principles and the points already settled, reviews the API. The person then signs off once for the whole vertical. An API change the plan does not show goes back to the plan.
+Plan each vertical before any code: its words, its API as a sentence of responsibility and signatures, then what moves, which callers change and the PR boundaries. A fresh subagent, given only the plan, these principles and the points already settled, reviews the API as its user would. The person then signs off once for the whole vertical. An API change the plan does not show goes back to the plan.
 
 Build in small PRs, with callers and adapters moved together and a word's entry landing with its first use. Run `pnpm typecheck` and `pnpm test:unit` before each push. A context's list of boundary crossings only shrinks. Shepherd each PR with [`babysit-pr`](../babysit-pr/SKILL.md).
 
