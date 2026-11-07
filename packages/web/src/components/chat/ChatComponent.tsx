@@ -21,6 +21,7 @@ import {
   startConciergeTopicChat,
   useConciergeChat,
   useConciergeChats,
+  useConciergeName,
 } from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
@@ -76,9 +77,10 @@ export function ChatComponent({
   const { data: settings } = useSettings();
   const concierge = useConciergeChat();
   const conciergeChats = useConciergeChats();
+  const conciergeName = useConciergeName();
   const isListedConcierge =
     sessionId === concierge.chatId ||
-    // The guardian's main chat, opened at `/chat/concierge` before it is loaded.
+    // The guardian's main chat, opened by its fixed id before it is loaded.
     (concierge.chatId === null && sessionId === CONCIERGE_CHAT_ID) ||
     conciergeChats.some((chat) => chat.id === sessionId);
   const coarsePointer = useCoarsePointer();
@@ -290,7 +292,7 @@ export function ChatComponent({
     [queryClient],
   );
 
-  // `/chat/concierge` opened directly: the setting decides whether the chat
+  // The main chat opened directly: the setting decides whether the chat
   // exists for this instance, so wait for it before choosing a layout. A
   // topic chat takes the Concierge layout once the Concierge chat list, which
   // the sidebar has usually loaded already, names it.
@@ -315,6 +317,7 @@ export function ChatComponent({
         recoverMissingSession={conciergeEnabled ? recoverMissingSession : undefined}
         variant={conciergeEnabled ? "concierge" : "default"}
         conciergeMainChatId={concierge.chatId ?? CONCIERGE_CHAT_ID}
+        conciergeName={conciergeName}
         startSession={topicDraft && concierge.enabled ? startTopicChat : undefined}
         centerDraftComposer={greetingOnlyHome && !topicDraft}
         emptyState={

@@ -39,8 +39,8 @@
         "archive": "Archiving…",
         "done": "Sending…"
       },
-      "unchanged": "Concierge did not change it",
-      "timeout": "Concierge has not handled this yet",
+      "unchanged": "{{name}} did not change it",
+      "timeout": "{{name}} has not handled this yet",
       "failed": "Could not send",
       "notSynced": "Not synced",
       "sourceMissing": "Can't find the original message",
@@ -65,7 +65,7 @@
         "idle": "Tasks"
       },
       "emptyTitle": "No tasks yet",
-      "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
+      "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
     },
     "messageDetails": "Message details",
     "chooseFolder": "Choose folder…",

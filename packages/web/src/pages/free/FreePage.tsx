@@ -1,9 +1,24 @@
-import { useLocation } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
+import { useConciergeChat } from "@/hooks/use-concierge";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { FreeGrid } from "./FreeGrid";
+
+/** The old address of the main Concierge chat. Search and state, such as a draft, ride along. */
+export function MainChatRedirect() {
+  const { search, state } = useLocation();
+  return <Navigate to={{ pathname: MAIN_CHAT_PATH, search }} state={state} replace />;
+}
 
 export default function FreePage() {
   const location = useLocation();
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
+  // `/message` names no chat: it is the signed-in person's main Concierge chat,
+  // whose id is the guardian's fixed one or a visitor's own, so the server says.
+  const onMainChat = location.pathname === MAIN_CHAT_PATH;
+  const main = useConciergeChat();
+  if (onMainChat && main.loading) return null;
+  // Concierge is off, so there is no main chat to open.
+  if (onMainChat && !main.chatId) return <Navigate to="/chat" replace />;
 
   return (
     // Plain div: RomeShellLayout owns the `main` landmark. `hideSidebar` drops
@@ -15,7 +30,7 @@ export default function FreePage() {
           : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]"
       }`}
     >
-      <FreeGrid />
+      <FreeGrid sessionId={onMainChat ? (main.chatId ?? undefined) : undefined} />
     </div>
   );
 }

@@ -20,6 +20,7 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
+import { chatPath } from "@/lib/chat-session";
 import { useApps } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
@@ -42,7 +43,7 @@ import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { cn } from "@/lib/utils";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
-import { useConciergeChatId, useConciergeChats } from "@/hooks/use-concierge";
+import { useConciergeChatId, useConciergeChats, useConciergeName } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import { useToolTrace } from "./tool-trace";
 import { getWidgetFullHref } from "./widget-links";
@@ -166,7 +167,11 @@ function ToolsToggle({ unread }: { unread: boolean }) {
   );
 }
 
-export function FreeGrid() {
+/**
+ * The chat workspace. The chat is the one the route names, `/chat/<id>`, or
+ * `sessionId` when the route has no id to name it, as `/message` has not.
+ */
+export function FreeGrid({ sessionId }: { sessionId?: string }) {
   const { t } = useTranslation("common");
   const params = useParams<{ "*"?: string }>();
   const location = useLocation();
@@ -205,7 +210,7 @@ export function FreeGrid() {
   const [workspaceStore] = useState(() => createWorkspaceStore());
   const [eventBus] = useState(() => createWorkspaceEventBus());
   const [workspaceContextRegistry] = useState(() => createWorkspaceContextRegistry());
-  const urlSessionId = params["*"]?.split("/")[0] || undefined;
+  const urlSessionId = sessionId ?? (params["*"]?.split("/")[0] || undefined);
   const locState = location.state as {
     projectPath?: string;
     deviceFolder?: DraftDeviceFolder;
@@ -361,13 +366,14 @@ export function FreeGrid() {
     [placements, removeWidget],
   );
 
+  const conciergeChatId = useConciergeChatId();
   const handleSessionChosen = useCallback(
-    (sessionId: string) => {
-      setChatSessionId(sessionId);
-      setActiveSession(sessionId);
-      navigate(`/chat/${sessionId}`, { replace: true });
+    (chosenId: string) => {
+      setChatSessionId(chosenId);
+      setActiveSession(chosenId);
+      navigate(chatPath(chosenId, conciergeChatId), { replace: true });
     },
-    [navigate],
+    [conciergeChatId, navigate],
   );
 
   // Session identity for the mobile header bar (the desktop chat navbar resolves
@@ -381,16 +387,22 @@ export function FreeGrid() {
     pinnedAgentMention,
     pinnedAt,
   } = useSessionIdentity(chatSessionId);
-  // The chat a guardian names is the one they keep a tab on, so the name
-  // outranks the route's own title. Claimed here rather than in FreePage so it
-  // reads the same identity the header does, and follows a rename with it.
-  useDocumentTitle(sessionName);
-  const setPinned = usePinSession();
-  const conciergeChatId = useConciergeChatId();
   const conciergeChats = useConciergeChats();
+  const conciergeName = useConciergeName();
   const isConcierge =
     chatSessionId !== undefined &&
     (chatSessionId === conciergeChatId || conciergeChats.some((chat) => chat.id === chatSessionId));
+  // The main chat goes by the guardian's name for the agent, not the session name the server stores.
+  const isMainConcierge =
+    chatSessionId !== undefined &&
+    (chatSessionId === conciergeChatId ||
+      conciergeChats.some((chat) => chat.id === chatSessionId && chat.main));
+  const chatName = isMainConcierge ? conciergeName : sessionName;
+  // The chat a guardian names is the one they keep a tab on, so the name
+  // outranks the route's own title. Claimed here rather than in FreePage so it
+  // reads the same identity the header does, and follows a rename with it.
+  useDocumentTitle(chatName);
+  const setPinned = usePinSession();
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
   // desktop navbar: drop the session, refresh the sidebar list, land on a fresh
@@ -463,9 +475,7 @@ export function FreeGrid() {
                   <span
                     className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}
                   >
-                    {sessionName?.trim() ||
-                      pinnedAgentMention?.appLabel ||
-                      t("recentChats.newChat")}
+                    {chatName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                   </span>
                 )}
                 {isConcierge ? <ConciergeTasksPill chatId={chatSessionId ?? null} /> : null}

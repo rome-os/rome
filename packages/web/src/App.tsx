@@ -9,7 +9,7 @@ import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
-import FreePage from "./pages/free/FreePage";
+import FreePage, { MainChatRedirect } from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
@@ -150,7 +150,12 @@ export default function App() {
             }
           >
             <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/chat/concierge" element={<MainChatRedirect />} />
             <Route path="/chat/*" element={<FreePage />} />
+            {/* The signed-in person's main Concierge chat. It shares FreePage
+                with /chat/*, so moving between it and a topic chat keeps the
+                workspace mounted. */}
+            <Route path="/message" element={<FreePage />} />
             {/* The event log is a tab of the Activity page, which keeps the
                 Sessions address. */}
             <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />

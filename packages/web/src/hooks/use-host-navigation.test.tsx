@@ -73,6 +73,21 @@ describe("useHostNavigation", () => {
     );
   });
 
+  it("opens the main Concierge chat from a same-origin host navigation message", async () => {
+    renderHarness();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: window.location.origin,
+          data: { type: "rome:host-navigate", detail: { path: "/message" } },
+        }),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId("pathname").textContent).toBe("/message"));
+  });
+
   it("ignores cross-origin host navigation messages", async () => {
     renderHarness();
 

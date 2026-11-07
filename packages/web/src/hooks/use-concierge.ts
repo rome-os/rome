@@ -2,6 +2,7 @@ import type { ConciergeChatDto, ConciergeChatsResponse } from "@rome/api-types/c
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { useSettings } from "@/hooks/use-settings";
+import { mainAgentDisplayName } from "@/lib/agent-name";
 
 /** The canonical id of the agent behind the Concierge chat. */
 export const CONCIERGE_AGENT_ID = "core:concierge";
@@ -62,6 +63,15 @@ function useConciergeSession(enabled: boolean) {
 }
 
 /**
+ * The main Concierge chat's id when it is already loaded, else null. It never
+ * asks the server, for a caller that only needs the id when it is there, and
+ * can open `/chat/<id>`, which still reaches the chat, when it is not.
+ */
+export function loadedConciergeChatId(queryClient: QueryClient): string | null {
+  return queryClient.getQueryData<ConciergeSession>(CONCIERGE_SESSION_QUERY_KEY)?.id ?? null;
+}
+
+/**
  * Resolves with the main Concierge chat's id once the server has created it,
  * joining a request already in flight and reusing a recent one. Rejects when
  * the server cannot.
@@ -95,6 +105,15 @@ export function useConciergeChat(): ConciergeChat {
     settingsLoading: settingsPending,
     loading: settingsPending || (enabled && isPending),
   };
+}
+
+/**
+ * What the dashboard calls the Concierge: the name the guardian gave their
+ * agent, else "Concierge". A main Concierge chat shows it in place of the
+ * session name the server stores.
+ */
+export function useConciergeName(): string {
+  return mainAgentDisplayName(useSettings().data?.agentName, "Concierge");
 }
 
 /** The Concierge chat's id, or null while Concierge is off or not loaded yet. */

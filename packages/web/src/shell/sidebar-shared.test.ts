@@ -7,6 +7,11 @@ describe("isEntryActive", () => {
     expect(isEntryActive("/chat/7b08b9bb", "/chat")).toBe(true);
   });
 
+  it("lights Chat on the main Concierge chat's page", () => {
+    expect(isEntryActive("/message", "/chat")).toBe(true);
+    expect(isEntryActive("/message", "/memory")).toBe(false);
+  });
+
   it("lights Apps on the launcher only, not on an app's own page", () => {
     expect(isEntryActive("/apps", "/apps")).toBe(true);
     expect(isEntryActive("/apps/stock-daily", "/apps")).toBe(false);

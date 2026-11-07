@@ -50,6 +50,7 @@ const server = {
   /** The Concierge chat's recent messages and running turns, for the press check. */
   messages: [] as Array<Record<string, unknown>>,
   turns: [] as Array<Record<string, unknown>>,
+  settings: {} as Record<string, unknown>,
 };
 const posts: Array<Record<string, unknown>> = [];
 /** What a press on a topic chat's row posted to that chat. */
@@ -67,6 +68,8 @@ function mockServer() {
         status,
         headers: { "content-type": "application/json" },
       });
+    if (url === "/api/settings") return json(server.settings);
+    if (url === "/api/concierge/session") return json({ id: "concierge", unread: 0 });
     if (url.startsWith("/api/concierge/tasks")) {
       return json({
         tasks: url.includes("doneDays=3650") ? [...server.recent, ...server.all] : server.recent,
@@ -92,12 +95,15 @@ function mockServer() {
   }) as typeof fetch);
 }
 
-function renderPanel(props: { chatId?: string; onNavigate?: () => void } = {}) {
+function renderPanel(
+  props: { chatId?: string; onNavigate?: () => void } = {},
+  path = "/chat/concierge",
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/chat/concierge"]}>
+        <MemoryRouter initialEntries={[path]}>
           <ConciergeTaskPanel {...props} />
         </MemoryRouter>
       </QueryClientProvider>
@@ -130,6 +136,7 @@ beforeEach(() => {
   server.all = [];
   server.messages = [];
   server.turns = [];
+  server.settings = {};
   posts.length = 0;
   postStatus = 200;
   toast.error.mockClear();
@@ -207,6 +214,24 @@ describe("ConciergeTaskPanel", () => {
     renderPanel();
     expect(await screen.findByText("No tasks yet")).toBeTruthy();
     expect(screen.getByText(/appear here/)).toBeTruthy();
+  });
+
+  it("names the agent the guardian chose in the empty list and in a press that changed nothing", async () => {
+    server.settings = { agentName: "Milo" };
+    mockServer();
+    const empty = renderPanel();
+    expect(
+      await screen.findByText("Tasks Milo is working on, planning, or watching appear here."),
+    ).toBeTruthy();
+    empty.unmount();
+
+    server.recent = [row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } })];
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Stop" }));
+    await screen.findByText("Stopping…");
+    server.messages = [consumed(posts[0].inputId)];
+    expect(await screen.findByText("Milo did not change it", {}, { timeout: 4_000 })).toBeTruthy();
   });
 
   it("shows one quiet line under the title: the summary, or what a watching or needs-you row waits for", async () => {
@@ -353,6 +378,19 @@ describe("ConciergeTaskPanel", () => {
     renderPanel({ chatId: "topic-1" });
     expect(await screen.findByText("Agenda")).toBeTruthy();
     expect(screen.queryByText("Main work")).toBeNull();
+  });
+
+  it("lists the main chat's rows at /message, which names no chat", async () => {
+    const topic = { id: "topic-1", name: "Calendar", main: false };
+    server.settings = { experimentalConcierge: true };
+    server.recent = [
+      row("doing", { title: "Main work" }),
+      row("doing", { title: "Agenda", conciergeChat: topic }),
+    ];
+    mockServer();
+    renderPanel({}, "/message");
+    expect(await screen.findByText("Main work")).toBeTruthy();
+    expect(screen.queryByText("Agenda")).toBeNull();
   });
 
   it("sends a topic chat's buttons to that chat", async () => {

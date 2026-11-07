@@ -36,6 +36,7 @@ import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
+import { isChatPath } from "@/lib/chat-session";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
 import { isApplePlatform } from "@/lib/platform";
@@ -103,7 +104,7 @@ export function RomeShellLayout() {
   // always there, and the chat list, which belongs to Chat alone. Collapsing
   // hides the chat list. That is a desktop arrangement: below `md` the sidebar
   // is a slide-over, so a collapse saved on desktop must not empty the drawer.
-  const onChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+  const onChat = isChatPath(location.pathname);
   const showChats = isDesktop && onChat && !collapsed;
   const phoneChatList = !isDesktop && onChat && chatListOpen && !hideSidebar;
   const sidebarShortcut = sidebarShortcutForPlatform();
