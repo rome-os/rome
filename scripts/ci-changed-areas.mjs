@@ -30,6 +30,7 @@ export const AREA_PATHS = {
     "packages/app-template/",
     "rome_apps/",
     "scripts/",
+    "lint/",
     "infra/",
   ],
   web: [
