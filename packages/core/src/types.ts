@@ -68,7 +68,7 @@ export interface AgentConfig {
    * session (no provider query — nothing to resume or bill).
    */
   codeBacked?: boolean;
-  /** Per-field overrides of the chat's session policy. See `resolveSessionPolicy`. */
+  /** Per-field overrides of the agent policy. See `resolveAgentPolicy`. */
   policy?: {
     finalText?: "deliver" | "private";
     autoTitle?: boolean;

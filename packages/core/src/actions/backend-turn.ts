@@ -158,7 +158,7 @@ export interface BackendTurnRunnerDeps {
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
-  /** Whether the agent's session policy keeps its text private, so its turn
+  /** Whether the agent's policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
 }

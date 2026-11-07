@@ -168,12 +168,12 @@ import {
   DrizzleSessionRepository,
   SharedCodexAccountService,
   romeCreditsProxyRoutes,
+  resolveAgentPolicy,
 } from "./agent/index.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
-import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -1212,7 +1212,7 @@ async function main() {
     replies: chatsWired.replies,
     isTextPrivate: (agentName) =>
       agentLoader.has(agentName) &&
-      resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
+      resolveAgentPolicy(agentLoader.get(agentName)).finalText === "private",
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);

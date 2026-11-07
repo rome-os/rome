@@ -9,6 +9,13 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 - In a chat, an agent is a participant ([Chats](chats.md#agent)). It speaks through its own account or answers on the guardian's behalf. When it wakes, what it reads and where it speaks is in [Participation](participation.md).
 - How an agent remembers what it observes in a chat or its threads is its own decision. Chats describes participants and messages and says nothing about memory.
 
+## Agent policy
+
+How a chat treats one agent's turns: whether the agent's text reaches the chat, whether the chat's first message names the chat, and whether its system prompt carries memory. The fields and their defaults are in [`concepts/agents.md`](../concepts/agents.md#agent-policy).
+
+- The agent declares it in the `policy:` block of its definition. Nothing stores it, and every session of an agent has the same policy.
+- In code it is `AgentPolicy` in [`packages/core/src/agent/domain/agent-policy.ts`](../../packages/core/src/agent/domain/agent-policy.ts).
+
 ## Model provider account
 
 Whose subscription an agent's turns run under when Rome credits is not the payer: the guardian's Codex (ChatGPT) account today. Rome never acts or chats as this account, so it is not a [connection](connections.md#connection) and has no connected account. Its alternative, Rome credits, has no external account at all.
