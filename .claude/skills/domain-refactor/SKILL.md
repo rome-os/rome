@@ -21,13 +21,13 @@ A vertical is a part of a domain that can be settled and built on its own, from 
 
 **Keep it small.** Everything public has a caller that needs it today. When something is wrong, remove or separate before you add. A rule with many cases means the model is wrong, so simplify the model.
 
-**Own what is yours and ask about the rest.** The person owns what others see: the words, the rules, the boundaries, the API and what the guardian sees. Decide everything else alone. Take what the person owns to the thread that owns the domain model, then to the person, one concept per question with a recommendation. Build nothing on an open question, and keep working on what it does not touch.
+**Own what is yours and ask about the rest.** The person owns what others see: the words, the rules, the boundaries, the API and what the guardian sees. Decide everything else alone. Take what the person owns to the domain design thread the project instructions name, through the coordinator, then to the person, one concept per question with a recommendation. With no such thread, go to the person. Build nothing on an open question, and keep working on what it does not touch.
 
 **Leave decisions where the next agent finds them.** Every rule you hold yourself to and every correction from the person goes in `docs/domains/` or the plan, so nobody asks twice.
 
 ## The work
 
-Plan each vertical before any code: its words, its API as a sentence of responsibility and signatures, then what moves, which callers change and the PR boundaries. A fresh reviewer who sees none of your reasoning judges the API against these principles and the points already settled. The person then signs off once for the whole vertical. An API change the plan does not show goes back to the plan.
+Plan each vertical before any code: its words, its API as a sentence of responsibility and signatures, then what moves, which callers change and the PR boundaries. A fresh subagent, given only the plan, these principles and the points already settled, reviews the API. The person then signs off once for the whole vertical. An API change the plan does not show goes back to the plan.
 
 Build in small PRs, with callers and adapters moved together and a word's entry landing with its first use. Run `pnpm typecheck` and `pnpm test:unit` before each push. A context's list of boundary crossings only shrinks. Shepherd each PR with [`babysit-pr`](../babysit-pr/SKILL.md).
 
