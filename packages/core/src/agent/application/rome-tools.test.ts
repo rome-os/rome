@@ -7,7 +7,7 @@ function tools(overrides: Partial<RomeToolsOptions> = {}) {
   return createRomeTools({
     actions: { list: () => [], run: async () => ({ status: "ok" }) },
     skills: { list: () => [] },
-    subagents: { tools: [], run: async () => ({}) },
+    subagents: { list: () => [], run: async () => ({}) },
     widgetsShow: false,
     log: { info: () => {}, warn: () => {}, error: () => {} },
     ...overrides,

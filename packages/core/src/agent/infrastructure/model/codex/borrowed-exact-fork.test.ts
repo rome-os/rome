@@ -65,9 +65,7 @@ describe("evaluateBorrowedExactFork", () => {
       "tools catalog",
       {
         tools: {
-          subagentTools: [
-            { name: "reviewer", description: "Review", inputSchema: { type: "object" } },
-          ],
+          subagents: [{ name: "reviewer", description: "Review" }],
         },
       },
       "sameTools",

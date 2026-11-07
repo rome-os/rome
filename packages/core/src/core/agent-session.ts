@@ -1,6 +1,5 @@
 // Long-lived, serialized agent sessions. Session model: docs/concepts/sessions.md.
 
-import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { Mutex } from "async-mutex";
 import {
@@ -38,6 +37,8 @@ import {
   type AgentActions,
   type DeferInput,
   type RomeTool,
+  subagentToolName,
+  type Subagent,
   type RomeTools,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
@@ -75,7 +76,6 @@ import type {
   ModelSessionParams,
   ModelReasoningEffort,
   ModelTier,
-  RomeToolDefinition,
   ModelToolCallContext,
   ProviderId,
 } from "./agent-runner.js";
@@ -1116,11 +1116,8 @@ async function openSession(
   });
   const getActionCatalog = (): AgentAction[] =>
     deps.actionRegistry.getForAgent(allowList).map(toAgentAction);
-  const { tools: subagentTools, targets: subagentTargets } = buildSubagentTools(
-    deps.agentLoader,
-    config,
-  );
-  const subagentToolNames = new Set(subagentTools.map((tool) => tool.name));
+  const subagents = subagentsOf(deps.agentLoader, config);
+  const subagentToolNames = new Set(subagents.map((subagent) => subagentToolName(subagent.name)));
 
   let externalMcpServers: Record<string, McpServerConfig> | undefined;
   if (config.networkDiscovery) {
@@ -1251,7 +1248,7 @@ async function openSession(
           throw new Error("SubagentExecutionService is not configured");
         }
         const execution = await deps.subagentExecutionService.startSubagent(
-          subagentTargets.get(name) ?? name,
+          name,
           input as ExecuteSubagentInput,
           {
             parentSessionId: refs.getRomeSessionId(),
@@ -1294,7 +1291,7 @@ async function openSession(
     createRomeTools({
       actions: agentActions(refs),
       skills: deps.skillCatalog,
-      subagents: { tools: subagentTools, run: makeExecuteSubagent(refs) },
+      subagents: { list: () => subagents, run: makeExecuteSubagent(refs) },
       // Without a speaker, action results that hand back a widget take their
       // plain-text forms. Otherwise the tool result claims a card was shown
       // while nothing mounted and the fork dead-ends.
@@ -1630,7 +1627,7 @@ async function openSession(
       (initialResolution
         ? config.tools.filter((name) => initialResolution.modelProvider.builtinTools.has(name))
             .length
-        : 0) + subagentTools.length,
+        : 0) + subagents.length,
     subagentToolNames,
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
@@ -2143,7 +2140,7 @@ class AgentSessionImpl implements AgentSession {
       }
       this.toolCount =
         this.config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)).length +
-        buildSubagentTools(this.deps.agentLoader, this.config).tools.length;
+        subagentsOf(this.deps.agentLoader, this.config).length;
       this.replacingModelSession = null;
       this.startModelSessionEvents();
     } catch (err) {
@@ -3790,45 +3787,12 @@ class AgentSessionImpl implements AgentSession {
 
 // Helpers
 
-/**
- * The model-facing tool name for delegating to a subagent. Provider tool names
- * reject the ":" in an artifact id, so the id maps to a stable hash.
- */
-export function subagentToolName(subagentId: string): string {
-  return `sa_${createHash("sha256").update(subagentId).digest("hex").slice(0, 16)}`;
-}
-
-function buildSubagentTools(
-  agentLoader: AgentLoader,
-  config: ReturnType<AgentLoader["get"]>,
-): { tools: RomeToolDefinition[]; targets: Map<string, string> } {
-  if (!config.allowedSubagents || config.allowedSubagents.length === 0) {
-    return { tools: [], targets: new Map() };
-  }
-  const targets = new Map<string, string>();
-  const tools = config.allowedSubagents.map((subagentName) => {
-    const subConfig = agentLoader.get(subagentName);
-    const toolName = subagentToolName(subagentName);
-    targets.set(toolName, subagentName);
-    return {
-      name: toolName,
-      description: `Delegate a task to the "${subagentName}" subagent: ${subConfig.description}`,
-      inputSchema: {
-        properties: {
-          prompt: {
-            type: "string",
-            description: "The task/prompt to send to the subagent",
-          },
-          resumeSessionId: {
-            type: "string",
-            description: "Explicit Child session ID to resume; omitted starts a fresh session",
-          },
-        },
-        required: ["prompt"],
-      },
-    };
-  });
-  return { tools, targets };
+/** The subagents this agent may hand work to, as its definition names them. */
+function subagentsOf(agentLoader: AgentLoader, config: ReturnType<AgentLoader["get"]>): Subagent[] {
+  return (config.allowedSubagents ?? []).map((name) => ({
+    name,
+    description: agentLoader.get(name).description,
+  }));
 }
 
 function buildLifecycleOutput(

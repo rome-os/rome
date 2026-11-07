@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
 import { testRomeTools } from "../../../../test/tool-calls.js";
-import type { ModelToolCallContext, RomeToolDefinition } from "../../../../core/agent-runner.js";
+import type { ModelToolCallContext } from "../../../../core/agent-runner.js";
 import type { AgentAction } from "../../../domain/agent-action.js";
 import type { Skill } from "../../../domain/skill.js";
+import { subagentToolName, type Subagent } from "../../../domain/subagent.js";
 
 const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
   createSdkMcpServerMock: rs.fn((config: unknown) => config),
@@ -33,7 +34,7 @@ interface BuildArgs {
   getActionCatalog?: () => AgentAction[];
   skillCatalog?: Skill[];
   getSkillCatalog?: () => Skill[];
-  subagentTools?: RomeToolDefinition[];
+  subagents?: Subagent[];
   executeAction?: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent?: (
     name: string,
@@ -97,7 +98,7 @@ function build(args: BuildArgs = {}) {
         }),
       },
       skills: { list: args.getSkillCatalog ?? (() => skillSnapshot) },
-      subagentTools: args.subagentTools,
+      subagents: args.subagents,
       executeSubagent: args.executeSubagent,
     }),
   });
@@ -202,20 +203,12 @@ describe("buildAnthropicMcpServers", () => {
   it("passes Claude's exact tool-use identity into subagent execution", async () => {
     const executeSubagent = rs.fn(async () => ({ status: "completed" }));
     build({
-      subagentTools: [
-        {
-          name: "researcher",
-          description: "Research a topic",
-          inputSchema: {
-            type: "object",
-            properties: { prompt: { type: "string" } },
-            required: ["prompt"],
-          },
-        },
-      ],
+      subagents: [{ name: "researcher", description: "Research a topic" }],
       executeSubagent,
     });
-    const tool = getSubagentServerTools().find((candidate) => candidate.name === "researcher");
+    const tool = getSubagentServerTools().find(
+      (candidate) => candidate.name === subagentToolName("researcher"),
+    );
 
     const response = await tool!.handler(
       { prompt: "inspect" },

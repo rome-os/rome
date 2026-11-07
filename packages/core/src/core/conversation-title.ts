@@ -109,7 +109,7 @@ export function createConversationTitleGenerator(
             },
             skills: { list: () => [] },
             subagents: {
-              tools: [],
+              list: () => [],
               run: async () => {
                 throw new Error("Conversation title generation cannot execute subagents");
               },

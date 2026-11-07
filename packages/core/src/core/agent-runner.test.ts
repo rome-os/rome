@@ -74,13 +74,13 @@ import {
   createModelResolver,
   createTierModelsSetting,
   type ModelResolver,
+  subagentToolName,
 } from "../agent/index.js";
 import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
-  subagentToolName,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";

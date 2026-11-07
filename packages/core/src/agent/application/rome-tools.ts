@@ -15,8 +15,9 @@ import type { SkillCatalog } from "../domain/skill.js";
 import type { Subagents } from "../domain/subagent.js";
 import { actionTools } from "./action-tools.js";
 import { askUserTools, type DeferTool } from "./ask-user-tools.js";
-import { romeToolRunner, type RomeToolRunner } from "./rome-tool-runner.js";
+import { romeToolRunner } from "./rome-tool-runner.js";
 import { skillTools } from "./skill-tools.js";
+import { subagentTools } from "./subagent-tools.js";
 
 export interface RomeToolsOptions {
   actions: AgentActions;
@@ -28,21 +29,6 @@ export interface RomeToolsOptions {
   defer?: DeferTool;
   /** Served in the ask-user group after `defer`, in the order given. */
   sessionTools?: readonly RomeTool[];
-}
-
-function subagentTools(subagents: Subagents, run: RomeToolRunner): RomeTool[] {
-  return subagents.tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-    handler: (input, context) =>
-      run(tool.name, input, (parsed) => {
-        if (!context?.toolUseId) {
-          throw new Error(`Subagent tool "${tool.name}" is missing its tool-use identity`);
-        }
-        return subagents.run(tool.name, parsed, context);
-      }),
-  }));
 }
 
 function toDefinition({ name, description, inputSchema, endsTurn }: RomeTool): RomeToolDefinition {

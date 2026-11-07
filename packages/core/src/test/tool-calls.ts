@@ -9,23 +9,24 @@ import {
   type RomeToolDefinition,
   type RomeToolResult,
   type RomeTools,
+  type Subagent,
   type Subagents,
 } from "../agent/index.js";
 
 type RomeToolsOptions = Parameters<typeof createRomeTools>[0];
 
 export interface TestRomeToolsOptions extends Partial<Omit<RomeToolsOptions, "subagents">> {
-  subagentTools?: readonly RomeToolDefinition[];
+  subagents?: readonly Subagent[];
   executeSubagent?: Subagents["run"];
 }
 
 /** Rome tools for a test, serving no actions, skills or subagents unless given. */
 export function testRomeTools(options: TestRomeToolsOptions = {}): RomeTools {
-  const { subagentTools = [], executeSubagent, ...rest } = options;
+  const { subagents = [], executeSubagent, ...rest } = options;
   return createRomeTools({
     actions: { list: () => [], run: async () => ({ status: "ok", data: { ok: true } }) },
     skills: { list: () => [] },
-    subagents: { tools: subagentTools, run: executeSubagent ?? (async () => "delegated") },
+    subagents: { list: () => subagents, run: executeSubagent ?? (async () => "delegated") },
     widgetsShow: false,
     log: { info: () => {}, warn: () => {}, error: () => {} },
     ...rest,
