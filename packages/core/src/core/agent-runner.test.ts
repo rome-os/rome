@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
@@ -55,7 +56,6 @@ rs.mock("../paths.js", () => ({
   ...pathsModule,
   getProjectRoot: rs.fn(() => "/tmp/agent-runner-test"),
   getDefaultAgentWorkingDir: rs.fn(() => "/tmp/default-project"),
-  ensureDefaultAgentWorkingDir: rs.fn(async () => "/tmp/default-project"),
   getProfileDir: rs.fn(() => "/tmp/agent-runner-test/profile"),
   getProfileMemoryDir: rs.fn(() => "/tmp/agent-runner-test/memory"),
   getProfileInstalledAppsDir: rs.fn(() => "/tmp/agent-runner-test/installed-apps"),
@@ -2220,6 +2220,7 @@ describe("AgentRunner", () => {
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
       readAnswerShape,
       turnUsage: new TurnUsageReporter({ apps: appCatalog }),
+      folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({

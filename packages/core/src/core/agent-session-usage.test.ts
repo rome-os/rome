@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -159,6 +160,7 @@ describe("AgentSession turn usage", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
         turnMiddleware,
         turnUsage: new TurnUsageReporter({

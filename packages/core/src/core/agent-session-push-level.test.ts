@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -95,6 +96,7 @@ describe("AgentSession turn push level", () => {
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
         sessionTools: async (context) => {
           tools = context;

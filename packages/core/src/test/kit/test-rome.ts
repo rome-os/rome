@@ -1,4 +1,5 @@
 import { readAnswerShape, TurnUsageReporter } from "../../agent/index.js";
+import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -287,6 +288,7 @@ async function buildHarness(
       turnLifecycle: new TurnListeners(new AppTurnHooks()),
       readAnswerShape,
       turnUsage: new TurnUsageReporter(),
+      folders: agentFolders(),
       channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },

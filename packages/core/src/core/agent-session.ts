@@ -1,6 +1,6 @@
 // Long-lived, serialized agent sessions. Session model: docs/concepts/sessions.md.
 
-import { stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { Mutex } from "async-mutex";
 import {
   AgentInputQueue,
@@ -22,6 +22,8 @@ import {
   type AnswerShape,
   type ReadAnswerShape,
   type TurnAttribution,
+  type AgentFolders,
+  projectPath,
   catchUpPrompt,
   type PromptFacts,
   type PromptMessage,
@@ -59,7 +61,6 @@ import {
   type RomeTools,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
-import { projectRelativePath } from "../webchat/projects.js";
 import type { ActionRegistry, Action, ActionResult } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
@@ -107,7 +108,6 @@ import {
 import { resolveWebchatLargeModelSelection } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
-import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
 import { enterSession } from "../telemetry-context.js";
 import { getTracer, startRomeSpan, withRomeSpan } from "../telemetry.js";
 import {
@@ -342,6 +342,8 @@ interface ManagerDeps {
   turnMiddleware?: TurnMiddlewareChain;
   /** Resolve the effective reset policy from the existing external thread identity. */
   resolveProviderSessionReset?: (ref: ChatRef) => Promise<ProviderSessionResetPolicy>;
+  /** Where agents work: the default working directory and the projects folder. */
+  folders: AgentFolders;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** What the named channel's surface supports, or null for a name no channel
@@ -773,9 +775,18 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
+/** The default working directory, made when it is missing. */
+async function ensureDefaultWorkingDir(folders: AgentFolders): Promise<string> {
+  await mkdir(folders.defaultWorkingDir, { recursive: true });
+  return folders.defaultWorkingDir;
+}
+
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */
-async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
-  if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
+async function reachableRecordedWorkingDir(
+  folders: AgentFolders,
+  recorded: string,
+): Promise<string | undefined> {
+  if (recorded === folders.defaultWorkingDir) return await ensureDefaultWorkingDir(folders);
   const isDirectory = await stat(recorded).then(
     (entry) => entry.isDirectory(),
     () => false,
@@ -875,7 +886,7 @@ async function openSession(
   // where it was written unless the caller names a dir. Legacy rows record none.
   let recordedWorkingDir: string | undefined;
   if (init.workingDir === undefined && resumed?.workingDir) {
-    recordedWorkingDir = await reachableRecordedWorkingDir(resumed.workingDir);
+    recordedWorkingDir = await reachableRecordedWorkingDir(deps.folders, resumed.workingDir);
     if (!recordedWorkingDir) {
       // The transcript is unreachable. An explicit resume names that exact
       // conversation, so it fails. An implicit reuse by channel-thread key
@@ -900,7 +911,7 @@ async function openSession(
   }
 
   const workingDir =
-    init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
+    init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultWorkingDir(deps.folders));
   const session =
     prepared ??
     resumed ??
@@ -3251,10 +3262,10 @@ class AgentSessionImpl implements AgentSession {
       // replaced it on another provider, has not seen the block yet.
       if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
-        const projectPath = this.workingDir?.trim();
+        const workingPath = this.workingDir?.trim();
         const block = buildThreadContextBlock(tc, {
-          path: projectPath,
-          relativePath: projectPath ? projectRelativePath(projectPath) : null,
+          path: workingPath,
+          relativePath: workingPath ? projectPath(this.deps.folders, workingPath) : null,
         });
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
