@@ -9,7 +9,7 @@ A Rome session is the durable product boundary around one continuous body of age
 - A chat does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same chat and the same model thread.
 - Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another session. An ordinary reply never does.
 - Provider compaction manages the live context window without deleting Rome's durable transcript.
-- Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. Parent/child sessions are linked and appear as session lineage.
+- Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. A child's session has its parent turn's session as parent, and a child's usage is counted under its root session.
 - Project attribution matches the session's project directory (exact path or child path). A project's display name is metadata, not an attribution fallback. Forks and subagents inherit the parent's project. Sessions created without project context stay unattributed.
 
 **Not to be confused with:**
@@ -99,7 +99,7 @@ User messages, assistant replies, cards, and interaction results stay in the tra
 History, lazy trace reads, and raw downloads follow the same session-wide decision.
 
 Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
-Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
+Reading, renaming, pinning, and unknown metadata roles do not count. A session that, with its ancestors, has no conversation messages is not an archive candidate.
 Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
 There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
 A new message reactivates the session and its descendants, not its ancestors or siblings.

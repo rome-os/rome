@@ -87,7 +87,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 **Contracts:**
 
 - Every turn the instance runs while signed in yields one turn event keyed by the turn id, failed and interrupted turns included. Subagent and fork turns are their own events.
-- A turn event's kind is `chat`, `channel`, `app`, `routine`, or `other`. A subagent or fork turn takes the kind of its root session, read from session lineage when the event is recorded.
+- A turn event's kind is `chat`, `channel`, `app`, `routine`, or `other`. A subagent or fork turn takes the kind of its root session, found when the event is recorded.
 - An action run event covers a finished top-level action execution that a routine fired, that an app called itself, or that a webhook sent to an app's action. An agent's tool calls are not action runs. Turn events count their model work.
 - Turn and action run events carry a trigger, which records what set the work off:
   - `user`: a person did. This covers a chat or channel message, an app call from a signed-in guardian or visitor session, and a routine's **Run now**.
