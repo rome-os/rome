@@ -106,3 +106,13 @@ describe("rome-init-tools.sh ensure_npm_prefix", () => {
     expect(npmrc()).toBe("prefix = /opt/custom\n");
   });
 });
+
+describe("rome-init-tools.sh GitHub setup", () => {
+  it("never writes Rome's GitHub OAuth token into gh's persistent config", () => {
+    const script = readFileSync(join(PROJECT_ROOT, "scripts/docker/rome-init-tools.sh"), "utf8");
+    // The shell's gh wrapper reads the token from /run/rome on each call, so
+    // revoking the connection ends access. `gh auth login` would persist it.
+    expect(script).not.toMatch(/gh auth login/);
+    expect(script).not.toMatch(/github-oauth-token/);
+  });
+});

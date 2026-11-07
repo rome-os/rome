@@ -63,8 +63,6 @@ if ! install_opencli_plugins; then
 fi
 
 # ─── Configure the rome and user shells ────────────────────────────────────
-# The provider OAuth token files under /run/rome are written by Rome's connection
-# registry during boot, so after Rome is healthy the GitHub token is in place.
 ensure_line_present() {
   local file_path="$1"
   local line="$2"
@@ -89,30 +87,12 @@ ensure_git_instead_of() {
   run_as_account "$username" "$home_dir" git config --global --add 'url.https://github.com/.insteadOf' "$instead_of_value"
 }
 
-github_shell_token_file() {
-  printf '%s' "${ROME_GITHUB_TOKEN_FILE:-/run/rome/github-oauth-token}"
-}
-
-github_shell_token() {
-  local token_file=""
-  token_file="$(github_shell_token_file)"
-
-  if [ -r "$token_file" ]; then
-    tr -d '\r\n' <"$token_file"
-  fi
-}
-
+# Never copies Rome's GitHub OAuth token into gh's config: the shell's gh
+# wrapper injects GH_TOKEN from /run/rome, so access ends when the connection
+# is revoked. A gh config would keep the token on the persistent volume.
 configure_github_git_helper() {
   local username="$1"
   local home_dir="$2"
-  local token=""
-
-  token="$(github_shell_token)"
-  if [ -n "$token" ]; then
-    printf '%s\n' "$token" | run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth login --hostname github.com --git-protocol https --with-token
-    run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com
-    return 0
-  fi
 
   if run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth status --hostname github.com >/dev/null 2>&1; then
     run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com
