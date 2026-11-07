@@ -219,7 +219,7 @@ struct MainShell: View {
                 if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
             case .photoViewer(let open):
                 photoViewerPreview = open
-            case .composerPhotos, nil: break
+            case .composerPhotos, .appIdeas, nil: break
             }
         }
         #endif
@@ -265,10 +265,10 @@ struct MainShell: View {
             case .apps:
                 AppsScreen(workspace: workspace, onMenu: { openDrawer() }, onOpen: { app in
                     path.append(.app(app))
-                }, onAsk: { prompt in
-                    // As a starter does: the main Chat, with the message sent.
+                }, onStart: { prompt in
+                    // The main Chat, with the prompt in its composer to edit.
                     show(.chat)
-                    workspace.concierge.send(prompt)
+                    workspace.composerPrefill = prompt
                 })
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in

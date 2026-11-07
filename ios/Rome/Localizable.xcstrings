@@ -755,6 +755,16 @@
         }
       }
     },
+    "Make an app: " : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我做一个 App："
+          }
+        }
+      }
+    },
     "Make me an app: a habit tracker" : {
       "localizations" : {
         "zh-Hans" : {
@@ -861,6 +871,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你处理"
+          }
+        }
+      }
+    },
+    "New app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新应用"
           }
         }
       }
@@ -2191,6 +2211,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 已停止"
+          }
+        }
+      }
+    },
+    "Your own idea…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自己的想法…"
           }
         }
       }

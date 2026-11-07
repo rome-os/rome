@@ -47,24 +47,55 @@ enum AppLinks {
 
 /// An app the guardian can ask Chat to make, as a ready prompt.
 enum AppIdea: CaseIterable, Identifiable {
+    /// A blank start: the guardian writes the idea.
+    case own
     case habitTracker, packingList, readingLog
 
     var id: Self { self }
 
     var title: LocalizedStringKey {
         switch self {
+        case .own: return "Your own idea…"
         case .habitTracker: return "A habit tracker"
         case .packingList: return "A trip packing list"
         case .readingLog: return "A reading log"
         }
     }
 
-    /// What goes to Chat, as a starter's text does.
+    /// What goes into Chat's composer, unsent, for the guardian to edit.
     var prompt: String {
         switch self {
+        case .own: return String(localized: "Make an app: ")
         case .habitTracker: return String(localized: "Make me an app: a habit tracker")
         case .packingList: return String(localized: "Make me an app: a trip packing list")
         case .readingLog: return String(localized: "Make me an app: a reading log")
         }
+    }
+}
+
+/// A starting prompt put into a composer that may already hold a draft.
+enum ComposerPrefill {
+    /// The draft stays and the prompt goes after it on a new line; an empty
+    /// draft gives way to the prompt. A draft already ending with the prompt,
+    /// as after a second tap, stays as it is.
+    static func merged(draft: String, prompt: String) -> String {
+        let kept = draft.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+        if kept.isEmpty { return prompt }
+        let wanted = prompt.trimmingCharacters(in: .whitespaces)
+        if kept.hasSuffix(wanted) { return draft }
+        return kept + "\n" + prompt
+    }
+}
+
+/// The letter tile of an app with no icon.
+enum AppTile {
+    /// The tile's color in `Palette.appTiles`, the same for a name on every
+    /// launch and every phone: Swift's own hash changes per launch.
+    static func colorIndex(for name: String, count: Int = Palette.appTiles.count) -> Int {
+        var hash: UInt32 = 2_166_136_261
+        for scalar in name.lowercased().unicodeScalars {
+            hash = (hash ^ scalar.value) &* 16_777_619
+        }
+        return Int(hash % UInt32(count))
     }
 }

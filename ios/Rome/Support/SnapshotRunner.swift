@@ -15,6 +15,8 @@ enum DebugCommand: Equatable {
     case composerPhotos(Int)
     /// The photo viewer on a demo image, or closed.
     case photoViewer(Bool)
+    /// The Apps page's "New app" sheet, or closed.
+    case appIdeas(Bool)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -115,8 +117,45 @@ enum SnapshotRunner {
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))
+            await capture("37b-apps-new", style: styleName, in: directory, wait: 1.2) {
+                model.debugCommand = .section(.apps)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.6))
+                    model.debugCommand = .appIdeas(true)
+                }
+            }
+            model.debugCommand = .appIdeas(false)
+            try? await Task.sleep(for: .seconds(0.4))
+            await capture("40-apps-many", style: styleName, in: directory, wait: 2) {
+                model.openDemo(.manyApps)
+                model.debugCommand = nil
+                Task {
+                    try? await Task.sleep(for: .seconds(0.6))
+                    model.debugCommand = .section(.apps)
+                }
+            }
+            // Large text: names cut, nothing overlaps; three columns at accessibility sizes.
+            for (name, size) in [("41-apps-many-ax3", DynamicTypeSize.accessibility3), ("42-apps-many-xxxl", .xxxLarge)] {
+                model.dynamicTypeOverride = size
+                await capture(name, style: styleName, in: directory, wait: 2) {
+                    model.openDemo(.manyApps)
+                    model.debugCommand = nil
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.6))
+                        model.debugCommand = .section(.apps)
+                    }
+                }
+            }
+            model.dynamicTypeOverride = nil
             await capture("16-chat-empty", style: styleName, in: directory, wait: 2) { model.openDemo(.empty) }
-            await capture("38-apps-empty", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
+            await capture("38-apps-empty", style: styleName, in: directory, wait: 2) {
+                model.openDemo(.empty)
+                model.debugCommand = nil
+                Task {
+                    try? await Task.sleep(for: .seconds(0.6))
+                    model.debugCommand = .section(.apps)
+                }
+            }
             await capture("17-chat-off", style: styleName, in: directory, wait: 2) { model.openDemo(.conciergeOff) }
             await capture("18-tasks-empty", style: styleName, in: directory, wait: 1.6) {
                 model.openDemo(.empty)

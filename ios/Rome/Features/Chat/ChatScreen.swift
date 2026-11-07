@@ -35,7 +35,10 @@ struct ChatScreen: View {
             }
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: conciergeChatID, text: $draft, attachments: attachments, transcript: workspace.concierge)
+        .composerDraft(workspace.drafts, chat: conciergeChatID, text: $draft, attachments: attachments, transcript: workspace.concierge, prefill: Binding(
+            get: { workspace.composerPrefill },
+            set: { workspace.composerPrefill = $0 }
+        )) { composerFocused = true }
         .toolbar(.hidden, for: .navigationBar)
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in

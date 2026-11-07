@@ -73,6 +73,9 @@ final class Workspace {
     private(set) var isGuardian = false
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
+    /// A prompt for the main Chat's composer, unsent; Chat takes it once its
+    /// draft is restored, and clears it.
+    var composerPrefill: String?
     /// Goes up when Chat must show its newest rows: a tapped push.
     private(set) var latestRequest = 0
 

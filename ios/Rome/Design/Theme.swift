@@ -42,6 +42,17 @@ enum Palette {
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
 
+    /// Letter tiles of apps with no icon, one per app by its name
+    /// (`AppTile.colorIndex`). White letters read on each, light and dark.
+    static let appTiles: [Color] = [
+        dynamic(0xD86F4C, 0xC4603F), // ember
+        dynamic(0x2E8F84, 0x2A8075), // teal
+        dynamic(0x3B74C9, 0x3768B5), // blue
+        dynamic(0x8460C8, 0x7655B4), // violet
+        dynamic(0x4E8B47, 0x467D40), // green
+        dynamic(0xC9506F, 0xB44864), // rose
+    ]
+
     /// `from` blended toward `to` by `amount` (0…1), in each appearance.
     static func blend(_ from: Color, _ to: Color, _ amount: CGFloat) -> Color {
         let t = min(1, max(0, amount))

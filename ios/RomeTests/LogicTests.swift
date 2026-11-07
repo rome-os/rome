@@ -437,3 +437,49 @@ final class StubBackend: RomeBackend {
         #expect(PushPresentation.serverChat(nil, mainServerID: "c-42") == nil)
     }
 }
+
+@Suite struct AppTileTests {
+    /// A name keeps its color on every launch, whatever its case.
+    @Test func aNameKeepsItsColor() {
+        #expect(AppTile.colorIndex(for: "Habit tracker") == AppTile.colorIndex(for: "Habit tracker"))
+        #expect(AppTile.colorIndex(for: "Habit tracker") == AppTile.colorIndex(for: "habit TRACKER"))
+        // Fixed values: a change to the hash would recolor every app.
+        #expect(AppTile.colorIndex(for: "", count: 6) == 2_166_136_261 % 6)
+        #expect(AppTile.colorIndex(for: "a", count: 6) == Int(((2_166_136_261 ^ 97) &* 16_777_619 as UInt32) % 6))
+    }
+
+    /// Apps spread over the palette rather than all taking one color.
+    @Test func appsSpreadOverThePalette() {
+        let names = ["记账本", "Recipes", "Workout plan", "家庭相册", "Plant care", "Budget", "单词卡片", "Meal planner", "Kyoto trip", "Movie night"]
+        let indexes = names.map { AppTile.colorIndex(for: $0) }
+        #expect(indexes.allSatisfy { (0..<Palette.appTiles.count).contains($0) })
+        #expect(Set(indexes).count >= 4)
+    }
+}
+
+@Suite struct ComposerPrefillTests {
+    /// An empty composer takes the prompt as it is, the blank start's trailing space too.
+    @Test func anEmptyComposerTakesThePrompt() {
+        #expect(ComposerPrefill.merged(draft: "", prompt: "Make an app: ") == "Make an app: ")
+        #expect(ComposerPrefill.merged(draft: "  \n", prompt: "Make me an app: a reading log") == "Make me an app: a reading log")
+    }
+
+    /// A draft is never overwritten: the prompt goes after it on a new line.
+    @Test func aDraftStaysAndThePromptFollows() {
+        #expect(ComposerPrefill.merged(draft: "Remind me at 6\n", prompt: "Make me an app: a habit tracker")
+            == "Remind me at 6\nMake me an app: a habit tracker")
+    }
+
+    /// A second tap on the same idea does not add it again.
+    @Test func aSecondTapAddsNothing() {
+        let once = ComposerPrefill.merged(draft: "Hi", prompt: "Make an app: ")
+        #expect(ComposerPrefill.merged(draft: once, prompt: "Make an app: ") == once)
+    }
+
+    /// The blank start comes first, before the three ideas, and each prompt is unsent text.
+    @Test func theBlankStartComesFirst() {
+        #expect(AppIdea.allCases.first == .own)
+        #expect(AppIdea.allCases.count == 4)
+        #expect(AppIdea.own.prompt.hasSuffix(" ") || AppIdea.own.prompt.hasSuffix("："))
+    }
+}

@@ -49,13 +49,14 @@ final class DemoBackend: RomeBackend {
 
     /// `updateRequired`: the full data on a Rome one release behind, so the
     /// update page shows; "Update now" brings it up to date after a few seconds.
-    enum Variant { case full, empty, conciergeOff, updateRequired }
+    /// `manyApps`: the full data with a screenful of apps.
+    enum Variant { case full, empty, conciergeOff, updateRequired, manyApps }
     private let variant: Variant
 
     init(variant: Variant = .full) {
         self.variant = variant
         seed()
-        if variant != .full && variant != .updateRequired {
+        if variant == .empty || variant == .conciergeOff {
             messages[conciergeChatID] = []
             tasks = []
             topicChats = []
@@ -264,12 +265,25 @@ final class DemoBackend: RomeBackend {
 
     func apps() async throws -> [InstalledApp] {
         try await pause(0.3)
-        guard variant == .full else { return [] }
-        return [
+        let few = [
             InstalledApp(id: "habits", displayName: "习惯打卡", description: "每天的小目标，连着打卡", fullHref: "/full/apps/habits", origin: "local"),
             InstalledApp(id: "packing", displayName: "Trip packing list", description: "What to bring to Kyoto, checked off as it goes in the bag", fullHref: "/full/apps/packing", origin: "appstore"),
+            // Not running: it stays in the grid, dimmed.
+            InstalledApp(id: "reading", displayName: "Reading log", fullHref: nil, origin: "local", status: "stopped"),
             InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
         ]
+        switch variant {
+        case .full:
+            return few
+        case .manyApps:
+            let names = ["记账本", "Recipes", "Workout plan", "家庭相册", "Plant care", "Budget", "单词卡片", "Meal planner",
+                         "Kyoto trip", "Movie night", "读书笔记", "Garden", "Chores", "Gift ideas", "Running log", "A very long app name that cuts"]
+            return few + names.enumerated().map { index, name in
+                InstalledApp(id: "app-\(index)", displayName: name, fullHref: "/full/apps/app-\(index)", origin: "local")
+            }
+        case .empty, .conciergeOff, .updateRequired:
+            return []
+        }
     }
 
     func sendFeedback(_ text: String) async throws {

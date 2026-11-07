@@ -382,6 +382,11 @@ private struct ComposerDraft: ViewModifier {
     /// The chat's transcript; the restore waits for it to load. Nil for a
     /// blank chat, which has none.
     let transcript: TranscriptStore?
+    /// A prompt to put in the composer, unsent, then cleared. It waits for the
+    /// restore, so it never takes the place of a draft still loading.
+    let prefill: Binding<String?>
+    /// The prompt went in: the composer takes focus.
+    let onPrefill: () -> Void
     /// Saving waits until the restore ran, so it never writes over the draft
     /// with an empty composer.
     @State private var restored = false
@@ -403,14 +408,23 @@ private struct ComposerDraft: ViewModifier {
                     }
                 }
                 restored = true
+                applyPrefill()
             }
             .onChange(of: chat) { restored = false }
+            .onChange(of: prefill.wrappedValue) { applyPrefill() }
             .onChange(of: text) { save() }
             .onChange(of: attachments.images.map(\.id)) { save() }
             .onDisappear {
                 save()
                 Task { await store.flush() }
             }
+    }
+
+    private func applyPrefill() {
+        guard restored, let prompt = prefill.wrappedValue else { return }
+        prefill.wrappedValue = nil
+        text = ComposerPrefill.merged(draft: text, prompt: prompt)
+        onPrefill()
     }
 
     private func save() {
@@ -420,8 +434,9 @@ private struct ComposerDraft: ViewModifier {
 }
 
 extension View {
-    /// Keeps the composer's text and photos as the chat's draft.
-    func composerDraft(_ store: DraftStore, chat: String, text: Binding<String>, attachments: ComposerAttachments, transcript: TranscriptStore?) -> some View {
-        modifier(ComposerDraft(store: store, chat: chat, text: text, attachments: attachments, transcript: transcript))
+    /// Keeps the composer's text and photos as the chat's draft, and puts a
+    /// `prefill` prompt after it.
+    func composerDraft(_ store: DraftStore, chat: String, text: Binding<String>, attachments: ComposerAttachments, transcript: TranscriptStore?, prefill: Binding<String?> = .constant(nil), onPrefill: @escaping () -> Void = {}) -> some View {
+        modifier(ComposerDraft(store: store, chat: chat, text: text, attachments: attachments, transcript: transcript, prefill: prefill, onPrefill: onPrefill))
     }
 }
