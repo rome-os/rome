@@ -30,7 +30,7 @@ struct ChatScreen: View {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onTasks: onTasks)
+                }, onTasks: onTasks, mascotTitle: true)
                 banners
             }
         }
@@ -206,6 +206,8 @@ struct ChatHeader: View {
     var onArchive: (() -> Void)? = nil
     /// A topic chat's title: one line of small text, no pill.
     var plainTitle = false
+    /// The main Chat: the mascot in the pill, read out as the title.
+    var mascotTitle = false
 
     var body: some View {
         HStack {
@@ -214,6 +216,17 @@ struct ChatHeader: View {
             }
             if plainTitle {
                 PlainHeaderTitle(title: title)
+            } else if mascotTitle {
+                Spacer()
+                Mascot(blinks: true)
+                    .frame(height: 22)
+                    .padding(.horizontal, 22)
+                    .frame(height: 44)
+                    .glassSurface(Capsule())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(title)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
             } else {
                 Spacer()
                 title
