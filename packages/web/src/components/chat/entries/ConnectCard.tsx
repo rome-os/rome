@@ -10,6 +10,7 @@ import {
   isServiceWorking,
   notifyServiceConnected,
   openPendingTab,
+  readConnector,
   SETTINGS_CONNECTIONS_PATH,
   startConnect,
   waitForService,
@@ -19,15 +20,21 @@ type Phase =
   | { kind: "idle" }
   | { kind: "connecting" }
   | { kind: "connected" }
+  /** The browser would not open a tab, so nothing was started. */
+  | { kind: "blocked" }
   | { kind: "failed"; reason: string | null };
 
 /**
  * A card the Concierge shows to connect a service: its name and one button that
- * starts the connection from the entry the Concierge's connector list gave it.
- * The card then watches that list, shows Connected when the service works, and
- * tells the Concierge in `chatId` so it goes on without the guardian typing.
- * A service that works when the card opens shows Connected and tells nobody,
- * since an old card in the history must not wake the Concierge again.
+ * starts the connection. The entry saved in the card only draws it: a click
+ * reads the connector list again and acts on the service's entry as it is then,
+ * since the saved one may be stale (a sign-in done since must not be undone by
+ * a second one). The card then watches that list, shows Connected when the
+ * service works, and tells the Concierge in `chatId` so it goes on without the
+ * guardian typing. A service that works when the card opens shows Connected and
+ * tells nobody, since an old card in the history must not wake the Concierge
+ * again. When the browser blocks the tab the flow needs, nothing is started and
+ * the card points to Settings.
  */
 export function ConnectCard({
   service,
@@ -45,6 +52,7 @@ export function ConnectCard({
   const { t } = useTranslation("chat");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const run = useRef<AbortController | null>(null);
+  const told = useRef(false);
 
   useEffect(() => {
     let current = true;
@@ -61,11 +69,38 @@ export function ConnectCard({
     run.current?.abort();
     const controller = new AbortController();
     run.current = controller;
-    setPhase({ kind: "connecting" });
     // Opened on the click, before any request, so the browser does not take it for a pop-up.
     const tab = openPendingTab();
+    if (!tab) {
+      setPhase({ kind: "blocked" });
+      return;
+    }
+    setPhase({ kind: "connecting" });
+    const connectedNow = () => {
+      setPhase({ kind: "connected" });
+      if (chatId && !told.current) {
+        told.current = true;
+        void notifyServiceConnected(chatId, service);
+      }
+    };
     try {
-      const started = await startConnect(connect, tab, controller.signal);
+      const fresh = await readConnector(service);
+      if (controller.signal.aborted) return;
+      if (!fresh) {
+        tab.close();
+        setPhase({ kind: "failed", reason: t("concierge.connect.checkFailed") });
+        return;
+      }
+      if (fresh.state === "working") {
+        tab.close();
+        connectedNow();
+        return;
+      }
+      const started = await startConnect(
+        fresh.connect ?? { kind: "dashboard" },
+        tab,
+        controller.signal,
+      );
       const connected =
         started.kind === "connected" || (await waitForService(service, controller.signal));
       if (controller.signal.aborted) return;
@@ -73,14 +108,13 @@ export function ConnectCard({
         setPhase({ kind: "failed", reason: null });
         return;
       }
-      setPhase({ kind: "connected" });
-      if (chatId) void notifyServiceConnected(chatId, service);
+      connectedNow();
     } catch (err) {
-      tab?.close();
+      tab.close();
       if (controller.signal.aborted) return;
       setPhase({ kind: "failed", reason: err instanceof Error ? err.message : String(err) });
     }
-  }, [connect, service, chatId]);
+  }, [service, chatId, t]);
 
   const unavailable =
     connect.kind === "rome_oauth" && (!connect.available || !connect.url)
@@ -94,6 +128,8 @@ export function ConnectCard({
         <span className="truncate text-ui text-foreground">{label}</span>
         {unavailable ? (
           <span className="text-aux text-muted-foreground">{unavailable}</span>
+        ) : phase.kind === "blocked" ? (
+          <span className="text-aux text-destructive">{t("concierge.connect.blocked")}</span>
         ) : phase.kind === "failed" ? (
           <span className="text-aux text-destructive">
             {phase.reason ?? t("concierge.connect.notConnected")}
@@ -105,7 +141,7 @@ export function ConnectCard({
           <Check className="size-4" aria-hidden />
           {t("concierge.connect.connected")}
         </span>
-      ) : unavailable ? (
+      ) : unavailable || phase.kind === "blocked" ? (
         <Button asChild variant="ghost" size="sm" className="shrink-0">
           <Link to={SETTINGS_CONNECTIONS_PATH}>{t("concierge.connect.settings")}</Link>
         </Button>

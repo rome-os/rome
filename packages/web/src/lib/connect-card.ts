@@ -1,4 +1,8 @@
-import type { ConciergeConnectEntry, ConciergeConnectorsResponse } from "@rome/api-types/concierge";
+import type {
+  ConciergeConnectEntry,
+  ConciergeConnectorDto,
+  ConciergeConnectorsResponse,
+} from "@rome/api-types/concierge";
 
 // The client side of a Concierge connect card: start a service's connection from
 // the `connect` entry the Concierge's connector list gave it, then watch that
@@ -146,19 +150,24 @@ export async function startConnect(
   }
 }
 
-/** Whether `service` works now, by the Concierge's connector list. A failed read counts as not yet. */
-export async function isServiceWorking(service: string): Promise<boolean> {
+/** The connector list's entry for `service` as it is now, or null when the list cannot be read or has none. */
+export async function readConnector(service: string): Promise<ConciergeConnectorDto | null> {
   try {
     const res = await fetch("/api/concierge/connectors", {
       credentials: "include",
       cache: "no-store",
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const { connectors } = (await res.json()) as ConciergeConnectorsResponse;
-    return connectors.some((entry) => entry.service === service && entry.state === "working");
+    return connectors.find((entry) => entry.service === service) ?? null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Whether `service` works now, by the Concierge's connector list. A failed read counts as not yet. */
+export async function isServiceWorking(service: string): Promise<boolean> {
+  return (await readConnector(service))?.state === "working";
 }
 
 /** Waits for `service` to work, for a bounded time. */

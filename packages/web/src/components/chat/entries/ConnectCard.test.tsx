@@ -29,12 +29,27 @@ const OAUTH: ConciergeConnectEntry = {
   unavailableReason: null,
 };
 
+const COMPOSIO = (needsLogin: boolean): ConciergeConnectEntry => ({
+  kind: "composio",
+  method: "POST",
+  path: "/api/apps/connector/connectors",
+  body: { provider: "mail" },
+  needsLogin,
+  login: { method: "POST", path: "/api/apps/connector/login/start" },
+});
+
 let working: boolean;
+/** The connector list's entry for the service now, which a click acts on. */
+let fresh: ConciergeConnectEntry;
+/** How the connector list answers: false is a failed read. */
+let listReadable: boolean;
 let calls: { key: string; body: unknown }[];
 let tab: { location: { href: string }; close: () => void; opener: unknown };
 
 beforeEach(() => {
   working = false;
+  fresh = OAUTH;
+  listReadable = true;
   poll.result = true;
   calls = [];
   tab = { location: { href: "" }, close: rs.fn(), opener: {} };
@@ -43,9 +58,21 @@ beforeEach(() => {
     const key = `${init?.method ?? "GET"} ${String(input)}`;
     calls.push({ key, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (key === "GET /api/concierge/connectors") {
+      if (!listReadable) return new Response("{}", { status: 502 });
       return new Response(
-        JSON.stringify({ connectors: [{ service: "mail", state: working ? "working" : null }] }),
+        JSON.stringify({
+          connectors: [
+            {
+              service: "mail",
+              state: working ? "working" : null,
+              connect: working ? null : fresh,
+            },
+          ],
+        }),
       );
+    }
+    if (key === "POST /api/apps/connector/connectors") {
+      return new Response(JSON.stringify({ authorizationUrl: "https://composio.test/auth" }));
     }
     return new Response(null, { status: 202 });
   }) as typeof fetch);
@@ -131,14 +158,8 @@ describe("ConnectCard", () => {
   });
 
   it("shows the reason a start failed, and closes the tab it opened", async () => {
-    renderCard({
-      kind: "composio",
-      method: "POST",
-      path: "/elsewhere",
-      body: { provider: "mail" },
-      needsLogin: false,
-      login: { method: "POST", path: "/api/x/start" },
-    });
+    fresh = { ...(COMPOSIO(false) as object), path: "/elsewhere" } as ConciergeConnectEntry;
+    renderCard();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
 
@@ -163,8 +184,92 @@ describe("ConnectCard", () => {
   });
 });
 
+describe("ConnectCard acts on the connector list as it is at the click", () => {
+  it("does not sign in again when the saved entry asks for a sign-in the list no longer does", async () => {
+    // The card was posted before Composio was signed in; it has been since.
+    fresh = COMPOSIO(false);
+    renderCard(COMPOSIO(true));
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Connected")).toBeTruthy();
+    const keys = calls.map((call) => call.key);
+    expect(keys).toContain("POST /api/apps/connector/connectors");
+    expect(keys.some((key) => key.includes("/login/"))).toBe(false);
+    expect(tab.location.href).toBe("https://composio.test/auth");
+  });
+
+  it("signs in first when the list says it must, whatever the saved entry says", async () => {
+    fresh = COMPOSIO(true);
+    renderCard(COMPOSIO(false));
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() =>
+      expect(calls.some((call) => call.key === "POST /api/apps/connector/login/start")).toBe(true),
+    );
+  });
+
+  it("shows Connected and tells the Concierge once, starting nothing, when it works by the click", async () => {
+    renderCard(COMPOSIO(true));
+    // It turns working after the card is drawn, before the click.
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    working = true;
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Connected")).toBeTruthy();
+    expect(tab.close).toHaveBeenCalled();
+    expect(calls.some((call) => call.key.startsWith("POST /api/apps"))).toBe(false);
+    await waitFor(() => expect(notices()).toHaveLength(1));
+    expect(notices()[0]?.body).toEqual({ service: "mail" });
+  });
+
+  it("shows an error and starts nothing when the list cannot be read", async () => {
+    renderCard(COMPOSIO(true));
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    listReadable = false;
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Could not check the connection")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(tab.close).toHaveBeenCalled();
+    expect(calls.some((call) => call.key.startsWith("POST"))).toBe(false);
+  });
+
+  it("shows why a service cannot be connected when the list says so now", async () => {
+    fresh = { kind: "rome_oauth", url: null, available: false, unavailableReason: "Not set up" };
+    renderCard(OAUTH);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Not set up")).toBeTruthy();
+    expect(tab.location.href).toBe("");
+  });
+});
+
+describe("ConnectCard when the browser blocks the tab", () => {
+  it("starts nothing and points to Settings", async () => {
+    rs.spyOn(window, "open").mockReturnValue(null);
+    renderCard(COMPOSIO(true));
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    const before = calls.length;
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("Pop-up blocked")).toBeTruthy();
+    expect(calls).toHaveLength(before);
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+      "/settings/connections",
+    );
+    expect(notices()).toEqual([]);
+  });
+});
+
 describe("ConnectCard for a service only Settings connects", () => {
   it("opens Settings in the tab and goes on once the service works", async () => {
+    fresh = { kind: "dashboard" };
     renderCard({ kind: "dashboard" });
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Connect" }));

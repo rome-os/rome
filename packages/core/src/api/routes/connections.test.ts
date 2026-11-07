@@ -285,6 +285,42 @@ describe("GET /connections", () => {
       else process.env.PANTHEON_BASE_ORIGIN = prev;
     }
   });
+
+  it("makes the connect link of a broken OAuth connection a reconnect", async () => {
+    const prev = process.env.PANTHEON_BASE_ORIGIN;
+    process.env.PANTHEON_BASE_ORIGIN = "https://rome-cloud.example";
+    try {
+      const ledger = makeLedger();
+      const fixture = makeBotAll();
+      const descriptor = { ...fixture.descriptor, connectionKind: "github" };
+      {
+        const setup = new ConnectionRegistry({ repository: ledger });
+        setup.register(descriptor);
+        const conn = await setup.connect("github", "GitHub");
+        await setup.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+        await updateGrant(ledger, conn.id, (current) => ({
+          ...current,
+          state: "degraded",
+          degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
+        }));
+      }
+      const registry = new ConnectionRegistry({ repository: ledger });
+      registry.register(descriptor);
+      await registry.load();
+
+      const { connections } = await (await makeApp(registry).request("/connections")).json();
+
+      expect(connections[0].state).toBe("broken");
+      expect(connections[0].connect).toEqual({
+        url: "/api/oauth/github/start?reconnect=1",
+        available: true,
+        unavailableReason: null,
+      });
+    } finally {
+      if (prev === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
+      else process.env.PANTHEON_BASE_ORIGIN = prev;
+    }
+  });
 });
 
 describe("GET /connections/:id", () => {

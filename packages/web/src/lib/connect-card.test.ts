@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConciergeConnectEntry } from "@rome/api-types/concierge";
 import {
   isServiceWorking,
+  readConnector,
   notifyServiceConnected,
   startConnect,
   type PendingTab,
@@ -192,6 +193,32 @@ describe("startConnect", () => {
       kind: "waiting",
     });
     expect(opened).toEqual(["/settings/connections"]);
+  });
+});
+
+describe("readConnector", () => {
+  it("answers the service's entry in the list as it is now", async () => {
+    mockApi({
+      "GET /api/concierge/connectors": () =>
+        reply({
+          connectors: [
+            { service: "code", state: "broken", connect: { kind: "dashboard" } },
+            { service: "mail", state: null, connect: { kind: "dashboard" } },
+          ],
+          rules: {},
+        }),
+    });
+
+    expect(await readConnector("mail")).toMatchObject({ service: "mail", state: null });
+    expect(await readConnector("fax")).toBeNull();
+  });
+
+  it("answers null when the list cannot be read", async () => {
+    mockApi({ "GET /api/concierge/connectors": () => reply({}, 502) });
+    expect(await readConnector("mail")).toBeNull();
+    rs.restoreAllMocks();
+    rs.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    expect(await readConnector("mail")).toBeNull();
   });
 });
 
