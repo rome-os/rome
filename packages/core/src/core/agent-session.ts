@@ -1286,19 +1286,27 @@ async function openSession(
 
   // What the Rome tools are made of for this session. Captured on open so an
   // exact fork rebuilds the same catalog with its own callbacks.
+  // What depends on whether the session has a speaker. `provided` is the session
+  // tools provider's answer, served before `propose_routine`.
+  const speakerToolParams = (refs: TurnExecRefs, hasSpeaker: boolean, provided: RomeTool[]) => ({
+    widgetsShow: showsWidgets(widgets, hasSpeaker),
+    sessionTools: [
+      ...provided,
+      ...proposeRoutineTools({
+        widgets,
+        hasSpeaker,
+        gate: routineActivation,
+        runAction: makeRunAction(refs),
+      }),
+    ],
+  });
   const liveToolParams: RomeToolsOptions = {
     actions: agentActions(sessionExecRefs),
     skills: deps.skillCatalog,
     subagents: { tools: subagentTools, run: makeExecuteSubagent(sessionExecRefs) },
-    widgetsShow: showsWidgets(widgets, true),
     log,
     defer: deferTool(sessionExecRefs),
-    sessionTools: proposeRoutineTools({
-      widgets,
-      hasSpeaker: true,
-      gate: routineActivation,
-      runAction: makeRunAction(sessionExecRefs),
-    }),
+    ...speakerToolParams(sessionExecRefs, true, []),
   };
 
   const buildSessionParams = (
@@ -1356,10 +1364,7 @@ async function openSession(
       getTurnPushLevel: () => impl.currentTurnPushLevelRef,
     });
     const toolParams: RomeToolsOptions = providedTools?.length
-      ? {
-          ...liveToolParams,
-          sessionTools: [...providedTools, ...(liveToolParams.sessionTools ?? [])],
-        }
+      ? { ...liveToolParams, ...speakerToolParams(sessionExecRefs, true, providedTools) }
       : liveToolParams;
     const params = buildSessionParams(resolution, toolParams, resumeProviderId, resumeThreadId);
     const resumed = params.thread.kind === "resume";
@@ -1504,20 +1509,11 @@ async function openSession(
           ...lastToolParams,
           actions: agentActions(refs),
           subagents: { tools: subagentTools, run: makeExecuteSubagent(refs) },
+          defer: fork.continuable ? undefined : deferTool(refs),
           // A fork has no speaker, so action results that hand back a widget
           // take their plain-text forms. Otherwise the tool result claims a card
           // was shown while nothing mounted and the fork dead-ends.
-          widgetsShow: showsWidgets(widgets, false),
-          defer: fork.continuable ? undefined : deferTool(refs),
-          sessionTools: [
-            ...detachSessionTools(lastProvidedTools),
-            ...proposeRoutineTools({
-              widgets,
-              hasSpeaker: false,
-              gate: routineActivation,
-              runAction: makeRunAction(refs),
-            }),
-          ],
+          ...speakerToolParams(refs, false, detachSessionTools(lastProvidedTools)),
         }),
       },
       projectProviderMessage: async (msg) => {
