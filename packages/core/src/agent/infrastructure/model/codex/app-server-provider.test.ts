@@ -207,6 +207,18 @@ async function collectUntilTerminal(session: ModelSession): Promise<ModelSession
 }
 
 describe("CodexAppServerProvider", () => {
+  it("warms its app-server on construction unless told not to", () => {
+    const manager = new CodexAppServerManager();
+    const warmup = rs.spyOn(manager, "warmup").mockResolvedValue(undefined);
+
+    new CodexAppServerProvider({ appServerManager: manager, warmup: false });
+    expect(warmup).not.toHaveBeenCalled();
+
+    new CodexAppServerProvider({ appServerManager: manager });
+    expect(warmup).toHaveBeenCalledTimes(1);
+    manager.close();
+  });
+
   it("steers the owned native turn, correlating consumption separately from RPC acceptance", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };

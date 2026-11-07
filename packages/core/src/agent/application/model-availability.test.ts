@@ -213,7 +213,11 @@ describe("createModelAvailability", () => {
     expect(changes).toEqual(["openai:authorization"]);
     codex.releaseUsage(null);
     await read;
-    expect(changes).toEqual(["openai:authorization", "openai:refreshed"]);
+    expect(changes.slice(0, 2)).toEqual(["openai:authorization", "openai:refreshed"]);
+    // The change can restart the provider's process under the usage read, so
+    // the account is read once more.
+    await settle();
+    expect(codex.statusReads()).toBe(3);
     availability.close();
   });
 

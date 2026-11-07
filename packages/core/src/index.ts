@@ -39,6 +39,7 @@ import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./us
 import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
+import { containerUptimeMs } from "./lib/runtime.js";
 import {
   AppActionSchemaCache,
   appActionSchemaCacheBuild,
@@ -877,6 +878,9 @@ async function main() {
   const claudeAccount = new ClaudeAccount({ settingsRepo });
   const modelAvailability = createModelAvailability({
     accounts: { openai: codexAccountService, anthropic: claudeAccount },
+    // The first read spawns the Codex app-server, which competes with boot
+    // for CPU on a small VM. It runs once Rome has started, with the warmup.
+    startRefresh: false,
     log: createLogger("model-availability"),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
@@ -897,6 +901,7 @@ async function main() {
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
     account: codexAccountService,
+    warmup: false,
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
     onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
@@ -2190,6 +2195,8 @@ async function main() {
   await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
 
   log.info("Rome started", {
+    processUptimeMs: Math.round(process.uptime() * 1000),
+    containerUptimeMs: containerUptimeMs(),
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],
     agents: agentNames,
@@ -2199,6 +2206,17 @@ async function main() {
     appActionFailures: appActionReload.failed,
     routines: allRoutines.length,
     discoveredCdpServers: discoveredServers.length > 0 ? discoveredServers : ["none"],
+  });
+
+  void codexAppServerManager.warmup().catch((err) => {
+    log.warn("codex app-server warmup failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  void modelAvailability.refresh().catch((err) => {
+    log.warn("initial model availability refresh failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   });
 
   // Startup is known-good: record this version as the last completed boot so

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 export function runningInsideDocker(): boolean {
   return existsSync("/.dockerenv");
@@ -18,4 +18,27 @@ export function runningInsideDocker(): boolean {
 export function resolveInstanceSlug(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const slug = env.PANTHEON_SLUG?.trim();
   return slug ? slug : undefined;
+}
+
+/**
+ * Milliseconds since PID 1 started, which inside Docker is the container's
+ * init, or null when `/proc` cannot be read. On a bare Linux host PID 1 is the
+ * host's init, so the value is close to the system uptime. Assumes the
+ * kernel's 100 Hz clock tick, which every Linux build Rome ships on uses.
+ */
+export function containerUptimeMs(
+  read: (path: string) => string = (path) => readFileSync(path, "utf-8"),
+): number | null {
+  try {
+    const systemUptimeSec = Number.parseFloat(read("/proc/uptime").split(" ")[0] ?? "");
+    // Field 22 of /proc/<pid>/stat is the start time in clock ticks since boot.
+    // The command name in field 2 can contain spaces, so count from its ")".
+    const stat = read("/proc/1/stat");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const startTicks = Number.parseInt(fields[19] ?? "", 10);
+    if (!Number.isFinite(systemUptimeSec) || !Number.isFinite(startTicks)) return null;
+    return Math.round(systemUptimeSec * 1000 - startTicks * 10);
+  } catch {
+    return null;
+  }
 }

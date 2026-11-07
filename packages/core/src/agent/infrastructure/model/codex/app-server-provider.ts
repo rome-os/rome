@@ -439,6 +439,12 @@ interface CodexAppServerProviderOptions {
   appServerManager?: CodexAppServerManager;
   /** The account this provider runs under, told of each turn the provider refuses. */
   account?: LearnsRefusedTurns;
+  /**
+   * Starts the app-server on construction so the first turn finds it ready.
+   * Defaults to true. Rome's boot passes false and warms the shared manager
+   * once it has started, so the spawn does not compete with boot for CPU.
+   */
+  warmup?: boolean;
   /** Only the Rome credits payer may classify its 402 as exhausted credits, and
    *  only the ChatGPT payer may mark the saved login as needing re-login. */
   isUsingRomeCredits?: () => boolean;
@@ -604,11 +610,13 @@ export class CodexAppServerProvider implements ModelProvider {
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.appServerManager = options.appServerManager ?? new CodexAppServerManager();
-    void this.appServerManager.warmup().catch((err) => {
-      log.warn("codex app-server warmup failed", {
-        error: err instanceof Error ? err.message : String(err),
+    if (options.warmup !== false) {
+      void this.appServerManager.warmup().catch((err) => {
+        log.warn("codex app-server warmup failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
+    }
   }
 
   close(): void {

@@ -107,15 +107,18 @@ export function createModelAvailability(
     }
   };
 
+  /** Stores the read and reports whether the authorized state flipped. */
   const store = (
     provider: ProviderId,
     status: ModelAccountStatus,
     usage: ModelAccountUsage | null,
-  ): void => {
+  ): boolean => {
     const previous = stored[provider];
     const next: ProviderAvailability = availabilityFromAccount(status, usage, now(), previous);
     stored[provider] = next;
-    if (providerAuthorized(previous) !== providerAuthorized(next)) emit(provider, "authorization");
+    const flipped = providerAuthorized(previous) !== providerAuthorized(next);
+    if (flipped) emit(provider, "authorization");
+    return flipped;
   };
 
   /**
@@ -138,7 +141,9 @@ export function createModelAvailability(
       await Promise.allSettled([usagePending]);
       return;
     }
-    store(provider, readStatus, stored[provider]?.usage ?? null);
+    // An authorization change can restart the provider's process under the
+    // usage read already running, so the usage is read once more after it.
+    if (store(provider, readStatus, stored[provider]?.usage ?? null)) rereadAfter.add(provider);
     const [usage] = await Promise.allSettled([usagePending]);
     if (closed) return;
     const readUsage =
@@ -159,7 +164,9 @@ export function createModelAvailability(
     const pending = readAccount(provider, account).finally(() => {
       if (inFlight.get(provider) === pending) inFlight.delete(provider);
       logLimitChange(provider, "usage read");
-      if (!closed) emit(provider, "refreshed");
+      if (closed) return;
+      emit(provider, "refreshed");
+      if (rereadAfter.delete(provider)) void refreshProvider(provider, account);
     });
     inFlight.set(provider, pending);
     return pending;
@@ -171,17 +178,8 @@ export function createModelAvailability(
    * read once more when it settles.
    */
   const readChangedAccount = (provider: ProviderId, account: ModelAccount): void => {
-    const existing = inFlight.get(provider);
-    if (!existing) {
-      void refreshProvider(provider, account);
-      return;
-    }
-    if (rereadAfter.has(provider)) return;
-    rereadAfter.add(provider);
-    void existing.finally(() => {
-      rereadAfter.delete(provider);
-      if (!closed) void refreshProvider(provider, account);
-    });
+    if (inFlight.has(provider)) rereadAfter.add(provider);
+    else void refreshProvider(provider, account);
   };
 
   const refresh = async (provider?: ProviderId): Promise<void> => {
