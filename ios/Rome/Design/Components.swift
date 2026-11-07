@@ -191,29 +191,6 @@ enum TaskTone: Sendable {
     }
 }
 
-/// A small status capsule: a dot (or spinner) and a word.
-struct StatusPill: View {
-    let tone: TaskTone
-    var label: String? = nil
-    var compact = true
-
-    var body: some View {
-        HStack(spacing: 5) {
-            if tone == .running {
-                Spinner(size: compact ? 10 : 12, lineWidth: 2.4, color: tone.text, trackOpacity: 0.3)
-            } else {
-                Circle().fill(tone.dot).frame(width: compact ? 6 : 7, height: compact ? 6 : 7)
-            }
-            Text(label ?? tone.label)
-                .romeFont(compact ? 12 : 13, .semibold)
-                .foregroundStyle(tone.text)
-        }
-        .padding(.horizontal, compact ? 8 : 10)
-        .frame(height: compact ? 22 : 28)
-        .background(tone.soft, in: Capsule())
-    }
-}
-
 /// The filled round status icon in Tasks rows.
 struct StatusGlyph: View {
     let tone: TaskTone
