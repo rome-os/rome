@@ -117,7 +117,7 @@ struct ChatScreen: View {
                 TranscriptList(store: store, composerFocused: composerFocused, focusMessageID: Binding(
                     get: { workspace.focusMessageID },
                     set: { workspace.focusMessageID = $0 }
-                )) { row, previous in
+                ), latestRequest: workspace.latestRequest) { row, previous in
                     rowView(row)
                         .padding(.top, TranscriptSpacing.top(row, after: previous))
                 }
@@ -271,6 +271,8 @@ struct TranscriptList<Row: View>: View {
     var footer: AnyView? = nil
     /// A message to scroll to and briefly highlight.
     var focusMessageID: Binding<String?> = .constant(nil)
+    /// Goes up when the newest rows must come into view (a tapped push).
+    var latestRequest = 0
     @ViewBuilder let row: (TranscriptRow, TranscriptRow?) -> Row
 
     /// The list keeps the bottom in view. It turns off when the guardian scrolls
@@ -284,6 +286,11 @@ struct TranscriptList<Row: View>: View {
     @State private var highlighted: String?
     @State private var visibleHeight: CGFloat = 0
     @State private var legacyScroll = LegacyScrollMonitor()
+    /// The bottom was on screen when the app left the foreground.
+    @State private var leftAtBottom = false
+    /// Until then, new last rows scroll into view: the refetch after a return
+    /// or a push tap lands a moment after it.
+    @State private var catchUpUntil: Date?
 
     var body: some View {
         let rows = store.rows
@@ -338,8 +345,23 @@ struct TranscriptList<Row: View>: View {
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
                 // row itself, in case the anchor does not hold the bottom.
-                if following && !Self.anchorFollowsBottom { scrollToBottom(proxy) }
+                if let until = catchUpUntil, Date.now < until {
+                    scrollToBottom(proxy)
+                } else if following && !Self.anchorFollowsBottom {
+                    scrollToBottom(proxy)
+                }
             }
+            // The swipe home, or Notification Center pulled down, starts on the
+            // list and reads as a drag away from the bottom. Where the list
+            // stood when the app left decides instead.
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                leftAtBottom = bottomVisible
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                guard leftAtBottom else { return }
+                catchUp(proxy)
+            }
+            .onChange(of: latestRequest) { catchUp(proxy) }
             .onChange(of: store.pending.count) { old, new in
                 if new > old { scrollToBottom(proxy) }
             }
@@ -395,6 +417,11 @@ struct TranscriptList<Row: View>: View {
     private static var anchorFollowsBottom: Bool {
         if #available(iOS 18, *) { return true }
         return false
+    }
+
+    private func catchUp(_ proxy: ScrollViewProxy) {
+        catchUpUntil = .now + 5
+        scrollToBottom(proxy)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

@@ -103,6 +103,7 @@ final class TranscriptStore {
             // behind it: start over from it. Otherwise keep the pages already
             // loaded, so a reload never puts the older-page spinner back on top.
             let known = Set(messages.map(\.id))
+            let wasLoaded = loaded
             let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { known.contains($0.id) }
             if gap {
                 messages = []
@@ -110,6 +111,11 @@ final class TranscriptStore {
                 olderPage = nil
             }
             merge(page.messages)
+            // Replies a refetch brings count like live ones: the list offers
+            // "New messages" to a guardian reading further up.
+            if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
+                arrivals += 1
+            }
             if !loaded || gap {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil
