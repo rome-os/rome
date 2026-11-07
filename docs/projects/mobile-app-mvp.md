@@ -2,7 +2,7 @@
 
 The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks sheet, task chats with approvals and questions, the drawer, Settings, Search and Routines. Design: the claude.ai artifact "Rome iOS v1 设计稿"; scope and decisions: the Claude Doc "Rome iOS v1 设计文档".
 
-- Branch: `feat/ios-app` (local only, not pushed)
+- Branch: `feat/ios-app`, pushed to origin as a backup (no PR yet, 2026-11-07); the worker pushes after each green commit
 - Worktree: `.claude/worktrees/mobile-app-mvp`
 - Lead: session "★ Mobile App MVP lead"
 
