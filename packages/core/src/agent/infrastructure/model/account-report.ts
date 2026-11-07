@@ -40,7 +40,7 @@ function ahead(until: string | undefined, now: number): string | undefined {
 
 /**
  * The refusal as the account should keep holding it after it reported
- * `availability`: ending when the exhausted window resets, when that comes
+ * the report: ending when the exhausted window resets, when that comes
  * first, so a usage read that fails later cannot bring the limit back past a
  * reset the provider stated.
  */
