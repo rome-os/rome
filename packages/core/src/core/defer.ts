@@ -6,13 +6,12 @@
 // wakes in its own conversation with full context. A time wakeup is a dated
 // schedule routine; an event wakeup is a `once` event-bus routine.
 //
-// This module is the pure logic half: parse the input, compute the absolute
-// fire instant, and shape the `create_routine` args. The side effects
-// (reading the live thread context, subscribing to the event's source,
+// This module shapes the `create_routine` args from the parsed input. The side
+// effects (reading the live thread context, subscribing to the event's source,
 // calling create_routine through the action engine) are injected by the
 // caller (`agent-session.ts`) so this stays testable without a running engine.
 
-import { z } from "zod";
+import { parseDeferInput, type DeferInput } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
 
 /** The action the one-off routine fires: `resume_session` continues this
@@ -20,8 +19,6 @@ import type { ThreadContext } from "./types.js";
  * main-process backend-turn orchestrator — defer needs only name the session to
  * resume; the orchestrator owns running the turn and delivering the reply. */
 export const RESUME_SESSION_ACTION = "resume_session";
-
-const MINUTE_MS = 60_000;
 
 /** The thread the `defer` call is running in, captured from the live session. */
 export interface DeferContext {
@@ -77,113 +74,6 @@ export type DeferResult =
       warning?: string;
       routineId?: string;
     };
-
-type ParsedDefer =
-  | { ok: true; kind: "time"; name: string; fireAtMs: number }
-  | { ok: true; kind: "event"; name: string; event: DeferEvent }
-  | { ok: false; error: string };
-
-// Strict: an unknown key (say, a field nested one level off) is an error the
-// model sees and fixes, not a field silently dropped.
-const deferEventSchema = z.strictObject({
-  eventName: z
-    .string()
-    .transform((value) => value.trim())
-    .refine((value) => value.length > 0, { message: "defer.event.eventName is required" }),
-  sourcePattern: z
-    .string()
-    .transform((value) => value.trim())
-    .refine((value) => value.length > 0, {
-      message: "defer.event.sourcePattern must be non-empty when provided",
-    })
-    .optional(),
-  filter: z
-    .array(
-      z.object({
-        field: z
-          .string()
-          .transform((value) => value.trim())
-          .refine((value) => value.length > 0 && value.split(".").every((seg) => seg.trim()), {
-            message: "defer.event.filter field must be a dot-path with no empty segments",
-          }),
-        equals: z.string(),
-      }),
-    )
-    .optional(),
-});
-
-type DeferEvent = z.infer<typeof deferEventSchema>;
-
-/** The `defer` tool input. The MCP boundary already validates the model's call
- * against the advertised JSON schema (see `mcp-facade.ts` → `toMcpToolShape`),
- * so field types are guaranteed by the time we get here; this schema is the
- * runtime source of truth that also encodes the constraints a JSON schema
- * can't express — exactly one of `afterMinutes`, `at` or `event` is required.
- * The future-time check stays in code (a schema can't see "now"). `name` is
- * trimmed-then-required so a whitespace-only name can't slip through. Strict,
- * like the event object: an unknown key is rejected, not dropped. */
-export const deferInputSchema = z
-  .strictObject({
-    name: z
-      .string()
-      .transform((value) => value.trim())
-      .refine((value) => value.length > 0, {
-        message: "defer.name is required — a short name for what you're watching",
-      }),
-    afterMinutes: z.number().int().min(1).optional(),
-    at: z.string().optional(),
-    event: deferEventSchema.optional(),
-  })
-  .refine(
-    (value) => [value.afterMinutes, value.at, value.event].filter((v) => v != null).length === 1,
-    {
-      message:
-        'defer needs exactly one of "afterMinutes", "at" (an ISO 8601 instant) or "event" (an event to wait for)',
-    },
-  );
-
-export type DeferInput = z.infer<typeof deferInputSchema>;
-
-/** Validate the tool input. A time wakeup resolves to one absolute fire
- * instant, ceiled to the next whole minute (the schedule trigger is
- * minute-resolution) and in the future. An event wakeup resolves to the event
- * match. Exported for unit tests. */
-export function parseDeferInput(input: unknown, now: number): ParsedDefer {
-  const parsed = deferInputSchema.safeParse(input);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    if (!issue) return { ok: false, error: "invalid defer input" };
-    // Name where a structural error sits ("defer.event: Unrecognized key …");
-    // the custom messages already start with their path.
-    const where = ["defer", ...issue.path.map(String)].join(".");
-    const error = issue.message.startsWith("defer") ? issue.message : `${where}: ${issue.message}`;
-    return { ok: false, error };
-  }
-  const { name, afterMinutes, at, event } = parsed.data;
-
-  if (event) return { ok: true, kind: "event", name, event };
-
-  let rawMs: number;
-  if (afterMinutes != null) {
-    rawMs = now + afterMinutes * MINUTE_MS;
-  } else {
-    // The refine above guarantees `at` is set when `afterMinutes` isn't.
-    const parsedAt = Date.parse(at as string);
-    if (Number.isNaN(parsedAt)) {
-      return { ok: false, error: `defer.at "${at}" is not a valid ISO 8601 instant` };
-    }
-    rawMs = parsedAt;
-  }
-
-  // Minute floor: the schedule trigger is HH:mm. Ceil so we never
-  // round down into the past, and so "fire in N minutes" never lands early.
-  const fireAtMs = Math.ceil(rawMs / MINUTE_MS) * MINUTE_MS;
-  if (fireAtMs <= now) {
-    return { ok: false, error: "defer fires in the past — pick a time at least a minute from now" };
-  }
-
-  return { ok: true, kind: "time", name, fireAtMs };
-}
 
 /** Build the args `resume_session` fires with: which runtime session to continue,
  * where its reply is delivered, and the prompt the woken turn receives.

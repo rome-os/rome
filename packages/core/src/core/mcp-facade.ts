@@ -20,32 +20,24 @@
 
 import { isValidTimeZone } from "../lib/timezone.js";
 import { createLogger } from "../logger.js";
-import type { DeferInput } from "./defer.js";
 import type { ModelToolCallContext, RomeToolDefinition } from "./agent-runner.js";
-import type { ActionConfig } from "../actions/types.js";
-import type { Skill } from "../agent/index.js";
-
-/** One action as the facade lists and describes it to the model. */
-export interface ActionMcpDefinition {
-  name: string;
-  description: string;
-  type: ActionConfig["type"];
-  complexity: ActionConfig["complexity"];
-  speed: ActionConfig["speed"];
-  reliability: ActionConfig["reliability"];
-  sideEffects: ActionConfig["sideEffects"];
-  requiresApproval: boolean;
-  cancellable: boolean;
-  inputSchema: Record<string, unknown>;
-}
+import {
+  askQuestionToolOutput,
+  describeAction,
+  MAX_SEARCH_LIMIT,
+  normalizeAskQuestionForCard,
+  SEARCH_LIMIT_DESCRIPTION,
+  searchActions,
+  searchSkills,
+  showsWidgets,
+  toActionSummary,
+  toSkillSummary,
+  type AgentAction,
+  type DeferInput,
+  type Skill,
+} from "../agent/index.js";
 
 const log = createLogger("mcp-facade");
-
-const DEFAULT_SEARCH_LIMIT = 10;
-const MAX_SEARCH_LIMIT = 25;
-const SEARCH_LIMIT_DESCRIPTION =
-  `Optional. Recommended: omit this parameter to use the default of ${DEFAULT_SEARCH_LIMIT}. ` +
-  `If provided, use an integer from 1 to ${MAX_SEARCH_LIMIT}.`;
 
 export interface FacadeTextContent {
   type: "text";
@@ -90,7 +82,7 @@ export interface FacadeParams {
    * facade has no static-snapshot fallback — callers must always supply a
    * getter so a stale snapshot can't accidentally leak through.
    */
-  getActionCatalog: () => ActionMcpDefinition[];
+  getActionCatalog: () => AgentAction[];
   /**
    * Live getter consulted on every MCP request, so skills from apps installed
    * mid-session (via `app_management`) become discoverable without ending the
@@ -166,269 +158,7 @@ export interface RoutineActivationGate {
   routineKeyFor(toolUseId: string): string | undefined;
 }
 
-interface ActionArgumentSummary {
-  name: string;
-  type: string;
-  required: boolean;
-  description?: string;
-  guidance?: string;
-  enum?: unknown[];
-  items?: Record<string, unknown>;
-}
-
-interface ActionSummary {
-  name: string;
-  description: string;
-  type: ActionMcpDefinition["type"];
-  complexity: ActionMcpDefinition["complexity"];
-  speed: ActionMcpDefinition["speed"];
-  reliability: ActionMcpDefinition["reliability"];
-  sideEffects: ActionMcpDefinition["sideEffects"];
-  requiresApproval: boolean;
-  cancellable: boolean;
-}
-
-interface SkillSummary {
-  name: string;
-  description: string;
-  tools?: string[];
-  ownerType: Skill["ownerType"];
-  ownerId: string;
-}
-
-interface SearchMatcher {
-  kind: "regex";
-  matches(text: string): boolean;
-  scoreName(text: string): number;
-  scoreDescription(text: string): number;
-}
-
-function toActionSummary(action: ActionMcpDefinition): ActionSummary {
-  return {
-    name: action.name,
-    description: action.description,
-    type: action.type,
-    complexity: action.complexity,
-    speed: action.speed,
-    reliability: action.reliability,
-    sideEffects: action.sideEffects,
-    requiresApproval: action.requiresApproval,
-    cancellable: action.cancellable,
-  };
-}
-
-function summarizeActionArguments(action: ActionMcpDefinition): ActionArgumentSummary[] {
-  const properties = (action.inputSchema.properties || {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
-  const required = new Set((action.inputSchema.required || []) as string[]);
-
-  return Object.entries(properties).map(([name, prop]) => {
-    const type = Array.isArray(prop.type)
-      ? prop.type.join("|")
-      : typeof prop.type === "string"
-        ? prop.type
-        : "unknown";
-    const summary: ActionArgumentSummary = {
-      name,
-      type,
-      required: required.has(name),
-    };
-    if (typeof prop.description === "string" && prop.description) {
-      summary.description = prop.description;
-    }
-    const guidance = argumentTypeGuidance(prop);
-    if (guidance) {
-      summary.guidance = guidance;
-    }
-    if (Array.isArray(prop.enum) && prop.enum.length > 0) {
-      summary.enum = prop.enum;
-    }
-    const hasArrayType = Array.isArray(prop.type)
-      ? prop.type.includes("array")
-      : prop.type === "array";
-    if (
-      hasArrayType &&
-      prop.items != null &&
-      typeof prop.items === "object" &&
-      !Array.isArray(prop.items)
-    ) {
-      summary.items = prop.items as Record<string, unknown>;
-    }
-    return summary;
-  });
-}
-
-function argumentTypeGuidance(prop: Record<string, unknown>): string | undefined {
-  const types = Array.isArray(prop.type)
-    ? prop.type.filter((type): type is string => typeof type === "string")
-    : typeof prop.type === "string"
-      ? [prop.type]
-      : [];
-
-  if (types.includes("string")) {
-    return undefined;
-  }
-
-  if (types.includes("integer")) {
-    return 'Pass this value as a JSON integer, e.g. 10. Do not pass it as a string like "10".';
-  }
-
-  if (types.includes("number")) {
-    return 'Pass this value as a JSON number, e.g. 10. Do not pass it as a string like "10".';
-  }
-
-  return undefined;
-}
-
-function readAction(action: ActionMcpDefinition) {
-  return {
-    ...toActionSummary(action),
-    arguments: summarizeActionArguments(action),
-  };
-}
-
-function buildActionSearchText(action: ActionMcpDefinition): string {
-  const argText = summarizeActionArguments(action)
-    .map((arg) =>
-      [
-        arg.name,
-        arg.type,
-        arg.description,
-        arg.guidance,
-        Array.isArray(arg.enum) ? arg.enum.join(" ") : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-    )
-    .join(" ");
-
-  return [
-    action.name,
-    action.description,
-    action.type,
-    action.complexity,
-    action.speed,
-    action.reliability,
-    action.sideEffects,
-    action.requiresApproval ? "requires approval" : "",
-    action.cancellable ? "cancellable" : "",
-    argText,
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function normalizeSearchLimit(limit: number | undefined): number {
-  if (typeof limit !== "number" || !Number.isFinite(limit)) {
-    return DEFAULT_SEARCH_LIMIT;
-  }
-  return Math.min(Math.max(Math.trunc(limit), 1), MAX_SEARCH_LIMIT);
-}
-
-function parseRegexQuery(queryText: string): RegExp | null {
-  const trimmed = queryText.trim();
-  if (!trimmed.startsWith("/") || trimmed.length < 2) {
-    return null;
-  }
-
-  const lastSlash = trimmed.lastIndexOf("/");
-  if (lastSlash <= 0) {
-    return null;
-  }
-
-  const flags = trimmed.slice(lastSlash + 1);
-  if (!/^[dgimsuvy]*$/.test(flags)) {
-    return null;
-  }
-
-  try {
-    return new RegExp(trimmed.slice(1, lastSlash), flags);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}`);
-  }
-}
-
-function matchesRegex(regex: RegExp, text: string): boolean {
-  regex.lastIndex = 0;
-  return regex.test(text);
-}
-
-function compileSearchRegex(queryText: string): RegExp {
-  const explicitRegex = parseRegexQuery(queryText);
-  if (explicitRegex) {
-    return explicitRegex;
-  }
-
-  try {
-    return new RegExp(queryText, "i");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}`);
-  }
-}
-
-function createSearchMatcher(queryText: string): SearchMatcher | null {
-  const trimmed = queryText.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const regex = compileSearchRegex(trimmed);
-  return {
-    kind: "regex",
-    matches: (text) => matchesRegex(regex, text),
-    scoreName: (text) => (matchesRegex(regex, text) ? 5 : 0),
-    scoreDescription: (text) => (matchesRegex(regex, text) ? 3 : 0),
-  };
-}
-
-function searchActions(
-  actionCatalog: ActionMcpDefinition[],
-  queryText: string,
-  limit: number | undefined,
-): ActionSummary[] {
-  const normalizedLimit = normalizeSearchLimit(limit);
-  const matcher = createSearchMatcher(queryText);
-  const sortedActions = [...actionCatalog].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
-
-  if (!matcher) {
-    return sortedActions.slice(0, normalizedLimit).map(toActionSummary);
-  }
-
-  return sortedActions
-    .map((action) => {
-      const haystack = buildActionSearchText(action);
-      if (!matcher.matches(haystack)) {
-        return null;
-      }
-
-      let score = 1;
-      score += matcher.scoreName(action.name);
-      score += matcher.scoreDescription(action.description);
-      if (matcher.kind === "regex") {
-        score += 1;
-      }
-
-      return { action, score };
-    })
-    .filter((entry): entry is { action: ActionMcpDefinition; score: number } => entry !== null)
-    .sort(
-      (left, right) =>
-        right.score - left.score || left.action.name.localeCompare(right.action.name),
-    )
-    .slice(0, normalizedLimit)
-    .map(({ action }) => toActionSummary(action));
-}
-
-function requireAction(
-  actionCatalog: ActionMcpDefinition[],
-  actionName: string,
-): ActionMcpDefinition {
+function requireAction(actionCatalog: AgentAction[], actionName: string): AgentAction {
   const action = actionCatalog.find((entry) => entry.name === actionName);
   if (!action) {
     throw new Error(`Unknown action: ${actionName}`);
@@ -441,53 +171,6 @@ function assertJsonArgs(value: unknown): Record<string, unknown> {
     throw new Error("execute_action.json_args must be an object");
   }
   return value as Record<string, unknown>;
-}
-
-function toSkillSummary(skill: Skill): SkillSummary {
-  return {
-    name: skill.name,
-    description: skill.description,
-    tools: skill.tools,
-    ownerType: skill.ownerType,
-    ownerId: skill.ownerId,
-  };
-}
-
-function searchSkills(
-  skillCatalog: readonly Skill[],
-  queryText: string,
-  limit: number | undefined,
-): SkillSummary[] {
-  const normalizedLimit = normalizeSearchLimit(limit);
-  const matcher = createSearchMatcher(queryText);
-  const sortedSkills = [...skillCatalog].sort((left, right) => left.name.localeCompare(right.name));
-
-  if (!matcher) {
-    return sortedSkills.slice(0, normalizedLimit).map(toSkillSummary);
-  }
-
-  return sortedSkills
-    .map((skill) => {
-      const haystack = [skill.name, skill.description, ...(skill.tools ?? [])].join(" ");
-      if (!matcher.matches(haystack)) {
-        return null;
-      }
-
-      let score = 1;
-      score += matcher.scoreName(skill.name);
-      score += matcher.scoreDescription(skill.description);
-      if (matcher.kind === "regex" && (skill.tools ?? []).some((tool) => matcher.matches(tool))) {
-        score += 1;
-      }
-
-      return { skill, score };
-    })
-    .filter((entry): entry is { skill: Skill; score: number } => entry !== null)
-    .sort(
-      (left, right) => right.score - left.score || left.skill.name.localeCompare(right.skill.name),
-    )
-    .slice(0, normalizedLimit)
-    .map(({ skill }) => toSkillSummary(skill));
 }
 
 function requireSkill(skillCatalog: readonly Skill[], skillName: string): Skill {
@@ -535,7 +218,7 @@ export async function runFacadeTool(
 // (Anthropic converts to zod; HTTP MCP serves as-is).
 
 function buildActionFacadeTools(
-  getActionCatalog: () => ActionMcpDefinition[],
+  getActionCatalog: () => AgentAction[],
   executeAction: (name: string, input: unknown) => Promise<unknown>,
 ): FacadeToolDef[] {
   return [
@@ -563,7 +246,7 @@ function buildActionFacadeTools(
       },
       handler: (input) =>
         runFacadeTool("read_action", input, async (args) =>
-          readAction(requireAction(getActionCatalog(), String(args.action_name))),
+          describeAction(requireAction(getActionCatalog(), String(args.action_name))),
         ),
     },
     {
@@ -1016,111 +699,6 @@ function buildScheduleTriggerFromInput(
   return { ok: true, trigger };
 }
 
-function nonEmptyString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-// `ask_question` is a host built-in: the question-card is rendered by rome-web
-// directly (see packages/web .../blocks/QuestionCard.tsx), not by an app. We
-// still ride the existing pending-interaction render/resume path, which keys on
-// an `appId`; "core" is the sentinel for a host-owned card (the webchat drain
-// skips the app-installed check when `render.builtin` is set).
-const ASK_QUESTION_APP_ID = "core";
-const ASK_QUESTION_COMPONENT_ID = "question-card";
-
-const ASK_QUESTION_PARK_DIRECTIVE =
-  "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
-
-/** Whether a valid `ask_question` call parks the turn on a question card.
- * Otherwise it relays the questions as prose. The tool's `endsTurn` and its
- * handler both read this one rule, so the fact the model is told cannot
- * drift from what the handler does. */
-export function askQuestionParksOnCard(
-  params: Pick<FacadeParams, "supportsInteractiveSurface" | "interactiveSurfaceDetached">,
-): boolean {
-  return params.supportsInteractiveSurface === true && params.interactiveSurfaceDetached !== true;
-}
-
-/** Shape the `ask_question` tool input into a `pendingInteraction` payload that
- * the webchat drain renders as the host built-in question-card component
- * (render.builtin = true, appId = "core"); the guardian's answer resumes the
- * turn through the unchanged interaction-result path. Fails closed on a
- * malformed questions array so a broken card never renders. */
-export function normalizeAskQuestionForCard(
-  input: unknown,
-): { ok: true; questions: Record<string, unknown>[] } | { ok: false; error: string } {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { ok: false, error: "ask_question input must be an object" };
-  }
-  const questions = (input as Record<string, unknown>).questions;
-  if (!Array.isArray(questions) || questions.length === 0) {
-    return { ok: false, error: "ask_question.questions must be a non-empty array" };
-  }
-  for (const [i, q] of questions.entries()) {
-    if (!q || typeof q !== "object" || Array.isArray(q)) {
-      return { ok: false, error: `ask_question.questions[${i}] must be an object` };
-    }
-    const o = q as Record<string, unknown>;
-    if (!nonEmptyString(o.id)) {
-      return { ok: false, error: `ask_question.questions[${i}].id is required` };
-    }
-    if (!nonEmptyString(o.question)) {
-      return { ok: false, error: `ask_question.questions[${i}].question is required` };
-    }
-    if (o.type !== "single" && o.type !== "multi" && o.type !== "text") {
-      return {
-        ok: false,
-        error: `ask_question.questions[${i}].type must be "single", "multi", or "text"`,
-      };
-    }
-    if (o.type === "single" || o.type === "multi") {
-      if (!Array.isArray(o.options) || o.options.length === 0) {
-        return {
-          ok: false,
-          error: `ask_question.questions[${i}] is ${o.type}-choice and needs a non-empty options array`,
-        };
-      }
-      // The web renderer drops non-string options, so a payload like
-      // `options: [null]` would otherwise pass and render a choice card with
-      // zero buttons — a dead, unanswerable parked turn. Reject up front.
-      if (!o.options.every((opt) => nonEmptyString(opt) !== null)) {
-        return {
-          ok: false,
-          error: `ask_question.questions[${i}].options must all be non-empty strings`,
-        };
-      }
-    }
-  }
-  return { ok: true, questions: questions as Record<string, unknown>[] };
-}
-
-// Plain-prose rendering of the questions — the cross-surface fallback for
-// channels that can't mount the interactive card (messaging channels, subagents,
-// CLI). The guardian replies in prose and the answer arrives as the next turn.
-function askQuestionsToPromptText(questions: Record<string, unknown>[]): string {
-  return questions
-    .map((q) => {
-      const base = typeof q.question === "string" ? q.question : "";
-      // Mark optional questions so the prose fallback reads the same as the card.
-      const text = q.optional === true ? `${base} (optional)` : base;
-      const hasOptions = q.type === "single" || q.type === "multi";
-      const options =
-        hasOptions && Array.isArray(q.options)
-          ? q.options.filter((o): o is string => typeof o === "string")
-          : [];
-      if (!options.length) return text;
-      // multi-choice: tell the guardian they can name more than one.
-      const head = q.type === "multi" ? `${text} (pick any that apply)` : text;
-      const lines = options.map((o) => `- ${o}`);
-      // freeText choice: tell the guardian they can also answer freely.
-      if (hasOptions && q.freeText === true) lines.push("- (or describe your own)");
-      return `${head}\n${lines.join("\n")}`;
-    })
-    .join("\n\n");
-}
-
 const DEFER_DESCRIPTION =
   "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
@@ -1219,6 +797,10 @@ function buildInteractiveTools(
   sessionTools: FacadeToolDef[] = [],
   textPrivate = false,
 ): FacadeToolDef[] {
+  const widgetsShow = showsWidgets(
+    supportsInteractiveSurface ? "card" : "plain_text",
+    !interactiveSurfaceDetached,
+  );
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
   // prose from the handler, so the model routes clarifying questions through it
@@ -1227,9 +809,9 @@ function buildInteractiveTools(
   const tools: FacadeToolDef[] = [
     {
       name: "ask_question",
-      // On a card the turn parks until the guardian answers; the prose relay
-      // returns and the turn goes on.
-      endsTurn: askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached }),
+      // On a card the turn parks until the guardian answers; the plain-message
+      // relay returns and the turn goes on.
+      endsTurn: widgetsShow,
       description:
         "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
       inputSchema: {
@@ -1283,39 +865,9 @@ function buildInteractiveTools(
         if (!result.ok) {
           return { content: [{ type: "text", text: result.error }], isError: true };
         }
-        // Non-interactive surfaces (messaging channels, subagents, CLI) can't
-        // mount the card — relay the questions as prose and let the guardian
-        // reply in the next turn, so a clarifying question never dead-ends.
-        // Detached sessions (exact forks) advertise the card but have no
-        // drain to mount it, so they take the same prose path.
-        if (!askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached })) {
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  "This surface cannot render an interactive UI. Ask the guardian the " +
-                  "following as a plain message, then wait for their reply before doing " +
-                  `anything else:\n\n${askQuestionsToPromptText(result.questions)}`,
-              },
-            ],
-          };
-        }
-        // `pendingInteraction` payload the webchat drain reads via
-        // `readSuspensionFromOutput`; `builtin: true` makes it render the
-        // host's question-card (no app) and parks the turn for the answer.
-        const payload = {
-          pendingInteraction: true,
-          appId: ASK_QUESTION_APP_ID,
-          render: {
-            kind: "inline",
-            componentId: ASK_QUESTION_COMPONENT_ID,
-            props: { questions: result.questions },
-            builtin: true,
-          },
-          message: ASK_QUESTION_PARK_DIRECTIVE,
-        };
-        return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+        const output = askQuestionToolOutput(result.questions, widgetsShow);
+        const text = typeof output === "string" ? output : JSON.stringify(output);
+        return { content: [{ type: "text", text }] };
       },
     },
   ];

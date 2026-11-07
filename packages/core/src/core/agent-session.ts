@@ -30,7 +30,11 @@ import {
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
   resolveAgentPolicy,
+  actionToolOutput,
+  showsWidgets,
   widgetDrawingFor,
+  type AgentAction,
+  type DeferInput,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import { projectRelativePath } from "../webchat/projects.js";
@@ -58,7 +62,7 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
-import { runDefer, type DeferInput } from "./defer.js";
+import { runDefer } from "./defer.js";
 import type { EventSources } from "../events/event-sources.js";
 import type {
   ModelSession,
@@ -69,7 +73,6 @@ import type {
   ModelToolCallContext,
   ProviderId,
 } from "./agent-runner.js";
-import type { ActionMcpDefinition } from "./mcp-facade.js";
 import {
   toModelResolutionErrorPayload,
   type ModelResolution,
@@ -787,7 +790,7 @@ interface TurnExecRefs {
    * degrade to the same prose fallbacks messaging channels use — the advertised
    * tool catalog is unaffected (that's ModelSessionParams, not refs).
    */
-  supportsInteractiveSurface: boolean;
+  widgetsShow: boolean;
   /**
    * Manager that owns this owner's subagent child sessions. The live session
    * hands out its own child manager; each exact fork gets a fork-owned manager
@@ -1110,7 +1113,7 @@ async function openSession(
       return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
     },
   };
-  const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
+  const toAgentAction = (a: Action): AgentAction => ({
     name: a.config.name,
     description: a.config.description,
     type: a.config.type,
@@ -1122,8 +1125,8 @@ async function openSession(
     cancellable: !!a.config.cancellable,
     inputSchema: a.inputSchema!,
   });
-  const getActionCatalog = (): ActionMcpDefinition[] =>
-    deps.actionRegistry.getForAgent(allowList).map(toActionMcpDefinition);
+  const getActionCatalog = (): AgentAction[] =>
+    deps.actionRegistry.getForAgent(allowList).map(toAgentAction);
   // Live view onto SkillCatalog for the same reason as `getActionCatalog`:
   // app_management installs land in the catalog mid-session via the
   // AppCatalog subscriber chain (skillCatalog.loadFromCatalog), and the
@@ -1166,11 +1169,10 @@ async function openSession(
     getTurnId: () => impl.currentTurnId,
     getThreadContext: () => impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
-    // Action results that hand back UI (pending_interaction,
-    // place_widget) read this, not the facade flag on ModelSessionParams. A
-    // detached session must degrade both, or the agent still parks on a
-    // component nobody can mount. Same combination an exact fork runs with.
-    supportsInteractiveSurface: supportsInteractiveSurface && !init.interactiveSurfaceDetached,
+    // Action results that hand back a widget read this. A session with no
+    // speaker must degrade them, or the agent parks on a component nobody can
+    // mount.
+    widgetsShow: showsWidgets(widgets, !init.interactiveSurfaceDetached),
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
     attachSubagentExecution: (toolUseId, execution) =>
@@ -1199,75 +1201,7 @@ async function openSession(
             turnId: refs.getTurnId(),
           },
         );
-        if (result.status === "pending_approval") {
-          return {
-            pendingApproval: true,
-            approvalId: result.approval.approvalId,
-            message:
-              `Action "${result.approval.actionName}" was submitted for guardian approval. ` +
-              `A proposal card has been shown to the guardian in the originating channel, and they will review it asynchronously. ` +
-              `Do NOT wait for the result. Continue with any remaining work in this turn that does not depend on this action's output. ` +
-              `When the guardian resolves the approval, a new turn will be started automatically with the outcome.`,
-          };
-        }
-        if (result.status === "pending_interaction") {
-          const { appId, promptText, render } = result.interaction;
-          // Off-webchat (messaging channel), inside a subagent, or on a forked
-          // turn: nothing can mount the component. Fall back to relaying the
-          // human-readable prompt as prose; the guardian's reply arrives as
-          // the next turn, exactly like an ordinary clarifying question.
-          if (!refs.supportsInteractiveSurface) {
-            return {
-              message:
-                "This surface cannot render an interactive UI. Ask the guardian the " +
-                "following as a plain message, then wait for their reply before doing " +
-                `anything else:\n\n${promptText}`,
-            };
-          }
-          // Webchat: the chat client mounts the component off this tool_result
-          // (the drain loop persists a pending_interaction card keyed by
-          // toolUseId). The guardian's outcome arrives as a new turn, so tell the
-          // agent to stop here rather than treating the directive as data.
-          return {
-            pendingInteraction: true,
-            appId,
-            render,
-            message:
-              `The "${render.componentId}" component has been shown to the guardian. It asks them to: ${promptText} ` +
-              `Their response will arrive as the next turn's prompt — do not call any further tools ` +
-              `or send another message until then. When you reply, describe only what this step does; ` +
-              `do not claim any later step has already happened.`,
-          };
-        }
-        if (result.status === "place_widget") {
-          const { appId, route, params } = result.placement;
-          // Fire-and-forget, NOT a park: the widget is mounted as a side effect
-          // (the webchat drain loop emits a `widget_placement` event off this
-          // tool_result) and the agent keeps going this turn. Off-webchat / inside
-          // a subagent there is no workspace to place it on, so say so plainly
-          // rather than implying the guardian can now see something they cannot.
-          if (!refs.supportsInteractiveSurface) {
-            return {
-              message:
-                `The "${appId}" widget could not be shown — this surface has no workspace to ` +
-                `place it on. Continue without it.`,
-            };
-          }
-          return {
-            placeWidget: true,
-            appId,
-            ...(route !== undefined ? { route } : {}),
-            ...(params !== undefined ? { params } : {}),
-            message:
-              `The "${appId}" widget has been placed on the guardian's workspace for them to ` +
-              `glance at. This needed no input from them — continue as normal, and don't claim ` +
-              `they have acted on it.`,
-          };
-        }
-        if (result.status === "error") {
-          return result;
-        }
-        return result.data ?? result;
+        return actionToolOutput(result, refs.widgetsShow);
       });
   const executeAction = makeExecuteAction(sessionExecRefs);
 
@@ -1551,11 +1485,10 @@ async function openSession(
       getTurnId: () => fork.forkTurnId,
       getThreadContext: () => fork.threadContext ?? init.threadContext,
       getSharedContext: () => init.sharedContext,
-      // Nothing drains a fork stream into webchat, so interactive action
-      // results (pending_interaction / place_widget) must take the
-      // prose fallbacks — otherwise the tool_result claims a card was shown
-      // while nothing mounted and the fork dead-ends.
-      supportsInteractiveSurface: false,
+      // A fork has no speaker, so action results that hand back a widget take
+      // their plain-text forms. Otherwise the tool result claims a card was
+      // shown while nothing mounted and the fork dead-ends.
+      widgetsShow: false,
       getChildManager: () => {
         if (!forkChildManager) {
           forkChildManager = createAgentSessionManager(deps, {

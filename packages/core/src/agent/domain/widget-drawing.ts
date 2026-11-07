@@ -8,3 +8,8 @@ export function widgetDrawingFor(input: {
 }): WidgetDrawing {
   return input.placeDrawsCards && !input.isSubagent ? "card" : "plain_text";
 }
+
+/** A widget shows when the place draws it and a speaker is there to carry it. */
+export function showsWidgets(widgets: WidgetDrawing, hasSpeaker: boolean): boolean {
+  return widgets === "card" && hasSpeaker;
+}

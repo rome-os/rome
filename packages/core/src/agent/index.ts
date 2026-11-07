@@ -35,9 +35,24 @@ export type {
 export { providerAvailability } from "./domain/provider-availability.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
-export type { Skill, SkillCatalog } from "./domain/skill.js";
+export {
+  searchSkills,
+  toSkillSummary,
+  type Skill,
+  type SkillCatalog,
+} from "./domain/skill.js";
+export {
+  actionToolOutput,
+  describeAction,
+  searchActions,
+  toActionSummary,
+  type AgentAction,
+} from "./domain/agent-action.js";
+export { MAX_SEARCH_LIMIT, SEARCH_LIMIT_DESCRIPTION } from "./domain/catalog-search.js";
+export { askQuestionToolOutput, normalizeAskQuestionForCard } from "./domain/ask-question.js";
+export { parseDeferInput, type DeferInput } from "./domain/defer.js";
 export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
-export { widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
+export { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
 export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
 export { createPromptSources } from "./infrastructure/prompt-sources.js";
 export {
