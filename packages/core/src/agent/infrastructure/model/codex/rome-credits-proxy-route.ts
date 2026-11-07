@@ -1,9 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
-import { ROME_CREDITS_PROXY_KEY, ROME_CREDITS_PROXY_PATH } from "../../agent/index.js";
-import { cloudBearer } from "../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import { isLoopbackInternalApiHost } from "./discord-cli.js";
+import { ROME_CREDITS_PROXY_PATH, ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
+import { cloudBearer } from "../../../../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
+import { isLoopbackInternalApiHost } from "../../../../lib/loopback-host.js";
 
 // Headers that describe the Codex-to-core hop or carry a credential.
 const DROP_REQUEST_HEADERS = new Set([
@@ -22,9 +22,9 @@ const DROP_RESPONSE_HEADERS = new Set([
   "transfer-encoding",
 ]);
 
-function hasProxyKey(authorization: string | undefined): boolean {
+function hasProxySecret(authorization: string | undefined): boolean {
   const presented = Buffer.from(authorization ?? "");
-  const expected = Buffer.from(`Bearer ${ROME_CREDITS_PROXY_KEY}`);
+  const expected = Buffer.from(`Bearer ${ROME_CREDITS_PROXY_SECRET}`);
   return presented.length === expected.length && timingSafeEqual(presented, expected);
 }
 
@@ -45,7 +45,8 @@ export function romeCreditsProxyRoutes(
   const app = new Hono();
 
   app.all(`${ROME_CREDITS_PROXY_PATH}/*`, async (c) => {
-    if (!hasProxyKey(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+    if (!hasProxySecret(c.req.header("authorization")))
+      return c.json({ error: "unauthorized" }, 401);
     const origin = getRomeCloudOrigin();
     const bearer = await cloudBearer();
     if (!origin || !bearer) return c.json({ error: "not_linked" }, 503);

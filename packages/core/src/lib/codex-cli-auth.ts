@@ -23,6 +23,7 @@
 // for as long as that exact token is still in auth.json, and self-clears once a
 // re-login rotates it.
 
+import type { ModelPlanType } from "../agent/index.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -59,19 +60,7 @@ interface CodexAuthFile {
   last_refresh?: string;
 }
 
-export type CodexPlanType =
-  | "free"
-  | "go"
-  | "plus"
-  | "pro"
-  | "prolite"
-  | "team"
-  | "self_serve_business_usage_based"
-  | "business"
-  | "enterprise_cbp_usage_based"
-  | "enterprise"
-  | "edu"
-  | "unknown";
+export type CodexPlanType = ModelPlanType;
 
 export interface CodexCliStatus {
   loggedIn: boolean;

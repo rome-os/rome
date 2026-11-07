@@ -14,6 +14,13 @@ import {
   readLiveOrCachedUsage,
   type AIToolUsageStatus,
 } from "../../../../lib/provider-usage.js";
+import type {
+  ModelAccount,
+  ModelAuthorizationMode,
+  ModelAuthorizationState,
+  ModelBrowserAuthorization,
+  ModelDeviceAuthorization,
+} from "../../../domain/model-account.js";
 import { isCodexAuthRevokedError } from "./auth-revoked.js";
 import { Method, Notify } from "./app-server-protocol.js";
 import type {
@@ -29,11 +36,9 @@ const CODEX_USAGE_CACHE_PATHS = ["usage-limits.json", "rate-limits.json"].map((f
 );
 const DEFAULT_LOGIN_TIMEOUT_MS = 16 * 60 * 1000;
 
-type LoginMode = "browser" | "device";
-
 interface ActiveLogin {
   loginId: string;
-  mode: LoginMode;
+  mode: ModelAuthorizationMode;
   userCode: string | null;
   verificationUrl: string | null;
   timeout: ReturnType<typeof setTimeout>;
@@ -61,37 +66,6 @@ interface LoginCompletedNotification {
   loginId?: unknown;
   success?: unknown;
   error?: unknown;
-}
-
-export interface CodexLoginState {
-  running: boolean;
-  mode: LoginMode | null;
-  userCode: string | null;
-  verificationUrl: string | null;
-  lastError: string | null;
-}
-
-export interface CodexBrowserLogin {
-  loginId: string;
-  authUrl: string;
-}
-
-export interface CodexDeviceLogin {
-  loginId: string;
-  userCode: string;
-  verificationUrl: string;
-}
-
-export interface CodexAccountService {
-  getStatus(): Promise<AIToolStatusProbeResult>;
-  getUsage(): Promise<AIToolUsageStatus | null>;
-  getLoginState(): CodexLoginState;
-  startBrowserLogin(): Promise<CodexBrowserLogin>;
-  startDeviceLogin(): Promise<CodexDeviceLogin>;
-  cancelLogin(): Promise<void>;
-  logout(): Promise<void>;
-  onAccountChanged(listener: () => void): () => void;
-  close(): void;
 }
 
 interface CodexAccountRpc {
@@ -130,7 +104,7 @@ function rateLimitsPayload(value: unknown): unknown {
   return record.rateLimits ?? value;
 }
 
-export class SharedCodexAccountService implements CodexAccountService {
+export class SharedCodexAccountService implements ModelAccount {
   private readonly manager: CodexAccountRpc;
   private readonly loginTimeoutMs: number;
   private readonly usageCachePaths: string[];
@@ -171,7 +145,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     ];
   }
 
-  async getStatus(): Promise<AIToolStatusProbeResult> {
+  async status(): Promise<AIToolStatusProbeResult> {
     const loginStartEpoch = this.isLoginIdle() ? this.loginStartEpoch : null;
     let response: CodexAccountReadResponse;
     try {
@@ -258,7 +232,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     return loginStartEpoch === this.loginStartEpoch && this.isLoginIdle();
   }
 
-  async getUsage(): Promise<AIToolUsageStatus | null> {
+  async usage(): Promise<AIToolUsageStatus | null> {
     return await readLiveOrCachedUsage(
       async () => {
         try {
@@ -285,7 +259,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     );
   }
 
-  getLoginState(): CodexLoginState {
+  authorizationState(): ModelAuthorizationState {
     return {
       running: this.activeLogin !== null,
       mode: this.activeLogin?.mode ?? null,
@@ -295,8 +269,8 @@ export class SharedCodexAccountService implements CodexAccountService {
     };
   }
 
-  async startBrowserLogin(): Promise<CodexBrowserLogin> {
-    await this.cancelLogin();
+  async startBrowserAuthorization(): Promise<ModelBrowserAuthorization> {
+    await this.cancelAuthorization();
     this.assertOpen();
     if (this.loginStartPending) throw new Error("Codex login is already starting");
     const loginStartEpoch = ++this.loginStartEpoch;
@@ -322,15 +296,15 @@ export class SharedCodexAccountService implements CodexAccountService {
       }
       this.setActiveLogin(result.loginId, "browser", null, null);
       this.finishPendingLoginStart();
-      return { loginId: result.loginId, authUrl: result.authUrl };
+      return { authorizationId: result.loginId, authUrl: result.authUrl };
     } catch (err) {
       this.clearPendingLoginStart(loginStartEpoch);
       throw err;
     }
   }
 
-  async startDeviceLogin(): Promise<CodexDeviceLogin> {
-    await this.cancelLogin();
+  async startDeviceAuthorization(): Promise<ModelDeviceAuthorization> {
+    await this.cancelAuthorization();
     this.assertOpen();
     if (this.loginStartPending) throw new Error("Codex login is already starting");
     const loginStartEpoch = ++this.loginStartEpoch;
@@ -359,7 +333,7 @@ export class SharedCodexAccountService implements CodexAccountService {
       this.setActiveLogin(result.loginId, "device", result.userCode, result.verificationUrl);
       this.finishPendingLoginStart();
       return {
-        loginId: result.loginId,
+        authorizationId: result.loginId,
         userCode: result.userCode,
         verificationUrl: result.verificationUrl,
       };
@@ -369,7 +343,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     }
   }
 
-  async cancelLogin(): Promise<void> {
+  async cancelAuthorization(): Promise<void> {
     if (this.loginStartPending) {
       this.cancelPendingLoginStart = true;
       this.lastLoginError = null;
@@ -390,13 +364,13 @@ export class SharedCodexAccountService implements CodexAccountService {
     }
   }
 
-  async logout(): Promise<void> {
-    await this.cancelLogin();
+  async revoke(): Promise<void> {
+    await this.cancelAuthorization();
     await this.manager.request(Method.accountLogout);
     this.emitAccountChanged();
   }
 
-  onAccountChanged(listener: () => void): () => void {
+  onChanged(listener: () => void): () => void {
     this.accountChangedListeners.add(listener);
     return () => this.accountChangedListeners.delete(listener);
   }
@@ -415,7 +389,7 @@ export class SharedCodexAccountService implements CodexAccountService {
 
   private setActiveLogin(
     loginId: string,
-    mode: LoginMode,
+    mode: ModelAuthorizationMode,
     userCode: string | null,
     verificationUrl: string | null,
   ): void {

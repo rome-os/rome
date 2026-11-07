@@ -26,7 +26,6 @@ import { appsRoutes, subscribeCatalogChanges } from "./routes/apps.js";
 import { agentsRoutes } from "./routes/agents.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
-import { romeCreditsProxyRoutes } from "./routes/rome-credits-proxy.js";
 import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
 import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
@@ -112,7 +111,7 @@ export function buildApp(
   );
 
   // Codex's loopback route to Rome credits. Outside `/api` for the same reason.
-  app.route("/", romeCreditsProxyRoutes(config.host));
+  app.route("/", deps.romeCreditsProxy);
 
   // External webhooks — X-API-Key auth, no /api/ prefix. Intentionally outside
   // sessionActorMiddleware: a machine-credential surface records no session

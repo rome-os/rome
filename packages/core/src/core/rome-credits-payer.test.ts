@@ -338,7 +338,7 @@ describe("Rome credits payer", () => {
     });
     let creditsRead: Promise<void> = Promise.resolve();
     const aiToolState = createAIToolState({
-      probes: { codexStatus: () => accounts.getStatus(), codexUsage: async () => null },
+      probes: { codexStatus: () => accounts.status(), codexUsage: async () => null },
       refreshIntervalMs: null,
       startRefresh: false,
       onCodexLoginChanged: () => payer.sync(),
