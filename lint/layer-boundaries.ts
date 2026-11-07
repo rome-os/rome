@@ -1,38 +1,58 @@
-// Import rules for a bounded context laid out as `<context>/<layer>`. The
-// layout and the direction of dependencies: DEVELOPMENT.md, "Established
-// patterns". The rules, numbered as the violations report them:
-//
-// 1. <context>/domain/ imports only its own domain/.
-// 2. <context>/application/ imports only its own domain/ and application/.
-// 3. <context>/infrastructure/ never imports its own application/ or index.ts.
-// 4. Code outside the context imports only its index.ts.
-//
-// Each import is checked by the file it resolves to, through the TypeScript
-// resolver and packages/core's tsconfig, so `../`, `./x/..`, `//` and `@/`
-// spellings of one file get one verdict. Package imports never break a rule.
-// A path that leaves src/ counts as outside every context. An import the
-// check cannot place, a path that does not resolve or a dynamic import inside
-// a context with a computed path, is reported as `unchecked`.
+// Engine for the layer import rules. The rules themselves are data, in
+// layer-rules.ts. The engine parses every file under a src/ directory with
+// the TypeScript compiler, resolves each relative or `@/` import through the
+// TypeScript resolver and the package's tsconfig, places the importer and the
+// resolved file in a context and layer, and asks the rules for a verdict. So
+// `../`, `./x/..`, `//` and `@/` spellings of one file get one verdict. An
+// import the engine cannot place, a path that does not resolve or a dynamic
+// import inside a context with a computed path, is reported as `unchecked`.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { LAYER_RULES } from "./layer-rules.js";
 
-/** Contexts in packages/core/src laid out as `<context>/<layer>`. A context adopting the layout joins this list. */
-export const LAYERED_CONTEXTS = ["agent"];
+/** Where a file sits in a context: a layer folder, the context's index.ts, or anything else in it. */
+export type Layer = "domain" | "application" | "infrastructure" | "index" | "other";
+
+/**
+ * A set of import targets, relative to the importer. `same` and `other` name
+ * layers in the importer's own context or in a different one, and an
+ * importer outside every context sees each context as `other`. `none` is code
+ * outside every context.
+ */
+export type Target = { context: "same" | "other"; layers: Layer[] } | { context: "none" };
+
+/**
+ * One import rule. It governs files in the `from` layers, or every file when
+ * `from` is absent. A governed import breaks it when it reaches no `allow`
+ * target, or any `deny` target.
+ */
+export interface LayerRule {
+  name: string;
+  /** Why the rule exists and what it permits, shown with every violation. */
+  description: string;
+  from?: Layer[];
+  allow?: Target[];
+  deny?: Target[];
+}
+
+/** The folders directly under src/ laid out as `<context>/<layer>`, and the rules for them. */
+export interface LayerRules {
+  contexts: string[];
+  rules: LayerRule[];
+}
 
 /** One import that breaks a rule. `file` is relative to the scanned src directory. */
 export interface LayerViolation {
   file: string;
   specifier: string;
-  rule: 1 | 2 | 3 | 4 | "unchecked";
+  rule: string;
   reason: string;
 }
 
-type Place =
-  | { kind: "outside" }
-  | { kind: "domain" | "application" | "infrastructure" | "index" | "other"; context: string };
+type Place = { kind: "outside" } | { kind: Layer; context: string };
 
 interface ImportSite {
   specifier: string | null;
@@ -41,15 +61,15 @@ interface ImportSite {
 }
 
 /**
- * Checks every `.ts` and `.tsx` file under `srcDir` against the rules for
- * each named context, a folder directly under `srcDir`. `tsconfigPath` gives
- * the resolver options, including path aliases.
+ * Checks every `.ts` and `.tsx` file under `srcDir` against `layerRules`.
+ * `tsconfigPath` gives the resolver options, including path aliases.
  */
 export function checkLayerBoundaries(
   srcDir: string,
   tsconfigPath: string,
-  contexts: readonly string[],
+  layerRules: LayerRules,
 ): LayerViolation[] {
+  const { contexts, rules } = layerRules;
   const options = readCompilerOptions(tsconfigPath);
   const cache = ts.createModuleResolutionCache(srcDir, (name) => name, options);
   const violations: LayerViolation[] = [];
@@ -90,48 +110,37 @@ export function checkLayerBoundaries(
         continue;
       }
       const target = toPosix(relative(srcDir, resolved.resolvedFileName));
-      const rule = brokenRule(from, placeOf(target, contexts));
+      const rule = brokenRule(rules, from, placeOf(target, contexts));
       if (rule)
         violations.push({
           file: at,
           specifier: `${site.specifier} (${target})`,
-          rule,
-          reason: RULES[rule],
+          rule: rule.name,
+          reason: rule.description,
         });
     }
   }
   return violations;
 }
 
-/** Renders one violation as a single line: `file:line → specifier (rule N): reason`. */
+/** Renders one violation as a single line: `file:line → specifier [rule]: reason`. */
 export function formatLayerViolation(violation: LayerViolation): string {
-  return `${violation.file} → ${violation.specifier} (rule ${violation.rule}): ${violation.reason}`;
+  return `${violation.file} → ${violation.specifier} [${violation.rule}]: ${violation.reason}`;
 }
 
-const RULES = {
-  1: "domain/ imports only its own domain/",
-  2: "application/ imports only its own domain/ and application/",
-  3: "infrastructure/ never imports its own application/ or index.ts",
-  4: "code outside a context imports only its index.ts",
-} as const;
+function brokenRule(rules: readonly LayerRule[], from: Place, to: Place): LayerRule | undefined {
+  return rules.find((rule) => {
+    if (rule.from && (from.kind === "outside" || !rule.from.includes(from.kind))) return false;
+    if (rule.allow && !rule.allow.some((target) => reaches(target, from, to))) return true;
+    return rule.deny?.some((target) => reaches(target, from, to)) ?? false;
+  });
+}
 
-function brokenRule(from: Place, to: Place): 1 | 2 | 3 | 4 | null {
-  const sameContext =
-    from.kind !== "outside" && to.kind !== "outside" && from.context === to.context;
-  switch (from.kind) {
-    case "domain":
-      return sameContext && to.kind === "domain" ? null : 1;
-    case "application":
-      return sameContext && (to.kind === "domain" || to.kind === "application") ? null : 2;
-    case "infrastructure":
-      if (sameContext) return to.kind === "application" || to.kind === "index" ? 3 : null;
-      break;
-    case "index":
-    case "other":
-      if (sameContext) return null;
-      break;
-  }
-  return to.kind === "outside" || to.kind === "index" ? null : 4;
+function reaches(target: Target, from: Place, to: Place): boolean {
+  if (to.kind === "outside") return target.context === "none";
+  if (target.context === "none") return false;
+  const sameContext = from.kind !== "outside" && from.context === to.context;
+  return (target.context === "same") === sameContext && target.layers.includes(to.kind);
 }
 
 function placeOf(file: string, contexts: readonly string[]): Place {
@@ -208,14 +217,16 @@ export function runCli(): number {
   const violations = checkLayerBoundaries(
     join(core, "src"),
     join(core, "tsconfig.json"),
-    LAYERED_CONTEXTS,
+    LAYER_RULES,
   );
   if (violations.length > 0) {
     for (const violation of violations) console.error(`  - ${formatLayerViolation(violation)}`);
     console.error(`layer-boundaries: ${violations.length} import(s) break a layer rule`);
     return 1;
   }
-  console.log(`layer-boundaries: ${LAYERED_CONTEXTS.join(", ")} imports follow the layer rules`);
+  console.log(
+    `layer-boundaries: ${LAYER_RULES.contexts.join(", ")} imports follow the layer rules`,
+  );
   return 0;
 }
 

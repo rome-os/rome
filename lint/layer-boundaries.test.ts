@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkLayerBoundaries, formatLayerViolation } from "./layer-boundaries.js";
+import { LAYER_RULES } from "./layer-rules.js";
 
 const root = mkdtempSync(join(tmpdir(), "layer-boundaries-"));
 
@@ -70,21 +71,21 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("checkLayerBoundaries", () => {
   it("judges each import by the file it resolves to", () => {
-    const lines = checkLayerBoundaries(join(root, "src"), join(root, "tsconfig.json"), ["agent"])
+    const lines = checkLayerBoundaries(join(root, "src"), join(root, "tsconfig.json"), LAYER_RULES)
       .map(formatLayerViolation)
       .map((line) => line.replace(/: .*$/, ""));
     expect(lines).toEqual([
-      "agent/application/sub/probe.ts:3 → ../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) (rule 2)",
-      "agent/domain/probe.ts:3 → ../index.js (agent/index.ts) (rule 1)",
-      "agent/domain/probe.ts:4 → @/logger.js (logger.ts) (rule 1)",
-      "agent/domain/probe.ts:5 → ../../logger.js (logger.ts) (rule 1)",
-      "agent/domain/probe.ts:6 → ./x/../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) (rule 1)",
-      "agent/domain/probe.ts:7 → <computed> (rule unchecked)",
-      "agent/infrastructure/model/probe.ts:3 → ../../index.js (agent/index.ts) (rule 3)",
-      "agent/infrastructure/model/probe.ts:4 → ../../../agent/./application/use.js (agent/application/use.ts) (rule 3)",
-      "concierge/probe.ts:2 → ../agent/./domain/session.js (agent/domain/session.ts) (rule 4)",
-      "concierge/probe.ts:3 → @/agent//infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) (rule 4)",
-      "concierge/probe.ts:4 → ../agent/domain/nope.js (rule unchecked)",
+      "agent/application/sub/probe.ts:3 → ../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [application-imports-inward]",
+      "agent/domain/probe.ts:3 → ../index.js (agent/index.ts) [domain-imports-domain]",
+      "agent/domain/probe.ts:4 → @/logger.js (logger.ts) [domain-imports-domain]",
+      "agent/domain/probe.ts:5 → ../../logger.js (logger.ts) [domain-imports-domain]",
+      "agent/domain/probe.ts:6 → ./x/../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [domain-imports-domain]",
+      "agent/domain/probe.ts:7 → <computed> [unchecked]",
+      "agent/infrastructure/model/probe.ts:3 → ../../index.js (agent/index.ts) [infrastructure-imports-inward]",
+      "agent/infrastructure/model/probe.ts:4 → ../../../agent/./application/use.js (agent/application/use.ts) [infrastructure-imports-inward]",
+      "concierge/probe.ts:2 → ../agent/./domain/session.js (agent/domain/session.ts) [enter-through-index]",
+      "concierge/probe.ts:3 → @/agent//infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [enter-through-index]",
+      "concierge/probe.ts:4 → ../agent/domain/nope.js [unchecked]",
     ]);
   });
 });
