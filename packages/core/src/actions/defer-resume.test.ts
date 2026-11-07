@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ActionConfig, BackendTurnRunner } from "@rome-os/app-runtime";
 import { createResumeSessionAction } from "../../../../rome_apps/system/src/actions/resume-session/index.js";
-import { runDefer, type DeferContext } from "../core/defer.js";
+import { runDefer, type DeferContext } from "../routines/defer.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import { EventBus } from "../events/event-bus.js";

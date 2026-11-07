@@ -2,11 +2,13 @@ import { describe, it, expect } from "@rstest/core";
 import { z } from "zod";
 import { jsonSchemaObjectToZodRawShape } from "zod-from-json-schema";
 import type { JSONSchema } from "zod/v4/core";
-import { buildFacadeBundle, type FacadeToolDef } from "./mcp-facade.js";
+import type { RomeTool } from "../agent/index.js";
+import { proposeRoutineTools } from "../routines/propose-routine-tool.js";
+import { buildFacadeBundle } from "./mcp-facade.js";
 import { toMcpToolShape } from "./mcp/json-schema-zod.js";
 
 // Every built-in tool the facade can offer, with each optional group switched on.
-function allBuiltInTools(): FacadeToolDef[] {
+function allBuiltInTools(): RomeTool[] {
   const bundle = buildFacadeBundle({
     getActionCatalog: () => [],
     getSkillCatalog: () => [],
@@ -15,16 +17,21 @@ function allBuiltInTools(): FacadeToolDef[] {
     executeSubagent: async () => ({}),
     executeDefer: async () => ({}),
     supportsInteractiveSurface: true,
-    routineActivation: {
-      canCallAction: () => "permitted",
-      validateArgs: () => null,
-      routineKeyFor: () => undefined,
-    },
+    sessionTools: proposeRoutineTools({
+      widgets: "card",
+      hasSpeaker: true,
+      gate: {
+        canCallAction: () => "permitted",
+        validateArgs: () => null,
+        routineKeyFor: () => undefined,
+      },
+      runAction: async () => ({ status: "ok" }),
+    }),
   });
   return [...bundle.actions, ...bundle.subagents, ...bundle.skills, ...bundle.interactiveTools];
 }
 
-function findTool(name: string): FacadeToolDef {
+function findTool(name: string): RomeTool {
   const tool = allBuiltInTools().find((t) => t.name === name);
   if (!tool) throw new Error(`missing built-in tool ${name}`);
   return tool;

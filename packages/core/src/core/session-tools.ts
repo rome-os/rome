@@ -1,4 +1,4 @@
-import type { FacadeToolDef } from "./mcp-facade.js";
+import type { RomeTool } from "../agent/index.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import type { ThreadContext } from "./types.js";
 
@@ -24,13 +24,13 @@ export interface SessionToolContext {
  * opens its provider, so an answer that depends on settings follows them on
  * the next open. An empty answer registers nothing.
  */
-export type SessionToolsProvider = (context: SessionToolContext) => Promise<FacadeToolDef[]>;
+export type SessionToolsProvider = (context: SessionToolContext) => Promise<RomeTool[]>;
 
 /**
  * The same tools with handlers that refuse. A forked turn advertises its
  * source's catalog unchanged, but its calls must not act on the source's turn.
  */
-export function detachSessionTools(tools: FacadeToolDef[]): FacadeToolDef[] {
+export function detachSessionTools(tools: RomeTool[]): RomeTool[] {
   return tools.map((tool) => ({
     ...tool,
     handler: async () => ({

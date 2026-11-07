@@ -35,13 +35,18 @@ import {
   widgetDrawingFor,
   type AgentAction,
   type DeferInput,
+  type RomeTool,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import { projectRelativePath } from "../webchat/projects.js";
-import type { ActionRegistry, Action } from "../actions/types.js";
+import type { ActionRegistry, Action, ActionResult } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
-import type { FacadeParams, RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeParams } from "./mcp-facade.js";
+import {
+  proposeRoutineTools,
+  type RoutineActivationGate,
+} from "../routines/propose-routine-tool.js";
 import { createRomeTools } from "./mcp/server.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
@@ -62,7 +67,7 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
-import { runDefer } from "./defer.js";
+import { runDefer } from "../routines/defer.js";
 import type { EventSources } from "../events/event-sources.js";
 import type {
   ModelSession,
@@ -1180,29 +1185,29 @@ async function openSession(
     bindTurnCtx: inCurrentTurnCtx,
   };
 
-  const makeExecuteAction =
+  const makeRunAction =
     (refs: TurnExecRefs) =>
-    async (name: string, input: unknown): Promise<unknown> =>
+    async (name: string, input: unknown): Promise<ActionResult> =>
       refs.bindTurnCtx(async () => {
         // Allow-list check is load-bearing for security: an agent yaml that
         // scopes `actions: [foo]` must not reach anything else in the registry.
         const action = findPermittedAction(name);
         if (!action) throw new Error(`Unknown action: ${name}`);
-        const result = await deps.actionEngine.run(
-          action.config.name,
-          input as Record<string, unknown>,
-          {
-            initiator: `agent:${key.agentName}`,
-            channelContext: refs.getThreadContext(),
-            sharedContext: refs.getSharedContext(),
-            sessionId: refs.sessionId,
-            agentName: key.agentName,
-            channelThreadKey: key.channelThreadKey,
-            turnId: refs.getTurnId(),
-          },
-        );
-        return actionToolOutput(result, refs.widgetsShow);
+        return deps.actionEngine.run(action.config.name, input as Record<string, unknown>, {
+          initiator: `agent:${key.agentName}`,
+          channelContext: refs.getThreadContext(),
+          sharedContext: refs.getSharedContext(),
+          sessionId: refs.sessionId,
+          agentName: key.agentName,
+          channelThreadKey: key.channelThreadKey,
+          turnId: refs.getTurnId(),
+        });
       });
+  const makeExecuteAction = (refs: TurnExecRefs) => {
+    const runAction = makeRunAction(refs);
+    return async (name: string, input: unknown): Promise<unknown> =>
+      actionToolOutput(await runAction(name, input), refs.widgetsShow);
+  };
   const executeAction = makeExecuteAction(sessionExecRefs);
 
   // `defer`: schedule a one-off wakeup back into this same thread. The
@@ -1318,7 +1323,12 @@ async function openSession(
     executeAction,
     executeSubagent,
     executeDefer,
-    routineActivation,
+    sessionTools: proposeRoutineTools({
+      widgets,
+      hasSpeaker: !init.interactiveSurfaceDetached,
+      gate: routineActivation,
+      runAction: makeRunAction(sessionExecRefs),
+    }),
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
     // The agent's text stays in its trace, so it reaches the guardian only
@@ -1362,13 +1372,16 @@ async function openSession(
   // exact forks without a second hand-maintained list.
   let lastOpenParams: ModelSessionParams | undefined;
   let lastToolParams: FacadeParams | undefined;
+  // Held apart from `lastToolParams`, because a fork refuses these outright
+  // and rebuilds `propose_routine` itself.
+  let lastProvidedTools: RomeTool[] = [];
 
   const openModelSession = async (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
-    const sessionTools = await deps.sessionTools?.({
+    const providedTools = await deps.sessionTools?.({
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
       sessionId,
@@ -1377,8 +1390,11 @@ async function openSession(
       getThreadContext: sessionExecRefs.getThreadContext,
       getTurnPushLevel: () => impl.currentTurnPushLevelRef,
     });
-    const toolParams: FacadeParams = sessionTools?.length
-      ? { ...liveToolParams, sessionTools }
+    const toolParams: FacadeParams = providedTools?.length
+      ? {
+          ...liveToolParams,
+          sessionTools: [...providedTools, ...(liveToolParams.sessionTools ?? [])],
+        }
       : liveToolParams;
     const params = buildSessionParams(resolution, toolParams, resumeProviderId, resumeThreadId);
     const resumed = params.thread.kind === "resume";
@@ -1399,6 +1415,7 @@ async function openSession(
     });
     lastOpenParams = params;
     lastToolParams = toolParams;
+    lastProvidedTools = providedTools ?? [];
     return session;
   };
 
@@ -1527,9 +1544,15 @@ async function openSession(
           executeAction: makeExecuteAction(refs),
           executeSubagent: makeExecuteSubagent(refs),
           executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
-          sessionTools: lastToolParams.sessionTools
-            ? detachSessionTools(lastToolParams.sessionTools)
-            : undefined,
+          sessionTools: [
+            ...detachSessionTools(lastProvidedTools),
+            ...proposeRoutineTools({
+              widgets,
+              hasSpeaker: false,
+              gate: routineActivation,
+              runAction: makeRunAction(refs),
+            }),
+          ],
           // `supportsInteractiveSurface` stays (it shapes the advertised
           // catalog + system prompt, which must stay byte-identical to the
           // source); this flag makes the interactive *runtime* degrade to the

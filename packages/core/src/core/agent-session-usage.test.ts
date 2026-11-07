@@ -6,7 +6,7 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
-import type { ModelSessionEvent } from "../agent/index.js";
+import type { ModelSessionEvent, ModelSessionParams } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
@@ -64,6 +64,7 @@ describe("AgentSession turn usage", () => {
   let resolverUsesRomeCredits: boolean;
   let state: ModelAccountReports;
   let providerCalls: number;
+  let opened: ModelSessionParams[];
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -91,10 +92,12 @@ describe("AgentSession turn usage", () => {
     onSend = undefined;
     resolverUsesRomeCredits = false;
     providerCalls = 0;
+    opened = [];
     const provider: ModelProvider = {
       id: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
+        opened.push(params);
         if (params.thread.kind === "branch") {
           return createSessionFromRun("openai", () => nextRun(), {
             ...params,
@@ -153,6 +156,14 @@ describe("AgentSession turn usage", () => {
         channelSurface: testChannelSurface,
         turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+        sessionTools: async () => [
+          {
+            name: "say",
+            description: "Say something",
+            inputSchema: { type: "object" },
+            handler: async () => ({ content: [{ type: "text", text: "said" }] }),
+          },
+        ],
       },
       { keepAliveAcrossTurns: true },
     );
@@ -303,6 +314,40 @@ describe("AgentSession turn usage", () => {
     await drain(session.sendTurn({ prompt: "after a reopen" }).events);
 
     expect(recorded.map((facts) => facts.funding)).toEqual(["byok"]);
+  });
+
+  it("serves an exact fork its source's tools and refuses the ones that would act", async () => {
+    nextRun = async function* () {
+      yield {
+        type: "result",
+        content: "done",
+        position: { provider: "openai", modelThreadId: "source-thread", checkpointId: "turn-1" },
+      };
+    };
+    const session = await manager.acquire(key);
+    await drain(session.sendTurn({ prompt: "first" }).events);
+    await drain(session.runForkedTurn!({ prompt: "side question", mode: "exact" }));
+
+    const [source, fork] = opened;
+    const catalog = (params: ModelSessionParams) =>
+      params.tools.listTools("ask_user").map((tool) => tool.name);
+    expect(catalog(source)).toEqual(["ask_question", "defer", "say", "propose_routine"]);
+    expect(catalog(fork)).toEqual(catalog(source));
+
+    const say = await fork.tools.callTool("ask_user", "say", {});
+    expect(say).toMatchObject({ isError: true });
+    expect(say.content[0].text).toBe("say is unavailable in a forked turn.");
+    const propose = await fork.tools.callTool("ask_user", "propose_routine", {
+      kind: "manual",
+      sentence: "Run it.",
+      name: "Run",
+      watchLabel: "On demand",
+      thenSummary: "run it",
+      actionName: "summon",
+      args: {},
+    });
+    expect(propose).toMatchObject({ isError: true });
+    expect(propose.content[0].text).toContain("NOT shown");
   });
 
   it("leaves no position to branch at after a turn that never reached the model", async () => {

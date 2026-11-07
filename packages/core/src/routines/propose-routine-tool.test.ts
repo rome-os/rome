@@ -1,5 +1,10 @@
 import { describe, it, expect } from "@rstest/core";
-import { normalizeRoutineDraftForCard, buildFacadeBundle } from "./mcp-facade.js";
+import type { ActionResult } from "@rome-os/app-runtime";
+import {
+  normalizeRoutineDraftForCard,
+  proposeRoutineTools,
+  type RoutineActivationGate,
+} from "./propose-routine-tool.js";
 
 const validInput = {
   kind: "event",
@@ -188,58 +193,37 @@ describe("normalizeRoutineDraftForCard", () => {
     expect(result.ok).toBe(false);
   });
 
-  // The routine card is webchat-only; propose_routine registers only on an
-  // interactive surface (dashboard + desktop), not on plain messaging channels.
-  // ask_question, by contrast, registers everywhere (it relays prose off-webchat).
-  it("registers propose_routine only on an interactive surface; ask_question everywhere", () => {
-    const params = {
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      executeAction: async () => ({}),
-      executeSubagent: async () => ({}),
-    };
-    const withSurface = buildFacadeBundle({ ...params, supportsInteractiveSurface: true });
-    const withoutSurface = buildFacadeBundle({ ...params, supportsInteractiveSurface: false });
-    expect(withSurface.interactiveTools.map((t) => t.name)).toEqual(
-      expect.arrayContaining(["ask_question", "propose_routine"]),
-    );
-    expect(withoutSurface.interactiveTools.map((t) => t.name)).toEqual(["ask_question"]);
+  const gate: RoutineActivationGate = {
+    canCallAction: () => "permitted",
+    validateArgs: () => null,
+    routineKeyFor: () => undefined,
+  };
+  const runAction = async (): Promise<ActionResult> => ({ status: "ok" });
+
+  it("is offered only where the place draws cards", () => {
+    const names = (widgets: "card" | "plain_text") =>
+      proposeRoutineTools({ widgets, hasSpeaker: true, gate, runAction }).map((t) => t.name);
+    expect(names("card")).toEqual(["propose_routine"]);
+    expect(names("plain_text")).toEqual([]);
   });
 
-  // A detached session (exact-mode forked turn) must keep advertising the
-  // interactive catalog — its model-visible prefix has to stay byte-identical
-  // to the webchat source — but nothing drains its stream to deliver UI, so
-  // the handlers must refuse instead of claiming a card was shown.
-  describe("interactiveSurfaceDetached (exact-mode forks)", () => {
-    const params = {
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      executeAction: async () => ({}),
-      executeSubagent: async () => ({}),
-      supportsInteractiveSurface: true,
-      interactiveSurfaceDetached: true,
-    };
+  // A fork has no speaker but must keep advertising the tool, so its catalog
+  // matches its source. Nothing delivers a card, so the handler refuses instead
+  // of claiming one was shown.
+  describe("a session with no speaker", () => {
+    const params = { widgets: "card", gate, runAction } as const;
 
-    it("keeps the advertised interactive catalog identical to the live surface", () => {
-      const detached = buildFacadeBundle(params);
-      const live = buildFacadeBundle({ ...params, interactiveSurfaceDetached: false });
-      expect(detached.interactiveTools.map((t) => t.name)).toEqual(
-        live.interactiveTools.map((t) => t.name),
-      );
-      expect(detached.interactiveTools.map((t) => t.name)).toEqual(
-        expect.arrayContaining(["ask_question", "propose_routine"]),
-      );
+    it("advertises the tool the same as a session with one", () => {
+      const strip = (hasSpeaker: boolean) =>
+        proposeRoutineTools({ ...params, hasSpeaker }).map(
+          ({ name, description, inputSchema }) => ({ name, description, inputSchema }),
+        );
+      expect(strip(false)).toEqual(strip(true));
     });
 
-    it("propose_routine refuses instead of claiming the card was delivered", async () => {
-      const bundle = buildFacadeBundle(params);
-      const tool = bundle.interactiveTools.find((t) => t.name === "propose_routine")!;
-      const res = (await tool.handler(validInput)) as {
-        content: { text: string }[];
-        isError?: boolean;
-      };
+    it("refuses instead of claiming the card was delivered", async () => {
+      const [tool] = proposeRoutineTools({ ...params, hasSpeaker: false });
+      const res = await tool.handler(validInput);
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toContain("NOT shown");
       expect(res.content[0].text).not.toContain("has been delivered");
@@ -254,42 +238,29 @@ describe("normalizeRoutineDraftForCard", () => {
     const setup = (opts: {
       permissions?: Record<string, "permitted" | "denied" | "unknown">;
       argsError?: string;
-      createResult?: unknown;
+      createResult?: ActionResult;
       createThrows?: boolean;
-      withGate?: boolean;
-      detached?: boolean;
+      hasSpeaker?: boolean;
     }) => {
       const calls: Call[] = [];
       const permissions = opts.permissions ?? {};
-      const bundle = buildFacadeBundle({
-        getActionCatalog: () => [],
-        getSkillCatalog: () => [],
-        subagentTools: [],
-        executeAction: async (name, input) => {
+      const [tool] = proposeRoutineTools({
+        widgets: "card",
+        hasSpeaker: opts.hasSpeaker ?? true,
+        gate: {
+          canCallAction: (name) => permissions[name] ?? "permitted",
+          validateArgs: () => opts.argsError ?? null,
+          routineKeyFor: (toolUseId) => `chat-routine:turn-1:${toolUseId}`,
+        },
+        runAction: async (name, input) => {
           calls.push({ name, input });
           if (opts.createThrows) throw new Error("worker RPC timed out");
-          return opts.createResult ?? { routineId: "r-42" };
+          return opts.createResult ?? { status: "ok", data: { routineId: "r-42" } };
         },
-        executeSubagent: async () => ({}),
-        supportsInteractiveSurface: true,
-        interactiveSurfaceDetached: opts.detached ?? false,
-        ...(opts.withGate === false
-          ? {}
-          : {
-              routineActivation: {
-                canCallAction: (name: string) => permissions[name] ?? "permitted",
-                validateArgs: () => opts.argsError ?? null,
-                routineKeyFor: (toolUseId: string) => `chat-routine:turn-1:${toolUseId}`,
-              },
-            }),
       });
-      const tool = bundle.interactiveTools.find((t) => t.name === "propose_routine")!;
       const run = async (input: Record<string, unknown>, toolUseId: string | null = "toolu_1") =>
-        (await tool.handler(input, toolUseId === null ? undefined : { toolUseId })) as {
-          content: { text: string }[];
-          isError?: boolean;
-        };
-      return { calls, run, bundle };
+        tool.handler(input, toolUseId === null ? undefined : { toolUseId });
+      return { calls, run };
     };
     const DRAFTED = "A draft card was shown instead";
 
@@ -332,14 +303,6 @@ describe("normalizeRoutineDraftForCard", () => {
 
     it("falls back to a draft card when the agent may not call create_routine", async () => {
       const { calls, run } = setup({ permissions: { create_routine: "denied" } });
-      const res = await run({ ...validInput, activate: true });
-      expect(calls).toEqual([]);
-      expect(res.isError).toBeUndefined();
-      expect(res.content[0].text).toContain(DRAFTED);
-    });
-
-    it("falls back to a draft card when the session wires no permission check", async () => {
-      const { calls, run } = setup({ withGate: false });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBeUndefined();
@@ -407,8 +370,16 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(res.content[0].text).toContain("NOT created");
     });
 
-    it("never creates on a detached session", async () => {
-      const { calls, run } = setup({ detached: true });
+    // The action's raw result, not the shaped output a tool call hands the model.
+    it("treats a result with no routine id as not created", async () => {
+      const { run } = setup({ createResult: { status: "ok", data: {} } });
+      const res = await run({ ...validInput, activate: true });
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toContain("create_routine returned no routineId");
+    });
+
+    it("never creates on a session with no speaker", async () => {
+      const { calls, run } = setup({ hasSpeaker: false });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBe(true);
@@ -419,16 +390,6 @@ describe("normalizeRoutineDraftForCard", () => {
       const res = await run(validInput);
       expect(calls).toEqual([]);
       expect(res.content[0].text).toContain("routine draft card has been delivered");
-    });
-
-    // Exact forks rely on a byte-identical catalog, so wiring the gate must
-    // not change what the model sees.
-    it("advertises the same schema whether or not the gate is wired", () => {
-      const gated = setup({}).bundle.interactiveTools;
-      const ungated = setup({ withGate: false }).bundle.interactiveTools;
-      const strip = (tools: typeof gated) =>
-        tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
-      expect(strip(gated)).toEqual(strip(ungated));
     });
   });
 });

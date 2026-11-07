@@ -1,12 +1,7 @@
-import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../agent/index.js";
-import {
-  buildFacadeBundle,
-  type FacadeBundle,
-  type FacadeParams,
-  type FacadeToolDef,
-} from "../mcp-facade.js";
+import type { RomeTool, RomeToolDefinition, RomeToolGroup, RomeTools } from "../../agent/index.js";
+import { buildFacadeBundle, type FacadeBundle, type FacadeParams } from "../mcp-facade.js";
 
-function toolsForGroup(bundle: FacadeBundle, group: RomeToolGroup): FacadeToolDef[] {
+function toolsForGroup(bundle: FacadeBundle, group: RomeToolGroup): RomeTool[] {
   switch (group) {
     case "actions":
       return bundle.actions;
@@ -19,12 +14,7 @@ function toolsForGroup(bundle: FacadeBundle, group: RomeToolGroup): FacadeToolDe
   }
 }
 
-function toDefinition({
-  name,
-  description,
-  inputSchema,
-  endsTurn,
-}: FacadeToolDef): RomeToolDefinition {
+function toDefinition({ name, description, inputSchema, endsTurn }: RomeTool): RomeToolDefinition {
   return { name, description, inputSchema, ...(endsTurn !== undefined ? { endsTurn } : {}) };
 }
 
