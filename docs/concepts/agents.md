@@ -39,7 +39,7 @@ systemPromptPrefix: Complete the requested coding task.
 
 An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model or the [Concierge provider failover](../adrs/concierge-provider-failover.md) applies.
 
-## Session policy
+## Agent policy
 
 A core or app agent may declare how a chat treats its turns in an optional `policy:` block. Each omitted field keeps the default, which is the behavior every chat had before the block existed.
 

@@ -22,6 +22,7 @@ import {
   type ModelProvider,
   type ThreadStart,
   type SessionRepository,
+  resolveAgentPolicy,
 } from "../agent/index.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
@@ -130,7 +131,6 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
-import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
@@ -1395,7 +1395,7 @@ async function openSession(
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
     // The agent's text stays in its trace, so it reaches the guardian only
     // through its tools; `defer` then asks for no confirmation line.
-    textPrivate: resolveSessionPolicy(config).finalText === "private",
+    textPrivate: resolveAgentPolicy(config).finalText === "private",
   };
 
   const buildSessionParams = (

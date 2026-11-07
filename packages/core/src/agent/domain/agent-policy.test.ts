@@ -1,14 +1,14 @@
 import { describe, expect, it } from "@rstest/core";
-import { resolveSessionPolicy } from "./session-policy.js";
+import { resolveAgentPolicy } from "./agent-policy.js";
 
-describe("resolveSessionPolicy", () => {
+describe("resolveAgentPolicy", () => {
   it("keeps today's chat behavior by default, with memory for main only", () => {
-    expect(resolveSessionPolicy({ name: "main" })).toEqual({
+    expect(resolveAgentPolicy({ name: "main" })).toEqual({
       finalText: "deliver",
       autoTitle: true,
       loadMemory: true,
     });
-    expect(resolveSessionPolicy({ name: "envoy" })).toEqual({
+    expect(resolveAgentPolicy({ name: "envoy" })).toEqual({
       finalText: "deliver",
       autoTitle: true,
       loadMemory: false,
@@ -17,12 +17,12 @@ describe("resolveSessionPolicy", () => {
 
   it("applies each declared field and keeps the rest", () => {
     expect(
-      resolveSessionPolicy({
+      resolveAgentPolicy({
         name: "concierge",
         policy: { finalText: "private", autoTitle: false },
       }),
     ).toEqual({ finalText: "private", autoTitle: false, loadMemory: false });
-    expect(resolveSessionPolicy({ name: "main", policy: { loadMemory: false } }).loadMemory).toBe(
+    expect(resolveAgentPolicy({ name: "main", policy: { loadMemory: false } }).loadMemory).toBe(
       false,
     );
   });

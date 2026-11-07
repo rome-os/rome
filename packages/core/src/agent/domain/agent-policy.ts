@@ -1,11 +1,11 @@
-import type { AgentConfig } from "../types.js";
+import type { AgentName } from "./session.js";
 
 /**
  * How a chat treats one agent's turns. The agent YAML declares it in an
  * optional `policy:` block; each omitted field keeps the default, which is
  * the behavior every chat had before the policy existed.
  */
-export interface SessionPolicy {
+export interface AgentPolicy {
   /**
    * `deliver` sends the model's text to the chat: in-turn narration as it
    * completes, then the final reply. `private` keeps all of it in the trace,
@@ -18,7 +18,10 @@ export interface SessionPolicy {
   loadMemory: boolean;
 }
 
-export function resolveSessionPolicy(agent: Pick<AgentConfig, "name" | "policy">): SessionPolicy {
+export function resolveAgentPolicy(agent: {
+  name: AgentName;
+  policy?: Partial<AgentPolicy>;
+}): AgentPolicy {
   return {
     finalText: agent.policy?.finalText ?? "deliver",
     autoTitle: agent.policy?.autoTitle ?? true,

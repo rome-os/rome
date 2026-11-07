@@ -28,6 +28,7 @@ export type {
   ModelUsageWindow,
 } from "./domain/model-account.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
+export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export type { ModelTier } from "./domain/model-tier.js";
 export { matchesModelAlias, stripLegacyReasoningSuffix } from "./domain/model-alias.js";
 export {

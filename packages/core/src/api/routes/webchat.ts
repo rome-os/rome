@@ -66,7 +66,7 @@ import {
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
-import type { ModelSelection } from "../../agent/index.js";
+import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
 import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
@@ -104,7 +104,6 @@ import type {
   BackendTurnOptions,
 } from "../../actions/backend-turn.js";
 import { z } from "zod";
-import { resolveSessionPolicy } from "../../core/session-policy.js";
 import { withReplyContext } from "../../core/reply-context.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 
@@ -121,7 +120,7 @@ const isReplyToPart = (part: unknown): boolean =>
 function agentPolicySource(
   agentLoader: ApiDeps["agentLoader"],
   agentName: string,
-): Parameters<typeof resolveSessionPolicy>[0] {
+): Parameters<typeof resolveAgentPolicy>[0] {
   try {
     return agentLoader.get(agentName);
   } catch {
@@ -3458,7 +3457,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // An agent whose text is private speaks one message per tool call, so
         // each of its rows is a message of its own.
         ownRowOnly:
-          resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
+          resolveAgentPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
             .finalText === "private",
       });
       if (!resolved.ok) return answer({ error: resolved.error }, 400);
@@ -3643,7 +3642,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
-    const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
+    const policy = resolveAgentPolicy(agentPolicySource(deps.agentLoader, agentName));
     // The main Concierge chat keeps its fixed name, and so does a topic chat
     // started with one. An untitled topic chat is named from its first
     // message, as an ordinary chat is.
@@ -4285,7 +4284,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The same rule as a foreground turn: an agent whose text is private keeps
     // its narration in the trace.
     const deliversText =
-      resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
+      resolveAgentPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
         .finalText === "deliver";
     // Position of the recorded turn's next text block, numbered as a foreground
     // turn numbers its blocks.
