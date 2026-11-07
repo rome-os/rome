@@ -3,7 +3,7 @@ import { z } from "zod";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
 import { createRomeTools } from "../../../../core/mcp/server.js";
 import type { ModelToolCallContext, RomeToolDefinition } from "../../../../core/agent-runner.js";
-import type { ActionMcpDefinition } from "../../../../core/mcp-facade.js";
+import type { AgentAction } from "../../../domain/agent-action.js";
 import type { Skill } from "../../../domain/skill.js";
 
 const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
@@ -29,8 +29,8 @@ rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 interface BuildArgs {
-  actionCatalog?: ActionMcpDefinition[];
-  getActionCatalog?: () => ActionMcpDefinition[];
+  actionCatalog?: AgentAction[];
+  getActionCatalog?: () => AgentAction[];
   skillCatalog?: Skill[];
   getSkillCatalog?: () => Skill[];
   subagentTools?: RomeToolDefinition[];
@@ -42,7 +42,7 @@ interface BuildArgs {
   ) => Promise<unknown>;
 }
 
-const baseActionCatalog: ActionMcpDefinition[] = [
+const baseActionCatalog: AgentAction[] = [
   {
     name: "demo_action",
     description: "Schedule a calendar event",
@@ -391,7 +391,7 @@ describe("buildAnthropicMcpServers", () => {
     // new action stays invisible. The stub here mirrors AgentSession's
     // contract: the executeAction callback is the gate that rejects names
     // that aren't currently visible.
-    const liveCatalog: ActionMcpDefinition[] = [baseActionCatalog[0]];
+    const liveCatalog: AgentAction[] = [baseActionCatalog[0]];
     const executeAction = rs.fn(async (name: string) => {
       if (!liveCatalog.some((a) => a.name === name)) {
         throw new Error(`Unknown action: ${name}`);

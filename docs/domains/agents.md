@@ -22,6 +22,20 @@ Know-how an agent reads and follows. An agent has the skills its installed apps 
 
 - In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts).
 
+## Rome tools
+
+The tools Rome serves the model during a turn, in four groups: actions, subagents, skills, and the group that asks the person. Each agent's are built from what it may call, and a provider mounts each group as one server.
+
+- How an agent finds actions and skills, what a call on an action hands back, and what `ask_question` and `defer` accept are rules in [`packages/core/src/agent/domain/`](../../packages/core/src/agent/domain/).
+
+## Session tools
+
+The tools a session carries beyond the ones every session of its agent has, such as the Concierge's tools, and `propose_routine` where the widget drawing is card.
+
+## Subagent
+
+An agent that another agent's turn hands work to. The session that runs it has that turn as its parent.
+
 ## System prompt
 
 What the model reads before the conversation. It is built when a run opens the agent's session, and kept across reopens and forks of the model's session.
