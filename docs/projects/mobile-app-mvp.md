@@ -64,8 +64,10 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 ## Update page and chat titles
 
-- [ ] Update page in the opening screen's style: mascot, versions named ("Your Rome is on X. The latest is Y."), while updating the animated mascot plus a status line that follows the real state (asking Rome Cloud, downloading Y, restarting, almost done), "This can take a few minutes…" (user, 2026-11-06). Queued after the appearance setting.
-- [ ] Topic and task chat headers: the title is one line of small text, no glass pill; side buttons keep their glass; main Chat unchanged (user, 2026-11-06). Queued.
+Done (`2ddca7b8`, `63d70b78`, `ebffb0b3`, `5400b50d`): 170 Mac Catalyst tests pass; snapshots of each update state and the headers in notes folder `update-page-headers/`. Tasks | … capsule 78 pt instead of 92. Follow-up sent: a soft edge fade behind the plain title, since rows show through it.
+
+- [x] Update page in the opening screen's style: mascot, versions named ("Your Rome is on X. The latest is Y."), while updating the animated mascot plus a status line that follows the real state (asking Rome Cloud, downloading Y, restarting, almost done), "This can take a few minutes…" (user, 2026-11-06). Queued after the appearance setting.
+- [x] Topic and task chat headers: the title is one line of small text, no glass pill; side buttons keep their glass; main Chat unchanged (user, 2026-11-06). Queued.
 
 ## Composer drafts
 
