@@ -13,12 +13,16 @@ const LAYERED_CONTEXTS = ["agent"];
 const SCAN_TIMEOUT_MS = 60_000;
 
 describe("layered context imports", () => {
-  it("follow the layer rules", () => {
-    const lines = checkLayerBoundaries(
-      srcDir,
-      join(srcDir, "..", "tsconfig.json"),
-      LAYERED_CONTEXTS,
-    ).map(formatLayerViolation);
-    expect(lines, `\nImports that break a layer rule:\n${lines.join("\n")}\n`).toEqual([]);
-  }, SCAN_TIMEOUT_MS);
+  it(
+    "follow the layer rules",
+    () => {
+      const lines = checkLayerBoundaries(
+        srcDir,
+        join(srcDir, "..", "tsconfig.json"),
+        LAYERED_CONTEXTS,
+      ).map(formatLayerViolation);
+      expect(lines, `\nImports that break a layer rule:\n${lines.join("\n")}\n`).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 });
