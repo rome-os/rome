@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isLoopbackInternalApiHost } from "../../lib/loopback-host.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -29,16 +30,6 @@ const log = createLogger("discord-cli-broker");
 type DiscordCliRouteDeps = Pick<ApiDeps, "connectionRegistry" | "setupManager"> & {
   channelRecords?: Pick<ChannelRecordsRepository, "byId">;
 };
-
-export function isLoopbackInternalApiHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase();
-  return (
-    normalized === "127.0.0.1" ||
-    normalized === "localhost" ||
-    normalized === "::1" ||
-    normalized === "[::1]"
-  );
-}
 
 export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: string): Hono {
   if (!isLoopbackInternalApiHost(internalApiHost)) {

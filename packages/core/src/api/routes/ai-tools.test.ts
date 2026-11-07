@@ -306,9 +306,12 @@ describe("Codex device-code login API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const startDeviceLogin = rs.spyOn(deps.codexAccountService, "startDeviceLogin");
-      const cancelLogin = rs.spyOn(deps.codexAccountService, "cancelLogin");
-      rs.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
+      const startDeviceAuthorization = rs.spyOn(
+        deps.codexAccountService,
+        "startDeviceAuthorization",
+      );
+      const cancelAuthorization = rs.spyOn(deps.codexAccountService, "cancelAuthorization");
+      rs.spyOn(deps.codexAccountService, "authorizationState").mockReturnValue({
         running: true,
         mode: "device",
         userCode: "TEST-CODE",
@@ -323,7 +326,7 @@ describe("Codex device-code login API", () => {
         userCode: "TEST-CODE",
         verificationUrl: "https://auth.openai.com/codex/device",
       });
-      expect(startDeviceLogin).toHaveBeenCalledTimes(1);
+      expect(startDeviceAuthorization).toHaveBeenCalledTimes(1);
 
       const status = await app.request("/ai-tools/status");
       expect(status.status).toBe(200);
@@ -336,7 +339,7 @@ describe("Codex device-code login API", () => {
       const cancel = await app.request("/ai-tools/codex/device-login/cancel", { method: "POST" });
       expect(cancel.status).toBe(200);
       expect(await cancel.json()).toEqual({ ok: true });
-      expect(cancelLogin).toHaveBeenCalledTimes(1);
+      expect(cancelAuthorization).toHaveBeenCalledTimes(1);
     } finally {
       testDb.close();
     }
@@ -348,7 +351,7 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      rs.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
+      rs.spyOn(deps.codexAccountService, "authorizationState").mockReturnValue({
         running: false,
         mode: null,
         userCode: null,
@@ -375,7 +378,10 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const startBrowserLogin = rs.spyOn(deps.codexAccountService, "startBrowserLogin");
+      const startBrowserAuthorization = rs.spyOn(
+        deps.codexAccountService,
+        "startBrowserAuthorization",
+      );
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = await app.request("/ai-tools/codex/login/start", { method: "POST" });
@@ -383,7 +389,7 @@ describe("Codex shared account routes", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ started: true });
       expect(closeAuthTabsMock).toHaveBeenCalledTimes(1);
-      expect(startBrowserLogin).toHaveBeenCalledTimes(1);
+      expect(startBrowserAuthorization).toHaveBeenCalledTimes(1);
       expect(openServerBrowserTabMock).toHaveBeenCalledWith("https://auth.openai.com/test");
     } finally {
       testDb.close();
@@ -394,7 +400,7 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const logout = rs.spyOn(deps.codexAccountService, "logout");
+      const logout = rs.spyOn(deps.codexAccountService, "revoke");
       const refresh = rs
         .spyOn(deps.aiToolState, "refresh")
         .mockResolvedValue(deps.aiToolState.get());

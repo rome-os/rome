@@ -1,24 +1,14 @@
 import { execFile } from "node:child_process";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { CodexPlanType } from "./codex-cli-auth.js";
+import type { ModelAccountStatus } from "../agent/index.js";
 import {
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
 } from "./anthropic-compatible-providers.js";
-import type { AnthropicCompatibleCredentialsSummary } from "@rome/api-types/anthropic-compatible-providers";
 import { isAnthropicAuthRevoked, isAnthropicCompatibleAuthRevoked } from "./anthropic-login.js";
 import { type AIToolUsageStatus, getErrorMessage, readClaudeOAuthUsage } from "./provider-usage.js";
 
-export interface AIToolStatusProbeResult {
-  loggedIn: boolean;
-  authMode?: "chatgpt" | "apikey" | null;
-  planType?: CodexPlanType;
-  email?: string;
-  authMethod?: string;
-  accountType?: string;
-  needsReauth?: boolean;
-  anthropicCompatible?: (AnthropicCompatibleCredentialsSummary & { needsReauth?: boolean }) | null;
-}
+export type AIToolStatusProbeResult = ModelAccountStatus;
 
 function readClaudeCliStatus(): Promise<AIToolStatusProbeResult> {
   return new Promise((resolve, reject) => {

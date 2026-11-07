@@ -1,7 +1,6 @@
-// Core's loopback proxy to the Rome credits inference gateway. The route in
-// api/routes/rome-credits-proxy.ts serves it; the Codex app-server is its one
-// client and presents the secret on every request (the adapter in
-// agent/infrastructure/model/codex/ sets both up).
+// The loopback proxy to the Rome credits inference gateway: the route in
+// rome-credits-proxy-route.ts serves it, the app-server manager hands the
+// secret to Codex, and nothing outside this folder reads either.
 
 import { randomBytes } from "node:crypto";
 

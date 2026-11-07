@@ -1,4 +1,4 @@
-import { ROME_CREDITS_PROXY_PATH } from "../../../../core/rome-credits-proxy.js";
+import { ROME_CREDITS_PROXY_PATH } from "./rome-credits-proxy.js";
 import { getInternalApiBaseUrl } from "../../../../internal-api-url.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 

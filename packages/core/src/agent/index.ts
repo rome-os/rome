@@ -15,6 +15,17 @@ export {
   type TurnCheckpoint,
   type TurnRun,
 } from "./domain/session.js";
+export type {
+  ModelAccount,
+  ModelAccountStatus,
+  ModelAccountUsage,
+  ModelAuthorizationMode,
+  ModelAuthorizationState,
+  ModelBrowserAuthorization,
+  ModelDeviceAuthorization,
+  ModelPlanType,
+  ModelUsageWindow,
+} from "./domain/model-account.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export type { ModelTier } from "./domain/model-tier.js";
 export type {
@@ -49,3 +60,4 @@ export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js"
 export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";
+export { romeCreditsProxyRoutes } from "./infrastructure/model/codex/rome-credits-proxy-route.js";

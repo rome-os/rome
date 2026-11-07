@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { setInstanceTokenInMemory } from "../../../../lib/instance-identity.js";
-import { ROME_CREDITS_PROXY_SECRET } from "../../../../core/rome-credits-proxy.js";
+import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
 import { SharedCodexAccountService } from "./account-service.js";
 import {
@@ -491,11 +491,11 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     const { manager } = capture();
     const accountService = new SharedCodexAccountService(manager);
     try {
-      await accountService.startDeviceLogin();
+      await accountService.startDeviceAuthorization();
 
       manager.setDefaultProvider("rome_credits");
 
-      expect(accountService.getLoginState()).toMatchObject({
+      expect(accountService.authorizationState()).toMatchObject({
         running: false,
         lastError: `Codex sign-in stopped: ${PAYER_RESTART}`,
       });
@@ -511,7 +511,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     try {
       await manager.warmup();
       const resolveLoginStart = clients[0].defer(Method.accountLoginStart);
-      const starting = accountService.startDeviceLogin();
+      const starting = accountService.startDeviceAuthorization();
       await rs.waitFor(() => {
         expect(
           clients[0].requests.some((request) => request.method === Method.accountLoginStart),
@@ -526,7 +526,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       manager.setDefaultProvider("rome_credits");
 
       await expect(starting).rejects.toThrow("Codex login was canceled");
-      expect(accountService.getLoginState()).toMatchObject({
+      expect(accountService.authorizationState()).toMatchObject({
         running: false,
         lastError: `Codex sign-in stopped: ${PAYER_RESTART}`,
       });
