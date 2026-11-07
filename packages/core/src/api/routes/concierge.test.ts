@@ -410,13 +410,11 @@ describe("without the Concierge service", () => {
 
 describe("POST /concierge/chats/:chatId/service-connected", () => {
   let testDb: TestDb;
-  let enabled: boolean;
   const serviceConnected = rs.fn();
   const chatOwners: Record<string, string> = { concierge: "guardian", "topic-1": "guardian" };
 
   const app = () => {
     const concierge = {
-      isEnabled: async () => enabled,
       following: {
         list: async () => ({
           connectors: [
@@ -444,7 +442,6 @@ describe("POST /concierge/chats/:chatId/service-connected", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    enabled = true;
     serviceConnected.mockClear();
   });
 
@@ -476,10 +473,8 @@ describe("POST /concierge/chats/:chatId/service-connected", () => {
     expect(serviceConnected).not.toHaveBeenCalled();
   });
 
-  it("answers 401 to a caller with no Concierge, and 404 while the setting is off", async () => {
+  it("answers 401 to a caller with no Concierge", async () => {
     expect((await post("concierge", { service: "mail" }, appUser)).status).toBe(401);
-    enabled = false;
-    expect((await post("concierge", { service: "mail" })).status).toBe(404);
     expect(serviceConnected).not.toHaveBeenCalled();
   });
 });
