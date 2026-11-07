@@ -23,7 +23,7 @@ import {
   sameProviderTarget,
   soleProviderAtUsageLimit,
   usageSwitchTarget,
-  type ModelAvailability,
+  type ModelAccounts,
   type ModelSelectionId,
   type SessionRepository,
 } from "../agent/index.js";
@@ -156,7 +156,7 @@ export interface ConciergeDeps {
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
-  availability: Pick<ModelAvailability, "read">;
+  accounts: Pick<ModelAccounts, "read">;
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
@@ -417,7 +417,7 @@ export class ConciergeService {
   // its own models through the tier mappings, so it keeps the tier's choice,
   // as does a chat that neither provider can serve.
   private pickModel(): ModelSelectionId | null {
-    const { anthropic: claude, openai: codex } = this.deps.availability.read();
+    const { anthropic: claude, openai: codex } = this.deps.accounts.read();
     if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
       return "claude-sonnet";
     }
@@ -454,7 +454,7 @@ export class ConciergeService {
     const runtime = selected
       ? null
       : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-    const state = this.deps.availability.read();
+    const state = this.deps.accounts.read();
     // An Auto chat whose first turn failed has no recorded provider yet.
     const from =
       selected?.providerId ??

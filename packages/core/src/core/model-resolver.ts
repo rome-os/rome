@@ -10,10 +10,10 @@ import {
   providerUsable,
   stripLegacyReasoningSuffix,
   type AccountedProviderId,
-  type ModelAvailability,
-  type ModelAvailabilityState,
+  type ModelAccounts,
+  type ModelAccountReports,
   type ModelSelectionId,
-  type ProviderAvailability,
+  type ModelAccountReport,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { RomeCreditsPayer } from "./rome-credits-payer.js";
@@ -111,7 +111,7 @@ export interface ModelResolver {
 }
 
 export interface CreateModelResolverOptions {
-  availability: Pick<ModelAvailability, "read" | "refresh">;
+  accounts: Pick<ModelAccounts, "read" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
   romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits"> &
@@ -137,7 +137,7 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
  */
 function codexModel(
   tier: ModelTier,
-  codex: ProviderAvailability | undefined,
+  codex: ModelAccountReport | undefined,
   served: ReadonlySet<string> | null,
 ): string {
   const allows = (model: string): boolean =>
@@ -185,10 +185,10 @@ function providerDisplayName(id: ProviderId): string {
 
 // Agents, apps, and logs see only the message, not the reason field, so the
 // message itself names the cause and when a usage limit ends.
-function unavailableCause(provider: ModelProvider, availability: ProviderAvailability): string {
+function unavailableCause(provider: ModelProvider, report: ModelAccountReport): string {
   const name = providerDisplayName(provider.id);
-  if (!providerAuthorized(availability)) return `${name} is not signed in`;
-  const until = availability.usageLimitUntil;
+  if (!providerAuthorized(report)) return `${name} is not signed in`;
+  const until = report.usageLimitUntil;
   return until
     ? `${name} has reached its usage limit until ${until}`
     : `${name} has reached its usage limit`;
@@ -198,8 +198,8 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
   const providers = new Map(options.providers.map((provider) => [provider.id, provider]));
 
   const refreshAfterFailure = (provider?: AccountedProviderId): void => {
-    void options.availability.refresh(provider).catch((error) => {
-      log.warn("model availability refresh after model resolution failure failed", {
+    void options.accounts.refresh(provider).catch((error) => {
+      log.warn("model accounts refresh after model resolution failure failed", {
         provider: provider ?? "all",
         error: error instanceof Error ? error.message : String(error),
       });
@@ -207,17 +207,17 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
   };
 
   /** Throws when the provider is read as unauthorized, expired or at its usage limit. */
-  const requireUsableProvider = (provider: ModelProvider, state: ModelAvailabilityState): void => {
-    const availability = state[provider.id];
-    if (!availability || providerUsable(availability)) return;
+  const requireUsableProvider = (provider: ModelProvider, state: ModelAccountReports): void => {
+    const report = state[provider.id];
+    if (!report || providerUsable(report)) return;
     const providerId = provider.id as AccountedProviderId;
     refreshAfterFailure(providerId);
     throw new ModelResolutionError(
-      `Selected model provider is unavailable: ${unavailableCause(provider, availability)}`,
+      `Selected model provider is unavailable: ${unavailableCause(provider, report)}`,
       {
         code: "model_provider_unavailable",
         provider: providerId,
-        reason: providerAuthorized(availability) ? "quota_exhausted" : "not_logged_in",
+        reason: providerAuthorized(report) ? "quota_exhausted" : "not_logged_in",
       },
     );
   };
@@ -230,7 +230,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
   const requireModelAccess = (
     providerId: ProviderId,
     model: string,
-    codex: ProviderAvailability | undefined,
+    codex: ModelAccountReport | undefined,
     served: ReadonlySet<string> | null,
   ): void => {
     if (providerId !== "openai") return;
@@ -262,7 +262,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
    * for Codex: while they pay, Codex is available and allows the models the
    * gateway serves, or any when the gateway has not said.
    */
-  const resolutionState = (state = options.availability.read()): ModelAvailabilityState => {
+  const resolutionState = (state = options.accounts.read()): ModelAccountReports => {
     if (!usingRomeCredits()) return state;
     return {
       ...state,
@@ -307,7 +307,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       // A tier reaches credits only when no subscription can serve it, and a
       // provider pin ignores the served list.
       if (!request.providerId) {
-        const current = options.availability.read();
+        const current = options.accounts.read();
         const subscriptionServes =
           (providers.has("openai") && providerUsable(current.openai)) ||
           (providers.has("anthropic") && providerUsable(current.anthropic));
@@ -316,7 +316,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       // Settings reads can yield while account state changes. Read the payer
       // and provider state after the final await so this resolution sees the
       // current login-selected payer.
-      const accountState = options.availability.read();
+      const accountState = options.accounts.read();
       const creditsPay = usingRomeCredits();
       const state = resolutionState(accountState);
       const creditsServed = creditsServedModels();
@@ -379,7 +379,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const mock = providers.get("mock");
       if (mock) return { modelProvider: mock, model: resolveTierModel(mock) };
 
-      const connectedProviders: ProviderAvailability[] = [];
+      const connectedProviders: ModelAccountReport[] = [];
       if (codex && providerAuthorized(state.openai) && state.openai) {
         connectedProviders.push(state.openai);
       }

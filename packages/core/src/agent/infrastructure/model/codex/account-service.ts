@@ -23,12 +23,8 @@ import type {
   ModelDeviceAuthorization,
 } from "../../../domain/model-account.js";
 import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL } from "../../../domain/model-selection.js";
-import type { ProviderAvailability } from "../../../domain/provider-availability.js";
-import {
-  accountAvailability,
-  refusalAfterReport,
-  usageShowsCapacity,
-} from "../account-availability.js";
+import type { ModelAccountReport } from "../../../domain/model-account-report.js";
+import { accountReport, refusalAfterReport, usageShowsCapacity } from "../account-report.js";
 import {
   type LearnsRefusedTurns,
   type RefusedTurn,
@@ -177,7 +173,7 @@ export class SharedCodexAccountService
   /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
   private refusal: UsageRefusal | undefined;
   /** The last report, so a limit still ahead survives a usage read that fails. */
-  private last: ProviderAvailability | undefined;
+  private last: ModelAccountReport | undefined;
   private readonly now: () => number;
   private closed = false;
 
@@ -213,13 +209,13 @@ export class SharedCodexAccountService
    * capacity after the hold ends a refusal; one in the hold describes the
    * account before the refused turn.
    */
-  async availability(): Promise<ProviderAvailability> {
+  async report(): Promise<ModelAccountReport> {
     const readAt = this.now();
     const [status, usage] = await Promise.all([this.status(), this.usage()]);
     if (usage && usageShowsCapacity(usage) && this.refusal) {
       if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
     }
-    this.last = accountAvailability(status, usage, this.heldRefusal(), this.now(), this.last);
+    this.last = accountReport(status, usage, this.heldRefusal(), this.now(), this.last);
     this.refusal = refusalAfterReport(this.refusal, this.last);
     return this.last;
   }

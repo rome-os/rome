@@ -40,7 +40,7 @@ import { AgentLoader } from "../../core/agent-loader.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../core/model-resolver.js";
-import { bothAvailable, fakeAvailability } from "./model-availability.js";
+import { bothAvailable, fakeAccounts } from "./model-accounts.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
@@ -243,7 +243,7 @@ async function buildHarness(
   const model = new FakeModel();
   const modelResolver = createModelResolver({
     providers: [model],
-    availability: fakeAvailability(bothAvailable()),
+    accounts: fakeAccounts(bothAvailable()),
   });
 
   const actionRegistry = new ActionRegistryImpl();

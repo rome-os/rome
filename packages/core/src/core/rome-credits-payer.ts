@@ -1,5 +1,5 @@
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
-import { providerAuthorized, type ModelAvailability } from "../agent/index.js";
+import { providerAuthorized, type ModelAccounts } from "../agent/index.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../usage/funding.js";
 import { instanceCredentialId } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
@@ -52,7 +52,7 @@ function canSpend(view: RomeCreditsView | null): view is RomeCreditsView {
  * changes. A read also refreshes the models the gateway serves.
  */
 export function createRomeCreditsPayer(options: {
-  availability: Pick<ModelAvailability, "read">;
+  accounts: Pick<ModelAccounts, "read">;
   appServerManager: CodexPayerManager;
   /** The instance credential's stable id (see instanceCredentialId), or null when not linked. */
   getCredentialId?: () => string | null;
@@ -118,7 +118,7 @@ export function createRomeCreditsPayer(options: {
   return {
     sync() {
       if (closed) return;
-      const hasChatGptLogin = providerAuthorized(options.availability.read().openai);
+      const hasChatGptLogin = providerAuthorized(options.accounts.read().openai);
       const nextToken = token();
       const tokenChanged = nextToken !== instanceToken;
       instanceToken = nextToken;

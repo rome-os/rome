@@ -1,19 +1,19 @@
-// Model availability fixtures for tests: a state per provider and a fake
-// `ModelAvailability` that reads it.
+// Model account fixtures for tests: a report per provider and a fake
+// `ModelAccounts` that reads it.
 
 import type {
   ModelAccountStatus,
-  ModelAvailability,
-  ModelAvailabilityState,
-  ProviderAvailability,
+  ModelAccounts,
+  ModelAccountReports,
+  ModelAccountReport,
   ProviderAvailabilityState,
 } from "../../agent/index.js";
 
-export function availabilityOf(
+export function reportOf(
   state: ProviderAvailabilityState,
   account: Partial<ModelAccountStatus> = {},
   usageLimitUntil?: string,
-): ProviderAvailability {
+): ModelAccountReport {
   const authorized = state !== "unauthorized" && state !== "expired";
   return {
     state,
@@ -29,14 +29,14 @@ export function availabilityOf(
 }
 
 /** Both providers available on a full plan. */
-export function bothAvailable(): ModelAvailabilityState {
-  return { openai: availabilityOf("available"), anthropic: availabilityOf("available") };
+export function bothAvailable(): ModelAccountReports {
+  return { openai: reportOf("available"), anthropic: reportOf("available") };
 }
 
-/** A `ModelAvailability` that reads a fixed or computed state and refreshes nothing. */
-export function fakeAvailability(
-  state: ModelAvailabilityState | (() => ModelAvailabilityState),
-): Pick<ModelAvailability, "read" | "refresh"> {
+/** A `ModelAccounts` that reads a fixed or computed state and refreshes nothing. */
+export function fakeAccounts(
+  state: ModelAccountReports | (() => ModelAccountReports),
+): Pick<ModelAccounts, "read" | "refresh"> {
   const read = typeof state === "function" ? state : () => state;
   return { read, refresh: async () => {} };
 }

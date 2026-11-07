@@ -60,14 +60,14 @@ export {
 } from "./domain/model-selection.js";
 export {
   accountAllowsModel,
-  currentAvailability,
+  currentReport,
   providerAuthorized,
   providerUsable,
   type AccountedProviderId,
-  type ModelAvailabilityState,
-  type ProviderAvailability,
+  type ModelAccountReports,
+  type ModelAccountReport,
   type ProviderAvailabilityState,
-} from "./domain/provider-availability.js";
+} from "./domain/model-account-report.js";
 export {
   sameProviderTarget,
   soleProviderAtUsageLimit,
@@ -75,11 +75,11 @@ export {
   type UsageSwitchTarget,
 } from "./domain/usage-switch.js";
 export {
-  createModelAvailability,
-  type CreateModelAvailabilityOptions,
-  type ModelAvailability,
-  type ModelAvailabilityChange,
-} from "./application/model-availability.js";
+  createModelAccounts,
+  type CreateModelAccountsOptions,
+  type ModelAccounts,
+  type ModelAccountChange,
+} from "./application/model-accounts.js";
 export type {
   McpServerConfig,
   ModelFunding,

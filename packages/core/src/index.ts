@@ -169,7 +169,7 @@ import {
   ClaudeAccount,
   CodexAppServerManager,
   CodexAppServerProvider,
-  createModelAvailability,
+  createModelAccounts,
   DrizzleSessionRepository,
   SharedCodexAccountService,
   SkillLoader,
@@ -880,15 +880,15 @@ async function main() {
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
   const claudeAccount = new ClaudeAccount({ settingsRepo });
-  const modelAvailability = createModelAvailability({
+  const modelAccounts = createModelAccounts({
     accounts: { openai: codexAccountService, anthropic: claudeAccount },
     // The first read spawns the Codex app-server, which competes with boot
     // for CPU on a small VM. It runs once Rome has started, with the warmup.
     startRefresh: false,
-    log: createLogger("model-availability"),
+    log: createLogger("model-accounts"),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
-    availability: modelAvailability,
+    accounts: modelAccounts,
     appServerManager: codexAppServerManager,
   });
   const syncRomeCreditsPayer = (): void => romeCreditsPayer.sync();
@@ -896,7 +896,7 @@ async function main() {
   romeCreditsPayer.sync();
   // The Codex authorization drives the payer, and each settled read of the
   // account re-reads the credits.
-  const unsubscribeAvailabilityChanged = modelAvailability.onChanged((provider, change) => {
+  const unsubscribeAvailabilityChanged = modelAccounts.onChanged((provider, change) => {
     if (provider !== "openai") return;
     if (change === "authorization") syncRomeCreditsPayer();
     else void romeCreditsPayer.refresh();
@@ -909,7 +909,7 @@ async function main() {
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
     onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
-      const codex = modelAvailability.read().openai;
+      const codex = modelAccounts.read().openai;
       return codexFunding({
         defaultProvider: codexAppServerManager.getDefaultProvider(),
         accountType: codex?.account.accountType,
@@ -918,7 +918,7 @@ async function main() {
     },
   });
   const modelResolver = createModelResolver({
-    availability: modelAvailability,
+    accounts: modelAccounts,
     providers: [anthropicProvider, codexProvider],
     settingsRepo,
     romeCreditsPayer,
@@ -1105,7 +1105,7 @@ async function main() {
     }),
     webchatRepo,
     sessionRepository,
-    availability: modelAvailability,
+    accounts: modelAccounts,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
@@ -1317,13 +1317,13 @@ async function main() {
     // Real push sender in main; the worker gets a NotifyServiceProxy.
     notify: notifyClient,
     // Image generation capability: provider-neutral registry the generate_image
-    // action consumes. Codex is the only provider today; its availability reads
-    // the same model availability the model resolver gates on.
+    // action consumes. Codex is the only provider today; its report reads
+    // the same model accounts the model resolver gates on.
     imageGeneration: createImageGenerationService({
       providers: [
         createCodexImageGenerationProvider({
           agentRunner,
-          getCodexAvailability: () => modelAvailability.read().openai,
+          getCodexReport: () => modelAccounts.read().openai,
         }),
       ],
     }),
@@ -2063,7 +2063,7 @@ async function main() {
       agentRunner,
       activeSubagentRegistry,
       agentTurnStreamRegistry,
-      modelAvailability,
+      modelAccounts,
       codexAccountService,
       claudeAccount,
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
@@ -2226,8 +2226,8 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   });
-  void modelAvailability.refresh().catch((err) => {
-    log.warn("initial model availability refresh failed", {
+  void modelAccounts.refresh().catch((err) => {
+    log.warn("initial model accounts refresh failed", {
       error: err instanceof Error ? err.message : String(err),
     });
   });
@@ -2348,8 +2348,8 @@ async function main() {
     unsubscribeInstanceTokenChanged();
     unsubscribeInstanceLinked();
     romeCreditsPayer.close();
-    modelAvailability.close();
-    shutdownLog.info("model availability stopped");
+    modelAccounts.close();
+    shutdownLog.info("model accounts stopped");
     codexAccountService.close();
     claudeAccount.close();
     shutdownLog.info("model accounts stopped");

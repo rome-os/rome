@@ -43,12 +43,12 @@ import { ConciergeTasks } from "./tasks.js";
 import { buildConciergeTools } from "./tools.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
-  availabilityOf,
+  reportOf,
   bothAvailable,
-  fakeAvailability,
+  fakeAccounts,
   RESTRICTED_PLAN,
-} from "../test/kit/model-availability.js";
-import type { ModelAvailabilityState } from "../agent/index.js";
+} from "../test/kit/model-accounts.js";
+import type { ModelAccountReports } from "../agent/index.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
 /** A topic chat: another Concierge chat. */
@@ -285,9 +285,9 @@ function setup(
     },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
     agentSessionManager: { peek: rs.fn(() => ({ selectModel: rs.fn() })) },
-    availability: fakeAvailability({
-      anthropic: availabilityOf("available"),
-      openai: availabilityOf("unauthorized"),
+    accounts: fakeAccounts({
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
     }),
     runBackendTurn: async (params: BackendTurnParams, turn?: SystemTurnOptions) => {
       backendTurns.push(params);
@@ -2119,14 +2119,14 @@ describe("Concierge chat", () => {
         createSession,
         updateSessionLargeModelSelection: update,
       },
-      availability: fakeAvailability(() => state),
+      accounts: fakeAccounts(() => state),
     } as unknown as ConciergeDeps);
     return { service, createSession, update };
   };
-  const signedOut = availabilityOf("unauthorized");
-  const codexOnly: ModelAvailabilityState = {
+  const signedOut = reportOf("unauthorized");
+  const codexOnly: ModelAccountReports = {
     anthropic: signedOut,
-    openai: availabilityOf("available"),
+    openai: reportOf("available"),
   };
 
   it("creates the chat at its fixed id, on the model the signed-in providers serve best", async () => {
@@ -2223,14 +2223,14 @@ describe("Concierge chat", () => {
 
   it("falls back to Terra without Luna access, and to Sonnet on a Claude login", async () => {
     const terra = serviceWith(
-      { anthropic: signedOut, openai: availabilityOf("available", RESTRICTED_PLAN) },
+      { anthropic: signedOut, openai: reportOf("available", RESTRICTED_PLAN) },
       true,
       null,
     );
     await terra.service.ensureChatId();
     expect(terra.update).toHaveBeenCalledWith("concierge", "gpt-5-6-terra");
     const claude = serviceWith(
-      { anthropic: availabilityOf("available"), openai: codexOnly.openai },
+      { anthropic: reportOf("available"), openai: codexOnly.openai },
       true,
       null,
     );
@@ -2240,7 +2240,7 @@ describe("Concierge chat", () => {
 
   it("stores nothing for an existing chat while no provider is signed in", async () => {
     const { service, update } = serviceWith(
-      { anthropic: signedOut, openai: availabilityOf("unauthorized") },
+      { anthropic: signedOut, openai: reportOf("unauthorized") },
       true,
       null,
     );
@@ -2251,8 +2251,8 @@ describe("Concierge chat", () => {
 
 describe("Concierge quota failover", () => {
   const state = () => ({
-    anthropic: availabilityOf("usage_limit_reached"),
-    openai: availabilityOf("available"),
+    anthropic: reportOf("usage_limit_reached"),
+    openai: reportOf("available"),
   });
   it("stores a selection, changes a live session, and persists a pushed notice excluded from history", async () => {
     const s = setup({ startEvents: false });
@@ -2260,7 +2260,7 @@ describe("Concierge quota failover", () => {
     await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "claude-sonnet");
     s.service.deps.webchatRepo = s.storedChats;
     const raw = state();
-    s.deps.availability = fakeAvailability(() => raw);
+    s.deps.accounts = fakeAccounts(() => raw);
     s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
     const selectModel = rs.fn();
     s.deps.agentSessionManager.peek = rs.fn(() => ({ selectModel }) as never);
@@ -2291,7 +2291,7 @@ describe("Concierge quota failover", () => {
     // Transcript order breaks same-second ties by turn id, so it must sort by time.
     expect(notice.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
     expect(await readWebchatMessages(s.storedChats, CONCIERGE_CHAT, new Date(0))).toEqual([]);
-    raw.anthropic = availabilityOf("available");
+    raw.anthropic = reportOf("available");
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
   });
   it.each([
@@ -2304,13 +2304,13 @@ describe("Concierge quota failover", () => {
   ])("leaves %s alone", async (reason) => {
     const s = setup({ startEvents: false });
     const raw = state();
-    s.deps.availability = fakeAvailability(() => raw);
-    if (reason === "both out") raw.openai = availabilityOf("usage_limit_reached");
-    if (reason === "not exhausted") raw.anthropic = availabilityOf("available");
-    if (reason === "credits") raw.openai = availabilityOf("unauthorized");
-    if (reason === "reauth") raw.openai = availabilityOf("expired");
+    s.deps.accounts = fakeAccounts(() => raw);
+    if (reason === "both out") raw.openai = reportOf("usage_limit_reached");
+    if (reason === "not exhausted") raw.anthropic = reportOf("available");
+    if (reason === "credits") raw.openai = reportOf("unauthorized");
+    if (reason === "reauth") raw.openai = reportOf("expired");
     if (reason === "api key")
-      raw.openai = availabilityOf("available", { accountType: "api_key", usageLimited: false });
+      raw.openai = reportOf("available", { accountType: "api_key", usageLimited: false });
     expect(
       await s.service.switchIfExhausted(reason === "other chat" ? "task-chat" : CONCIERGE_CHAT),
     ).toBeNull();
@@ -2319,7 +2319,7 @@ describe("Concierge quota failover", () => {
   });
   it("uses the runtime provider before the sole-exhausted fallback", async () => {
     const s = setup({ startEvents: false });
-    s.deps.availability = fakeAvailability(state);
+    s.deps.accounts = fakeAccounts(state);
     s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
     s.deps.sessionRepository.current = rs.fn(async () => null);
@@ -2331,10 +2331,10 @@ describe("Concierge quota failover", () => {
   it("runs one recovery and never recovers the recovery, even across a slow settings read", async () => {
     const s = setup({ settingsDelayMs: 10 });
     const raw = state();
-    s.deps.availability = fakeAvailability(() => raw);
+    s.deps.accounts = fakeAccounts(() => raw);
     s.onBackendTurn(() => {
-      raw.anthropic = availabilityOf("available");
-      raw.openai = availabilityOf("usage_limit_reached");
+      raw.anthropic = reportOf("available");
+      raw.openai = reportOf("usage_limit_reached");
       if (s.backendTurns.length < 3)
         void s.finish({
           turnId: "recovery",
@@ -2377,8 +2377,8 @@ describe("Concierge quota failover", () => {
 
 describe("Concierge provider recovery", () => {
   const healthy = () => ({
-    anthropic: availabilityOf("available"),
-    openai: availabilityOf("available"),
+    anthropic: reportOf("available"),
+    openai: reportOf("available"),
   });
   const failure = (message: string, provider = "anthropic"): AgentTurnFailure => ({
     message,
@@ -2396,7 +2396,7 @@ describe("Concierge provider recovery", () => {
   async function prepared(options: Parameters<typeof setup>[0] = {}) {
     const s = setup(options);
     const raw = healthy();
-    s.deps.availability = fakeAvailability(() => raw);
+    s.deps.accounts = fakeAccounts(() => raw);
     await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "claude-sonnet");
     return { s, raw };
   }
@@ -2421,7 +2421,7 @@ describe("Concierge provider recovery", () => {
   });
   it("falls back on the same provider only for ambiguous quota, without marking it", async () => {
     const { s, raw } = await prepared({ startEvents: false });
-    raw.openai = availabilityOf("unauthorized");
+    raw.openai = reportOf("unauthorized");
     expect(
       await s.service.switchForFailure(CONCIERGE_CHAT, failure("You've hit your limit"), "quota"),
     ).toMatchObject({ selectionId: "claude-opus-5-5" });
@@ -2435,14 +2435,14 @@ describe("Concierge provider recovery", () => {
   ])("refuses %s", async (kind) => {
     const { s, raw } = await prepared({ startEvents: false });
     if (kind === "api source")
-      raw.anthropic = availabilityOf("available", {
+      raw.anthropic = reportOf("available", {
         authMethod: "environment",
         usageLimited: false,
       });
-    if (kind === "credits target") raw.openai = availabilityOf("unauthorized");
+    if (kind === "credits target") raw.openai = reportOf("unauthorized");
     if (kind === "both out") {
-      raw.anthropic = availabilityOf("usage_limit_reached");
-      raw.openai = availabilityOf("usage_limit_reached");
+      raw.anthropic = reportOf("usage_limit_reached");
+      raw.openai = reportOf("usage_limit_reached");
     }
     expect(
       await s.service.switchForFailure(
@@ -2477,7 +2477,7 @@ describe("Concierge provider recovery", () => {
   });
   it.each(["loggedOut", "reauth"])("switches before a turn when %s", async (kind) => {
     const { s, raw } = await prepared({ startEvents: false });
-    raw.anthropic = availabilityOf(kind === "loggedOut" ? "unauthorized" : "expired");
+    raw.anthropic = reportOf(kind === "loggedOut" ? "unauthorized" : "expired");
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
       reason: "login",
       to: "openai",
@@ -2492,7 +2492,7 @@ describe("Concierge provider recovery", () => {
     s.service.deps.sessionRepository = {
       current: rs.fn(async () => ({ provider: null, model: null })),
     } as never;
-    s.service.deps.availability = fakeAvailability(bothAvailable());
+    s.service.deps.accounts = fakeAccounts(bothAvailable());
     expect(
       await s.service.switchForFailure(
         CONCIERGE_CHAT,
@@ -2506,13 +2506,13 @@ describe("Concierge provider recovery", () => {
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
     await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna");
     s.service.deps.webchatRepo = s.storedChats;
-    const raw: ModelAvailabilityState = {
-      anthropic: availabilityOf("available"),
-      openai: availabilityOf("unauthorized"),
+    const raw: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
     };
-    s.deps.availability = fakeAvailability(() => raw);
+    s.deps.accounts = fakeAccounts(() => raw);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-    raw.openai = availabilityOf("expired");
+    raw.openai = reportOf("expired");
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({ reason: "login" });
   });
   it("drops a pending retry when the failed subscription stops paying during the wait", async () => {
@@ -2524,11 +2524,11 @@ describe("Concierge provider recovery", () => {
         }),
     );
     const { s } = await prepared({ delay });
-    const raw: ModelAvailabilityState = bothAvailable();
-    s.deps.availability = fakeAvailability(() => raw);
+    const raw: ModelAccountReports = bothAvailable();
+    s.deps.accounts = fakeAccounts(() => raw);
     await finish(s, failure("Selected model is busy: API Error: 503", "openai"));
     expect(delay).toHaveBeenCalledTimes(1);
-    raw.openai = availabilityOf("unauthorized");
+    raw.openai = reportOf("unauthorized");
     release();
     await s.settle();
     expect(s.backendTurns).toHaveLength(0);
@@ -2682,7 +2682,7 @@ describe("Concierge provider recovery", () => {
   });
   it("uses the runtime model for a same-provider move without a stored selection", async () => {
     const s = setup({ startEvents: false });
-    s.deps.availability = fakeAvailability(healthy);
+    s.deps.accounts = fakeAccounts(healthy);
     s.deps.sessionRepository.current = rs.fn(
       async () => ({ provider: "anthropic", model: "claude-sonnet-5-5" }) as never,
     );
@@ -2692,7 +2692,7 @@ describe("Concierge provider recovery", () => {
   });
   it("does not return to a same-provider model within the cooldown", async () => {
     const { s, raw } = await prepared({ startEvents: false });
-    raw.openai = availabilityOf("unauthorized");
+    raw.openai = reportOf("unauthorized");
     expect(
       await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sonnet limit"), "model_limit"),
     ).not.toBeNull();
@@ -2832,9 +2832,9 @@ describe("Concierge chats", () => {
   it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
     const s = setup({ startEvents: false });
     s.deps.sessionRepository.current = (async () => null) as never;
-    s.deps.availability = fakeAvailability({
-      anthropic: availabilityOf("usage_limit_reached"),
-      openai: availabilityOf("available"),
+    s.deps.accounts = fakeAccounts({
+      anthropic: reportOf("usage_limit_reached"),
+      openai: reportOf("available"),
     });
     s.sessions.set(CONCIERGE_CHAT, {
       ...s.sessions.get(CONCIERGE_CHAT),
@@ -2889,9 +2889,9 @@ describe("Concierge chats", () => {
 
   it("switches a topic chat's provider when its quota runs out, as the main chat's", async () => {
     const s = setup({ startEvents: false });
-    s.deps.availability = fakeAvailability({
-      anthropic: availabilityOf("usage_limit_reached"),
-      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
+    s.deps.accounts = fakeAccounts({
+      anthropic: reportOf("usage_limit_reached"),
+      openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
     s.sessions.set(TOPIC_CHAT, {
       ...s.sessions.get(TOPIC_CHAT),

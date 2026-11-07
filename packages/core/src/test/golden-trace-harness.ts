@@ -11,7 +11,7 @@ import {
 import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createModelResolver } from "../core/model-resolver.js";
-import { bothAvailable, fakeAvailability } from "./kit/model-availability.js";
+import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillLoader } from "../agent/index.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
@@ -97,7 +97,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
 
   const modelResolver = createModelResolver({
     providers: [options.modelProvider],
-    availability: fakeAvailability(bothAvailable()),
+    accounts: fakeAccounts(bothAvailable()),
   });
   const manager = createAgentSessionManager({
     agentLoader,

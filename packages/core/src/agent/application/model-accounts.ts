@@ -1,4 +1,4 @@
-// Model availability: remembers, for each provider, what its account last
+// Model accounts: remembers, for each provider, what its account last
 // reported, so the resolver, the concierge and the dashboard can read it
 // without waiting on the provider's process. It reads the accounts at start,
 // hourly, when an account says it changed and when asked, and tells its
@@ -8,67 +8,65 @@
 import type { ModelAccount } from "../domain/model-account.js";
 import type { ProviderId } from "../domain/model-port.js";
 import {
-  currentAvailability,
-  type ModelAvailabilityState,
-  type ProviderAvailability,
+  currentReport,
+  type ModelAccountReports,
+  type ModelAccountReport,
   providerAuthorized,
-} from "../domain/provider-availability.js";
+} from "../domain/model-account-report.js";
 
 /**
  * "authorization" when a provider's authorized state changed, "refreshed"
  * when a read of it settled, whether or not the read succeeded.
  */
-export type ModelAvailabilityChange = "authorization" | "refreshed";
+export type ModelAccountChange = "authorization" | "refreshed";
 
-export interface ModelAvailability {
+export interface ModelAccounts {
   /** Pure. A usage limit whose end has passed reads as available. */
-  read(): ModelAvailabilityState;
+  read(): ModelAccountReports;
   /** Reads every account, or one. Resolves when the reads settle, failed or not. */
   refresh(provider?: ProviderId): Promise<void>;
-  onChanged(listener: (provider: ProviderId, change: ModelAvailabilityChange) => void): () => void;
+  onChanged(listener: (provider: ProviderId, change: ModelAccountChange) => void): () => void;
   close(): void;
 }
 
 /** What the application logs. The composition root passes Rome's logger. */
-export interface ModelAvailabilityLog {
+export interface AgentLog {
   info(message: string, data?: Record<string, unknown>): void;
   warn(message: string, data?: Record<string, unknown>): void;
 }
 
-export interface CreateModelAvailabilityOptions {
+export interface CreateModelAccountsOptions {
   accounts: Partial<Record<ProviderId, ModelAccount>>;
   /** Null disables the hourly refresh. */
   refreshIntervalMs?: number | null;
   /** Read every account at creation. Default true. */
   startRefresh?: boolean;
-  log?: ModelAvailabilityLog;
+  log?: AgentLog;
   now?: () => Date;
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
-export function createModelAvailability(
-  options: CreateModelAvailabilityOptions,
-): ModelAvailability {
+export function createModelAccounts(options: CreateModelAccountsOptions): ModelAccounts {
   const now = options.now ?? (() => new Date());
   const log = options.log;
   const accounts = Object.entries(options.accounts).filter(
     (entry): entry is [ProviderId, ModelAccount] => entry[1] !== undefined,
   );
-  const remembered: ModelAvailabilityState = {};
-  const listeners = new Set<(provider: ProviderId, change: ModelAvailabilityChange) => void>();
+  const remembered: ModelAccountReports = {};
+  const listeners = new Set<(provider: ProviderId, change: ModelAccountChange) => void>();
   // One read per provider at a time. A refresh asked during one joins it.
   const inFlight = new Map<ProviderId, Promise<void>>();
   // Providers whose account changed during a read: read again when it settles.
   const rereadAfter = new Set<ProviderId>();
   let closed = false;
 
-  const emit = (provider: ProviderId, change: ModelAvailabilityChange): void => {
+  const emit = (provider: ProviderId, change: ModelAccountChange): void => {
     for (const listener of listeners) {
       try {
         listener(provider, change);
       } catch (err) {
-        log?.warn("model availability listener failed", {
+        log?.warn("model accounts listener failed", {
           provider,
           change,
           error: err instanceof Error ? err.message : String(err),
@@ -77,7 +75,7 @@ export function createModelAvailability(
     }
   };
 
-  const remember = (provider: ProviderId, next: ProviderAvailability): void => {
+  const remember = (provider: ProviderId, next: ModelAccountReport): void => {
     const previous = remembered[provider];
     remembered[provider] = next;
     if (previous?.state !== next.state) {
@@ -93,7 +91,7 @@ export function createModelAvailability(
 
   const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
     try {
-      const next = await account.availability();
+      const next = await account.report();
       if (!closed) remember(provider, next);
     } catch (err) {
       log?.warn("model account read failed", {
@@ -147,11 +145,11 @@ export function createModelAvailability(
   return {
     read() {
       const at = now();
-      const state: ModelAvailabilityState = {};
-      for (const [provider, availability] of Object.entries(remembered) as Array<
-        [ProviderId, ProviderAvailability]
+      const state: ModelAccountReports = {};
+      for (const [provider, report] of Object.entries(remembered) as Array<
+        [ProviderId, ModelAccountReport]
       >) {
-        state[provider] = currentAvailability(availability, at);
+        state[provider] = currentReport(report, at);
       }
       return state;
     },

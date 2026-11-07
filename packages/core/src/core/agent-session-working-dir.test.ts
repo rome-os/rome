@@ -18,7 +18,7 @@ import { SkillLoader } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 const AGENT = "worker";
 
@@ -64,8 +64,8 @@ describe("AgentSessionManager working dirs", () => {
         ),
     };
     const state = {
-      openai: availabilityOf("unauthorized"),
-      anthropic: availabilityOf("available"),
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
@@ -80,7 +80,7 @@ describe("AgentSessionManager working dirs", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          availability: fakeAvailability(() => state),
+          accounts: fakeAccounts(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),

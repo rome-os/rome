@@ -23,7 +23,7 @@ import { AgentLoader } from "../core/agent-loader.js";
 import { SkillLoader } from "../agent/index.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import {
-  createModelAvailability,
+  createModelAccounts,
   ClaudeAccount,
   type ModelAccount,
   type ModelAccountAuthorization,
@@ -693,7 +693,7 @@ export async function buildTestDeps(
   const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: ModelAccount & ModelAccountAuthorization = {
-    async availability() {
+    async report() {
       return {
         state: "available" as const,
         account: {
@@ -736,14 +736,14 @@ export async function buildTestDeps(
   // The real adapter: the dashboard route tests put a fake `claude` binary on
   // PATH and mock the revoked marker, and read status through it.
   const claudeAccount = new ClaudeAccount({ settingsRepo });
-  const modelAvailability = createModelAvailability({
+  const modelAccounts = createModelAccounts({
     accounts: { openai: codexAccountService, anthropic: claudeAccount },
     startRefresh: false,
     refreshIntervalMs: null,
   });
   const modelResolver = createModelResolver({
     providers: [new MockModelProvider()],
-    availability: modelAvailability,
+    accounts: modelAccounts,
   });
   const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
@@ -895,7 +895,7 @@ export async function buildTestDeps(
     agentRunner,
     activeSubagentRegistry,
     agentTurnStreamRegistry,
-    modelAvailability,
+    modelAccounts,
     codexAccountService,
     claudeAccount,
     romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),

@@ -142,12 +142,12 @@ describe("SharedCodexAccountService", () => {
     expect(changed).toHaveBeenCalledTimes(1);
     // The usage read in the hold shows capacity but describes the account
     // before the refused turn.
-    await expect(service.availability()).resolves.toMatchObject({
+    await expect(service.report()).resolves.toMatchObject({
       state: "usage_limit_reached",
       usageLimitUntil: "2026-11-07T03:00:00.000Z",
     });
     now += USAGE_REFUSAL_HOLD_MS;
-    await expect(service.availability()).resolves.toMatchObject({ state: "available" });
+    await expect(service.report()).resolves.toMatchObject({ state: "available" });
   });
 
   it("drops a refusal when an authorization completes, since it may name another account", async () => {
@@ -172,12 +172,12 @@ describe("SharedCodexAccountService", () => {
     );
     const service = createService(rpc);
     service.refusedTurn({ kind: "usage" });
-    await expect(service.availability()).resolves.toMatchObject({ state: "usage_limit_reached" });
+    await expect(service.report()).resolves.toMatchObject({ state: "usage_limit_reached" });
     await service.startDeviceAuthorization();
     rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
     // The first read of the new account fails its usage read; the old
     // account's limit does not carry over to it.
-    await expect(service.availability()).resolves.toMatchObject({
+    await expect(service.report()).resolves.toMatchObject({
       state: "available",
       usage: { error: "app-server restarting" },
     });
@@ -192,7 +192,7 @@ describe("SharedCodexAccountService", () => {
     rpc.request = ((method: string, params?: unknown) =>
       method === "account/rateLimits/read" ? never : request(method, params)) as typeof rpc.request;
     const service = createService(rpc, { usageTimeoutMs: 5 });
-    await expect(service.availability()).resolves.toMatchObject({
+    await expect(service.report()).resolves.toMatchObject({
       state: "available",
       usage: { error: "Codex rate limit read timed out after 5ms" },
     });

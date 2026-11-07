@@ -38,7 +38,7 @@ import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
-import { availabilityOf } from "../../test/kit/model-availability.js";
+import { reportOf } from "../../test/kit/model-accounts.js";
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -4347,13 +4347,13 @@ describe("Webchat API", () => {
     it("fails over only the Concierge pre-turn and leaves an ordinary quota failure unchanged", async () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      rs.spyOn(deps.modelAvailability, "read").mockReturnValue({
-        anthropic: availabilityOf("usage_limit_reached"),
-        openai: availabilityOf("available"),
+      rs.spyOn(deps.modelAccounts, "read").mockReturnValue({
+        anthropic: reportOf("usage_limit_reached"),
+        openai: reportOf("available"),
       });
       deps.concierge = new ConciergeService({
         ...deps,
-        availability: deps.modelAvailability,
+        accounts: deps.modelAccounts,
       } as unknown as ConciergeDeps);
       const acquire = deps.agentSessionManager.acquire;
       deps.agentSessionManager.acquire = rs.fn(
