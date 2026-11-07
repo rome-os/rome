@@ -56,6 +56,8 @@ final class TasksStore {
     private(set) var loaded = false
     private var tokens: [UUID] = []
     private var refreshingChats = false
+    private var resyncWork: Task<Void, Never>?
+    private var resyncAgain = false
 
     init(backend: RomeBackend) {
         self.backend = backend
@@ -91,6 +93,24 @@ final class TasksStore {
         loaded = true
     }
 
+    /// Refreshes after events may have been missed. A burst of requests (one
+    /// per topic and a resume) shares one refresh, plus one more for requests
+    /// that came while it ran.
+    func resync() {
+        guard resyncWork == nil else {
+            resyncAgain = true
+            return
+        }
+        resyncWork = Task {
+            await Task.yield()
+            repeat {
+                resyncAgain = false
+                await refresh()
+            } while resyncAgain
+            resyncWork = nil
+        }
+    }
+
     private func refreshChats() async {
         guard !refreshingChats else { return }
         refreshingChats = true
@@ -112,7 +132,7 @@ final class TasksStore {
             // Stopping changes whether the chat waits on the guardian or failed.
             if !running || chats[id] == nil { Task { await refreshChats() } }
         case .reconnected:
-            Task { await refresh() }
+            resync()
         default:
             break
         }

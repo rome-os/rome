@@ -363,6 +363,9 @@ final class AppModel {
             await switchInstance(to: instance)
         case .openConcierge:
             conciergeRequest += 1
+            // The push is news the chat may not hold yet: the socket can still
+            // be reconnecting, or never paused if the tap came over the open app.
+            workspace?.concierge.resync()
         }
     }
 

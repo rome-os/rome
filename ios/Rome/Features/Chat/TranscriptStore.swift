@@ -49,6 +49,8 @@ final class TranscriptStore {
     private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
+    private var resyncWork: Task<Void, Never>?
+    private var resyncAgain = false
 
     init(sessionId: String, kind: Kind, backend: RomeBackend) {
         self.sessionId = sessionId
@@ -211,9 +213,27 @@ final class TranscriptStore {
                 Task { await reload() }
             }
         case .reconnected:
-            Task { await reload() }
+            resync()
         default:
             break
+        }
+    }
+
+    /// Reloads after events may have been missed. A burst of requests (one per
+    /// topic, a resume and a push tap) shares one reload, plus one more for
+    /// requests that came while it ran.
+    func resync() {
+        guard resyncWork == nil else {
+            resyncAgain = true
+            return
+        }
+        resyncWork = Task {
+            await Task.yield()
+            repeat {
+                resyncAgain = false
+                await reload()
+            } while resyncAgain
+            resyncWork = nil
         }
     }
 
