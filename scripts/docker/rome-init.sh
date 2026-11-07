@@ -55,9 +55,6 @@ chmod 775 /home/user/projects /home/user/projects/default /home/user/mounts /hom
 # Shared runtime directory for shell integrations that need to be visible to
 # both the rome service user and the interactive shell user.
 mkdir -p /run/rome
-# rome-wait-for-rome marks Rome's first healthy answer here. /run can outlive a
-# container restart, so each boot clears it.
-rm -f /run/rome-boot-healthy
 safe_chown rome:user /run/rome
 chmod 2770 /run/rome
 

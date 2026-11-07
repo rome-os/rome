@@ -3,14 +3,12 @@
 
 # =============================================================================
 # Rome — container setup that Rome's boot does not need, run as root by the s6
-# oneshot "init-tools". It waits for Rome to answer healthy first, so on a small
-# VM it does not compete with Rome's boot for CPU. Every step is best effort: a
+# oneshot "init-tools". It runs after the wait-for-rome oneshot, so on a small VM
+# it does not compete with Rome's boot for CPU. Every step is best effort: a
 # failure warns and continues, because a failed oneshot would stop the container.
 # =============================================================================
 
 . /etc/s6-overlay/scripts/rome-init-lib
-
-/etc/s6-overlay/scripts/rome-wait-for-rome
 
 # ─── Start OpenCLI, the browser bridge ─────────────────────────────────────
 if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then

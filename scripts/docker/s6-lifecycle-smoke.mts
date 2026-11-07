@@ -153,6 +153,28 @@ for pair in chrome:chrome-cdp openbox:openbox novnc:novnc xtigervnc:xtigervnc; d
   grep -q service-output "$log"
 done
 echo 'PASS: service logs open as rome and cannot append through symlinks to root-owned files'
+
+# The wait-for-rome oneshot gates the desktop on Rome's health and never fails.
+cp /repo/rome-wait-for-rome.sh /etc/s6-overlay/scripts/rome-wait-for-rome
+chmod +x /etc/s6-overlay/scripts/rome-wait-for-rome
+wait_up="$(cat /repo/s6-rc.d/wait-for-rome/up)"
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 2
+mkdir -p /tmp/unready-bin
+printf '#!/bin/sh\nexit 7\n' > /tmp/unready-bin/curl
+chmod +x /tmp/unready-bin/curl
+printf '%s' "/tmp/unready-bin:$PATH" > /run/s6/container_environment/PATH
+printf 1 > /run/s6/container_environment/ROME_DEFER_UNTIL_HEALTHY_SECONDS
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 5
+printf true > /run/s6/container_environment/ROME_ENABLE_CDP_AUTOMATION
+printf 120 > /run/s6/container_environment/ROME_DEFER_UNTIL_HEALTHY_SECONDS
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 1
+echo 'PASS: wait-for-rome returns on health, at its cap, and at once for CDP discovery'
 `,
   },
 );

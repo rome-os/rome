@@ -184,6 +184,8 @@ async function checkBootStopRestart(name: string): Promise<void> {
 async function checkKilledServicesRestart(name: string): Promise<void> {
   startContainer(name);
   await waitForStarted(name, 1);
+  // The desktop starts after Rome is healthy, so it may not run yet.
+  await assertServicesListening(name);
   // Killing the X server also takes down openbox and Chrome, which need it.
   const processNames = ["sshd", "websockify", "caddy", "Xtigervnc"];
   docker(["exec", name, "pkill", "-KILL", "-f", "^bash .*/rome-start-chrome-cdp\\.sh"]);

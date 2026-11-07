@@ -11,10 +11,8 @@ fi
 geometry="${BASH_REMATCH[1]}"
 depth="${BASH_REMATCH[3]:-24}"
 
-# The desktop (this X server, then openbox, noVNC and Chrome, which depend on it)
-# starts after Rome is healthy, so it does not slow Rome's boot on a small VM.
-# timeout-up covers this wait plus the X server's own start.
-/etc/s6-overlay/scripts/rome-wait-for-rome
+# This X server, and openbox, noVNC and Chrome after it, start after the
+# wait-for-rome oneshot, so they do not slow Rome's boot on a small VM.
 
 # s6 starts this service only after the previous X server has exited, so a lock
 # or socket left on disk is stale.
