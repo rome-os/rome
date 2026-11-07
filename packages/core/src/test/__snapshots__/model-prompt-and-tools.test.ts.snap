@@ -1,0 +1,1619 @@
+// Rstest Snapshot v1
+
+exports[`what the model reads when a session opens > a core agent in a chat that draws cards, with a context suffix 1`] = `
+{
+  "systemPrompt": "You are the main agent.
+
+# Asking The Guardian For Input
+
+Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.
+
+Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.
+
+When you do need to ask, use the \`ask_question\` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.
+
+---
+
+# Charter
+
+Charter text.
+
+---
+
+# Identity
+
+Identity text.
+
+---
+
+# Runtime Context
+
+- Active profile directory: \`<profile>\`
+- Profile memory directory: \`<profile>/memory\`
+- Custom app authoring directory: \`<profile>/projects/apps\`
+- Installed apps directory: \`<profile>/apps/installed\`
+- Repo seed apps directory: \`<root>/rome_apps\`
+
+Installable app model:
+- Load runtime apps from the active profile's installed apps directory or custom app authoring directory.
+- Use the active custom app authoring directory for custom app source, builds, tests, and DB work during local development.
+- Custom apps use \`~/.rome/<profile>/projects/apps/<appId>/\` as both the local authoring root and the runtime source of truth by default.
+- Repo-local \`rome_apps/\` remains the seed source for platform-shipped apps, including bootstrap and repair flows for \`system\`.
+- Do not treat repo-local \`rome_apps/\` as the live runtime root for custom apps.
+- Installable apps can contribute agents, actions, skills, hooks, web bundles, API entrypoints, and DB migrations.
+- In Rome product context, 'store', 'app store', or 'marketplace' usually means the Rome App Store unless the guardian clearly means an external store like Apple App Store or Google Play.
+
+Agent browser:
+- The platform runs a persistent browser that you operate to do work on the web — researching, filling forms, placing orders, and reading or acting inside the guardian's own accounts on other services (e.g. UberEats, DoorDash, Amazon, banking). The guardian can watch what you do in real time on the [Browser](/desktop) page.
+- The browser profile is persistent: a site the guardian signs into once stays logged in for later turns, so you can reuse an authenticated session without signing in again. If the guardian asks you to perform a task behind an auth wall while the account is not logged in, ask the guardian if they would like to log in using the browser.
+- In the agent browser, visit \`http://127.0.0.1:4141\` to open the Rome dashboard, or \`http://127.0.0.1:4141/apps/<appId>\` to use a specific app.
+
+---
+
+# Command Line Tools
+
+- A global \`discord\` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer \`discord api\` over memory because it is live and authoritative. Run \`discord api --help\` when needed.
+- Run \`rome-node help\` to learn the remote computer CLI and \`rome-node help device run\` for action arguments and result handling. Use \`rome-node device\` to list authorized remote computers. Authorization does not mean online. Use \`rome-node device describe <id>\` to query its platform and supported actions. Execute a program with \`rome-node device run <id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'\`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.
+
+# Memory
+
+Memory index.
+
+# Projects
+
+- \`garden\`: First paragraph of the garden.
+
+Context suffix.
+
+---
+
+# Diagrams
+
+This chat surface renders Mermaid fenced code blocks (\`\`\`mermaid) as interactive SVG diagrams. Use them to visualize architecture, workflows, state machines, and data flows when a diagram would be clearer than prose. Supported types: flowchart (graph TD/LR), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, xychart-beta. Focus on structure (the right diagram type and clear labels) and leave styling to the host: the UI themes diagrams with Rome's own fonts and colors, so do NOT add color/font styling — no \`%%{init}%%\` directives, \`style\`/\`classDef\` color rules, or hard-coded fills.",
+  "tools": {
+    "actions": [
+      {
+        "description": "List the actions available to this agent.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_actions",
+      },
+      {
+        "description": "Read one available action and its arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to inspect.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "action_name",
+          ],
+          "type": "object",
+        },
+        "name": "read_action",
+      },
+      {
+        "description": "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_actions",
+      },
+      {
+        "description": "Execute one available action with object arguments in json_args.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to execute.",
+              "type": "string",
+            },
+            "json_args": {
+              "additionalProperties": true,
+              "description": "Object arguments to pass to the action.",
+              "type": "object",
+            },
+          },
+          "required": [
+            "action_name",
+            "json_args",
+          ],
+          "type": "object",
+        },
+        "name": "execute_action",
+      },
+    ],
+    "ask_user": [
+      {
+        "description": "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
+        "endsTurn": true,
+        "inputSchema": {
+          "properties": {
+            "questions": {
+              "description": "Questions rendered together as one card.",
+              "items": {
+                "properties": {
+                  "freeText": {
+                    "description": "single/multi only: also show a free-text box beneath the options, so the guardian can tap option(s) OR type their own answer. Use this for most choice questions — it keeps input cheap (a tap) without trapping them in your option set. Ignored for text.",
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "description": "Stable id; the answer references it.",
+                    "type": "string",
+                  },
+                  "optional": {
+                    "description": "If true, the guardian may leave this question blank without blocking submit (a blank answer is simply omitted from the results). Defaults to false — questions are required.",
+                    "type": "boolean",
+                  },
+                  "options": {
+                    "description": "Required for single and multi; the choices. Ignored for text.",
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "question": {
+                    "description": "The prompt shown to the guardian.",
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "single: pick exactly one option; multi: pick any number of options; text: free-form.",
+                    "enum": [
+                      "single",
+                      "multi",
+                      "text",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "question",
+                  "type",
+                ],
+                "type": "object",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "required": [
+            "questions",
+          ],
+          "type": "object",
+        },
+        "name": "ask_question",
+      },
+      {
+        "description": "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. Give a short \`name\` for what you're watching (it becomes the routine's name) and exactly one of \`afterMinutes\`, \`at\`, or \`event\`. Prefer \`event\` when something announces completion (CI finished, a PR merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, with no timeout. Look up the event name and payload fields with the search_event_catalog action first. For a \`subscribable\` type, filter on one of its \`keys\` (e.g. repository.full_name); defer then subscribes at the provider and fails with the reason if it can't. Events are not replayed and a new subscription only sees future events: after an event defer, check the current state once more, and if what you're waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so just re-evaluate and either finish or \`defer\` again (minimum one minute, no limit on re-defers). After calling defer, write one short line confirming you'll keep watch, then end your turn.",
+        "inputSchema": {
+          "properties": {
+            "afterMinutes": {
+              "description": "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes, at, or event.",
+              "minimum": 1,
+              "type": "integer",
+            },
+            "at": {
+              "description": "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
+              "type": "string",
+            },
+            "event": {
+              "description": "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+              "properties": {
+                "eventName": {
+                  "description": "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+                  "type": "string",
+                },
+                "filter": {
+                  "description": "Optional payload conditions, AND-ed together. Each compares the payload value at a dot-path, as a string, for equality.",
+                  "items": {
+                    "properties": {
+                      "equals": {
+                        "description": "Value the field must equal",
+                        "type": "string",
+                      },
+                      "field": {
+                        "description": "Dot-path into the payload, e.g. pull_request.number",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "field",
+                      "equals",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "sourcePattern": {
+                  "description": "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "eventName",
+              ],
+              "type": "object",
+            },
+            "name": {
+              "description": "A short name for what you're watching, e.g. "GitHub CI run" or "Dana's reply". Stored as the routine's name and shown on the Routines page; you'll be pinged back in this same conversation when the time is up.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "name",
+          ],
+          "type": "object",
+        },
+        "name": "defer",
+      },
+      {
+        "description": "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+        "inputSchema": {
+          "properties": {
+            "actionName": {
+              "description": "The action the routine fires when it triggers, e.g. send_message.",
+              "type": "string",
+            },
+            "activate": {
+              "description": "Create the routine enabled right away instead of waiting for the guardian's click. Use only when the guardian explicitly stated the trigger or cadence, what to run and its arguments — nothing you inferred — and it acts on their behalf (sending, posting, spending) only as they asked. Otherwise omit it. Falls back to a draft card if you may not call the action yourself.",
+              "type": "boolean",
+            },
+            "args": {
+              "additionalProperties": true,
+              "description": "A single argument object for the action. Not an array.",
+              "type": "object",
+            },
+            "date": {
+              "description": "Schedule routines only: calendar date "YYYY-MM-DD" for a true one-off. Omit for recurring or for "next time it is localTime". Mutually exclusive with rrule.",
+              "type": "string",
+            },
+            "eventName": {
+              "description": "Event routines (kind: event) only — required there. The exact bus event type to watch, from search_event_catalog, e.g. "provider:event:gmail.gmail_new_gmail_message".",
+              "type": "string",
+            },
+            "filter": {
+              "description": "Event routines only: optional payload conditions, AND-ed together. Omit to fire on every event of this type.",
+              "items": {
+                "properties": {
+                  "equals": {
+                    "description": "Value the payload at \`field\` must equal",
+                    "type": "string",
+                  },
+                  "field": {
+                    "description": "Dot-path into the event payload, e.g. from.email",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "field",
+                  "equals",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "filterSummary": {
+              "description": "Event routines only: optional plain-language narrowing, e.g. "sender is dana@example.com". Omit when the routine watches every event of this type, or for schedule routines.",
+              "type": "string",
+            },
+            "kind": {
+              "description": ""event" when the routine should fire on something happening (an email arrives, a payment lands); "schedule" when it should fire at a time or on a recurring cadence ("every Friday at 9am", "tomorrow at noon"); "manual" when it should never fire on its own — a saved playbook the guardian keeps and runs by hand from the Routines page ("save this as something I can run whenever I want"). Manual routines need no eventName/tzid/schedule fields.",
+              "enum": [
+                "event",
+                "schedule",
+                "manual",
+              ],
+              "type": "string",
+            },
+            "localTime": {
+              "description": "Schedule routines only — required there. Time of day in 24-hour HH:mm, e.g. "09:00" or "17:30".",
+              "type": "string",
+            },
+            "name": {
+              "description": "Short stored routine name, e.g. "Landlord emails".",
+              "type": "string",
+            },
+            "rrule": {
+              "description": "Schedule routines only: iCal RRULE for a recurring schedule, e.g. "FREQ=WEEKLY;BYDAY=FR" or "FREQ=DAILY". Omit for a one-off. Mutually exclusive with date.",
+              "type": "string",
+            },
+            "sentence": {
+              "description": "One-line headline in plain language, e.g. "When you get an email from Dana, Rome will summarize it and text you." or "Every Friday at 9am, Rome will send you a week-ahead summary."",
+              "type": "string",
+            },
+            "thenSummary": {
+              "description": "What Rome does when it fires, e.g. "summarize it and text you on Telegram".",
+              "type": "string",
+            },
+            "tzMode": {
+              "description": "Schedule routines only. How the timezone is bound. Omit (defaults to 'floating') for an ordinary reminder — it follows the guardian and fires at localTime wherever they are. Use 'fixed' only for a zone-anchored recurring routine that must stay pinned to tzid no matter where the guardian goes (e.g. a market open at 09:30 Asia/Tokyo). One-offs are always pinned regardless.",
+              "enum": [
+                "fixed",
+                "floating",
+              ],
+              "type": "string",
+            },
+            "tzid": {
+              "description": "Schedule routines (kind: schedule) only — required there. IANA timezone for the time, e.g. "America/Los_Angeles". Infer from what the guardian tells you; do not make them type an IANA name.",
+              "type": "string",
+            },
+            "watchLabel": {
+              "description": "What triggers it, in human terms: "Gmail · new email" (event), "Every Friday at 9:00 AM" (schedule), or "Run on demand" (manual).",
+              "type": "string",
+            },
+          },
+          "required": [
+            "sentence",
+            "name",
+            "watchLabel",
+            "thenSummary",
+            "kind",
+            "actionName",
+            "args",
+          ],
+          "type": "object",
+        },
+        "name": "propose_routine",
+      },
+    ],
+    "skills": [
+      {
+        "description": "List the skills available in this workspace.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_skills",
+      },
+      {
+        "description": "Search available skills by regex against name, description, or declared tools. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match skills, for example browser|calendar, or /web(fetch|search)/i for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_skills",
+      },
+      {
+        "description": "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its \`directory\` and \`files\`; open one with your file tools only when the skill body points you to it.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Alias for skill_name. Use the exact skill name.",
+              "type": "string",
+            },
+            "skill_name": {
+              "description": "The skill name to read.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "name": "read_skill",
+      },
+    ],
+    "subagents": [],
+  },
+}
+`;
+
+exports[`what the model reads when a session opens > a core agent in a chat that draws plain text 1`] = `
+{
+  "systemPrompt": "You are the main agent.
+
+# Asking The Guardian For Input
+
+Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.
+
+Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.
+
+When you do need to ask, use the \`ask_question\` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.
+
+---
+
+# Charter
+
+Charter text.
+
+---
+
+# Identity
+
+Identity text.
+
+---
+
+# Runtime Context
+
+- Active profile directory: \`<profile>\`
+- Profile memory directory: \`<profile>/memory\`
+- Custom app authoring directory: \`<profile>/projects/apps\`
+- Installed apps directory: \`<profile>/apps/installed\`
+- Repo seed apps directory: \`<root>/rome_apps\`
+
+Installable app model:
+- Load runtime apps from the active profile's installed apps directory or custom app authoring directory.
+- Use the active custom app authoring directory for custom app source, builds, tests, and DB work during local development.
+- Custom apps use \`~/.rome/<profile>/projects/apps/<appId>/\` as both the local authoring root and the runtime source of truth by default.
+- Repo-local \`rome_apps/\` remains the seed source for platform-shipped apps, including bootstrap and repair flows for \`system\`.
+- Do not treat repo-local \`rome_apps/\` as the live runtime root for custom apps.
+- Installable apps can contribute agents, actions, skills, hooks, web bundles, API entrypoints, and DB migrations.
+- In Rome product context, 'store', 'app store', or 'marketplace' usually means the Rome App Store unless the guardian clearly means an external store like Apple App Store or Google Play.
+
+Agent browser:
+- The platform runs a persistent browser that you operate to do work on the web — researching, filling forms, placing orders, and reading or acting inside the guardian's own accounts on other services (e.g. UberEats, DoorDash, Amazon, banking). The guardian can watch what you do in real time on the [Browser](/desktop) page.
+- The browser profile is persistent: a site the guardian signs into once stays logged in for later turns, so you can reuse an authenticated session without signing in again. If the guardian asks you to perform a task behind an auth wall while the account is not logged in, ask the guardian if they would like to log in using the browser.
+- In the agent browser, visit \`http://127.0.0.1:4141\` to open the Rome dashboard, or \`http://127.0.0.1:4141/apps/<appId>\` to use a specific app.
+
+---
+
+# Command Line Tools
+
+- A global \`discord\` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer \`discord api\` over memory because it is live and authoritative. Run \`discord api --help\` when needed.
+- Run \`rome-node help\` to learn the remote computer CLI and \`rome-node help device run\` for action arguments and result handling. Use \`rome-node device\` to list authorized remote computers. Authorization does not mean online. Use \`rome-node device describe <id>\` to query its platform and supported actions. Execute a program with \`rome-node device run <id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'\`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.
+
+# Memory
+
+Memory index.
+
+# Projects
+
+- \`garden\`: First paragraph of the garden.",
+  "tools": {
+    "actions": [
+      {
+        "description": "List the actions available to this agent.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_actions",
+      },
+      {
+        "description": "Read one available action and its arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to inspect.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "action_name",
+          ],
+          "type": "object",
+        },
+        "name": "read_action",
+      },
+      {
+        "description": "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_actions",
+      },
+      {
+        "description": "Execute one available action with object arguments in json_args.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to execute.",
+              "type": "string",
+            },
+            "json_args": {
+              "additionalProperties": true,
+              "description": "Object arguments to pass to the action.",
+              "type": "object",
+            },
+          },
+          "required": [
+            "action_name",
+            "json_args",
+          ],
+          "type": "object",
+        },
+        "name": "execute_action",
+      },
+    ],
+    "ask_user": [
+      {
+        "description": "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
+        "endsTurn": false,
+        "inputSchema": {
+          "properties": {
+            "questions": {
+              "description": "Questions rendered together as one card.",
+              "items": {
+                "properties": {
+                  "freeText": {
+                    "description": "single/multi only: also show a free-text box beneath the options, so the guardian can tap option(s) OR type their own answer. Use this for most choice questions — it keeps input cheap (a tap) without trapping them in your option set. Ignored for text.",
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "description": "Stable id; the answer references it.",
+                    "type": "string",
+                  },
+                  "optional": {
+                    "description": "If true, the guardian may leave this question blank without blocking submit (a blank answer is simply omitted from the results). Defaults to false — questions are required.",
+                    "type": "boolean",
+                  },
+                  "options": {
+                    "description": "Required for single and multi; the choices. Ignored for text.",
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "question": {
+                    "description": "The prompt shown to the guardian.",
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "single: pick exactly one option; multi: pick any number of options; text: free-form.",
+                    "enum": [
+                      "single",
+                      "multi",
+                      "text",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "question",
+                  "type",
+                ],
+                "type": "object",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "required": [
+            "questions",
+          ],
+          "type": "object",
+        },
+        "name": "ask_question",
+      },
+      {
+        "description": "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. Give a short \`name\` for what you're watching (it becomes the routine's name) and exactly one of \`afterMinutes\`, \`at\`, or \`event\`. Prefer \`event\` when something announces completion (CI finished, a PR merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, with no timeout. Look up the event name and payload fields with the search_event_catalog action first. For a \`subscribable\` type, filter on one of its \`keys\` (e.g. repository.full_name); defer then subscribes at the provider and fails with the reason if it can't. Events are not replayed and a new subscription only sees future events: after an event defer, check the current state once more, and if what you're waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so just re-evaluate and either finish or \`defer\` again (minimum one minute, no limit on re-defers). After calling defer, write one short line confirming you'll keep watch, then end your turn.",
+        "inputSchema": {
+          "properties": {
+            "afterMinutes": {
+              "description": "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes, at, or event.",
+              "minimum": 1,
+              "type": "integer",
+            },
+            "at": {
+              "description": "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
+              "type": "string",
+            },
+            "event": {
+              "description": "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+              "properties": {
+                "eventName": {
+                  "description": "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+                  "type": "string",
+                },
+                "filter": {
+                  "description": "Optional payload conditions, AND-ed together. Each compares the payload value at a dot-path, as a string, for equality.",
+                  "items": {
+                    "properties": {
+                      "equals": {
+                        "description": "Value the field must equal",
+                        "type": "string",
+                      },
+                      "field": {
+                        "description": "Dot-path into the payload, e.g. pull_request.number",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "field",
+                      "equals",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "sourcePattern": {
+                  "description": "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "eventName",
+              ],
+              "type": "object",
+            },
+            "name": {
+              "description": "A short name for what you're watching, e.g. "GitHub CI run" or "Dana's reply". Stored as the routine's name and shown on the Routines page; you'll be pinged back in this same conversation when the time is up.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "name",
+          ],
+          "type": "object",
+        },
+        "name": "defer",
+      },
+    ],
+    "skills": [
+      {
+        "description": "List the skills available in this workspace.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_skills",
+      },
+      {
+        "description": "Search available skills by regex against name, description, or declared tools. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match skills, for example browser|calendar, or /web(fetch|search)/i for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_skills",
+      },
+      {
+        "description": "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its \`directory\` and \`files\`; open one with your file tools only when the skill body points you to it.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Alias for skill_name. Use the exact skill name.",
+              "type": "string",
+            },
+            "skill_name": {
+              "description": "The skill name to read.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "name": "read_skill",
+      },
+    ],
+    "subagents": [],
+  },
+}
+`;
+
+exports[`what the model reads when a session opens > a core agent that loads no memory 1`] = `
+{
+  "systemPrompt": "You are a helper.
+
+---
+
+# Charter
+
+Charter text.
+
+---
+
+# Identity
+
+Identity text.
+
+---
+
+# Command Line Tools
+
+- A global \`discord\` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer \`discord api\` over memory because it is live and authoritative. Run \`discord api --help\` when needed.
+- Run \`rome-node help\` to learn the remote computer CLI and \`rome-node help device run\` for action arguments and result handling. Use \`rome-node device\` to list authorized remote computers. Authorization does not mean online. Use \`rome-node device describe <id>\` to query its platform and supported actions. Execute a program with \`rome-node device run <id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'\`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.",
+  "tools": {
+    "actions": [
+      {
+        "description": "List the actions available to this agent.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_actions",
+      },
+      {
+        "description": "Read one available action and its arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to inspect.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "action_name",
+          ],
+          "type": "object",
+        },
+        "name": "read_action",
+      },
+      {
+        "description": "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_actions",
+      },
+      {
+        "description": "Execute one available action with object arguments in json_args.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to execute.",
+              "type": "string",
+            },
+            "json_args": {
+              "additionalProperties": true,
+              "description": "Object arguments to pass to the action.",
+              "type": "object",
+            },
+          },
+          "required": [
+            "action_name",
+            "json_args",
+          ],
+          "type": "object",
+        },
+        "name": "execute_action",
+      },
+    ],
+    "ask_user": [
+      {
+        "description": "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
+        "endsTurn": false,
+        "inputSchema": {
+          "properties": {
+            "questions": {
+              "description": "Questions rendered together as one card.",
+              "items": {
+                "properties": {
+                  "freeText": {
+                    "description": "single/multi only: also show a free-text box beneath the options, so the guardian can tap option(s) OR type their own answer. Use this for most choice questions — it keeps input cheap (a tap) without trapping them in your option set. Ignored for text.",
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "description": "Stable id; the answer references it.",
+                    "type": "string",
+                  },
+                  "optional": {
+                    "description": "If true, the guardian may leave this question blank without blocking submit (a blank answer is simply omitted from the results). Defaults to false — questions are required.",
+                    "type": "boolean",
+                  },
+                  "options": {
+                    "description": "Required for single and multi; the choices. Ignored for text.",
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "question": {
+                    "description": "The prompt shown to the guardian.",
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "single: pick exactly one option; multi: pick any number of options; text: free-form.",
+                    "enum": [
+                      "single",
+                      "multi",
+                      "text",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "question",
+                  "type",
+                ],
+                "type": "object",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "required": [
+            "questions",
+          ],
+          "type": "object",
+        },
+        "name": "ask_question",
+      },
+    ],
+    "skills": [
+      {
+        "description": "List the skills available in this workspace.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_skills",
+      },
+      {
+        "description": "Search available skills by regex against name, description, or declared tools. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match skills, for example browser|calendar, or /web(fetch|search)/i for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_skills",
+      },
+      {
+        "description": "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its \`directory\` and \`files\`; open one with your file tools only when the skill body points you to it.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Alias for skill_name. Use the exact skill name.",
+              "type": "string",
+            },
+            "skill_name": {
+              "description": "The skill name to read.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "name": "read_skill",
+      },
+    ],
+    "subagents": [],
+  },
+}
+`;
+
+exports[`what the model reads when a session opens > a core agent that may delegate to a subagent 1`] = `
+{
+  "systemPrompt": "You are the main agent.
+
+# Asking The Guardian For Input
+
+Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.
+
+Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.
+
+When you do need to ask, use the \`ask_question\` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.
+
+---
+
+# Charter
+
+Charter text.
+
+---
+
+# Identity
+
+Identity text.
+
+---
+
+# Runtime Context
+
+- Active profile directory: \`<profile>\`
+- Profile memory directory: \`<profile>/memory\`
+- Custom app authoring directory: \`<profile>/projects/apps\`
+- Installed apps directory: \`<profile>/apps/installed\`
+- Repo seed apps directory: \`<root>/rome_apps\`
+
+Installable app model:
+- Load runtime apps from the active profile's installed apps directory or custom app authoring directory.
+- Use the active custom app authoring directory for custom app source, builds, tests, and DB work during local development.
+- Custom apps use \`~/.rome/<profile>/projects/apps/<appId>/\` as both the local authoring root and the runtime source of truth by default.
+- Repo-local \`rome_apps/\` remains the seed source for platform-shipped apps, including bootstrap and repair flows for \`system\`.
+- Do not treat repo-local \`rome_apps/\` as the live runtime root for custom apps.
+- Installable apps can contribute agents, actions, skills, hooks, web bundles, API entrypoints, and DB migrations.
+- In Rome product context, 'store', 'app store', or 'marketplace' usually means the Rome App Store unless the guardian clearly means an external store like Apple App Store or Google Play.
+
+Agent browser:
+- The platform runs a persistent browser that you operate to do work on the web — researching, filling forms, placing orders, and reading or acting inside the guardian's own accounts on other services (e.g. UberEats, DoorDash, Amazon, banking). The guardian can watch what you do in real time on the [Browser](/desktop) page.
+- The browser profile is persistent: a site the guardian signs into once stays logged in for later turns, so you can reuse an authenticated session without signing in again. If the guardian asks you to perform a task behind an auth wall while the account is not logged in, ask the guardian if they would like to log in using the browser.
+- In the agent browser, visit \`http://127.0.0.1:4141\` to open the Rome dashboard, or \`http://127.0.0.1:4141/apps/<appId>\` to use a specific app.
+
+---
+
+# Command Line Tools
+
+- A global \`discord\` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer \`discord api\` over memory because it is live and authoritative. Run \`discord api --help\` when needed.
+- Run \`rome-node help\` to learn the remote computer CLI and \`rome-node help device run\` for action arguments and result handling. Use \`rome-node device\` to list authorized remote computers. Authorization does not mean online. Use \`rome-node device describe <id>\` to query its platform and supported actions. Execute a program with \`rome-node device run <id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'\`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.
+
+# Memory
+
+Memory index.
+
+# Projects
+
+- \`garden\`: First paragraph of the garden.",
+  "tools": {
+    "actions": [
+      {
+        "description": "List the actions available to this agent.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_actions",
+      },
+      {
+        "description": "Read one available action and its arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to inspect.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "action_name",
+          ],
+          "type": "object",
+        },
+        "name": "read_action",
+      },
+      {
+        "description": "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_actions",
+      },
+      {
+        "description": "Execute one available action with object arguments in json_args.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to execute.",
+              "type": "string",
+            },
+            "json_args": {
+              "additionalProperties": true,
+              "description": "Object arguments to pass to the action.",
+              "type": "object",
+            },
+          },
+          "required": [
+            "action_name",
+            "json_args",
+          ],
+          "type": "object",
+        },
+        "name": "execute_action",
+      },
+    ],
+    "ask_user": [
+      {
+        "description": "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
+        "endsTurn": false,
+        "inputSchema": {
+          "properties": {
+            "questions": {
+              "description": "Questions rendered together as one card.",
+              "items": {
+                "properties": {
+                  "freeText": {
+                    "description": "single/multi only: also show a free-text box beneath the options, so the guardian can tap option(s) OR type their own answer. Use this for most choice questions — it keeps input cheap (a tap) without trapping them in your option set. Ignored for text.",
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "description": "Stable id; the answer references it.",
+                    "type": "string",
+                  },
+                  "optional": {
+                    "description": "If true, the guardian may leave this question blank without blocking submit (a blank answer is simply omitted from the results). Defaults to false — questions are required.",
+                    "type": "boolean",
+                  },
+                  "options": {
+                    "description": "Required for single and multi; the choices. Ignored for text.",
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "question": {
+                    "description": "The prompt shown to the guardian.",
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "single: pick exactly one option; multi: pick any number of options; text: free-form.",
+                    "enum": [
+                      "single",
+                      "multi",
+                      "text",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "question",
+                  "type",
+                ],
+                "type": "object",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "required": [
+            "questions",
+          ],
+          "type": "object",
+        },
+        "name": "ask_question",
+      },
+    ],
+    "skills": [
+      {
+        "description": "List the skills available in this workspace.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_skills",
+      },
+      {
+        "description": "Search available skills by regex against name, description, or declared tools. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match skills, for example browser|calendar, or /web(fetch|search)/i for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_skills",
+      },
+      {
+        "description": "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its \`directory\` and \`files\`; open one with your file tools only when the skill body points you to it.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Alias for skill_name. Use the exact skill name.",
+              "type": "string",
+            },
+            "skill_name": {
+              "description": "The skill name to read.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "name": "read_skill",
+      },
+    ],
+    "subagents": [
+      {
+        "description": "Delegate a task to the "core:helper" subagent: Helps with one task.",
+        "inputSchema": {
+          "properties": {
+            "prompt": {
+              "description": "The task/prompt to send to the subagent",
+              "type": "string",
+            },
+            "resumeSessionId": {
+              "description": "Explicit Child session ID to resume; omitted starts a fresh session",
+              "type": "string",
+            },
+          },
+          "required": [
+            "prompt",
+          ],
+        },
+        "name": "sa_21d52f9a6068a24c",
+      },
+    ],
+  },
+}
+`;
+
+exports[`what the model reads when a session opens > an app's agent 1`] = `
+{
+  "systemPrompt": "You are the main agent.
+
+Context suffix.",
+  "tools": {
+    "actions": [
+      {
+        "description": "List the actions available to this agent.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_actions",
+      },
+      {
+        "description": "Read one available action and its arguments.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to inspect.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "action_name",
+          ],
+          "type": "object",
+        },
+        "name": "read_action",
+      },
+      {
+        "description": "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_actions",
+      },
+      {
+        "description": "Execute one available action with object arguments in json_args.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action_name": {
+              "description": "The action name to execute.",
+              "type": "string",
+            },
+            "json_args": {
+              "additionalProperties": true,
+              "description": "Object arguments to pass to the action.",
+              "type": "object",
+            },
+          },
+          "required": [
+            "action_name",
+            "json_args",
+          ],
+          "type": "object",
+        },
+        "name": "execute_action",
+      },
+    ],
+    "ask_user": [
+      {
+        "description": "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
+        "endsTurn": true,
+        "inputSchema": {
+          "properties": {
+            "questions": {
+              "description": "Questions rendered together as one card.",
+              "items": {
+                "properties": {
+                  "freeText": {
+                    "description": "single/multi only: also show a free-text box beneath the options, so the guardian can tap option(s) OR type their own answer. Use this for most choice questions — it keeps input cheap (a tap) without trapping them in your option set. Ignored for text.",
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "description": "Stable id; the answer references it.",
+                    "type": "string",
+                  },
+                  "optional": {
+                    "description": "If true, the guardian may leave this question blank without blocking submit (a blank answer is simply omitted from the results). Defaults to false — questions are required.",
+                    "type": "boolean",
+                  },
+                  "options": {
+                    "description": "Required for single and multi; the choices. Ignored for text.",
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "question": {
+                    "description": "The prompt shown to the guardian.",
+                    "type": "string",
+                  },
+                  "type": {
+                    "description": "single: pick exactly one option; multi: pick any number of options; text: free-form.",
+                    "enum": [
+                      "single",
+                      "multi",
+                      "text",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "id",
+                  "question",
+                  "type",
+                ],
+                "type": "object",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "required": [
+            "questions",
+          ],
+          "type": "object",
+        },
+        "name": "ask_question",
+      },
+      {
+        "description": "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. Give a short \`name\` for what you're watching (it becomes the routine's name) and exactly one of \`afterMinutes\`, \`at\`, or \`event\`. Prefer \`event\` when something announces completion (CI finished, a PR merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, with no timeout. Look up the event name and payload fields with the search_event_catalog action first. For a \`subscribable\` type, filter on one of its \`keys\` (e.g. repository.full_name); defer then subscribes at the provider and fails with the reason if it can't. Events are not replayed and a new subscription only sees future events: after an event defer, check the current state once more, and if what you're waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so just re-evaluate and either finish or \`defer\` again (minimum one minute, no limit on re-defers). After calling defer, write one short line confirming you'll keep watch, then end your turn.",
+        "inputSchema": {
+          "properties": {
+            "afterMinutes": {
+              "description": "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes, at, or event.",
+              "minimum": 1,
+              "type": "integer",
+            },
+            "at": {
+              "description": "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
+              "type": "string",
+            },
+            "event": {
+              "description": "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+              "properties": {
+                "eventName": {
+                  "description": "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+                  "type": "string",
+                },
+                "filter": {
+                  "description": "Optional payload conditions, AND-ed together. Each compares the payload value at a dot-path, as a string, for equality.",
+                  "items": {
+                    "properties": {
+                      "equals": {
+                        "description": "Value the field must equal",
+                        "type": "string",
+                      },
+                      "field": {
+                        "description": "Dot-path into the payload, e.g. pull_request.number",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "field",
+                      "equals",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "sourcePattern": {
+                  "description": "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "eventName",
+              ],
+              "type": "object",
+            },
+            "name": {
+              "description": "A short name for what you're watching, e.g. "GitHub CI run" or "Dana's reply". Stored as the routine's name and shown on the Routines page; you'll be pinged back in this same conversation when the time is up.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "name",
+          ],
+          "type": "object",
+        },
+        "name": "defer",
+      },
+      {
+        "description": "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+        "inputSchema": {
+          "properties": {
+            "actionName": {
+              "description": "The action the routine fires when it triggers, e.g. send_message.",
+              "type": "string",
+            },
+            "activate": {
+              "description": "Create the routine enabled right away instead of waiting for the guardian's click. Use only when the guardian explicitly stated the trigger or cadence, what to run and its arguments — nothing you inferred — and it acts on their behalf (sending, posting, spending) only as they asked. Otherwise omit it. Falls back to a draft card if you may not call the action yourself.",
+              "type": "boolean",
+            },
+            "args": {
+              "additionalProperties": true,
+              "description": "A single argument object for the action. Not an array.",
+              "type": "object",
+            },
+            "date": {
+              "description": "Schedule routines only: calendar date "YYYY-MM-DD" for a true one-off. Omit for recurring or for "next time it is localTime". Mutually exclusive with rrule.",
+              "type": "string",
+            },
+            "eventName": {
+              "description": "Event routines (kind: event) only — required there. The exact bus event type to watch, from search_event_catalog, e.g. "provider:event:gmail.gmail_new_gmail_message".",
+              "type": "string",
+            },
+            "filter": {
+              "description": "Event routines only: optional payload conditions, AND-ed together. Omit to fire on every event of this type.",
+              "items": {
+                "properties": {
+                  "equals": {
+                    "description": "Value the payload at \`field\` must equal",
+                    "type": "string",
+                  },
+                  "field": {
+                    "description": "Dot-path into the event payload, e.g. from.email",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "field",
+                  "equals",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "filterSummary": {
+              "description": "Event routines only: optional plain-language narrowing, e.g. "sender is dana@example.com". Omit when the routine watches every event of this type, or for schedule routines.",
+              "type": "string",
+            },
+            "kind": {
+              "description": ""event" when the routine should fire on something happening (an email arrives, a payment lands); "schedule" when it should fire at a time or on a recurring cadence ("every Friday at 9am", "tomorrow at noon"); "manual" when it should never fire on its own — a saved playbook the guardian keeps and runs by hand from the Routines page ("save this as something I can run whenever I want"). Manual routines need no eventName/tzid/schedule fields.",
+              "enum": [
+                "event",
+                "schedule",
+                "manual",
+              ],
+              "type": "string",
+            },
+            "localTime": {
+              "description": "Schedule routines only — required there. Time of day in 24-hour HH:mm, e.g. "09:00" or "17:30".",
+              "type": "string",
+            },
+            "name": {
+              "description": "Short stored routine name, e.g. "Landlord emails".",
+              "type": "string",
+            },
+            "rrule": {
+              "description": "Schedule routines only: iCal RRULE for a recurring schedule, e.g. "FREQ=WEEKLY;BYDAY=FR" or "FREQ=DAILY". Omit for a one-off. Mutually exclusive with date.",
+              "type": "string",
+            },
+            "sentence": {
+              "description": "One-line headline in plain language, e.g. "When you get an email from Dana, Rome will summarize it and text you." or "Every Friday at 9am, Rome will send you a week-ahead summary."",
+              "type": "string",
+            },
+            "thenSummary": {
+              "description": "What Rome does when it fires, e.g. "summarize it and text you on Telegram".",
+              "type": "string",
+            },
+            "tzMode": {
+              "description": "Schedule routines only. How the timezone is bound. Omit (defaults to 'floating') for an ordinary reminder — it follows the guardian and fires at localTime wherever they are. Use 'fixed' only for a zone-anchored recurring routine that must stay pinned to tzid no matter where the guardian goes (e.g. a market open at 09:30 Asia/Tokyo). One-offs are always pinned regardless.",
+              "enum": [
+                "fixed",
+                "floating",
+              ],
+              "type": "string",
+            },
+            "tzid": {
+              "description": "Schedule routines (kind: schedule) only — required there. IANA timezone for the time, e.g. "America/Los_Angeles". Infer from what the guardian tells you; do not make them type an IANA name.",
+              "type": "string",
+            },
+            "watchLabel": {
+              "description": "What triggers it, in human terms: "Gmail · new email" (event), "Every Friday at 9:00 AM" (schedule), or "Run on demand" (manual).",
+              "type": "string",
+            },
+          },
+          "required": [
+            "sentence",
+            "name",
+            "watchLabel",
+            "thenSummary",
+            "kind",
+            "actionName",
+            "args",
+          ],
+          "type": "object",
+        },
+        "name": "propose_routine",
+      },
+    ],
+    "skills": [
+      {
+        "description": "List the skills available in this workspace.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object",
+        },
+        "name": "list_skills",
+      },
+      {
+        "description": "Search available skills by regex against name, description, or declared tools. Supports /pattern/flags for explicit flags.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "description": "Optional. Recommended: omit this parameter to use the default of 10. If provided, use an integer from 1 to 25.",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer",
+            },
+            "query": {
+              "description": "Regex pattern to match skills, for example browser|calendar, or /web(fetch|search)/i for explicit flags.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "query",
+          ],
+          "type": "object",
+        },
+        "name": "search_skills",
+      },
+      {
+        "description": "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its \`directory\` and \`files\`; open one with your file tools only when the skill body points you to it.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "Alias for skill_name. Use the exact skill name.",
+              "type": "string",
+            },
+            "skill_name": {
+              "description": "The skill name to read.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "name": "read_skill",
+      },
+    ],
+    "subagents": [],
+  },
+}
+`;
