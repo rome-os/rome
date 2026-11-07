@@ -7,7 +7,7 @@ import type {
   ModelAccountUsage,
   ModelUsageWindow,
 } from "../../domain/model-account.js";
-import type { ProviderAvailability } from "../../domain/provider-availability.js";
+import type { ModelAccountReport } from "../../domain/model-account-report.js";
 import { USAGE_LIMIT_FALLBACK_MS, type UsageRefusal } from "./refused-turn.js";
 
 function windowExhausted(window: ModelUsageWindow | undefined): window is ModelUsageWindow {
@@ -46,9 +46,9 @@ function ahead(until: string | undefined, now: number): string | undefined {
  */
 export function refusalAfterReport(
   refusal: UsageRefusal | undefined,
-  availability: ProviderAvailability,
+  report: ModelAccountReport,
 ): UsageRefusal | undefined {
-  const until = availability.usageLimitUntil;
+  const until = report.usageLimitUntil;
   if (!refusal || !until || Date.parse(until) >= Date.parse(refusal.until)) return refusal;
   return { ...refusal, until };
 }
@@ -64,20 +64,20 @@ export function refusalAfterReport(
  * nor a limit, so a limit still ahead carries over from the refusal or from
  * `previous`, the account's last report, whichever ends later.
  */
-export function accountAvailability(
+export function accountReport(
   status: ModelAccountStatus,
   usage: ModelAccountUsage | null,
   refusal: UsageRefusal | undefined,
   now: number,
-  previous?: ProviderAvailability,
-): ProviderAvailability {
-  const base: ProviderAvailability = { state: "available", account: status };
+  previous?: ModelAccountReport,
+): ModelAccountReport {
+  const base: ModelAccountReport = { state: "available", account: status };
   if (usage) base.usage = usage;
   if (status.needsReauth) return { ...base, state: "expired" };
   if (!status.loggedIn) return { ...base, state: "unauthorized" };
   if (status.usageLimited === false) return base;
 
-  const limit = (until: string): ProviderAvailability => ({
+  const limit = (until: string): ModelAccountReport => ({
     ...base,
     state: "usage_limit_reached",
     usageLimitUntil: until,

@@ -1,37 +1,37 @@
 import { describe, expect, it } from "@rstest/core";
 import {
   accountAllowsModel,
-  currentAvailability,
-  type ProviderAvailability,
+  currentReport,
+  type ModelAccountReport,
   providerAuthorized,
   providerUsable,
-} from "./provider-availability.js";
+} from "./model-account-report.js";
 
 const readAt = new Date("2026-11-07T00:00:00Z");
 const hourLater = new Date(readAt.getTime() + 3_600_000).toISOString();
-const limited: ProviderAvailability = {
+const limited: ModelAccountReport = {
   state: "usage_limit_reached",
   usageLimitUntil: hourLater,
   account: { loggedIn: true },
 };
 
-describe("currentAvailability", () => {
+describe("currentReport", () => {
   it("reads a passed limit as available and leaves the rest alone", () => {
-    expect(currentAvailability(limited, readAt)).toBe(limited);
-    expect(currentAvailability(limited, new Date(hourLater))).toEqual({
+    expect(currentReport(limited, readAt)).toBe(limited);
+    expect(currentReport(limited, new Date(hourLater))).toEqual({
       state: "available",
       account: { loggedIn: true },
     });
-    const expired: ProviderAvailability = {
+    const expired: ModelAccountReport = {
       state: "expired",
       account: { loggedIn: false, needsReauth: true },
     };
-    expect(currentAvailability(expired, new Date(hourLater))).toBe(expired);
+    expect(currentReport(expired, new Date(hourLater))).toBe(expired);
   });
 
   it("reads a limit with an unreadable end as over", () => {
     const odd = { ...limited, usageLimitUntil: "invalid" };
-    expect(currentAvailability(odd, readAt)).toMatchObject({ state: "available" });
+    expect(currentReport(odd, readAt)).toMatchObject({ state: "available" });
   });
 });
 
@@ -39,7 +39,7 @@ describe("predicates", () => {
   it("treat an unread provider as usable and authorized", () => {
     expect(providerUsable(undefined)).toBe(true);
     expect(providerAuthorized(undefined)).toBe(true);
-    const expired: ProviderAvailability = {
+    const expired: ModelAccountReport = {
       state: "expired",
       account: { loggedIn: false, needsReauth: true },
     };

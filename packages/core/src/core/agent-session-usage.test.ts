@@ -19,11 +19,11 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SkillLoader } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import type { ModelAvailabilityState } from "../agent/index.js";
+import type { ModelAccountReports } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 /** Lets the run finish sending, so what follows happens during the turn. */
 const turnUnderway = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -62,7 +62,7 @@ describe("AgentSession turn usage", () => {
   let onSend: (() => void) | undefined;
   // Whether the model resolver sees Rome credits paying.
   let resolverUsesRomeCredits: boolean;
-  let state: ModelAvailabilityState;
+  let state: ModelAccountReports;
   let providerCalls: number;
 
   beforeEach(async () => {
@@ -121,8 +121,8 @@ describe("AgentSession turn usage", () => {
       },
     };
     state = {
-      openai: availabilityOf("available"),
-      anthropic: availabilityOf("unauthorized"),
+      openai: reportOf("available"),
+      anthropic: reportOf("unauthorized"),
     };
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -144,7 +144,7 @@ describe("AgentSession turn usage", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          availability: fakeAvailability(() => state),
+          accounts: fakeAccounts(() => state),
           romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),

@@ -1,10 +1,10 @@
 import { expect, it } from "@rstest/core";
 import { failoverReason, type FailoverReason } from "./failover-reason.js";
-import type { ModelAvailabilityState } from "../agent/index.js";
-import { availabilityOf } from "../test/kit/model-availability.js";
-const state = (): ModelAvailabilityState => ({
-  anthropic: availabilityOf("available"),
-  openai: availabilityOf("available"),
+import type { ModelAccountReports } from "../agent/index.js";
+import { reportOf } from "../test/kit/model-accounts.js";
+const state = (): ModelAccountReports => ({
+  anthropic: reportOf("available"),
+  openai: reportOf("available"),
 });
 it.each<[string, FailoverReason | null]>([
   ["exceeded retry limit, last status: 429 Too Many Requests", "temporary"],
@@ -105,7 +105,7 @@ it("keeps exclusions and model wording ahead of generic kinds and statuses", () 
 });
 it("does not recover a turn Rome credits paid for, unless the credits ran out or the login failed", () => {
   const raw = state();
-  raw.openai = availabilityOf("unauthorized");
+  raw.openai = reportOf("unauthorized");
   const failed = (extra: object) =>
     failoverReason({ provider: "openai", message: "Selected model is busy", ...extra }, raw);
   expect(failed({ code: "transient" })).toBeNull();
@@ -118,8 +118,8 @@ it("does not recover a turn Rome credits paid for, unless the credits ran out or
 
 it("refuses API key sources, unknown providers and absent failures", () => {
   const raw = state();
-  raw.anthropic = availabilityOf("available", { authMethod: "environment", usageLimited: false });
-  raw.openai = availabilityOf("available", { accountType: "api_key", usageLimited: false });
+  raw.anthropic = reportOf("available", { authMethod: "environment", usageLimited: false });
+  raw.openai = reportOf("available", { accountType: "api_key", usageLimited: false });
   for (const provider of ["openai", "anthropic", "anthropic-compatible"])
     expect(
       failoverReason(
@@ -142,6 +142,6 @@ it.each([
   const failure = { message: "Model not served", provider: "openai", ...fields };
   expect(failoverReason(failure, state())).toBe("model_limit");
   const raw = state();
-  raw.openai = availabilityOf("available", { accountType: "api_key", usageLimited: false });
+  raw.openai = reportOf("available", { accountType: "api_key", usageLimited: false });
   expect(failoverReason(failure, raw)).toBeNull();
 });

@@ -13,7 +13,7 @@
 // exception is the status field `loggedIn`, which keeps the name the dashboard
 // reads today. docs/domains/agents.md carries the language.
 
-import type { ProviderAvailability } from "./provider-availability.js";
+import type { ModelAccountReport } from "./model-account-report.js";
 
 /** The provider's subscription tier, as the provider reports it. */
 export type ModelPlanType =
@@ -90,8 +90,8 @@ export interface ModelDeviceAuthorization {
 }
 
 /**
- * The model provider account as this context reads it. Model availability
- * reads it and remembers the answer; the dashboard revokes it; the agent run
+ * The model provider account as this context reads it. Model accounts
+ * read it and remember the answer; the dashboard revokes it; the agent run
  * never calls it. The adapter in infrastructure/ implements it on the
  * provider's own process.
  */
@@ -100,10 +100,10 @@ export interface ModelAccount {
    * Whether a run can use the provider now and why not, with the status and
    * usage it was read off. Rejects when the account could not be read at all.
    */
-  availability(): Promise<ProviderAvailability>;
+  report(): Promise<ModelAccountReport>;
   /** Takes the authorization back. */
   revoke(): Promise<void>;
-  /** Fires when the account's availability may have changed; returns the unsubscribe. */
+  /** Fires when the account's report may have changed; returns the unsubscribe. */
   onChanged(listener: () => void): () => void;
   close(): void;
 }

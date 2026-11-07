@@ -333,7 +333,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       });
       const terminalServer = attachTerminalServer(server as Server, deps.db, {
         onAuthCommandExit: () => {
-          void deps.modelAvailability.refresh().catch(() => {});
+          void deps.modelAccounts.refresh().catch(() => {});
         },
       });
       const liveEvents = attachLiveEventsServer(

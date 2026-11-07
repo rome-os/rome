@@ -207,7 +207,7 @@ export function startConciergeEvents(
     }
     if (event.status === "error") {
       const failure = event.output.failure;
-      const reason = failoverReason(failure, service.deps.availability.read());
+      const reason = failoverReason(failure, service.deps.accounts.read());
       if (!reason || !failure) return;
       const chain: { finished?: AgentTurnFinishedEvent } = {};
       recoveriesRunning.set(chatId, chain);
@@ -233,7 +233,7 @@ export function startConciergeEvents(
           );
           // The wait may have ended Concierge or the subscription that paid for this turn.
           if (!(await service.isEnabled())) return;
-          if (!failoverReason(failure, service.deps.availability.read())) return;
+          if (!failoverReason(failure, service.deps.accounts.read())) return;
           next = await recover(failure, reason, true);
         } else {
           const moved = await service.switchForFailure(chatId, failure, reason);
@@ -242,7 +242,7 @@ export function startConciergeEvents(
           next = await recover(failure, reason, !crossed);
         }
         if (crossed || next?.status !== "error" || !next.output.failure) return;
-        const second = failoverReason(next.output.failure, service.deps.availability.read());
+        const second = failoverReason(next.output.failure, service.deps.accounts.read());
         if (!second) return;
         const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
         if (moved) await recover(next.output.failure, second, false);

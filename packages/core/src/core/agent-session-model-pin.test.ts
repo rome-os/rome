@@ -29,11 +29,7 @@ import {
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
-import {
-  availabilityOf,
-  fakeAvailability,
-  RESTRICTED_PLAN,
-} from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -74,8 +70,8 @@ function createProvider(id: ProviderId) {
 
 function healthyState() {
   return {
-    openai: availabilityOf("available"),
-    anthropic: availabilityOf("available"),
+    openai: reportOf("available"),
+    anthropic: reportOf("available"),
   };
 }
 
@@ -120,7 +116,7 @@ describe("agent model pins through AgentSessionManager", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
-          availability: fakeAvailability(() => state),
+          accounts: fakeAccounts(() => state),
           romeCreditsPayer: {
             isUsingRomeCredits: () =>
               typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
@@ -176,8 +172,8 @@ describe("agent model pins through AgentSessionManager", () => {
   it("pins a credit-funded session to the model ChatGPT would run", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
     // No account authorized: credits pay, and serve the frontier models.
-    state.openai = availabilityOf("unauthorized");
-    state.anthropic = availabilityOf("unauthorized");
+    state.openai = reportOf("unauthorized");
+    state.anthropic = reportOf("unauthorized");
     let usingRomeCredits = true;
     const session = await createManager(false, () => usingRomeCredits).acquire(key, {
       workingDir: directory,
@@ -189,7 +185,7 @@ describe("agent model pins through AgentSessionManager", () => {
     });
 
     // Connecting ChatGPT changes only who pays: the pinned model keeps running.
-    state.openai = availabilityOf("available");
+    state.openai = reportOf("available");
     usingRomeCredits = false;
     await collect(session.sendTurn({ prompt: "guardian" }).events);
 
@@ -204,7 +200,7 @@ describe("agent model pins through AgentSessionManager", () => {
     await collect(first.sendTurn({ prompt: "guardian" }).events);
     await firstManager.shutdown();
 
-    state.openai = availabilityOf("unauthorized");
+    state.openai = reportOf("unauthorized");
     const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "credits" }).events);
 
@@ -255,7 +251,7 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("fails closed on a disconnected pinned provider even when another provider is healthy", async () => {
-    state.openai = availabilityOf("unauthorized");
+    state.openai = reportOf("unauthorized");
     await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
@@ -268,7 +264,7 @@ describe("agent model pins through AgentSessionManager", () => {
   it("fails a later turn on quota exhaustion and recovers on the same model", async () => {
     const session = await createManager().acquire(key, { workingDir: directory });
     await collect(session.sendTurn({ prompt: "first" }).events);
-    state.openai = availabilityOf("usage_limit_reached");
+    state.openai = reportOf("usage_limit_reached");
     const failed = await collect(session.sendTurn({ prompt: "blocked" }).events);
     expect(failed).toContainEqual(
       expect.objectContaining({
@@ -281,7 +277,7 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(openai.calls).toHaveLength(1);
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
-    state.openai = availabilityOf("available");
+    state.openai = reportOf("available");
     await collect(session.sendTurn({ prompt: "retry" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
   });
@@ -297,7 +293,7 @@ describe("agent model pins through AgentSessionManager", () => {
     });
     const first = session.sendTurn({ prompt: "first" });
     await collect(first.events);
-    state.openai = availabilityOf("usage_limit_reached");
+    state.openai = reportOf("usage_limit_reached");
     const blocked = session.sendTurn({ prompt: "blocked" });
     await collect(blocked.events);
 
@@ -312,7 +308,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("enforces known model entitlements instead of substituting a tier model", async () => {
     await writeConfig({ modelId: "gpt-6-astra" });
-    state.openai = availabilityOf("available", RESTRICTED_PLAN);
+    state.openai = reportOf("available", RESTRICTED_PLAN);
     await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",

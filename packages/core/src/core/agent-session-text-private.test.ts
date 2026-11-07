@@ -21,7 +21,7 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SkillLoader } from "../agent/index.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 describe("AgentSessionManager textPrivate", () => {
   let directory: string;
@@ -69,8 +69,8 @@ describe("AgentSessionManager textPrivate", () => {
       },
     };
     const state = {
-      openai: availabilityOf("unauthorized"),
-      anthropic: availabilityOf("available"),
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
@@ -85,7 +85,7 @@ describe("AgentSessionManager textPrivate", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          availability: fakeAvailability(() => state),
+          accounts: fakeAccounts(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),

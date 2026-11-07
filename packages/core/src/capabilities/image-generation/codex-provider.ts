@@ -6,7 +6,7 @@ import type {
   ImageProviderAvailability,
   ImageProviderGenerateResult,
 } from "@rome-os/app-runtime";
-import type { ProviderAvailability } from "../../agent/index.js";
+import type { ModelAccountReport } from "../../agent/index.js";
 import { adhocSessionKey } from "../../core/agent-session-key.js";
 import { createLogger } from "../../logger.js";
 
@@ -101,7 +101,7 @@ export interface CodexImageProviderDeps {
    * via the pinned agent's model resolution, whose error streams back over
    * RPC with a machine-readable code.
    */
-  getCodexAvailability?: () => ProviderAvailability | undefined;
+  getCodexReport?: () => ModelAccountReport | undefined;
 }
 
 /**
@@ -117,7 +117,7 @@ export function createCodexImageGenerationProvider(
     displayName: "Codex (ChatGPT)",
 
     async availability(): Promise<ImageProviderAvailability> {
-      const codex = deps.getCodexAvailability?.();
+      const codex = deps.getCodexReport?.();
       // Reads the ChatGPT account, not the resolver's Rome credits view: the
       // credits gateway rejects hosted image generation. An unread account is
       // treated as available.

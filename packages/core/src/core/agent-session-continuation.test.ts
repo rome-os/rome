@@ -38,7 +38,7 @@ import { DrizzleSessionRepository, type SessionRepository } from "../agent/index
 import { SkillLoader } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -103,8 +103,8 @@ function createProvider(id: ProviderId) {
 
 function healthyState() {
   return {
-    openai: availabilityOf("available"),
-    anthropic: availabilityOf("available"),
+    openai: reportOf("available"),
+    anthropic: reportOf("available"),
   };
 }
 
@@ -152,7 +152,7 @@ describe("continuation notice through AgentSessionManager", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
-          availability: fakeAvailability(() => state),
+          accounts: fakeAccounts(() => state),
           romeCreditsPayer: { isUsingRomeCredits: () => false },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
@@ -443,13 +443,13 @@ describe("continuation notice through AgentSessionManager", () => {
     }
     if (concierge) {
       const raw = healthyState();
-      raw[source] = availabilityOf("usage_limit_reached");
+      raw[source] = reportOf("usage_limit_reached");
       await webchatRepo.updateSessionLargeModelSelection(chatId, from);
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
         agentSessionManager: manager,
-        availability: fakeAvailability(() => raw),
+        accounts: fakeAccounts(() => raw),
       } as unknown as ConciergeDeps);
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);

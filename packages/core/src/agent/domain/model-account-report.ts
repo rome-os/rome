@@ -15,7 +15,7 @@ export type ProviderAvailabilityState =
   | "expired"
   | "usage_limit_reached";
 
-export interface ProviderAvailability {
+export interface ModelAccountReport {
   state: ProviderAvailabilityState;
   /** When the usage limit ends, stated or assumed. Set only in usage_limit_reached. */
   usageLimitUntil?: string;
@@ -31,13 +31,10 @@ export type AccountedProviderId = Exclude<ProviderId, "mock">;
  * A provider is absent until its account was read once, or when it has no
  * account (mock). A run treats an absent provider as available.
  */
-export type ModelAvailabilityState = Partial<Record<ProviderId, ProviderAvailability>>;
+export type ModelAccountReports = Partial<Record<ProviderId, ModelAccountReport>>;
 
 /** The remembered availability as of `now`: a usage limit whose end has passed reads as available. */
-export function currentAvailability(
-  remembered: ProviderAvailability,
-  now: Date,
-): ProviderAvailability {
+export function currentReport(remembered: ModelAccountReport, now: Date): ModelAccountReport {
   if (remembered.state !== "usage_limit_reached") return remembered;
   if (Date.parse(remembered.usageLimitUntil ?? "") > now.getTime()) return remembered;
   const { usageLimitUntil: _ended, ...rest } = remembered;
@@ -45,16 +42,13 @@ export function currentAvailability(
 }
 
 /** A run can use the provider: it is available, or Rome has not read it yet. */
-export function providerUsable(availability: ProviderAvailability | undefined): boolean {
-  return availability === undefined || availability.state === "available";
+export function providerUsable(report: ModelAccountReport | undefined): boolean {
+  return report === undefined || report.state === "available";
 }
 
 /** The account is authorized, or Rome has not read it yet. */
-export function providerAuthorized(availability: ProviderAvailability | undefined): boolean {
-  return (
-    availability === undefined ||
-    (availability.state !== "unauthorized" && availability.state !== "expired")
-  );
+export function providerAuthorized(report: ModelAccountReport | undefined): boolean {
+  return report === undefined || (report.state !== "unauthorized" && report.state !== "expired");
 }
 
 /** Whether the account's plan allows the model: one its plan does not withhold. */

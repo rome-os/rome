@@ -14,7 +14,7 @@ import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import type { RomeToolGroup, RomeTools } from "../agent/index.js";
 import { createModelResolver } from "../core/model-resolver.js";
-import { bothAvailable, fakeAvailability } from "../test/kit/model-availability.js";
+import { bothAvailable, fakeAccounts } from "../test/kit/model-accounts.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import {
   createAppLifecycleHarness,
@@ -482,7 +482,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({
     providers: [provider],
-    availability: fakeAvailability(bothAvailable()),
+    accounts: fakeAccounts(bothAvailable()),
   });
   const actionEngine = new ActionEngine(
     harness.actionRegistry,

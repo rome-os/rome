@@ -21,7 +21,7 @@ import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SkillLoader } from "../agent/index.js";
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("AgentSession turn push level", () => {
@@ -84,9 +84,9 @@ describe("AgentSession turn push level", () => {
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          availability: fakeAvailability({
-            anthropic: availabilityOf("available"),
-            openai: availabilityOf("unauthorized"),
+          accounts: fakeAccounts({
+            anthropic: reportOf("available"),
+            openai: reportOf("unauthorized"),
           }),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),

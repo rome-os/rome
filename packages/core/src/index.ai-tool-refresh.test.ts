@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "@rstest/core";
 import ts from "typescript";
 
-describe("Model availability refresh wiring", () => {
+describe("Model accounts refresh wiring", () => {
   it("does not attach account reads to turn-finished listeners for either provider", () => {
     // Inspect the composition root without starting its server or provider processes.
     const source = ts.createSourceFile(
@@ -20,7 +20,7 @@ describe("Model availability refresh wiring", () => {
         node.expression.name.text === "onFinished"
       ) {
         const inspect = (child: ts.Node): void => {
-          if (ts.isIdentifier(child) && child.text === "modelAvailability") {
+          if (ts.isIdentifier(child) && child.text === "modelAccounts") {
             listenersUsingAIToolState.push(node.getText(source));
           }
           ts.forEachChild(child, inspect);
