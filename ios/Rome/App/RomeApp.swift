@@ -59,10 +59,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 // The completion-handler forms, called on the main thread: the async forms
 // return to UIKit off it, and UIKit aborts the app when a tap's handler does.
 extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
-    /// While the app is open the live events already update the chat, so a
-    /// push shows no banner and plays no sound.
+    /// While the app is open, a push for the chat on screen shows nothing: the
+    /// live events already put the reply there. Any other chat's shows its
+    /// banner, plays its sound and stays in the list.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([])
+        completionHandler(model.presentsInForeground(notification.request.content.userInfo) ? [.banner, .sound, .list] : [])
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {

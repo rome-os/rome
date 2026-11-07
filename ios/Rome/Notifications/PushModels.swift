@@ -118,3 +118,29 @@ enum PushPrompt {
         return now.timeIntervalSince(dismissedAt) >= snooze
     }
 }
+
+/// Whether a push shows while the app is open, and which delivered ones a
+/// chat clears. A chat is named by its store's id: `concierge` for the main
+/// chat, which the server may name by its own id instead.
+enum PushPresentation {
+    /// The push's chat and `chat` are the same chat.
+    static func sameChat(_ pushChat: String?, _ chat: String, mainServerID: String?) -> Bool {
+        let push = pushChat ?? conciergeChatID
+        if push == chat { return true }
+        let isMain = { (id: String) in id == conciergeChatID || (mainServerID != nil && id == mainServerID) }
+        return isMain(push) && isMain(chat)
+    }
+
+    /// Shown as a banner, with its sound, unless it is for the chat on screen:
+    /// that one is read there already.
+    static func shows(_ target: PushTarget?, visibleChat: String?, instanceID: String?, mainServerID: String?) -> Bool {
+        guard let target, let visibleChat, target.instanceId == instanceID else { return true }
+        return !sameChat(target.chatId, visibleChat, mainServerID: mainServerID)
+    }
+
+    /// Whether a delivered notification is one of `chat`'s, on this instance.
+    static func belongs(_ userInfo: [AnyHashable: Any], to chat: String, instanceID: String?, mainServerID: String?) -> Bool {
+        guard let target = PushTarget(userInfo: userInfo), target.instanceId == instanceID else { return false }
+        return sameChat(target.chatId, chat, mainServerID: mainServerID)
+    }
+}

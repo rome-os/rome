@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Observation
 import os
+import UserNotifications
 
 /// Holds the current instance session token for requests, safe to read from any thread.
 final class TokenBox: Sendable {
@@ -29,6 +30,9 @@ struct ForegroundGate {
         if leftAt == nil { leftAt = date }
         wentBackground = true
     }
+
+    /// In the background since it last came back.
+    var isInBackground: Bool { wentBackground }
 
     /// True when the screens should refetch.
     mutating func becameActive(at date: Date) -> Bool {
@@ -106,6 +110,12 @@ final class Workspace {
     /// Each opened task chat's transcript, kept like the topic chats': a
     /// failed send keeps its bubble and Retry when the guardian comes back.
     @ObservationIgnored private var taskStores: [String: TranscriptStore] = [:]
+
+    /// A message of the guardian's is still on its way, in any chat.
+    var isSending: Bool {
+        ([concierge] + Array(topicStores.values) + Array(taskStores.values))
+            .contains { store in store.pending.contains { $0.state == .sending } }
+    }
 
     func taskStore(_ chatId: String) -> TranscriptStore {
         if let store = taskStores[chatId] { return store }
@@ -509,13 +519,62 @@ final class AppModel {
         foreground.enteredBackground(at: .now)
         // Drafts are written before the app may be killed.
         if let drafts = workspace?.drafts { Task { await drafts.flush() } }
-        workspace?.backend.events.pause()
+        sayGoodbye()
+    }
+
+    /// Closes the live socket as the app leaves, so the server stops counting
+    /// this phone as watching and the reply is pushed. A message still
+    /// sending keeps it open until it is through, for at most a few seconds.
+    private func sayGoodbye() {
+        guard let workspace else { return }
+        guard workspace.isSending else {
+            workspace.backend.events.pause()
+            return
+        }
+        let hold = BackgroundHold("send-before-goodbye")
+        Task { [weak self] in
+            for _ in 0..<40 where workspace.isSending {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            // Back in front meanwhile: the socket stays.
+            if self?.foreground.isInBackground == true { workspace.backend.events.pause() }
+            hold.end()
+        }
+    }
+
+    /// The chat in front of the guardian, by its store's id; nil when a sheet,
+    /// the drawer or another page covers it. A push for it shows no banner,
+    /// and opening it clears its delivered notifications.
+    var visibleChat: String? {
+        didSet {
+            guard let visibleChat, visibleChat != oldValue else { return }
+            clearDelivered(for: visibleChat)
+        }
+    }
+
+    /// Whether a push that arrives while the app is open shows its banner.
+    func presentsInForeground(_ userInfo: [AnyHashable: Any]) -> Bool {
+        PushPresentation.shows(PushTarget(userInfo: userInfo), visibleChat: visibleChat, instanceID: currentInstanceID, mainServerID: workspace?.mainChatServerID)
+    }
+
+    private func clearDelivered(for chat: String) {
+        let instance = currentInstanceID
+        let main = workspace?.mainChatServerID
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered
+                .filter { PushPresentation.belongs($0.request.content.userInfo, to: chat, instanceID: instance, mainServerID: main) }
+                .map(\.request.identifier)
+            if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+        }
     }
 
     /// Back in front: what the screens show may be behind, whether or not the
     /// app was suspended, so they refetch and the socket starts over.
     func appDidBecomeActive() {
         appearance.apply()
+        // Back in front on a chat counts as opening it: its delivered pushes go.
+        if let visibleChat { clearDelivered(for: visibleChat) }
         syncLanguage()
         // Notifications turned on in the Settings app register this phone.
         Task { await push.launch() }

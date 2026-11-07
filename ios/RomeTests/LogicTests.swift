@@ -344,3 +344,49 @@ final class StubBackend: RomeBackend {
         #expect(script.contains(#"localStorage.setItem("rome.lang", "zh-CN")"#))
     }
 }
+
+@Suite struct PushPresentationTests {
+    private func target(_ chat: String?, instance: String = "i1") -> PushTarget { PushTarget(instanceId: instance, chatId: chat) }
+
+    /// The chat on screen has the reply already: no banner. Any other shows one.
+    @Test func noBannerForTheChatOnScreen() {
+        #expect(!PushPresentation.shows(target("topic-1"), visibleChat: "topic-1", instanceID: "i1", mainServerID: nil))
+        #expect(PushPresentation.shows(target("topic-2"), visibleChat: "topic-1", instanceID: "i1", mainServerID: nil))
+        // Nothing on screen (a sheet, the drawer): it shows.
+        #expect(PushPresentation.shows(target("topic-1"), visibleChat: nil, instanceID: "i1", mainServerID: nil))
+        // Another instance's push always shows.
+        #expect(PushPresentation.shows(target("topic-1", instance: "i2"), visibleChat: "topic-1", instanceID: "i1", mainServerID: nil))
+    }
+
+    /// The server names the main chat by its own id; the app by `concierge`.
+    @Test func theMainChatMatchesByEitherName() {
+        #expect(!PushPresentation.shows(target("c-42"), visibleChat: conciergeChatID, instanceID: "i1", mainServerID: "c-42"))
+        #expect(!PushPresentation.shows(target(nil), visibleChat: conciergeChatID, instanceID: "i1", mainServerID: "c-42"))
+        #expect(PushPresentation.shows(target("c-42"), visibleChat: "topic-1", instanceID: "i1", mainServerID: "c-42"))
+    }
+
+    @Test func openingAChatClearsOnlyItsOwn() {
+        let reply: [AnyHashable: Any] = ["rome": ["instanceId": "i1", "chatId": "topic-1"]]
+        let other: [AnyHashable: Any] = ["rome": ["instanceId": "i1", "chatId": "topic-2"]]
+        let elsewhere: [AnyHashable: Any] = ["rome": ["instanceId": "i2", "chatId": "topic-1"]]
+        #expect(PushPresentation.belongs(reply, to: "topic-1", instanceID: "i1", mainServerID: nil))
+        #expect(!PushPresentation.belongs(other, to: "topic-1", instanceID: "i1", mainServerID: nil))
+        #expect(!PushPresentation.belongs(elsewhere, to: "topic-1", instanceID: "i1", mainServerID: nil))
+        #expect(!PushPresentation.belongs([:], to: "topic-1", instanceID: "i1", mainServerID: nil))
+    }
+
+    /// The server counts only the phone's socket as watching, by this header.
+    @Test func theSocketSaysItIsThePhone() {
+        let request = APIClient(origin: URL(string: "https://me.romeos.cc")!, token: { "t" }).socketRequest("/ws/events")
+        #expect(request.value(forHTTPHeaderField: "x-rome-client") == "phone")
+    }
+
+    @Test func theGateKnowsWhenTheAppIsAway() {
+        var gate = ForegroundGate()
+        #expect(!gate.isInBackground)
+        gate.enteredBackground(at: .now)
+        #expect(gate.isInBackground)
+        _ = gate.becameActive(at: .now)
+        #expect(!gate.isInBackground)
+    }
+}

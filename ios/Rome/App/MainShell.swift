@@ -169,6 +169,9 @@ struct MainShell: View {
             }
         }
         #endif
+        // Which chat is in front, for pushes: none under a sheet or the drawer.
+        .onChange(of: visibleChat, initial: true) { _, chat in model.visibleChat = chat }
+        .onDisappear { model.visibleChat = nil }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
             if open {
@@ -360,6 +363,20 @@ struct MainShell: View {
     struct DragAxis {
         let start: CGPoint
         let horizontal: Bool
+    }
+
+    /// The chat on screen, by its store's id.
+    private var visibleChat: String? {
+        if drawerOpen || showTasks || showSettings { return nil }
+        if let top = path.last {
+            if case .taskChat(let chatId, _) = top { return chatId }
+            return nil
+        }
+        switch section {
+        case .chat: return conciergeChatID
+        case .topic(let chatId): return chatId
+        default: return nil
+        }
     }
 
     private func drawerProgress(width: CGFloat) -> CGFloat {
