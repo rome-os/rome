@@ -2,7 +2,7 @@ import { expect, it } from "@rstest/core";
 import type { ModelAvailabilityState, ProviderAvailability } from "./provider-availability.js";
 import { sameProviderTarget, soleProviderAtUsageLimit, usageSwitchTarget } from "./usage-switch.js";
 
-const TERRA_ONLY = ["gpt-5.6-terra"];
+const FRONTIER_DENIED = ["gpt-6.1-sol", "gpt-6-luna"];
 
 function available(account: ProviderAvailability["account"] = { loggedIn: true }) {
   return { state: "available", account } as const satisfies ProviderAvailability;
@@ -25,7 +25,7 @@ it("keeps Concierge's Luna then Terra and Sonnet choices", () => {
   const raw = state();
   expect(soleProviderAtUsageLimit(raw)).toBe("anthropic");
   expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-6-luna");
-  raw.openai = available({ loggedIn: true, models: TERRA_ONLY });
+  raw.openai = available({ loggedIn: true, modelsDenied: FRONTIER_DENIED });
   expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-5-6-terra");
   raw.openai = atLimit();
   expect(soleProviderAtUsageLimit(raw)).toBeNull();
@@ -85,7 +85,7 @@ it.each([
 it("requires same-provider availability and model access", () => {
   const raw: ModelAvailabilityState = {
     anthropic: available(),
-    openai: available({ loggedIn: true, models: TERRA_ONLY }),
+    openai: available({ loggedIn: true, modelsDenied: FRONTIER_DENIED }),
   };
   expect(sameProviderTarget(raw, "openai", "gpt-5.6-terra")).toBeNull();
   expect(sameProviderTarget(raw, "openai", "gpt-6.1-sol")?.selectionId).toBe("gpt-5-6-terra");

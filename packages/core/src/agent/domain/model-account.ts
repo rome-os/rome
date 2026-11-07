@@ -36,8 +36,8 @@ export interface ModelAccountStatus {
   authMethod?: string;
   accountType?: string;
   needsReauth?: boolean;
-  /** The models the plan allows, when the provider limits them. Absent means any. */
-  models?: readonly string[];
+  /** The models the plan does not allow, when the provider withholds some. Absent means none. */
+  modelsDenied?: readonly string[];
   /**
    * Whether the provider limits the account's usage, as it does a
    * subscription and not an account billed per use. Absent reads as limited.

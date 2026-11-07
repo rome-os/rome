@@ -1,5 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import {
+  RESTRICTED_PLAN_DENIED_MODELS,
   SharedCodexAccountService,
   type SharedCodexAccountServiceOptions,
 } from "./account-service.js";
@@ -101,6 +103,53 @@ describe("SharedCodexAccountService", () => {
       { method: "account/rateLimits/read", params: undefined },
     ]);
     service.close();
+  });
+
+  it("reports what the plan withholds and whether the provider limits usage", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue(
+      "account/read",
+      { account: { type: "chatgpt", email: "free@example.com", planType: "free" } },
+      { account: { type: "chatgpt", email: "plus@example.com", planType: "plus" } },
+      { account: { type: "apiKey" } },
+    );
+    const service = createService(rpc);
+    await expect(service.status()).resolves.toMatchObject({
+      usageLimited: true,
+      modelsDenied: RESTRICTED_PLAN_DENIED_MODELS,
+    });
+    const plus = await service.status();
+    expect(plus).toMatchObject({ usageLimited: true });
+    expect(plus).not.toHaveProperty("modelsDenied");
+    const apiKey = await service.status();
+    expect(apiKey).toMatchObject({ usageLimited: false });
+    expect(apiKey).not.toHaveProperty("modelsDenied");
+  });
+
+  it("holds a refused turn until a usage read after the hold shows capacity", async () => {
+    let now = Date.parse("2026-11-07T00:00:00.000Z");
+    const rpc = new FakeAccountRpc();
+    const capacity = {
+      rateLimits: { primary: { usedPercent: 10 }, secondary: { usedPercent: 10 } },
+    };
+    rpc.queue("account/read", ...Array(4).fill({ account: { type: "chatgpt", planType: "pro" } }));
+    rpc.queue("account/rateLimits/read", capacity, capacity);
+    const service = createService(rpc, { now: () => now });
+    const changed = rs.fn();
+    service.onChanged(changed);
+
+    service.refusedTurn({ kind: "usage", until: "2026-11-07T03:00:00.000Z" });
+    expect(changed).toHaveBeenCalledTimes(1);
+    await expect(service.status()).resolves.toMatchObject({
+      usageLimitUntil: "2026-11-07T03:00:00.000Z",
+    });
+    await service.usage();
+    await expect(service.status()).resolves.toMatchObject({
+      usageLimitUntil: "2026-11-07T03:00:00.000Z",
+    });
+    now += USAGE_REFUSAL_HOLD_MS;
+    await service.usage();
+    await expect(service.status()).resolves.not.toHaveProperty("usageLimitUntil");
   });
 
   it("classifies the current single-window rate-limit response by duration", async () => {

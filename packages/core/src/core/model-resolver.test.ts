@@ -10,7 +10,7 @@ import { createModelResolver, TIER_MODEL_MAPPINGS_SETTING_KEY } from "./model-re
 import {
   availabilityOf,
   fakeAvailability,
-  TERRA_ONLY_PLAN,
+  RESTRICTED_PLAN,
 } from "../test/kit/model-availability.js";
 
 const codex = { id: "openai" } as ModelProvider;
@@ -346,7 +346,7 @@ describe("ModelResolver", () => {
 
   it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {
     const r = resolver({
-      openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
@@ -512,7 +512,7 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-sol" });
 
     const unavailable = resolver({
-      openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
       unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
@@ -544,7 +544,7 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-luna" });
 
     const unavailable = resolver({
-      openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
       unavailable.getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
@@ -752,7 +752,7 @@ describe("ModelResolver", () => {
 
   it("denies an exact request for a model whose access was lost", async () => {
     const noEntitlements = resolver({
-      openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
       noEntitlements.getModelProvider({ exact: { providerId: "anthropic", model: "gpt-6-sol" } }),

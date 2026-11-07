@@ -40,7 +40,12 @@ const log = createLogger("api:ai-tools");
 function providerStatusJson(availability: ProviderAvailability | undefined) {
   if (!availability) return { quotaExhausted: false };
   const { state, usageLimitUntil, account, usage } = availability;
-  const { models: _models, usageLimited: _limited, usageLimitUntil: _until, ...rest } = account;
+  const {
+    modelsDenied: _denied,
+    usageLimited: _limited,
+    usageLimitUntil: _until,
+    ...rest
+  } = account;
   return {
     ...rest,
     loggedIn: state !== "unauthorized" && state !== "expired",

@@ -131,10 +131,7 @@ export function providerAuthorized(availability: ProviderAvailability | undefine
   );
 }
 
-/** Whether the account's plan allows the model. An account that lists no models allows any. */
+/** Whether the account's plan allows the model: one its plan does not withhold. */
 export function accountAllowsModel(account: ModelAccountStatus, model: string): boolean {
-  return (
-    account.models === undefined ||
-    account.models.some((allowed) => matchesModelAlias(model, allowed))
-  );
+  return !account.modelsDenied?.some((denied) => matchesModelAlias(model, denied));
 }

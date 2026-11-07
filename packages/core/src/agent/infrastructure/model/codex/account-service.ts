@@ -22,9 +22,14 @@ import type {
   ModelBrowserAuthorization,
   ModelDeviceAuthorization,
 } from "../../../domain/model-account.js";
-import { CODEX_TERRA_MODEL } from "../../../domain/model-selection.js";
+import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL } from "../../../domain/model-selection.js";
 import { usageShowsCapacity } from "../../../domain/provider-availability.js";
-import type { LearnsRefusedTurns, RefusedTurn } from "../refused-turn.js";
+import {
+  type LearnsRefusedTurns,
+  type RefusedTurn,
+  type UsageRefusal,
+  usageReadClearsRefusal,
+} from "../refused-turn.js";
 import { isCodexAuthRevokedError } from "./auth-revoked.js";
 import { Method, Notify } from "./app-server-protocol.js";
 import type {
@@ -83,6 +88,7 @@ export interface SharedCodexAccountServiceOptions {
   usageCachePaths?: string[];
   readFileStatus?: () => Promise<CodexCliStatus>;
   markAuthRevoked?: () => Promise<void>;
+  now?: () => number;
 }
 
 function statusFromFile(fileStatus: CodexCliStatus): ModelAccountStatus {
@@ -96,7 +102,7 @@ function statusFromFile(fileStatus: CodexCliStatus): ModelAccountStatus {
   };
 }
 
-/** The ChatGPT plans that serve every Codex model. The others serve Terra alone. */
+/** The ChatGPT plans that serve every Codex model. The others do not serve the frontier models below. */
 const FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
   "plus",
   "pro",
@@ -109,14 +115,24 @@ const FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
   "edu",
 ]);
 
-/** What the account's plan allows and whether the provider limits its usage. */
+/** The frontier models a restricted plan does not serve: the Sol, Luna and Astra family. */
+export const RESTRICTED_PLAN_DENIED_MODELS: readonly string[] = [
+  "gpt-6-astra",
+  CODEX_SOL_MODEL,
+  "gpt-6-sol",
+  "gpt-5.6-sol",
+  CODEX_LUNA_MODEL,
+  "gpt-5.6-luna",
+];
+
+/** What the account's plan withholds and whether the provider limits its usage. */
 function planFacts(
   status: ModelAccountStatus,
-): Pick<ModelAccountStatus, "models" | "usageLimited"> {
+): Pick<ModelAccountStatus, "modelsDenied" | "usageLimited"> {
   if (!status.loggedIn) return {};
   if (status.authMode === "apikey") return { usageLimited: false };
   const full = status.planType !== undefined && FULL_MODEL_ACCESS_PLANS.has(status.planType);
-  return { usageLimited: true, ...(full ? {} : { models: [CODEX_TERRA_MODEL] }) };
+  return { usageLimited: true, ...(full ? {} : { modelsDenied: RESTRICTED_PLAN_DENIED_MODELS }) };
 }
 
 function rateLimitsPayload(value: unknown): unknown {
@@ -147,8 +163,9 @@ export class SharedCodexAccountService
   private cancelPendingLoginStart = false;
   private earlyLoginCompletion: LoginCompletedNotification | null = null;
   private lastLoginError: string | null = null;
-  /** The provider's stated end of a refused turn, null for none stated, undefined when not refused. */
-  private usageLimitUntil: string | null | undefined;
+  /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
+  private refusal: UsageRefusal | undefined;
+  private readonly now: () => number;
   private closed = false;
 
   constructor(
@@ -160,6 +177,7 @@ export class SharedCodexAccountService
     this.usageCachePaths = options.usageCachePaths ?? CODEX_USAGE_CACHE_PATHS;
     this.readFileStatus = options.readFileStatus ?? getCodexCliStatus;
     this.markAuthRevoked = options.markAuthRevoked ?? markCodexAuthRevoked;
+    this.now = options.now ?? Date.now;
     this.unsubscribers = [
       manager.onNotification(Notify.accountLoginCompleted, (params) => {
         this.handleLoginCompleted(params);
@@ -182,9 +200,7 @@ export class SharedCodexAccountService
     return {
       ...read,
       ...facts,
-      ...(facts.usageLimited && this.usageLimitUntil !== undefined
-        ? { usageLimitUntil: this.usageLimitUntil }
-        : {}),
+      ...(facts.usageLimited && this.refusal ? { usageLimitUntil: this.refusal.until } : {}),
     };
   }
 
@@ -276,8 +292,16 @@ export class SharedCodexAccountService
   }
 
   async usage(): Promise<AIToolUsageStatus | null> {
+    const readAt = this.now();
     const usage = await this.readUsage();
-    if (usage && usageShowsCapacity(usage)) this.usageLimitUntil = undefined;
+    if (
+      usage &&
+      usageShowsCapacity(usage) &&
+      this.refusal &&
+      usageReadClearsRefusal(this.refusal, readAt)
+    ) {
+      this.refusal = undefined;
+    }
     return usage;
   }
 
@@ -416,13 +440,15 @@ export class SharedCodexAccountService
   async revoke(): Promise<void> {
     await this.cancelAuthorization();
     await this.manager.request(Method.accountLogout);
-    this.usageLimitUntil = undefined;
+    this.refusal = undefined;
     this.emitAccountChanged();
   }
 
   /** The provider adapter saw the provider refuse a turn. A credential refusal is already in auth.json. */
   refusedTurn(refusal: RefusedTurn): void {
-    if (refusal.kind === "usage") this.usageLimitUntil = refusal.until ?? null;
+    if (refusal.kind === "usage") {
+      this.refusal = { until: refusal.until ?? null, refusedAt: this.now() };
+    }
     this.emitAccountChanged();
   }
 

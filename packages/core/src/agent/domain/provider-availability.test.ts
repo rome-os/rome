@@ -87,7 +87,7 @@ describe("availabilityFromAccount", () => {
   });
 
   it("keeps the account's reports as read and drops unreadable usage", () => {
-    const status = { loggedIn: true, email: "g@example.com", models: ["gpt-5.6-terra"] };
+    const status = { loggedIn: true, email: "g@example.com", modelsDenied: ["gpt-6-luna"] };
     const result = availabilityFromAccount(status, null, readAt);
     expect(result.account).toEqual(status);
     expect(result.usage).toBeUndefined();
@@ -119,10 +119,12 @@ describe("predicates", () => {
     expect(providerAuthorized(limited)).toBe(true);
   });
 
-  it("allow any model to an account that lists none, and aliases of the listed ones", () => {
+  it("allows any model to an account that withholds none, and withholds aliases of the denied ones", () => {
     expect(accountAllowsModel({ loggedIn: true }, "gpt-6-luna")).toBe(true);
-    const terra = { loggedIn: true, models: ["gpt-5.6-terra"] };
-    expect(accountAllowsModel(terra, "gpt-5.6-terra:high")).toBe(true);
-    expect(accountAllowsModel(terra, "gpt-6-luna")).toBe(false);
+    const restricted = { loggedIn: true, modelsDenied: ["gpt-6.1-sol", "gpt-6-luna"] };
+    expect(accountAllowsModel(restricted, "gpt-5.6-terra:high")).toBe(true);
+    expect(accountAllowsModel(restricted, "gpt-5.4-mini")).toBe(true);
+    expect(accountAllowsModel(restricted, "gpt-6-luna:high")).toBe(false);
+    expect(accountAllowsModel(restricted, "gpt-6.1-sol")).toBe(false);
   });
 });

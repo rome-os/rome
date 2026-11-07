@@ -43,7 +43,7 @@ import {
   availabilityOf,
   bothAvailable,
   fakeAvailability,
-  TERRA_ONLY_PLAN,
+  RESTRICTED_PLAN,
 } from "../test/kit/model-availability.js";
 import type { ModelAvailabilityState } from "../agent/index.js";
 
@@ -1982,7 +1982,7 @@ describe("Concierge chat", () => {
 
   it("falls back to Terra without Luna access, and to Sonnet on a Claude login", async () => {
     const terra = serviceWith(
-      { anthropic: signedOut, openai: availabilityOf("available", TERRA_ONLY_PLAN) },
+      { anthropic: signedOut, openai: availabilityOf("available", RESTRICTED_PLAN) },
       true,
       null,
     );
@@ -2650,7 +2650,7 @@ describe("Concierge chats", () => {
     const s = setup({ startEvents: false });
     s.deps.availability = fakeAvailability({
       anthropic: availabilityOf("usage_limit_reached"),
-      openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+      openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
     });
     s.sessions.set(TOPIC_CHAT, {
       ...s.sessions.get(TOPIC_CHAT),

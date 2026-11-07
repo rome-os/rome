@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import { ClaudeAccount } from "./account.js";
 
 const usage = (usedPercent: number) => ({
@@ -19,10 +20,12 @@ describe("ClaudeAccount", () => {
   });
 
   it("reports the CLI's login as a subscription, with the refused turns it saw", async () => {
+    let now = Date.parse("2026-11-07T00:00:00.000Z");
     const account = new ClaudeAccount({
       env: {},
       readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
       readUsage: async () => usage(10),
+      now: () => now,
     });
     const changed = rs.fn();
     account.onChanged(changed);
@@ -41,9 +44,20 @@ describe("ClaudeAccount", () => {
     account.refusedTurn({ kind: "usage" });
     await expect(account.status()).resolves.toMatchObject({ usageLimitUntil: null });
 
-    // A usage read that shows capacity ends the refusal.
+    // The usage read the refusal itself triggers describes the account before
+    // the refused turn, so it cannot end the refusal. One after the hold does.
+    await account.usage();
+    await expect(account.status()).resolves.toMatchObject({ usageLimitUntil: null });
+    now += USAGE_REFUSAL_HOLD_MS;
     await account.usage();
     await expect(account.status()).resolves.not.toHaveProperty("usageLimitUntil");
+  });
+
+  it("reads no usage for an account the provider bills per use", async () => {
+    const readUsage = rs.fn(async () => usage(10));
+    const account = new ClaudeAccount({ env: { ANTHROPIC_API_KEY: "sk" }, readUsage });
+    await expect(account.usage()).resolves.toBeNull();
+    expect(readUsage).not.toHaveBeenCalled();
   });
 
   it("keeps a refused turn through a usage read that shows no capacity", async () => {
@@ -51,6 +65,7 @@ describe("ClaudeAccount", () => {
       env: {},
       readCliStatus: async () => ({ loggedIn: true }),
       readUsage: async () => usage(100),
+      now: () => Date.now() - USAGE_REFUSAL_HOLD_MS,
     });
     account.refusedTurn({ kind: "usage" });
     await account.usage();

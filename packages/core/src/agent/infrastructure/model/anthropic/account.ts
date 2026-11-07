@@ -22,7 +22,12 @@ import type {
   ModelAccountUsage,
 } from "../../../domain/model-account.js";
 import { usageShowsCapacity } from "../../../domain/provider-availability.js";
-import type { LearnsRefusedTurns, RefusedTurn } from "../refused-turn.js";
+import {
+  type LearnsRefusedTurns,
+  type RefusedTurn,
+  type UsageRefusal,
+  usageReadClearsRefusal,
+} from "../refused-turn.js";
 
 const log = createLogger("claude-account");
 
@@ -35,6 +40,7 @@ export interface ClaudeAccountOptions {
   readCliStatus?: () => Promise<ModelAccountStatus>;
   readUsage?: () => Promise<ModelAccountUsage | null>;
   logout?: () => Promise<void>;
+  now?: () => number;
 }
 
 function runClaude(args: string[]): Promise<string> {
@@ -80,8 +86,8 @@ async function logoutClaude(): Promise<void> {
 export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
   private readonly options: ClaudeAccountOptions;
   private readonly listeners = new Set<() => void>();
-  /** The provider's stated end of a refused turn, null for none stated, undefined when not refused. */
-  private usageLimitUntil: string | null | undefined;
+  /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
+  private refusal: UsageRefusal | undefined;
 
   constructor(options: ClaudeAccountOptions = {}) {
     this.options = options;
@@ -93,10 +99,15 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
     return {
       ...base,
       usageLimited,
-      ...(usageLimited && this.usageLimitUntil !== undefined
-        ? { usageLimitUntil: this.usageLimitUntil }
-        : {}),
+      ...(usageLimited && this.refusal ? { usageLimitUntil: this.refusal.until } : {}),
     };
+  }
+
+  /** Stored Anthropic-compatible credentials or an environment credential: the provider bills per use. */
+  private async billedPerUse(): Promise<boolean> {
+    const env = this.options.env ?? process.env;
+    if (await getStoredAnthropicCompatibleCredentials(this.options.settingsRepo)) return true;
+    return Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN);
   }
 
   private async readStatus(): Promise<ModelAccountStatus> {
@@ -119,20 +130,34 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
   }
 
   async usage(): Promise<ModelAccountUsage | null> {
+    // An account billed per use has no usage windows. The OAuth endpoint
+    // would answer for a subscription login that may still be on disk, which
+    // is not this account's usage.
+    if (await this.billedPerUse()) return null;
+    const readAt = (this.options.now ?? Date.now)();
     // Claude keeps no local usage files, so the OAuth endpoint is the one source.
     const usage = await (this.options.readUsage ?? readClaudeOAuthUsage)();
-    if (usage && usageShowsCapacity(usage)) this.usageLimitUntil = undefined;
+    if (
+      usage &&
+      usageShowsCapacity(usage) &&
+      this.refusal &&
+      usageReadClearsRefusal(this.refusal, readAt)
+    ) {
+      this.refusal = undefined;
+    }
     return usage;
   }
 
   async revoke(): Promise<void> {
     await (this.options.logout ?? logoutClaude)();
-    this.usageLimitUntil = undefined;
+    this.refusal = undefined;
     this.emitChanged();
   }
 
   refusedTurn(refusal: RefusedTurn): void {
-    if (refusal.kind === "usage") this.usageLimitUntil = refusal.until ?? null;
+    if (refusal.kind === "usage") {
+      this.refusal = { until: refusal.until ?? null, refusedAt: (this.options.now ?? Date.now)() };
+    }
     this.emitChanged();
   }
 

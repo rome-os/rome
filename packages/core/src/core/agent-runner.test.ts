@@ -96,7 +96,7 @@ import {
   availabilityOf,
   bothAvailable,
   fakeAvailability,
-  TERRA_ONLY_PLAN,
+  RESTRICTED_PLAN,
 } from "../test/kit/model-availability.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
@@ -5103,7 +5103,7 @@ describe("AgentRunner", () => {
       });
       await collectMessages(session.sendTurn({ prompt: "Sol" }).events);
 
-      state.openai = availabilityOf("available", TERRA_ONLY_PLAN);
+      state.openai = availabilityOf("available", RESTRICTED_PLAN);
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
@@ -5207,7 +5207,7 @@ describe("AgentRunner", () => {
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
-        openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
         anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
@@ -5329,7 +5329,7 @@ describe("AgentRunner", () => {
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
-      state.openai = availabilityOf("available", TERRA_ONLY_PLAN);
+      state.openai = availabilityOf("available", RESTRICTED_PLAN);
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
       expect(second.find((message) => message.type === "error")).toMatchObject({
         code: "model_unavailable",
@@ -5390,7 +5390,7 @@ describe("AgentRunner", () => {
 
     it("a new session of another agent on the same thread resolves its own tier (no pin inheritance)", async () => {
       const state = {
-        openai: availabilityOf("available", TERRA_ONLY_PLAN),
+        openai: availabilityOf("available", RESTRICTED_PLAN),
         anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
@@ -5429,7 +5429,7 @@ describe("AgentRunner", () => {
 
     it("a resumed session runs on its pin even when tier resolution would pick another model", async () => {
       const state = {
-        openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
         anthropic: availabilityOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
@@ -5511,7 +5511,7 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session becomes usable again through an explicit selection", async () => {
       const state = {
-        openai: availabilityOf("available", { ...TERRA_ONLY_PLAN }),
+        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
         anthropic: availabilityOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];

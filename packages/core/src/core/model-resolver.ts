@@ -130,9 +130,18 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   small: "claude-haiku-5-5",
 };
 
-/** The Codex model for a tier, within what the account's plan allows. An unread account allows any. */
-function codexModel(tier: ModelTier, codex: ProviderAvailability | undefined): string {
-  const allows = (model: string): boolean => !codex || accountAllowsModel(codex.account, model);
+/**
+ * The Codex model for a tier, within what the account's plan allows, or the
+ * models the Rome credits gateway serves while credits pay. An unread account
+ * allows any.
+ */
+function codexModel(
+  tier: ModelTier,
+  codex: ProviderAvailability | undefined,
+  served: ReadonlySet<string> | null,
+): string {
+  const allows = (model: string): boolean =>
+    served ? served.has(model) : !codex || accountAllowsModel(codex.account, model);
   if (tier === "small") return allows(CODEX_LUNA_MODEL) ? CODEX_LUNA_MODEL : CODEX_TERRA_MODEL;
   return allows(CODEX_SOL_MODEL) ? CODEX_SOL_MODEL : CODEX_TERRA_MODEL;
 }
@@ -255,17 +264,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
    */
   const resolutionState = (state = options.availability.read()): ModelAvailabilityState => {
     if (!usingRomeCredits()) return state;
-    const served = creditsServedModels();
     return {
       ...state,
-      openai: {
-        state: "available",
-        account: {
-          loggedIn: true,
-          usageLimited: false,
-          ...(served ? { models: [...served] } : {}),
-        },
-      },
+      openai: { state: "available", account: { loggedIn: true, usageLimited: false } },
     };
   };
 
@@ -329,7 +330,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const model =
           configured ??
           (provider.id === "openai"
-            ? codexModel(request.tier, providerState.openai)
+            ? codexModel(request.tier, providerState.openai, served)
             : provider.id === "anthropic"
               ? CLAUDE_TIER_TO_MODEL[request.tier]
               : TEST_TIER_TO_MODEL[request.tier]);
@@ -367,7 +368,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const creditsServeTier =
         !creditsServed ||
         configuredTierModel(tierModelMappings, "openai", request.tier) !== null ||
-        creditsServed.has(codexModel(request.tier, state.openai));
+        creditsServed.has(codexModel(request.tier, state.openai, creditsServed));
       if (codex && creditsPay && creditsServeTier) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }

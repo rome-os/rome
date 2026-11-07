@@ -32,7 +32,7 @@ import { testChannelSurface } from "../test/channel-surface.js";
 import {
   availabilityOf,
   fakeAvailability,
-  TERRA_ONLY_PLAN,
+  RESTRICTED_PLAN,
 } from "../test/kit/model-availability.js";
 
 const AGENT = "pinned_agent";
@@ -176,7 +176,7 @@ describe("agent model pins through AgentSessionManager", () => {
   it("pins a credit-funded session to the model ChatGPT would run", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
     state.openai = availabilityOf("unauthorized");
-    state.openai = availabilityOf("available", TERRA_ONLY_PLAN);
+    state.openai = availabilityOf("available", RESTRICTED_PLAN);
     state.anthropic = availabilityOf("unauthorized");
     let usingRomeCredits = true;
     const session = await createManager(false, () => usingRomeCredits).acquire(key, {
@@ -207,7 +207,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
     state.openai = availabilityOf("unauthorized");
     // luna access follows the plan
-    state.openai = availabilityOf("available", TERRA_ONLY_PLAN);
+    state.openai = availabilityOf("available", RESTRICTED_PLAN);
     const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "credits" }).events);
 
@@ -315,7 +315,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("enforces known model entitlements instead of substituting a tier model", async () => {
     await writeConfig({ modelId: "gpt-6-astra" });
-    state.openai = availabilityOf("available", TERRA_ONLY_PLAN);
+    state.openai = availabilityOf("available", RESTRICTED_PLAN);
     await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",

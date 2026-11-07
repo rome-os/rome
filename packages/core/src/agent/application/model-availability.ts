@@ -62,6 +62,8 @@ export function createModelAvailability(
   const loggedAtLimit = new Map<ProviderId, boolean>();
   // One read per provider at a time. A refresh asked during one joins it.
   const inFlight = new Map<ProviderId, Promise<void>>();
+  // Providers whose account changed during a read: read again when it settles.
+  const rereadAfter = new Set<ProviderId>();
   let closed = false;
 
   const emit = (provider: ProviderId, change: ModelAvailabilityChange): void => {
@@ -144,6 +146,25 @@ export function createModelAvailability(
     return pending;
   };
 
+  /**
+   * The account says it changed. A read already in flight may have asked the
+   * account before the change, so its answer cannot be trusted to carry it:
+   * read once more when it settles.
+   */
+  const readChangedAccount = (provider: ProviderId, account: ModelAccount): void => {
+    const existing = inFlight.get(provider);
+    if (!existing) {
+      void refreshProvider(provider, account);
+      return;
+    }
+    if (rereadAfter.has(provider)) return;
+    rereadAfter.add(provider);
+    void existing.finally(() => {
+      rereadAfter.delete(provider);
+      if (!closed) void refreshProvider(provider, account);
+    });
+  };
+
   const refresh = async (provider?: ProviderId): Promise<void> => {
     const targets = provider ? accounts.filter(([id]) => id === provider) : accounts;
     await Promise.all(targets.map(([id, account]) => refreshProvider(id, account)));
@@ -151,7 +172,7 @@ export function createModelAvailability(
 
   const unsubscribers = accounts.map(([provider, account]) =>
     account.onChanged(() => {
-      void refreshProvider(provider, account);
+      readChangedAccount(provider, account);
     }),
   );
 
