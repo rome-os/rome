@@ -1,4 +1,4 @@
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -2215,6 +2215,9 @@ describe("AgentRunner", () => {
       modelResolver,
       actionEngine,
       webchatRepo: new ChatsWebChatRepository(testDb.db),
+      sessionSettings: new ChatSessionSettings({
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
+      }),
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
@@ -2249,7 +2252,12 @@ describe("AgentRunner", () => {
       {
         ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.resetPolicy
-          ? { resolveProviderSessionReset: async () => options.resetPolicy! }
+          ? {
+              sessionSettings: new ChatSessionSettings({
+                resetPolicy: async () => options.resetPolicy!,
+                webchatRepo: new ChatsWebChatRepository(testDb.db),
+              }),
+            }
           : {}),
         ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
       },

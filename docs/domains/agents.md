@@ -16,6 +16,7 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 What an agent declares about itself in its file, in core or in an app. The fields are in [`concepts/agents.md`](../concepts/agents.md). Rome reads a definition and never stores or edits it. A session keeps the definition it opened with, which is why an agent's [policy](#agent-policy) is the same for every session of it.
 
 - In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). `AgentLoader` reads the files when apps change and fills the `AgentCatalog` port.
+- One trait comes from Rome, not the file: whether a chat's saved model outranks the session's [model pin](../concepts/sessions.md#model-pin) on a cold resume (`savedSelectionOutranksPin`). Rome sets it for the Concierge, whose [provider failover](../adrs/concierge-provider-failover.md) must reach its background turns, and the rule that reads it is `restoresSavedSelection`.
 
 ## Agent policy
 

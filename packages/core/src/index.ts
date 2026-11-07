@@ -154,6 +154,7 @@ import {
   AppTurnHooks,
   readAnswerShape,
   TurnUsageReporter,
+  ChatSessionSettings,
   requireAgent,
   TurnListeners,
 } from "./agent/index.js";
@@ -1123,8 +1124,10 @@ async function main() {
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
-      resolveProviderSessionReset: async (ref) =>
-        (await chatSettings.get(ref)).effective.session.reset,
+      sessionSettings: new ChatSessionSettings({
+        resetPolicy: async (ref) => (await chatSettings.get(ref)).effective.session.reset,
+        webchatRepo,
+      }),
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
       channelSurface: (channel) => {

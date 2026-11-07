@@ -214,6 +214,31 @@ describe("AgentLoader", () => {
       }
     });
 
+    it("lets only the Concierge's saved model outrank its session's pinned one", async () => {
+      const root = await mkdtemp(join(tmpdir(), "rome-concierge-"));
+      const agentYaml = (name: string) =>
+        [
+          `name: ${name}`,
+          "description: Fixture.",
+          "tier: small",
+          "permissionMode: bypassPermissions",
+          "tools: []",
+          "systemPromptPrefix: Test agent.",
+          "",
+        ].join("\n");
+      await writeFile(join(root, "concierge.yaml"), agentYaml("concierge"), "utf-8");
+      await writeFile(join(root, "main.yaml"), agentYaml("main"), "utf-8");
+
+      try {
+        await loader.loadAll(root);
+        const agents = byId(loader);
+        expect(agents.get("core:concierge")!.definition.savedSelectionOutranksPin).toBe(true);
+        expect(agents.get("core:main")!.definition.savedSelectionOutranksPin).toBeUndefined();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     it("drops an app agent that references a subagent not in the catalog", async () => {
       const root = await mkdtemp(join(tmpdir(), "rome-app-subagents-"));
       const agentPath = join(root, "scout.yaml");
