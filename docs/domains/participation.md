@@ -8,6 +8,7 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 
 - A session is in a chat when it has a speaker there. The session keeps its own id. No table holds speakers and nothing names one by an id of its own.
 - A speaker points at one [session](agents.md#session), found by the continuity key Participation derives from the speaker's place and account. A speaker with no session yet gets one the first time its account hears a message in the place or speaks there.
+- Switching the agent on an account starts a new session for its speakers. The new agent reads the same chat history (Ouou, 2026-11-07).
 - A session no speaker points at has no place to reply into. A reply from it is refused, never placed in a chat for it.
 
 ## Wake

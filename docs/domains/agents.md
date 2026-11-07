@@ -15,12 +15,13 @@ One agent's run of work: its turns, in order (Ouou, 2026-11-04). A session is no
 
 - A session is known by Rome's own id. It has one agent for its whole life.
 - A session may have a [continuity key](#continuity-key), and may have a parent turn: a turn of another session it was started from with a fresh context, or branched from with that turn's context. A subagent is the first, a fork the second.
+- A session does not record whose it is, or who opened it.
 - A session knows no chat. Whether one stands in a chat is Participation's fact: a [speaker](participation.md#speaker) points at it or none does.
 - Deleting a chat changes nothing in a session.
 
 ## Continuity key
 
-What the opener of a session, such as a chat, an app or Concierge, mints so that it finds its current session again after a reset, such as New Chat (Ouou, 2026-11-06).
+How whoever opens a session, such as a chat, an app or Concierge, says that an input goes to that session. The opener mints it, and finds its current session again by it after a reset, such as New Chat (Ouou, 2026-11-06).
 
 - It is opaque. Sessions never reads anything into it.
 - A speaker's continuity key is derived by Participation from its place and its account.
@@ -39,4 +40,5 @@ One prompt to the agent and the work that follows, until the agent answers or st
 - **A session as a kind of chat.** A subagent's task, a routine's instructions and a fork's question were never said in any place, by any account. A chat for them would record things no participant said or saw (Ouou, 2026-11-04).
 - **Turns and traces kept by Chats.** A chat holds what participants said. A turn and its trace are what one agent did (Ouou, 2026-11-05).
 - **Kinds of session, such as chat session, subagent, fork and action run, each with its own rules.** Every kind added cases to the rules for prompts, answers and lifetime. One session with an optional parent turn and an optional continuity key covers them all (Ouou, 2026-11-07).
+- **A session recording whose it is.** That is not a session's job (Ouou, 2026-11-07).
 - **A starter, naming what opened a session in no chat.** It follows from the continuity key or the parent turn, and a subagent's answer going back is the parent turn's own tool call.

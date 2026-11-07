@@ -108,4 +108,5 @@ Diffs still owed to the model, each a change of its own:
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
 - A session knows no chat, and a speaker points at its session. Today the session row carries its chat.
 - Every turn keeps its own prompt and answer, with a link to the message when one is from a chat. Today a turn in a chat keeps only the link.
+- Open, not decided: whether a side chat, a fork the guardian keeps talking in, is a chat. Today promoting one moves its prompts and answers into Chats.
 - A dashboard chat gets its own id when it opens. Today it takes the id of its session, which cannot hold once the chat exists before its session.
