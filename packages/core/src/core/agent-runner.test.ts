@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
@@ -2218,6 +2219,7 @@ describe("AgentRunner", () => {
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
+      readAnswerShape,
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({

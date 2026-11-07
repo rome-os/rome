@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -129,6 +130,7 @@ describe("agent model pins through AgentSessionManager", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle,
+        readAnswerShape,
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },

@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
@@ -109,6 +110,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     capabilityDiscovery: new CapabilityDiscovery(),
     skillCatalog: new SkillLoader(artifactIdentity),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
     channelSurface: testChannelSurface,
   });
   const runner = new AgentRunner(manager, agentLoader);

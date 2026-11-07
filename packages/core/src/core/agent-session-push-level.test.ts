@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -92,6 +93,7 @@ describe("AgentSession turn push level", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
         channelSurface: testChannelSurface,
         sessionTools: async (context) => {
           tools = context;

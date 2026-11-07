@@ -18,6 +18,9 @@ import {
   type AgentDefinition,
   type TurnEnding,
   type TurnLifecycle,
+  shapedResult,
+  type AnswerShape,
+  type ReadAnswerShape,
 } from "../agent/index.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
@@ -130,11 +133,6 @@ import type {
   SubagentExecution,
   SubagentExecutionService,
 } from "./subagent-execution.js";
-import {
-  compileOutputSchema,
-  formatOutputSchemaErrors,
-  type CompiledOutputSchema,
-} from "../apps/packaging/output-schema-validator.js";
 import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
 import {
   buildRequiredTiming,
@@ -399,6 +397,8 @@ interface ManagerDeps {
   capabilityDiscovery: CapabilityDiscovery;
   skillCatalog: SkillCatalog;
   turnLifecycle: TurnLifecycle;
+  /** Reads the answer shape an agent declares in its `outputSchema`. */
+  readAnswerShape: ReadAnswerShape;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
   /** Each session's links to what was said where it stands, which a wake's
@@ -1026,10 +1026,10 @@ async function openSession(
     warnOnConversationMismatch(key, sessionId, session.deprecatedChatId, requestedRomeSessionId);
   }
 
-  let structuredOutputValidator: CompiledOutputSchema | undefined;
+  let structuredOutputValidator: AnswerShape | undefined;
   if (config.outputSchema) {
     try {
-      structuredOutputValidator = compileOutputSchema(config.outputSchema);
+      structuredOutputValidator = deps.readAnswerShape(config.outputSchema);
     } catch (err) {
       throw new Error(
         `Agent ${key.agentName} declares an invalid outputSchema: ${
@@ -1664,7 +1664,7 @@ interface ImplArgs {
   modelProvider?: ModelProvider;
   deps: ManagerDeps;
   config: AgentDefinition;
-  structuredOutputValidator?: CompiledOutputSchema;
+  structuredOutputValidator?: AnswerShape;
   systemPrompt: string;
   workingDir: string;
   /** Builds the open params for a forked turn's session (mode-aware). */
@@ -1808,44 +1808,11 @@ function splitProviderFacts(event: Exclude<ModelSessionEvent, ModelTurnStartedEv
 
 function validateProviderStructuredResult(
   message: AgentEvent,
-  compiled: CompiledOutputSchema | undefined,
+  shape: AnswerShape | undefined,
   suspended = false,
 ): AgentEvent {
-  if (!compiled || message.type !== "result") return message;
-  if (suspended) {
-    return {
-      type: "error",
-      error: "Agent cannot suspend a turn while outputSchema is configured",
-      accounting: message.accounting,
-    };
-  }
-  if (!Object.prototype.hasOwnProperty.call(message, "structuredOutput")) {
-    return {
-      type: "error",
-      error: "Provider completed without structured output for the declared outputSchema",
-      accounting: message.accounting,
-    };
-  }
-  if (!compiled.validate(message.structuredOutput)) {
-    return {
-      type: "error",
-      error: `Provider returned structured output that failed Rome validation: ${formatOutputSchemaErrors(
-        compiled.validate.errors,
-      ).join("; ")}`,
-      accounting: message.accounting,
-    };
-  }
-  try {
-    return { ...message, content: JSON.stringify(message.structuredOutput) };
-  } catch (err) {
-    return {
-      type: "error",
-      error: `Provider returned non-serializable structured output: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-      accounting: message.accounting,
-    };
-  }
+  if (!shape || message.type !== "result") return message;
+  return shapedResult(message, shape, suspended);
 }
 
 /**
@@ -1913,7 +1880,7 @@ class AgentSessionImpl implements AgentSession {
   private lastPosition?: ModelPosition;
   private deps: ManagerDeps;
   private config: AgentDefinition;
-  private structuredOutputValidator?: CompiledOutputSchema;
+  private structuredOutputValidator?: AnswerShape;
   private systemPrompt: string;
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;

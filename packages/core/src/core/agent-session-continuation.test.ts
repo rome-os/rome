@@ -1,3 +1,4 @@
+import { readAnswerShape } from "../agent/index.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { randomUUID } from "node:crypto";
@@ -158,6 +159,7 @@ describe("continuation notice through AgentSessionManager", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
