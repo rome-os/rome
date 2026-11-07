@@ -59,3 +59,23 @@ import UIKit
         #expect(page[0] > rgb(Palette.bg, dark: true)[0] && page[0] < rgb(Palette.bubble, dark: true)[0])
     }
 }
+
+@Suite struct BackToBottomTests {
+    let height: CGFloat = 600
+
+    @Test func showsPastTwoScreens() {
+        #expect(!BackToBottom.shows(false, distance: 1100, height: height))
+        #expect(BackToBottom.shows(false, distance: 1201, height: height))
+    }
+
+    @Test func hidesOnlyWellInsideTheLine() {
+        // Between 1.7 and 2 screens it keeps what it was: no flicker.
+        #expect(BackToBottom.shows(true, distance: 1100, height: height))
+        #expect(!BackToBottom.shows(false, distance: 1100, height: height))
+        #expect(!BackToBottom.shows(true, distance: 1000, height: height))
+    }
+
+    @Test func nothingBeforeTheListIsMeasured() {
+        #expect(!BackToBottom.shows(false, distance: 5000, height: 0))
+    }
+}

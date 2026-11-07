@@ -396,6 +396,7 @@ final class DemoBackend: RomeBackend {
         topicChats = [
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
             ConciergeChat(id: "topic-home", name: "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排", main: false, unread: 0),
+            ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
@@ -431,6 +432,14 @@ final class DemoBackend: RomeBackend {
             UIColor(red: 0.95, green: 0.88, blue: 0.7, alpha: 1).setFill()
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
+        // A long chat, to scroll far from the bottom.
+        messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
+            let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
+            return [
+                user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"),
+                agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"),
+            ]
+        }
         messages["topic-trip"] = [
             user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
             agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
