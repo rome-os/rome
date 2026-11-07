@@ -225,10 +225,16 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
     // LinkedIn can keep markup for another relationship in the header without showing it, so
     // only rendered badges count. Visually hidden accessibility text is still rendered.
     const shown = (el) => visible(el) && getComputedStyle(el).visibility !== "hidden";
+    // A rendered wrapper's textContent still holds its hidden descendants, so read rendered text.
+    const renderedText = (el) =>
+      Array.from(el.childNodes, (node) => {
+        if (node.nodeType === Node.TEXT_NODE) return node.data;
+        return node.nodeType === Node.ELEMENT_NODE && shown(node) ? renderedText(node) : "";
+      }).join("");
     const degrees = new Set();
     for (const el of header ? [header, ...header.querySelectorAll("*")] : []) {
       if (!owned(el) || !shown(el)) continue;
-      const value = clean(el.textContent);
+      const value = clean(renderedText(el));
       const badge =
         (value.length <= 80 &&
           value.match(/(?:^|[•·])\s*(1st|2nd|3rd\+?)(?:[\s-]degree(?:\s+connection)?)?$/i)) ||
