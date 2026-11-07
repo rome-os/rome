@@ -7,6 +7,8 @@ import SwiftUI
 struct Mascot: View {
     /// Blinks, glances and nods while something loads.
     var alive = false
+    /// Still, but blinks now and then (the sign-in page).
+    var blinks = false
 
     /// The paths' own size; the launch image uses it too.
     static let viewBox = CGSize(width: 51, height: 47.53)
@@ -20,12 +22,13 @@ struct Mascot: View {
         #if DEBUG
         if SnapshotRunner.directory != nil { return false }
         #endif
-        return alive && !reduceMotion
+        return (alive || blinks) && !reduceMotion
     }
 
     var body: some View {
         TimelineView(.animation(paused: !moves)) { context in
-            let pose = moves ? MascotPose(time: context.date.timeIntervalSinceReferenceDate) : .rest
+            let time = context.date.timeIntervalSinceReferenceDate
+            let pose = !moves ? .rest : alive ? MascotPose(time: time) : MascotPose.blinkOnly(time: time)
             figure(pose)
         }
         .aspectRatio(Self.viewBox, contentMode: .fit)
@@ -85,6 +88,14 @@ struct MascotPose: Equatable {
         glance = 1.6 * sin(2 * .pi * time / 6.5)
         nod = 0.9 * sin(2 * .pi * time / 2.4)
         tilt = 1.4 * sin(2 * .pi * time / 2.4 + 0.6)
+    }
+
+    /// Only the blink, a little less often: still, but not lifeless.
+    static func blinkOnly(time: TimeInterval) -> MascotPose {
+        let blinkEvery = 4.5, blinkLength = 0.18
+        let intoBlink = time.truncatingRemainder(dividingBy: blinkEvery)
+        guard intoBlink < blinkLength else { return .rest }
+        return MascotPose(eyeScale: 1 - 0.92 * sin(.pi * intoBlink / blinkLength))
     }
 
     init(eyeScale: CGFloat = 1, glance: CGFloat = 0, nod: CGFloat = 0, tilt: Double = 0) {

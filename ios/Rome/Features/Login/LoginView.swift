@@ -8,19 +8,24 @@ struct LoginView: View {
     @State private var showDebugMenu = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            center
-                .padding(.horizontal, 32)
-                .padding(.bottom, 40)
-            Spacer(minLength: 0)
+        ZStack {
+            Palette.bg
+            // Where the launch and opening screens draw it, so the logo never moves.
+            Mascot(blinks: true)
+                .frame(width: Mascot.width)
+                .overlay(alignment: .top) {
+                    center
+                        .frame(width: 320)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+                }
+        }
+        .ignoresSafeArea()
+        .overlay(alignment: .bottom) {
             bottom
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
-                .frame(minHeight: 120, alignment: .bottom)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.bg.ignoresSafeArea())
         .animation(.spring(response: 0.4, dampingFraction: 0.9), value: model.phase)
         .animation(.easeOut(duration: 0.2), value: model.signInError)
         #if DEBUG
@@ -34,38 +39,30 @@ struct LoginView: View {
     private var center: some View {
         switch model.phase {
         case .stopped, .noInstance:
-            VStack(spacing: 16) {
-                Image(systemName: "power")
-                    .romeFont(22, .medium)
-                    .frame(width: 56, height: 56)
-                    .background(Palette.fill, in: Circle())
-                VStack(spacing: 6) {
-                    Text(model.phase == .noInstance ? "No Rome to open yet" : "Your Rome is stopped")
-                        .romeFont(20, .semibold)
-                    Text(model.phase == .noInstance ? "Create one in Rome Cloud, then open it here." : "Start it in Rome Cloud, then open it here.")
-                        .romeFont(15)
-                        .foregroundStyle(Palette.sub)
-                }
-                .multilineTextAlignment(.center)
+            VStack(spacing: 6) {
+                Text(model.phase == .noInstance ? "No Rome to open yet" : "Your Rome is stopped")
+                    .romeFont(20, .semibold)
+                Text(model.phase == .noInstance ? "Create one in Rome Cloud, then open it here." : "Start it in Rome Cloud, then open it here.")
+                    .romeFont(15)
+                    .foregroundStyle(Palette.sub)
             }
-            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
             .transition(.opacity)
         default:
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Rome")
-                    .romeFont(64, .semibold)
-                    .tracking(-2.2)
+            VStack(spacing: 6) {
+                Text(verbatim: "Rome")
+                    .romeFont(22, .medium)
+                    .tracking(-0.4)
                     .onLongPressGesture(minimumDuration: 1.2) {
                         #if DEBUG
                         showDebugMenu = true
                         #endif
                     }
                 Text("Sign in to open your Rome")
-                    .romeFont(20)
-                    .tracking(-0.3)
+                    .romeFont(15)
                     .foregroundStyle(Palette.sub)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .multilineTextAlignment(.center)
             .transition(.opacity)
         }
     }
