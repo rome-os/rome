@@ -55,6 +55,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func me() async throws -> String?
     /// Whether this session is the instance's guardian, not a visitor.
     func isGuardian() async -> Bool
+    /// The instance's apps, every origin; `AppLinks.mine` picks the guardian's.
+    func apps() async throws -> [InstalledApp]
+    /// The session cookie for a web view on the instance; nil without one.
+    func webSessionCookie() -> HTTPCookie?
     /// The language the server writes in for the guardian: "en" or "zh-CN".
     func setGuardianLanguage(_ code: String) async throws
     func sendFeedback(_ text: String) async throws
@@ -194,6 +198,13 @@ final class LiveBackend: RomeBackend {
         try await client.put("/settings", json: .object(["guardianLanguage": .string(code)]))
     }
 
+    func apps() async throws -> [InstalledApp] {
+        let list: AppList = try await client.get("/apps")
+        return list.apps
+    }
+
+    func webSessionCookie() -> HTTPCookie? { client.sessionCookie() }
+
     func sendFeedback(_ text: String) async throws {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         try await client.post("/feedback", json: .object([
@@ -268,4 +279,6 @@ extension RomeBackend {
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }
     func setGuardianLanguage(_ code: String) async throws {}
+    func apps() async throws -> [InstalledApp] { [] }
+    func webSessionCookie() -> HTTPCookie? { nil }
 }

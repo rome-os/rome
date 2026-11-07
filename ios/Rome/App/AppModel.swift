@@ -65,6 +65,8 @@ final class Workspace {
     /// The guardian's own main chat on the server; the app reads it as
     /// `conciergeChatID`, the dashboard by this id.
     private(set) var mainChatServerID: String?
+    /// The instance's guardian, not a visitor: Apps shows for the guardian only.
+    private(set) var isGuardian = false
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
     /// Goes up when Chat must show its newest rows: a tapped push.
@@ -168,6 +170,7 @@ final class Workspace {
         tasks.start()
         topics.start()
         Task { if let name = try? await backend.me(), !name.isEmpty { accountLabel = name } }
+        Task { isGuardian = await backend.isGuardian() }
         await openConcierge()
     }
 

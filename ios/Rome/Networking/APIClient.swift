@@ -164,6 +164,20 @@ final class APIClient: Sendable {
         }
     }
 
+    /// The session as a cookie for a web view: scoped to this origin's host
+    /// and path `/`, secure on https, so no other site ever receives it.
+    func sessionCookie() -> HTTPCookie? {
+        guard let token = token(), let host = origin.host() else { return nil }
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .domain: host,
+            .path: "/",
+            .name: "rome_session",
+            .value: token,
+        ]
+        if origin.scheme == "https" { properties[.secure] = "TRUE" }
+        return HTTPCookie(properties: properties)
+    }
+
     /// A request carrying the session cookie, for the live-events socket.
     func socketRequest(_ path: String) -> URLRequest {
         var components = URLComponents(url: origin.appending(path: path), resolvingAgainstBaseURL: false)!

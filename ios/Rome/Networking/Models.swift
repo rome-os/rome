@@ -222,6 +222,30 @@ struct AIToolsStatus: Codable, Sendable {
     var codex: Provider?
 }
 
+// MARK: - Apps
+
+/// One app on the instance, as `GET /api/apps` lists it. Every field but the
+/// id is read as optional, so an older server keeps decoding.
+struct InstalledApp: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    var displayName: String?
+    var description: String?
+    /// `/api/apps/<id>/icon` when the app has one.
+    var iconUrl: String?
+    /// `/full/apps/<id>`, set only when the app is running and has a page.
+    var fullHref: String?
+    /// `local` (made here), `appstore` (installed) or `builtin` (ships with Rome).
+    var origin: String?
+    var hideInLauncher: Bool?
+    var status: String?
+
+    var name: String { displayName ?? id }
+}
+
+struct AppList: Codable, Sendable {
+    var apps: [InstalledApp]
+}
+
 // MARK: - Trace
 
 /// `GET /chat/messages/:id/content`: a turn's trace, used to list its tool calls.

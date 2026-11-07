@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Board 2: search, Chat, the topic chats, and the account row.
+/// Board 2: search, Chat, Apps (for the guardian), the topic chats, and the account row.
 struct DrawerView: View {
     let workspace: Workspace
     let section: MainSection
@@ -27,6 +27,12 @@ struct DrawerView: View {
             VStack(spacing: 2) {
                 DrawerItem(title: "Chat", selected: section == .chat, action: { onSection(.chat) }) {
                     Image(systemName: "bubble.left")
+                }
+                // The apps are the guardian's: a visitor does not see them.
+                if workspace.isGuardian {
+                    DrawerItem(title: "Apps", selected: section == .apps, action: { onSection(.apps) }) {
+                        Image(systemName: "square.grid.2x2")
+                    }
                 }
             }
             .padding(.top, 22)

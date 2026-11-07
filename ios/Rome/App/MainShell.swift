@@ -3,6 +3,8 @@ import SwiftUI
 /// Screens pushed on the main stack.
 enum Route: Hashable {
     case taskChat(chatId: String, title: String)
+    /// An app of the instance, full screen.
+    case app(InstalledApp)
 }
 
 /// The pages the drawer switches between. Each is the root of the main stack,
@@ -10,6 +12,8 @@ enum Route: Hashable {
 enum MainSection: Hashable {
     case chat
     case search
+    /// The guardian's apps.
+    case apps
     /// A Concierge topic chat.
     case topic(String)
     /// A blank topic chat, which creates its chat on the first send.
@@ -221,6 +225,9 @@ struct MainShell: View {
         case .taskChat(let chatId, let title):
             TaskChatScreen(workspace: workspace, chatId: chatId, initialTitle: title)
                 .id(chatId)
+        case .app(let app):
+            AppWebScreen(workspace: workspace, app: app)
+                .id(app.id)
         }
     }
 
@@ -249,6 +256,14 @@ struct MainShell: View {
             case .newTopic(let key):
                 topicScreen(chatId: nil, key: key, draftKey: DraftStore.blankChat(key))
                     .id(key.uuidString)
+            case .apps:
+                AppsScreen(workspace: workspace, onMenu: { openDrawer() }, onOpen: { app in
+                    path.append(.app(app))
+                }, onAsk: { prompt in
+                    // As a starter does: the main Chat, with the message sent.
+                    show(.chat)
+                    workspace.concierge.send(prompt)
+                })
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
                     if hit.session.id == conciergeChatID {

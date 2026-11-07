@@ -109,7 +109,14 @@ enum SnapshotRunner {
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))
+            await capture("37-apps", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
+            await capture("39-app-open", style: styleName, in: directory, wait: 2.5) {
+                model.debugCommand = .route([.app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))])
+            }
+            model.debugCommand = .route([])
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("16-chat-empty", style: styleName, in: directory, wait: 2) { model.openDemo(.empty) }
+            await capture("38-apps-empty", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
             await capture("17-chat-off", style: styleName, in: directory, wait: 2) { model.openDemo(.conciergeOff) }
             await capture("18-tasks-empty", style: styleName, in: directory, wait: 1.6) {
                 model.openDemo(.empty)

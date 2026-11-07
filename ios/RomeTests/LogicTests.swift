@@ -284,3 +284,63 @@ final class StubBackend: RomeBackend {
         #expect(writes.isEmpty)
     }
 }
+
+@Suite struct AppLinksTests {
+    private let origin = URL(string: "https://me.romeos.cc")!
+
+    /// Only what the guardian made or installed: as the web splits them.
+    @Test func leavesOutBuiltinAndHiddenApps() {
+        let apps = [
+            InstalledApp(id: "habits", origin: "local"),
+            InstalledApp(id: "packing", origin: "appstore"),
+            InstalledApp(id: "browser-automation", origin: "builtin"),
+            InstalledApp(id: "quiet", origin: "local", hideInLauncher: true),
+            InstalledApp(id: "user-skills", origin: "local"),
+            InstalledApp(id: "unknown"),
+        ]
+        #expect(AppLinks.mine(apps).map(\.id) == ["habits", "packing"])
+    }
+
+    @Test func buildsTheFullScreenURL() {
+        #expect(AppLinks.fullURL(origin: origin, app: InstalledApp(id: "habits", fullHref: "/full/apps/habits"))?.absoluteString == "https://me.romeos.cc/full/apps/habits")
+        // Without a href, built as the server builds it.
+        #expect(AppLinks.fullURL(origin: origin, app: InstalledApp(id: "my app"))?.absoluteString == "https://me.romeos.cc/full/apps/my%20app")
+        // A href that is not a path never sends the view elsewhere.
+        #expect(AppLinks.fullURL(origin: origin, app: InstalledApp(id: "x", fullHref: "https://evil.example/x"))?.host() == "me.romeos.cc")
+    }
+
+    /// The session goes to the instance alone; every other site opens in Safari.
+    @Test func onlyTheInstanceStaysInTheWebView() {
+        #expect(AppLinks.staysInApp(URL(string: "https://me.romeos.cc/full/apps/x/page")!, origin: origin))
+        #expect(AppLinks.staysInApp(URL(string: "https://ME.romeos.cc:443/api/apps")!, origin: origin))
+        #expect(!AppLinks.staysInApp(URL(string: "https://other.romeos.cc/")!, origin: origin))
+        #expect(!AppLinks.staysInApp(URL(string: "http://me.romeos.cc/")!, origin: origin))
+        #expect(!AppLinks.staysInApp(URL(string: "https://me.romeos.cc:8443/")!, origin: origin))
+        #expect(!AppLinks.staysInApp(URL(string: "mailto:a@b.c")!, origin: origin))
+        #expect(AppLinks.staysInApp(URL(string: "about:blank")!, origin: origin))
+    }
+
+    @Test func theSessionCookieIsScopedToTheInstance() throws {
+        let client = APIClient(origin: origin, token: { "t" })
+        let cookie = try #require(client.sessionCookie())
+        #expect(cookie.name == "rome_session" && cookie.value == "t")
+        #expect(cookie.domain == "me.romeos.cc")
+        #expect(cookie.path == "/")
+        #expect(cookie.isSecure)
+        #expect(APIClient(origin: origin, token: { nil }).sessionCookie() == nil)
+    }
+
+    @Test func eachIdeaIsAReadyPrompt() {
+        #expect(AppIdea.habitTracker.prompt == "Make me an app: a habit tracker")
+        #expect(AppIdea.packingList.prompt == "Make me an app: a trip packing list")
+        #expect(AppIdea.readingLog.prompt == "Make me an app: a reading log")
+    }
+
+    @Test func thePageFollowsTheAppsLookAndLanguage() {
+        #expect(AppWebView.themeValue(.automatic) == "system")
+        #expect(AppWebView.themeValue(.dark) == "dark")
+        let script = AppWebView.settingsScript(theme: "dark", language: "zh-CN")
+        #expect(script.contains(#"localStorage.setItem("rome-theme", "dark")"#))
+        #expect(script.contains(#"localStorage.setItem("rome.lang", "zh-CN")"#))
+    }
+}

@@ -259,6 +259,19 @@ final class DemoBackend: RomeBackend {
 
     func me() async throws -> String? { "lin@example.com" }
 
+    /// The demo's guardian sees Apps.
+    func isGuardian() async -> Bool { true }
+
+    func apps() async throws -> [InstalledApp] {
+        try await pause(0.3)
+        guard variant == .full else { return [] }
+        return [
+            InstalledApp(id: "habits", displayName: "习惯打卡", description: "每天的小目标，连着打卡", fullHref: "/full/apps/habits", origin: "local"),
+            InstalledApp(id: "packing", displayName: "Trip packing list", description: "What to bring to Kyoto, checked off as it goes in the bag", fullHref: "/full/apps/packing", origin: "appstore"),
+            InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
+        ]
+    }
+
     func sendFeedback(_ text: String) async throws {
         try await pause(0.8)
     }

@@ -97,12 +97,42 @@
         }
       }
     },
+    "A habit tracker" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "习惯打卡"
+          }
+        }
+      }
+    },
     "A newer release just came out." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "刚发布了更新的版本。"
+          }
+        }
+      }
+    },
+    "A reading log" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读书记录"
+          }
+        }
+      }
+    },
+    "A trip packing list" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "旅行打包清单"
           }
         }
       }
@@ -203,6 +233,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已批准，但%@没有完成。"
+          }
+        }
+      }
+    },
+    "Apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用"
           }
         }
       }
@@ -363,6 +403,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复制链接"
+          }
+        }
+      }
+    },
+    "Could not load apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载应用"
+          }
+        }
+      }
+    },
+    "Could not open the app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开应用"
           }
         }
       }
@@ -681,6 +741,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地 Rome"
+          }
+        }
+      }
+    },
+    "Make a new app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "做一个新应用"
+          }
+        }
+      }
+    },
+    "Make me an app: a habit tracker" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我做一个应用：习惯打卡"
+          }
+        }
+      }
+    },
+    "Make me an app: a reading log" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我做一个应用：读书记录"
+          }
+        }
+      }
+    },
+    "Make me an app: a trip packing list" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我做一个应用：旅行打包清单"
+          }
+        }
+      }
+    },
+    "Make your own app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "做一个你自己的应用"
           }
         }
       }
@@ -1071,6 +1181,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已拒绝"
+          }
+        }
+      }
+    },
+    "Reload" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新加载"
           }
         }
       }
@@ -1683,6 +1803,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "任务"
+          }
+        }
+      }
+    },
+    "Tell Chat what you need. Rome builds it as an app you can open here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Chat 里说说你想要什么，Rome 会把它做成应用，做好后在这里打开"
           }
         }
       }
