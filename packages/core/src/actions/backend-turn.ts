@@ -25,6 +25,7 @@ import type { BackendTurnParams, BackendTurnRunner, ChatId } from "@rome-os/app-
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
 
@@ -49,6 +50,9 @@ export interface BackendTurnOptions {
   quiet?: boolean;
   /** Keeps the turn's input in its saved trace under this label. */
   inputLabel?: string;
+  /** Pushes the first message the agent says in the turn at this level
+   *  (RunParams.pushLevel). Absent, the turn pushes nothing. */
+  pushLevel?: NotifyLevel;
 }
 
 export interface BackendEmitOptions {
@@ -167,7 +171,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     workingDir: string | undefined,
     trace: Pick<
       RunParams,
-      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel"
+      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel" | "pushLevel"
     > = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
@@ -307,6 +311,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             persistTrace: true,
             persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+            ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
           };
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;

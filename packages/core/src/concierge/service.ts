@@ -28,6 +28,10 @@ import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
+import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { quietWindowEnd } from "./alerts.js";
+import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import {
   type ConciergeOwner,
   GUARDIAN_OWNER,
@@ -60,6 +64,8 @@ export {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 };
+/** The dashboard language the guardian picked: `en` or `zh-CN`. */
+const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 /** The guardian setting that turns Concierge on. Any value but `true` is off. */
 const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** Concierge's own account on the dashboard, which says what it sends into a
@@ -153,8 +159,18 @@ export interface ConciergeDeps {
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
   runBackendTurn: (
     params: BackendTurnParams,
-    options?: { quiet?: boolean; inputLabel?: string },
+    options?: SystemTurnOptions,
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
+  /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
+  notify?: ConciergePushDeps["notify"];
+}
+
+export interface SystemTurnOptions {
+  quiet?: boolean;
+  inputLabel?: string;
+  /** The first message the Concierge says in the turn goes to the guardian's
+   *  phone at this level. Only a turn the guardian did not start has one. */
+  pushLevel?: NotifyLevel;
 }
 
 export class ConciergeService {
@@ -165,8 +181,38 @@ export class ConciergeService {
   private taskEvents: TaskEventCoalescer | null = null;
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
+  private readonly push: ConciergePush | null;
 
-  constructor(readonly deps: ConciergeDeps) {}
+  constructor(readonly deps: ConciergeDeps) {
+    this.push = deps.notify
+      ? new ConciergePush({
+          notify: deps.notify,
+          quietUntil: (at) => this.quietUntil(at),
+          pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
+          language: async () => {
+            const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+            return typeof stored === "string" ? stored : null;
+          },
+        })
+      : null;
+  }
+
+  /**
+   * The Concierge said something in a chat. The first message of a turn with a
+   * push level in one of the guardian's chats also goes to the guardian's
+   * phone, outside quiet hours. A visitor's Concierge never pushes: Rome Cloud
+   * delivers only to the guardian's devices.
+   */
+  said(said: SaidInTurn): void {
+    this.push?.said(said);
+  }
+
+  /** When the guardian's quiet window `at` falls in ends, or null outside it. */
+  private async quietUntil(at: number): Promise<number | null> {
+    const quietHours = (await this.attachedFollowing?.rules(GUARDIAN_OWNER))?.quietHours;
+    if (!quietHours) return null;
+    return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(this.deps.settingsRepo));
+  }
 
   attachDashboard(dashboard: ConciergeDashboard): void {
     this.attached = dashboard;
@@ -519,7 +565,7 @@ export class ConciergeService {
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean; inputLabel?: string } = {},
+    options: SystemTurnOptions = {},
   ): Promise<boolean> {
     return (await this.systemTurnOutcome(chatId, prompt, options)) === "completed";
   }
@@ -528,7 +574,7 @@ export class ConciergeService {
   async systemTurnOutcome(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean; inputLabel?: string } = {},
+    options: SystemTurnOptions = {},
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,

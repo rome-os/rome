@@ -2911,6 +2911,55 @@ describe("AgentRunner", () => {
       );
     });
 
+    it("hands a turn's push level to the session turn", async () => {
+      const sendTurn: AgentSession["sendTurn"] = rs.fn(() => ({
+        turnId: "turn-1",
+        events: (async function* () {
+          yield { type: "result", content: "resumed", agent: "test-main" } as const;
+        })(),
+        turnContext: context.active(),
+      }));
+      const session: AgentSession = {
+        selectModel: () => {},
+        key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
+        sessionId: "sess-1",
+        status: "idle",
+        sendTurn,
+        submitInput: rs.fn(),
+        runForkedTurn: rs.fn(),
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager: AgentSessionManager = {
+        acquire: rs.fn(async () => {
+          throw new Error("implicit acquire should not be used");
+        }),
+        acquireBySessionId: rs.fn(async () => session),
+        peek: rs.fn(() => undefined),
+        findWorkingDirBySessionId: rs.fn(),
+        recordConversation: rs.fn(async () => undefined),
+        shutdown: rs.fn(async () => undefined),
+      };
+      const runner = new AgentRunner(manager, agentLoader);
+
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "<task_events/>",
+          sessionId: "sess-1",
+          initiatedBy: "system",
+          pushLevel: "active",
+        }),
+      );
+
+      expect(sendTurn).toHaveBeenCalledWith(
+        { prompt: "<task_events/>" },
+        expect.objectContaining({ initiatedBy: "system", pushLevel: "active" }),
+      );
+    });
+
     it("creates new session when no existing session found", async () => {
       const provider = new MockModelProvider([
         [
