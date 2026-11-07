@@ -212,6 +212,14 @@ final class Workspace {
         }
     }
 
+    /// The guardian's apps as last read, for links in chat text.
+    private(set) var apps: [InstalledApp] = []
+
+    /// Keeps the apps list for links in chat text.
+    func shelve(_ apps: [InstalledApp]) async {
+        self.apps = apps
+    }
+
     func stop() {
         tasks.stop()
         concierge.stop()

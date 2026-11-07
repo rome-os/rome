@@ -483,3 +483,48 @@ final class StubBackend: RomeBackend {
         #expect(AppIdea.own.prompt.hasSuffix(" ") || AppIdea.own.prompt.hasSuffix("："))
     }
 }
+@Suite struct ChatLinkTests {
+    private static let origin = URL(string: "https://me.romeos.cc")!
+    private static let apps = [
+        InstalledApp(id: "habit-tracker", displayName: "Habit Tracker", fullHref: "/full/apps/habit-tracker", origin: "local"),
+        InstalledApp(id: "notes", displayName: "Notes", fullHref: "/custom/notes-page", origin: "appstore"),
+    ]
+
+    private func link(_ text: String, origin: URL? = ChatLinkTests.origin) throws -> AppLinks.ChatLink {
+        AppLinks.chatLink(try #require(URL(string: text)), origin: origin, apps: Self.apps)
+    }
+
+    /// `/apps/<id>` as the Concierge writes it, the full page, and the same on the origin open the app.
+    @Test func appLinksOpenTheApp() throws {
+        let page = URL(string: "https://me.romeos.cc/apps/habit-tracker")
+        #expect(try link("/apps/habit-tracker") == .app(id: "habit-tracker", page: page))
+        #expect(try link("/apps/habit-tracker/") == .app(id: "habit-tracker", page: URL(string: "https://me.romeos.cc/apps/habit-tracker/")))
+        #expect(try link("https://me.romeos.cc/apps/habit-tracker") == .app(id: "habit-tracker", page: page))
+        #expect(try link("/full/apps/habit-tracker") == .app(id: "habit-tracker", page: URL(string: "https://me.romeos.cc/full/apps/habit-tracker")))
+        // An app's own fullHref, whatever its shape.
+        #expect(try link("/custom/notes-page") == .app(id: "notes", page: URL(string: "https://me.romeos.cc/custom/notes-page")))
+        // An app not in the list yet (just built) still names its id.
+        #expect(try link("/apps/new-one") == .app(id: "new-one", page: URL(string: "https://me.romeos.cc/apps/new-one")))
+        #expect(try link("/apps/my%20app") == .app(id: "my app", page: URL(string: "https://me.romeos.cc/apps/my%20app")))
+    }
+
+    /// Other paths on the instance open in the in-app web view.
+    @Test func instancePagesStayInTheApp() throws {
+        #expect(try link("/settings/models") == .page(URL(string: "https://me.romeos.cc/settings/models")!))
+        #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
+        #expect(try link("/apps/a/b") == .page(URL(string: "https://me.romeos.cc/apps/a/b")!))
+        #expect(try link("https://me.romeos.cc/chat/123") == .page(URL(string: "https://me.romeos.cc/chat/123")!))
+        // No origin (demo data): a page has nowhere to resolve.
+        #expect(try link("/settings", origin: nil) == .system)
+        #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))
+    }
+
+    /// Other sites go to Safari, other schemes to the system.
+    @Test func everythingElseLeavesTheApp() throws {
+        #expect(try link("https://example.com/apps/habit-tracker") == .external)
+        #expect(try link("http://me.romeos.cc/apps/habit-tracker") == .external)
+        #expect(try link("https://me.romeos.cc:8443/x") == .external)
+        #expect(try link("mailto:lin@example.com") == .system)
+        #expect(try link("tel:+123") == .system)
+    }
+}

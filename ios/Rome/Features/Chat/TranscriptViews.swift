@@ -8,6 +8,9 @@ extension EnvironmentValues {
     @Entry var apiFileLoader: (@MainActor (String, String?) async throws -> Data)? = nil
     /// The instance's origin: an absolute URL on it is one of its own.
     @Entry var instanceOrigin: URL? = nil
+    /// Opens a link tapped in chat text; the shell sets it so app and
+    /// instance links stay in the app.
+    @Entry var chatLinkOpener: (@MainActor (URL) -> OpenURLAction.Result)? = nil
 }
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
