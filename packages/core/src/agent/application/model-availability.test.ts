@@ -221,6 +221,32 @@ describe("createModelAvailability", () => {
     availability.close();
   });
 
+  it("treats a usage read that fails while the status is pending as a failed read", async () => {
+    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const availability = createModelAvailability({
+      accounts: { openai: codex.account },
+      startRefresh: false,
+      refreshIntervalMs: null,
+      now: () => readAt,
+    });
+    const unhandled = rs.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      codex.hold();
+      (codex.account.usage as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("gone"));
+      const read = availability.refresh("openai");
+      await settle();
+      codex.release({ loggedIn: true, usageLimited: true });
+      await read;
+      await settle();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(availability.read().openai).toMatchObject({ usage: { error: "gone" } });
+    } finally {
+      process.off("unhandledRejection", unhandled);
+      availability.close();
+    }
+  });
+
   it("keeps the last status when a read fails and drops the usage into an error", async () => {
     const codex = fakeAccount({ loggedIn: true, usageLimited: true });
     const warn = rs.fn();

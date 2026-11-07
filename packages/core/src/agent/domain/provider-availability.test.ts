@@ -59,10 +59,20 @@ describe("availabilityFromAccount", () => {
     expect(availabilityFromAccount(status, null, later)).toMatchObject({ state: "available" });
   });
 
-  it("assumes the fallback end for an exhausted window with no reset", () => {
+  it("assumes the fallback end for an exhausted window with no reset, counted from when the usage was checked", () => {
     expect(availabilityFromAccount({ loggedIn: true }, usage(), readAt)).toMatchObject({
       state: "usage_limit_reached",
       usageLimitUntil: fallback,
+    });
+    // The same usage read again an hour later keeps its end.
+    const hourLaterRead = new Date(readAt.getTime() + 3_600_000);
+    expect(availabilityFromAccount({ loggedIn: true }, usage(), hourLaterRead)).toMatchObject({
+      usageLimitUntil: fallback,
+    });
+    // And once that end has passed, it is no longer evidence of a limit.
+    const afterFallback = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS + 1);
+    expect(availabilityFromAccount({ loggedIn: true }, usage(), afterFallback)).toMatchObject({
+      state: "available",
     });
   });
 

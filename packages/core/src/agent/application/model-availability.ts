@@ -127,7 +127,9 @@ export function createModelAvailability(
    * usage read that may stall. The usage is folded in when it settles.
    */
   const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
-    const usagePending = account.usage();
+    // Settled from the start: a usage read that fails while the status is
+    // still pending is a failed read, not an unhandled rejection.
+    const usagePending = Promise.allSettled([Promise.resolve().then(() => account.usage())]);
     const status = await Promise.allSettled([account.status()]).then(([result]) => result);
     if (closed) return;
     if (status.status === "rejected") {
@@ -138,13 +140,13 @@ export function createModelAvailability(
     }
     const readStatus = status.status === "fulfilled" ? status.value : stored[provider]?.account;
     if (!readStatus) {
-      await Promise.allSettled([usagePending]);
+      await usagePending;
       return;
     }
     // An authorization change can restart the provider's process under the
     // usage read already running, so the usage is read once more after it.
     if (store(provider, readStatus, stored[provider]?.usage ?? null)) rereadAfter.add(provider);
-    const [usage] = await Promise.allSettled([usagePending]);
+    const [usage] = await usagePending;
     if (closed) return;
     const readUsage =
       usage.status === "fulfilled"

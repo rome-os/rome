@@ -72,7 +72,8 @@ function ahead(until: string | undefined, now: Date): string | undefined {
 /**
  * What the account's status and usage amount to, read at `readAt`. The end
  * of a usage limit is the time the account reports for a refused turn, else
- * the latest reset among the exhausted windows, else the fallback. Usage that could not be read
+ * the latest reset among the exhausted windows, else the fallback after the
+ * usage was checked, so reading the same usage again never moves the end. Usage that could not be read
  * (null, or an error) proves neither capacity nor a limit, so a limit still
  * ahead carries over from `previous`.
  */
@@ -93,18 +94,19 @@ export function availabilityFromAccount(
   // usage decides as if there were none, so a refusal never renews itself.
   const refusedUntil = ahead(status.usageLimitUntil, readAt);
   if (refusedUntil) return { ...base, state: "usage_limit_reached", usageLimitUntil: refusedUntil };
-  const fallback = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS).toISOString();
   if (!usage || usage.error) {
     const carried = ahead(previous?.usageLimitUntil, readAt);
     return carried ? { ...base, state: "usage_limit_reached", usageLimitUntil: carried } : base;
   }
   const exhausted = [usage.fiveHour, usage.sevenDay].filter(windowExhausted);
   if (exhausted.length === 0) return base;
-  return {
-    ...base,
-    state: "usage_limit_reached",
-    usageLimitUntil: latestReset(exhausted) ?? fallback,
-  };
+  const checkedAt = Date.parse(usage.checkedAt);
+  const seenAt = Number.isNaN(checkedAt) ? readAt.getTime() : checkedAt;
+  const fallback = new Date(seenAt + USAGE_LIMIT_FALLBACK_MS).toISOString();
+  const until = latestReset(exhausted) ?? fallback;
+  // An exhausted window whose assumed end has passed is no longer evidence.
+  if (!ahead(until, readAt)) return base;
+  return { ...base, state: "usage_limit_reached", usageLimitUntil: until };
 }
 
 /** The stored availability as of `now`: a usage limit whose end has passed reads as available. */

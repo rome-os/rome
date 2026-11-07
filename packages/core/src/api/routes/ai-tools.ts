@@ -8,6 +8,7 @@ import {
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import {
   accountAllowsModel,
+  providerAuthorized,
   CODEX_LUNA_MODEL,
   CODEX_SOL_MODEL,
   type ProviderAvailability,
@@ -57,8 +58,11 @@ function providerStatusJson(availability: ProviderAvailability | undefined) {
 }
 
 function codexStatusJson(availability: ProviderAvailability | undefined) {
+  // A logged-out account allows nothing, as the old state reported.
   const allows = (model: string): boolean =>
-    availability !== undefined && accountAllowsModel(availability.account, model);
+    availability !== undefined &&
+    providerAuthorized(availability) &&
+    accountAllowsModel(availability.account, model);
   return {
     ...providerStatusJson(availability),
     solAccess: allows(CODEX_SOL_MODEL),
