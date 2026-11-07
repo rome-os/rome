@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
-import { checkLayerBoundaries, formatLayerViolation } from "./layer-boundaries.js";
-import { LAYER_RULES } from "./layer-rules.js";
+import { checkImports, formatImportViolation } from "./import-rules.js";
+import { layerRules } from "./rules/layers.js";
 
-const root = mkdtempSync(join(tmpdir(), "layer-boundaries-"));
+const root = mkdtempSync(join(tmpdir(), "import-rules-"));
 
 function write(path: string, text: string): void {
   mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -69,10 +69,10 @@ write(
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-describe("checkLayerBoundaries", () => {
+describe("checkImports with the layer rules", () => {
   it("judges each import by the file it resolves to", () => {
-    const lines = checkLayerBoundaries(join(root, "src"), join(root, "tsconfig.json"), LAYER_RULES)
-      .map(formatLayerViolation)
+    const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), layerRules)
+      .map(formatImportViolation)
       .map((line) => line.replace(/: .*$/, ""));
     expect(lines).toEqual([
       "agent/application/sub/probe.ts:3 → ../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [application-imports-inward]",
@@ -80,12 +80,12 @@ describe("checkLayerBoundaries", () => {
       "agent/domain/probe.ts:4 → @/logger.js (logger.ts) [domain-imports-domain]",
       "agent/domain/probe.ts:5 → ../../logger.js (logger.ts) [domain-imports-domain]",
       "agent/domain/probe.ts:6 → ./x/../../infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [domain-imports-domain]",
-      "agent/domain/probe.ts:7 → <computed> [unchecked]",
+      "agent/domain/probe.ts:7 → <computed> [literal-imports-in-contexts]",
       "agent/infrastructure/model/probe.ts:3 → ../../index.js (agent/index.ts) [infrastructure-imports-inward]",
       "agent/infrastructure/model/probe.ts:4 → ../../../agent/./application/use.js (agent/application/use.ts) [infrastructure-imports-inward]",
       "concierge/probe.ts:2 → ../agent/./domain/session.js (agent/domain/session.ts) [enter-through-index]",
       "concierge/probe.ts:3 → @/agent//infrastructure/model/adapter.js (agent/infrastructure/model/adapter.ts) [enter-through-index]",
-      "concierge/probe.ts:4 → ../agent/domain/nope.js [unchecked]",
+      "concierge/probe.ts:4 → ../agent/domain/nope.js [unresolved]",
     ]);
   });
 });
