@@ -90,23 +90,31 @@ export function availabilityFromAccount(
   if (!status.loggedIn) return { ...base, state: "unauthorized" };
   if (status.usageLimited === false) return base;
 
-  // A refusal the account still reports after its end is over, and the
-  // usage decides as if there were none, so a refusal never renews itself.
+  const limit = (until: string): ProviderAvailability => ({
+    ...base,
+    state: "usage_limit_reached",
+    usageLimitUntil: until,
+  });
+  // A refusal the account still reports after its end is over, so a refusal
+  // never renews itself.
   const refusedUntil = ahead(status.usageLimitUntil, readAt);
-  if (refusedUntil) return { ...base, state: "usage_limit_reached", usageLimitUntil: refusedUntil };
   if (!usage || usage.error) {
-    const carried = ahead(previous?.usageLimitUntil, readAt);
-    return carried ? { ...base, state: "usage_limit_reached", usageLimitUntil: carried } : base;
+    const carried = refusedUntil ?? ahead(previous?.usageLimitUntil, readAt);
+    return carried ? limit(carried) : base;
   }
+  // The exhausted windows say when the limit ends better than a refusal's
+  // assumed end does: a weekly window outlasts it, a five-hour window may
+  // reset before it. Without a reset time the end is assumed from when the
+  // usage was checked, and once that has passed the window is no evidence.
   const exhausted = [usage.fiveHour, usage.sevenDay].filter(windowExhausted);
-  if (exhausted.length === 0) return base;
-  const checkedAt = Date.parse(usage.checkedAt);
-  const seenAt = Number.isNaN(checkedAt) ? readAt.getTime() : checkedAt;
-  const fallback = new Date(seenAt + USAGE_LIMIT_FALLBACK_MS).toISOString();
-  const until = latestReset(exhausted) ?? fallback;
-  // An exhausted window whose assumed end has passed is no longer evidence.
-  if (!ahead(until, readAt)) return base;
-  return { ...base, state: "usage_limit_reached", usageLimitUntil: until };
+  if (exhausted.length > 0) {
+    const checkedAt = Date.parse(usage.checkedAt);
+    const seenAt = Number.isNaN(checkedAt) ? readAt.getTime() : checkedAt;
+    const fallback = new Date(seenAt + USAGE_LIMIT_FALLBACK_MS).toISOString();
+    const windowEnd = ahead(latestReset(exhausted) ?? fallback, readAt);
+    if (windowEnd) return limit(windowEnd);
+  }
+  return refusedUntil ? limit(refusedUntil) : base;
 }
 
 /** The stored availability as of `now`: a usage limit whose end has passed reads as available. */

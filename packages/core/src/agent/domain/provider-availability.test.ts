@@ -31,7 +31,7 @@ describe("availabilityFromAccount", () => {
     });
   });
 
-  it("takes the provider's stated refusal time over the usage windows", () => {
+  it("ends a limit at the exhausted window's reset even when the refusal says later", () => {
     const stated = new Date(readAt.getTime() + 6 * 3_600_000).toISOString();
     expect(
       availabilityFromAccount(
@@ -39,7 +39,7 @@ describe("availabilityFromAccount", () => {
         usage(hourLater),
         readAt,
       ),
-    ).toMatchObject({ state: "usage_limit_reached", usageLimitUntil: stated });
+    ).toMatchObject({ state: "usage_limit_reached", usageLimitUntil: hourLater });
   });
 
   it.each([
@@ -57,6 +57,31 @@ describe("availabilityFromAccount", () => {
     // Reading the same refusal again never renews it.
     const later = new Date(readAt.getTime() + 10 * 60 * 60 * 1000);
     expect(availabilityFromAccount(status, null, later)).toMatchObject({ state: "available" });
+  });
+
+  it("ends a refusal with the exhausted windows' reset when the usage shows one", () => {
+    const assumed = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS).toISOString();
+    const inThreeDays = new Date(readAt.getTime() + 3 * 24 * 3_600_000).toISOString();
+    const inTwoHours = new Date(readAt.getTime() + 2 * 3_600_000).toISOString();
+    const status = { loggedIn: true, usageLimitUntil: assumed };
+    // A weekly window outlasts the refusal's assumed end.
+    expect(availabilityFromAccount(status, usage(inThreeDays), readAt)).toMatchObject({
+      state: "usage_limit_reached",
+      usageLimitUntil: inThreeDays,
+    });
+    // A five-hour window may reset before it.
+    expect(availabilityFromAccount(status, usage(inTwoHours), readAt)).toMatchObject({
+      usageLimitUntil: inTwoHours,
+    });
+    // With no exhausted window the refusal's end holds.
+    const capacity = {
+      checkedAt: readAt.toISOString(),
+      source: "test",
+      fiveHour: { usedPercent: 10 },
+    };
+    expect(availabilityFromAccount(status, capacity, readAt)).toMatchObject({
+      usageLimitUntil: assumed,
+    });
   });
 
   it("assumes the fallback end for an exhausted window with no reset, counted from when the usage was checked", () => {
