@@ -51,6 +51,8 @@ const CODEX_USAGE_CACHE_PATHS = ["usage-limits.json", "rate-limits.json"].map((f
   join(homedir(), ".codex", file),
 );
 const DEFAULT_LOGIN_TIMEOUT_MS = 16 * 60 * 1000;
+/** The app-server's RPC has no timeout of its own, and a usage read holds the account's report. */
+const DEFAULT_USAGE_TIMEOUT_MS = 10_000;
 
 interface ActiveLogin {
   loginId: string;
@@ -96,6 +98,7 @@ export interface SharedCodexAccountServiceOptions {
   readFileStatus?: () => Promise<CodexCliStatus>;
   markAuthRevoked?: () => Promise<void>;
   now?: () => number;
+  usageTimeoutMs?: number;
 }
 
 function statusFromFile(fileStatus: CodexCliStatus): ModelAccountStatus {
@@ -160,6 +163,7 @@ export class SharedCodexAccountService
   private readonly manager: CodexAccountRpc;
   private readonly loginTimeoutMs: number;
   private readonly usageCachePaths: string[];
+  private readonly usageTimeoutMs: number;
   private readonly readFileStatus: () => Promise<CodexCliStatus>;
   private readonly markAuthRevoked: () => Promise<void>;
   private readonly accountChangedListeners = new Set<() => void>();
@@ -184,6 +188,7 @@ export class SharedCodexAccountService
     this.manager = manager;
     this.loginTimeoutMs = options.loginTimeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
     this.usageCachePaths = options.usageCachePaths ?? CODEX_USAGE_CACHE_PATHS;
+    this.usageTimeoutMs = options.usageTimeoutMs ?? DEFAULT_USAGE_TIMEOUT_MS;
     this.readFileStatus = options.readFileStatus ?? getCodexCliStatus;
     this.markAuthRevoked = options.markAuthRevoked ?? markCodexAuthRevoked;
     this.now = options.now ?? Date.now;
@@ -321,7 +326,9 @@ export class SharedCodexAccountService
     return await readLiveOrCachedUsage(
       async () => {
         try {
-          const response = await this.manager.request<unknown>(Method.accountRateLimitsRead);
+          const response = await this.withUsageTimeout(
+            this.manager.request<unknown>(Method.accountRateLimitsRead),
+          );
           return (
             normalizeUsageStatus(rateLimitsPayload(response), "codex app-server", {
               utilizationUnit: "fraction",
@@ -447,6 +454,18 @@ export class SharedCodexAccountService
         error: getErrorMessage(err),
       });
     }
+  }
+
+  private withUsageTimeout<T>(read: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Codex rate limit read timed out after ${this.usageTimeoutMs}ms`)),
+        this.usageTimeoutMs,
+      );
+      timer.unref?.();
+    });
+    return Promise.race([read, timeout]).finally(() => clearTimeout(timer));
   }
 
   async revoke(): Promise<void> {

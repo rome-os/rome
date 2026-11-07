@@ -170,6 +170,21 @@ describe("SharedCodexAccountService", () => {
     service.close();
   });
 
+  it("reports a usage read the app-server never answers as an error read", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: { type: "chatgpt", planType: "pro" } });
+    const never = new Promise<never>(() => {});
+    const request = rpc.request.bind(rpc);
+    rpc.request = ((method: string, params?: unknown) =>
+      method === "account/rateLimits/read" ? never : request(method, params)) as typeof rpc.request;
+    const service = createService(rpc, { usageTimeoutMs: 5 });
+    await expect(service.availability()).resolves.toMatchObject({
+      state: "available",
+      usage: { error: "Codex rate limit read timed out after 5ms" },
+    });
+    service.close();
+  });
+
   it("classifies the current single-window rate-limit response by duration", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/rateLimits/read", {
