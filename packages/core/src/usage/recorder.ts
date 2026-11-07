@@ -6,7 +6,7 @@ import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
 
 const log = createLogger("usage-recorder");
 
-/** The turn-end seam AgentSession calls. Never throws and never blocks the turn. */
+/** The seam the turn usage reporter hands each ended turn to. Never throws and never blocks the turn. */
 export interface TurnUsageSink {
   recordTurn(facts: TurnUsageFacts): void;
 }
