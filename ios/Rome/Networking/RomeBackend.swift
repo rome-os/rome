@@ -34,6 +34,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
+    /// An instance URL a reply points at: the path after `/api`, and its query
+    /// still percent-encoded, sent as written.
+    func apiFile(path: String, query: String?) async throws -> Data
+    /// The instance's origin, when there is a real one.
+    var origin: URL? { get }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws
     func markRead(sessionId: String) async
     func sessions() async throws -> [ChatSession]
@@ -101,6 +106,12 @@ final class LiveBackend: RomeBackend {
             body["files"] = .array(files.map { .object(["name": .string($0.name), "mimeType": .string($0.mimeType), "dataBase64": .string($0.dataBase64)]) })
         }
         return try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(body), as: CreatedTurn.self)
+    }
+
+    var origin: URL? { client.origin }
+
+    func apiFile(path: String, query: String?) async throws -> Data {
+        try await client.getFile(apiPath: path, percentEncodedQuery: query)
     }
 
     /// `projects/…` from the projects route, `memory/…` from memory's.

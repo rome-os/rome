@@ -208,12 +208,13 @@ struct MarkdownText: View {
     private var blocks: [MarkdownBlock] { MarkdownParser.parse(source) }
     @State private var showViewer = false
     @State private var viewerStart = 0
+    @Environment(\.instanceOrigin) private var origin
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
         blocks.compactMap { block in
-            if case .image(let alt, let src) = block, ImageSource(src: src) != .rejected {
-                return .markdown(ImageSource(src: src), alt: alt, src: src)
+            if case .image(let alt, let src) = block, case let source = ImageSource(src: src, origin: origin), source != .rejected {
+                return .markdown(source, alt: alt, src: src)
             }
             return nil
         }
@@ -283,7 +284,7 @@ struct MarkdownText: View {
         case .rule:
             Rectangle().fill(Palette.hair).frame(height: 1).padding(.vertical, 4)
         case .image(let alt, let src):
-            MarkdownImageView(source: ImageSource(src: src), alt: alt) {
+            MarkdownImageView(source: ImageSource(src: src, origin: origin), alt: alt, src: src) {
                 viewerStart = gallery.firstIndex { $0.matches(src: src) } ?? 0
                 showViewer = true
             }

@@ -1,20 +1,38 @@
+import os
 import SwiftUI
 import UIKit
 
+let imageLog = Logger(subsystem: "cc.romeos.mobile", category: "Images")
+
 /// Where a Markdown image's bytes come from, by the web's rules
-/// (packages/web/src/lib/markdown-url.ts): a file of the instance's own,
-/// fetched with the session; a public https image, fetched with no cookies;
-/// anything else is not loaded, and its alt text shows instead.
+/// (packages/web/src/lib/markdown-url.ts and internal-href.ts): a URL of the
+/// instance's own, fetched with the session; a public https image, fetched
+/// with no cookies; anything else is not loaded, and its alt text shows instead.
 enum ImageSource: Hashable, Sendable {
     /// A logical path, `projects/…` or `memory/…`, for the instance's asset route.
     case asset(path: String)
+    /// An `/api/…` URL of the instance's, sent as written: `path` after `/api`,
+    /// `query` still percent-encoded.
+    case instance(path: String, query: String?)
     case external(URL)
     case rejected
 
-    init(src raw: String) {
-        let src = raw.trimmingCharacters(in: .whitespaces)
+    /// `origin`: the instance's, so its own absolute URLs count as internal.
+    init(src raw: String, origin: URL? = nil) {
+        var src = raw.trimmingCharacters(in: .whitespaces)
+        if let origin, let url = URL(string: src), url.scheme != nil {
+            guard Self.sameOrigin(url, origin) else {
+                self = url.scheme?.lowercased() == "https" && url.host() != nil ? .external(url) : .rejected
+                return
+            }
+            // The path and query as written, still percent-encoded.
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            src = (components?.percentEncodedPath ?? "") + (components?.percentEncodedQuery.map { "?\($0)" } ?? "")
+        } else if src.hasPrefix("projects/") || src.hasPrefix("memory/") {
+            src = "/" + src
+        }
         if src.hasPrefix("/") && !src.hasPrefix("//") {
-            self = Self.internalPath(src).map { .asset(path: $0) } ?? .rejected
+            self = Self.internalSource(src)
             return
         }
         if let url = URL(string: src), url.scheme?.lowercased() == "https", url.host() != nil {
@@ -22,6 +40,49 @@ enum ImageSource: Hashable, Sendable {
             return
         }
         self = .rejected
+    }
+
+    private static func sameOrigin(_ url: URL, _ origin: URL) -> Bool {
+        func port(_ url: URL) -> Int? { url.port ?? (url.scheme?.lowercased() == "https" ? 443 : url.scheme?.lowercased() == "http" ? 80 : nil) }
+        return url.scheme?.lowercased() == origin.scheme?.lowercased()
+            && url.host()?.lowercased() == origin.host()?.lowercased()
+            && port(url) == port(origin)
+    }
+
+    private static func internalSource(_ src: String) -> ImageSource {
+        let withoutFragment = String(src.prefix { $0 != "#" })
+        let pathname = String(withoutFragment.prefix { $0 != "?" })
+        guard pathname.hasPrefix("/api/") else {
+            return internalPath(src).map { .asset(path: $0) } ?? .rejected
+        }
+        // An API URL, such as an asset URL already: as written, through the session.
+        let rest = withoutFragment.dropFirst(pathname.count)
+        let query = rest.isEmpty ? nil : String(rest.dropFirst())
+        guard let path = encoded(String(pathname.dropFirst(4)), allowed: .urlPathAllowed),
+              path.count > 1,
+              path.split(separator: "/").allSatisfy({ segment in
+                  let decoded = String(segment).removingPercentEncoding ?? ""
+                  return decoded != "." && decoded != ".." && !decoded.contains("\\")
+              })
+        else { return .rejected }
+        if let query, !query.isEmpty {
+            guard let query = encoded(query, allowed: .urlQueryAllowed) else { return .rejected }
+            return .instance(path: path, query: query)
+        }
+        return .instance(path: path, query: nil)
+    }
+
+    /// Encodes what a URL cannot carry as is (a space, a CJK name) and keeps
+    /// the escapes already there; nil for a stray `%`.
+    private static func encoded(_ text: String, allowed: CharacterSet) -> String? {
+        guard let result = text.addingPercentEncoding(withAllowedCharacters: allowed.union(CharacterSet(charactersIn: "%"))) else { return nil }
+        var rest = Substring(result)
+        while let percent = rest.firstIndex(of: "%") {
+            let hex = rest[rest.index(after: percent)...].prefix(2)
+            guard hex.count == 2, hex.allSatisfy(\.isHexDigit) else { return nil }
+            rest = rest[rest.index(percent, offsetBy: 3)...]
+        }
+        return result
     }
 
     /// `/projects/a%20b/c.png` → `projects/a b/c.png`; nil for any other
@@ -58,11 +119,14 @@ enum ImageFetch {
     }()
 
     @MainActor
-    static func data(_ source: ImageSource, assetLoader: (@MainActor (String) async throws -> Data)?) async throws -> Data {
+    static func data(_ source: ImageSource, assetLoader: (@MainActor (String) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
         switch source {
         case .asset(let path):
             guard let assetLoader else { throw APIError.network }
             return try await assetLoader(path)
+        case .instance(let path, let query):
+            guard let apiLoader else { throw APIError.network }
+            return try await apiLoader(path, query)
         case .external(let url):
             let (data, response) = try await publicSession.data(from: url)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.network }
@@ -100,11 +164,11 @@ enum ViewerImage: Identifiable, Hashable {
     }
 
     @MainActor
-    func data(assetLoader: (@MainActor (String) async throws -> Data)?) async throws -> Data {
+    func data(assetLoader: (@MainActor (String) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
         switch self {
         case .local(let photo): return photo.jpeg
         case .stored(let upload): return try await ImageFetch.data(.asset(path: upload.assetPath), assetLoader: assetLoader)
-        case .markdown(let source, _, _): return try await ImageFetch.data(source, assetLoader: assetLoader)
+        case .markdown(let source, _, _): return try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
         }
     }
 }
@@ -114,8 +178,11 @@ enum ViewerImage: Identifiable, Hashable {
 struct MarkdownImageView: View {
     let source: ImageSource
     let alt: String
+    /// As written, for the log when it does not load.
+    var src: String = ""
     let onOpen: () -> Void
     @Environment(\.assetLoader) private var assetLoader
+    @Environment(\.apiFileLoader) private var apiLoader
     @State private var image: CGImage?
     @State private var failed = false
 
@@ -130,6 +197,7 @@ struct MarkdownImageView: View {
                 Text(verbatim: alt.isEmpty ? String(localized: "Image") : alt)
                     .romeFont(15)
                     .foregroundStyle(Palette.sub)
+                    .onAppear { imageLog.notice("reply image not loaded, not an allowed source: \(src, privacy: .public)") }
             } else if let image {
                 Color.clear
                     .aspectRatio(CGFloat(image.width) / CGFloat(max(1, image.height)), contentMode: .fit)
@@ -168,16 +236,25 @@ struct MarkdownImageView: View {
             return
         }
         do {
-            let data = try await ImageFetch.data(source, assetLoader: assetLoader)
+            let data = try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
             let decoded = await Task.detached(priority: .userInitiated) {
                 ImageCompressor.thumbnail(from: data, maxPixel: Self.pixels)
             }.value
-            guard let decoded else { throw APIError.network }
+            guard let decoded else {
+                // Not an image, such as a page or an error in JSON.
+                imageLog.error("reply image is not an image: \(src, privacy: .public) as \(String(describing: source), privacy: .public), \(data.count) bytes")
+                throw APIError.decoding
+            }
             StoredImageCache.store(decoded, for: key)
             image = decoded
         } catch is CancellationError {
         } catch {
-            if !Task.isCancelled { failed = true }
+            if !Task.isCancelled {
+                if (error as? APIError) != .decoding {
+                    imageLog.error("reply image failed: \(src, privacy: .public) as \(String(describing: source), privacy: .public): \(String(describing: error), privacy: .public)")
+                }
+                failed = true
+            }
         }
     }
 }
@@ -299,6 +376,7 @@ private struct ViewerPage: View {
     @Binding var zoomed: Bool
     let onLoad: (UIImage) -> Void
     @Environment(\.assetLoader) private var assetLoader
+    @Environment(\.apiFileLoader) private var apiLoader
     @Environment(\.displayScale) private var displayScale
     @State private var full: UIImage?
     @State private var failed = false
@@ -326,7 +404,7 @@ private struct ViewerPage: View {
 
     private func load(longEdge: CGFloat) async {
         do {
-            let data = try await image.data(assetLoader: assetLoader)
+            let data = try await image.data(assetLoader: assetLoader, apiLoader: apiLoader)
             let decoded = await Task.detached(priority: .userInitiated) {
                 ImageCompressor.thumbnail(from: data, maxPixel: max(600, longEdge))
             }.value

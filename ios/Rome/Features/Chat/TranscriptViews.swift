@@ -4,6 +4,10 @@ import SwiftUI
 /// Loads a stored upload's bytes; the shell sets it from the open instance.
 extension EnvironmentValues {
     @Entry var assetLoader: (@MainActor (String) async throws -> Data)? = nil
+    /// An `/api/…` path and its percent-encoded query, fetched with the session.
+    @Entry var apiFileLoader: (@MainActor (String, String?) async throws -> Data)? = nil
+    /// The instance's origin: an absolute URL on it is one of its own.
+    @Entry var instanceOrigin: URL? = nil
 }
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with

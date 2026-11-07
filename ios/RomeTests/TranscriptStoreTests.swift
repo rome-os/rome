@@ -81,6 +81,8 @@ final class FakeBackend: RomeBackend {
     var sentFiles: [OutgoingFile] = []
 
     func asset(path: String) async throws -> Data { throw APIError.notFound }
+    func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
+    var origin: URL? { nil }
 
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false

@@ -63,6 +63,28 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
+    /// The bytes behind an `/api/…` URL a reply wrote, sent as written: the
+    /// query is not decoded and encoded again.
+    func getFile(apiPath: String, percentEncodedQuery: String?) async throws -> Data {
+        guard let url = Self.fileURL(origin: origin, apiPath: apiPath, percentEncodedQuery: percentEncodedQuery) else { throw APIError.notFound }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        if let token = token() {
+            request.setValue("rome_session=\(token)", forHTTPHeaderField: "Cookie")
+        }
+        return try await send(request)
+    }
+
+    /// Always on this client's own origin, so the cookie never leaves it.
+    static func fileURL(origin: URL, apiPath: String, percentEncodedQuery: String?) -> URL? {
+        guard apiPath.hasPrefix("/") else { return nil }
+        var text = originString(origin) + "/api" + apiPath
+        if let percentEncodedQuery, !percentEncodedQuery.isEmpty { text += "?" + percentEncodedQuery }
+        guard let url = URL(string: text), url.host() == origin.host() else { return nil }
+        return url
+    }
+
     /// Percent-encodes everything but unreserved characters and `/`.
     static func strictQueryValue(_ value: String) -> String {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/")

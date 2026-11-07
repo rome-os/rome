@@ -84,6 +84,18 @@ final class DemoBackend: RomeBackend {
         return chat
     }
 
+    var origin: URL? { nil }
+
+    /// Asset URLs only, as the instance writes them: `/projects/asset/<name>?path=…`.
+    func apiFile(path: String, query: String?) async throws -> Data {
+        var components = URLComponents()
+        components.percentEncodedQuery = query
+        guard path.hasPrefix("/projects/asset") || path.hasPrefix("/memory/asset"),
+              let logical = components.queryItems?.first(where: { $0.name == "path" })?.value
+        else { throw APIError.notFound }
+        return try await asset(path: logical)
+    }
+
     func asset(path: String) async throws -> Data {
         try await pause(0.2)
         guard let data = assets[path] else { throw APIError.notFound }
@@ -443,7 +455,7 @@ final class DemoBackend: RomeBackend {
         messages["topic-trip"] = [
             user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
             agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
-            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/\(hotel))\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
+            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"

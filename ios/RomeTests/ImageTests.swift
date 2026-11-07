@@ -15,10 +15,53 @@ import Testing
 
     @Test func everythingElseIsRejected() {
         for src in ["http://example.com/cat.png", "data:image/png;base64,AAAA", "cat.png", "//evil.example/x.png",
-                    "/api/projects/asset?path=x", "/projects/", "/projects/../etc/passwd", "/projects/a/./b.png",
-                    "/projects/a%2Fb.png", "javascript:alert(1)"] {
-            #expect(ImageSource(src: src) == .rejected, "\(src)")
+                    "/projects/", "/projects/../etc/passwd", "/projects/a/./b.png",
+                    "/projects/a%2Fb.png", "javascript:alert(1)", "/desktop",
+                    "/api/", "/api/../etc/passwd", "/api/projects/%2E%2E/x.png", "/api/a%zz.png", "/api/a.png?path=%"] {
+            #expect(ImageSource(src: src, origin: origin) == .rejected, "\(src)")
         }
+    }
+
+    private let origin = URL(string: "https://me.romeos.cc")!
+
+    /// The reply that showed only its alt text on a phone.
+    @Test func anAssetURLLoadsAsWritten() {
+        let src = "/api/projects/asset/photo-1.jpg?path=projects%2Fdefault%2F2026%2F11%2F07%2Fphoto-1.jpg"
+        let source = ImageSource(src: src, origin: origin)
+        #expect(source == .instance(path: "/projects/asset/photo-1.jpg", query: "path=projects%2Fdefault%2F2026%2F11%2F07%2Fphoto-1.jpg"))
+        #expect(APIClient.fileURL(origin: origin, apiPath: "/projects/asset/photo-1.jpg", percentEncodedQuery: "path=projects%2Fdefault%2F2026%2F11%2F07%2Fphoto-1.jpg")?.absoluteString
+            == "https://me.romeos.cc\(src)")
+    }
+
+    @Test func otherAssetAndAPIURLsLoadThroughTheInstance() {
+        #expect(ImageSource(src: "/api/projects/asset?path=projects%2Fa.png") == .instance(path: "/projects/asset", query: "path=projects%2Fa.png"))
+        #expect(ImageSource(src: "/api/memory/asset/b.png?path=memory%2Fb.png") == .instance(path: "/memory/asset/b.png", query: "path=memory%2Fb.png"))
+        #expect(ImageSource(src: "/api/charts/usage.png") == .instance(path: "/charts/usage.png", query: nil))
+        // What a URL cannot carry is encoded; escapes already there stay.
+        #expect(ImageSource(src: "/api/projects/asset/a b.png?path=projects/a b.png&x=%2F") == .instance(path: "/projects/asset/a%20b.png", query: "path=projects/a%20b.png&x=%2F"))
+    }
+
+    @Test func theInstancesOwnAbsoluteURLsAreInternal() {
+        #expect(ImageSource(src: "https://me.romeos.cc/projects/demo/a%20b.png", origin: origin) == .asset(path: "projects/demo/a b.png"))
+        #expect(ImageSource(src: "https://ME.romeos.cc:443/memory/n.png", origin: origin) == .asset(path: "memory/n.png"))
+        #expect(ImageSource(src: "https://me.romeos.cc/api/projects/asset/a.png?path=projects%2Fa.png#top", origin: origin)
+            == .instance(path: "/projects/asset/a.png", query: "path=projects%2Fa.png"))
+        let local = URL(string: "http://127.0.0.1:3000")!
+        #expect(ImageSource(src: "http://127.0.0.1:3000/projects/a.png", origin: local) == .asset(path: "projects/a.png"))
+    }
+
+    /// Another origin never gets the session: at most a public fetch.
+    @Test func anotherOriginIsNotInternal() {
+        #expect(ImageSource(src: "https://other.romeos.cc/projects/a.png", origin: origin) == .external(URL(string: "https://other.romeos.cc/projects/a.png")!))
+        #expect(ImageSource(src: "https://me.romeos.cc:8443/projects/a.png", origin: origin) == .external(URL(string: "https://me.romeos.cc:8443/projects/a.png")!))
+        #expect(ImageSource(src: "http://me.romeos.cc/projects/a.png", origin: origin) == .rejected)
+        #expect(ImageSource(src: "https://me.romeos.cc/projects/a.png") == .external(URL(string: "https://me.romeos.cc/projects/a.png")!))
+        #expect(APIClient.fileURL(origin: origin, apiPath: "//evil.example/x.png", percentEncodedQuery: nil)?.host() == "me.romeos.cc")
+    }
+
+    @Test func aPathWithoutItsSlashIsStillAFile() {
+        #expect(ImageSource(src: "projects/demo/a.png") == .asset(path: "projects/demo/a.png"))
+        #expect(ImageSource(src: "memory/notes/b.jpg") == .asset(path: "memory/notes/b.jpg"))
     }
 
     @Test func assetPathsAreStrictlyEncodedOnTheWire() {
@@ -53,5 +96,43 @@ import Testing
     @Test func codeIsLeftAlone() {
         let blocks = MarkdownParser.parse("```\n![x](/projects/a.png)\n```")
         #expect(blocks == [.code(language: nil, text: "![x](/projects/a.png)")])
+    }
+}
+
+/// Records what the client sent and answers with a few bytes.
+final class RecordingProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var urls: [String] = []
+    nonisolated(unsafe) static var cookies: [String?] = []
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.urls.append(request.url!.absoluteString)
+        Self.cookies.append(request.value(forHTTPHeaderField: "Cookie"))
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/jpeg"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data([0xFF, 0xD8]))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+@Suite(.serialized) struct InstanceImageWireTests {
+    @Test func anAssetURLGoesOutUnchangedWithTheSession() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RecordingProtocol.self]
+        RecordingProtocol.urls = []
+        RecordingProtocol.cookies = []
+        let backend = LiveBackend(client: APIClient(origin: URL(string: "https://me.romeos.cc")!, token: { "t" }, configuration: configuration))
+        let src = "/api/projects/asset/photo-1.jpg?path=projects%2Fdefault%2F2026%2F11%2F07%2Fphoto-1.jpg"
+        guard case .instance(let path, let query) = ImageSource(src: src, origin: backend.origin) else {
+            Issue.record("not an instance URL")
+            return
+        }
+        let data = try await backend.apiFile(path: path, query: query)
+        #expect(data == Data([0xFF, 0xD8]))
+        #expect(RecordingProtocol.urls == ["https://me.romeos.cc\(src)"])
+        #expect(RecordingProtocol.cookies == ["rome_session=t"])
     }
 }

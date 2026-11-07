@@ -86,6 +86,8 @@ struct RootView: View {
             } else if model.phase == .ready, let workspace = model.workspace {
                 MainShell(workspace: workspace)
                     .environment(\.assetLoader) { [backend = workspace.backend] path in try await backend.asset(path: path) }
+                    .environment(\.apiFileLoader) { [backend = workspace.backend] path, query in try await backend.apiFile(path: path, query: query) }
+                    .environment(\.instanceOrigin, workspace.backend.origin)
                     .id(ObjectIdentifier(workspace))
                     .transition(.opacity)
             } else if model.phase.isOpening {
