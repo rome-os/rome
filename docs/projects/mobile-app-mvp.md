@@ -55,6 +55,12 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 - [x] Drawer: the coming-soon entries are gone; under Chat and Routines, a divider and a "Topic chats" section with + (44 pt) and each topic chat with its unread count. + opens a blank chat in Chat's style; nothing is created until the first send, which starts the chat and then sends to it; the chat then shows in the drawer with the name the server gives it. Each chat's Tasks lists its own tasks; a push for a topic chat opens it (`a4376ba1`, `f07c0ff5`, `80f71ff5`, `97f037a6`). 100 Mac Catalyst tests pass; snapshots `05-drawer`, `24-topic-chat`, `25-topic-blank` light and dark; checked on the Simulator against a local Rome (create from +, send, named in the drawer, reopen, a push opens it). Screenshots: notes folder `topic-chats/`.
 
+## Composer and replies (batch I–O)
+
+- [x] I–L by the iOS app worker (`71aa41a9`, `1281aafc`, `42684366`, `5ade4aaa`): glass composer; + menu (camera, library), up to 4 photos as thumbnails in the composer, JPEG long edge 2048 and ≤ 2.5 MB, sent as the turn's `files`; image paste (the field is now a UIKit text view, since SwiftUI's paste hook needs iOS 27); every Concierge reply in a bubble, folded past about 15 lines. 139 Mac Catalyst tests pass; checked on the Simulator against a local Rome. Snapshots: notes folder `photos-glass-bubbles/`. Independent review running.
+- Uploads need no server change: the server saves each file in the chat's project folder and appends `- File N: [name](</projects/…>)` to the stored message text; the app parses those lines and loads the photos from `GET /api/projects/asset?path=…`. Not live-checked: paste and the camera.
+- [ ] M–O: launch and opening screens, dark page behind the open drawer, shorter first starter
+
 ## Composer drafts
 
 - [ ] One local draft per chat (instance + chat: main, topic, task chats): text and photos, saved on each edit, restored on reopen and after a relaunch; cleared when a send succeeds, kept when it fails; wiped on sign-out; a blank topic chat's draft goes with it if never sent. No drawer marker (user, 2026-11-06). Queued to the iOS app worker after batch I–O.
