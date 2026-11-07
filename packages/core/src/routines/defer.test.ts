@@ -3,6 +3,7 @@ import { RESUME_SESSION_ACTION, runDefer, type DeferContext } from "./defer.js";
 
 // A fixed "now" on a minute boundary keeps the ceil math easy to reason about.
 const NOW = Date.parse("2026-06-25T12:00:00.000Z");
+const MINUTE_MS = 60_000;
 
 const threadContext = {
   channel: "webchat",
@@ -22,13 +23,14 @@ describe("runDefer", () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-ev" });
     const result = await runDefer(
       {
+        kind: "event",
         name: "CI on #12",
         event: {
           eventName: "github.check_suite",
           filter: [{ field: "pr", equals: "12" }],
         },
       },
-      { context: baseContext, createRoutine, now: NOW },
+      { context: baseContext, createRoutine },
     );
 
     expect(result).toEqual({
@@ -69,8 +71,12 @@ describe("runDefer", () => {
     });
     const filter = [{ field: "repository.full_name", equals: "acme/widgets" }];
     const result = await runDefer(
-      { name: "CI", event: { eventName: "provider:event:github.workflow_run", filter } },
-      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+      {
+        kind: "event",
+        name: "CI",
+        event: { eventName: "provider:event:github.workflow_run", filter },
+      },
+      { context: baseContext, createRoutine, prepareEventWait },
     );
 
     expect(calls).toEqual(["prepare", "create"]);
@@ -92,8 +98,8 @@ describe("runDefer", () => {
     }));
     await expect(
       runDefer(
-        { name: "CI", event: { eventName: "provider:event:github.workflow_run" } },
-        { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+        { kind: "event", name: "CI", event: { eventName: "provider:event:github.workflow_run" } },
+        { context: baseContext, createRoutine, prepareEventWait },
       ),
     ).rejects.toThrow("GitHub refused the webhook on acme/widgets");
     expect(prepareEventWait).toHaveBeenCalledWith("provider:event:github.workflow_run", []);
@@ -107,8 +113,8 @@ describe("runDefer", () => {
       warning: "Nothing has emitted it since Rome started",
     }));
     const result = await runDefer(
-      { name: "reply", event: { eventName: "provider:event:gmail.new_message" } },
-      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+      { kind: "event", name: "reply", event: { eventName: "provider:event:gmail.new_message" } },
+      { context: baseContext, createRoutine, prepareEventWait },
     );
     expect(createRoutine).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
@@ -121,8 +127,8 @@ describe("runDefer", () => {
     const prepareEventWait = rs.fn();
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-t" });
     await runDefer(
-      { name: "x", afterMinutes: 5 },
-      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+      { kind: "time", name: "x", fireAtMs: NOW + 5 * MINUTE_MS },
+      { context: baseContext, createRoutine, prepareEventWait },
     );
     expect(prepareEventWait).not.toHaveBeenCalled();
   });
@@ -130,8 +136,8 @@ describe("runDefer", () => {
   it("creates a one-off UTC routine targeting the dispatcher", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
     const result = await runDefer(
-      { name: "检查 GitHub CI", afterMinutes: 5 },
-      { context: baseContext, createRoutine, now: NOW },
+      { kind: "time", name: "检查 GitHub CI", fireAtMs: NOW + 5 * MINUTE_MS },
+      { context: baseContext, createRoutine },
     );
 
     expect(result).toMatchObject({
@@ -175,14 +181,13 @@ describe("runDefer", () => {
     const createRoutine = rs.fn();
     await expect(
       runDefer(
-        { name: "x", afterMinutes: 5 },
+        { kind: "time", name: "x", fireAtMs: NOW + 5 * MINUTE_MS },
         {
           context: {
             agentName: "main",
             sessionId: "agent-session-1",
           },
           createRoutine,
-          now: NOW,
         },
       ),
     ).rejects.toThrow(/active conversation thread/);
@@ -192,14 +197,17 @@ describe("runDefer", () => {
   it("propagates a create_routine domain error", async () => {
     const createRoutine = rs.fn().mockRejectedValue(new Error("boom"));
     await expect(
-      runDefer({ name: "x", afterMinutes: 5 }, { context: baseContext, createRoutine, now: NOW }),
+      runDefer(
+        { kind: "time", name: "x", fireAtMs: NOW + 5 * MINUTE_MS },
+        { context: baseContext, createRoutine },
+      ),
     ).rejects.toThrow("boom");
   });
 
   it("carries the channel coords from channelContext into the resume args", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-2" });
     await runDefer(
-      { name: "watch deploy", afterMinutes: 1 },
+      { kind: "time", name: "watch deploy", fireAtMs: NOW + 1 * MINUTE_MS },
       {
         context: {
           agentName: "main",
@@ -207,7 +215,6 @@ describe("runDefer", () => {
           channelContext: { channel: "telegram", threadId: "tg-9" },
         },
         createRoutine,
-        now: NOW,
       },
     );
     const args = createRoutine.mock.calls[0][0];
@@ -226,8 +233,8 @@ describe("runDefer", () => {
   it("records whose chat it was scheduled in, so the wake-up reaches them after the chat is gone", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-3" });
     await runDefer(
-      { name: "check back", afterMinutes: 5 },
-      { context: { ...baseContext, ownerKey: "visitor:a" }, createRoutine, now: NOW },
+      { kind: "time", name: "check back", fireAtMs: NOW + 5 * MINUTE_MS },
+      { context: { ...baseContext, ownerKey: "visitor:a" }, createRoutine },
     );
     expect(createRoutine.mock.calls[0][0].args).toMatchObject({ ownerKey: "visitor:a" });
   });

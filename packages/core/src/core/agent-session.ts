@@ -35,7 +35,7 @@ import {
   widgetDrawingFor,
   type AgentAction,
   type AgentActions,
-  type DeferInput,
+  type WakeUp,
   type RomeTool,
   subagentToolName,
   type Subagent,
@@ -1201,9 +1201,9 @@ async function openSession(
   });
   const makeExecuteDefer =
     (refs: TurnExecRefs) =>
-    async (input: DeferInput): Promise<unknown> =>
+    async (wakeUp: WakeUp): Promise<unknown> =>
       refs.bindTurnCtx(async () =>
-        runDefer(input, {
+        runDefer(wakeUp, {
           context: {
             agentName: key.agentName,
             sessionId: refs.sessionId,
@@ -1228,7 +1228,6 @@ async function openSession(
                   deps.actionEngine.run(name, args, agentRunContext(refs)),
                 )
             : undefined,
-          now: Date.now(),
         }),
       );
   const deferTool = (refs: TurnExecRefs) =>

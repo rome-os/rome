@@ -3,13 +3,13 @@
 
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import { askQuestionToolOutput, parseAskQuestionInput } from "../domain/ask-question.js";
-import type { DeferInput } from "../domain/defer.js";
+import { parseDeferInput, type WakeUp } from "../domain/defer.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
 
 /** What `defer` is served with, for a session with a live thread to wake. */
 export interface DeferTool {
-  schedule(input: DeferInput): Promise<unknown>;
+  schedule(wakeUp: WakeUp): Promise<unknown>;
   /** The agent's text never reaches the guardian, so `defer` asks for no confirmation in text. */
   finalText: AgentPolicy["finalText"];
 }
@@ -95,10 +95,12 @@ function deferTool(defer: DeferTool, run: RomeToolRunner): RomeTool {
         },
       },
     },
-    // The provider has already validated `input` against the advertised JSON
-    // schema, so the cast is safe. The schedule enforces the value-level rules
-    // a schema can't express.
-    handler: (input) => run("defer", input, () => defer.schedule(input as DeferInput)),
+    handler: (input) =>
+      run("defer", input, () => {
+        const parsed = parseDeferInput(input, Date.now());
+        if (!parsed.ok) throw new Error(parsed.error);
+        return defer.schedule(parsed.wakeUp);
+      }),
   };
 }
 

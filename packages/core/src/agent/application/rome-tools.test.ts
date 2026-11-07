@@ -141,7 +141,7 @@ describe("defer", () => {
     expect(askUserNames({ defer: defer(), widgetsShow: false })).toContain("defer");
   });
 
-  it("relays the call and returns what the schedule answers", async () => {
+  it("schedules the parsed wake-up and returns what the schedule answers", async () => {
     const schedule = rs
       .fn()
       .mockResolvedValue({ ok: true, deferredUntil: "2026-06-25T12:05:00.000Z" });
@@ -150,7 +150,11 @@ describe("defer", () => {
       "defer",
       { name: "check CI", afterMinutes: 5 },
     );
-    expect(schedule).toHaveBeenCalledWith({ name: "check CI", afterMinutes: 5 });
+    expect(schedule).toHaveBeenCalledWith({
+      kind: "time",
+      name: "check CI",
+      fireAtMs: expect.any(Number),
+    });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("2026-06-25T12:05:00.000Z");
   });
@@ -168,8 +172,8 @@ describe("defer", () => {
     expect(served?.description).toContain("end your turn");
   });
 
-  it("surfaces a thrown error as a tool error", async () => {
-    const schedule = rs.fn().mockRejectedValue(new Error("defer fires in the past"));
+  it("refuses a wake-up in the past without scheduling it", async () => {
+    const schedule = rs.fn();
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
@@ -177,6 +181,18 @@ describe("defer", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("defer fires in the past");
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a schedule's error as a tool error", async () => {
+    const schedule = rs.fn().mockRejectedValue(new Error("no thread to wake"));
+    const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
+      "ask_user",
+      "defer",
+      { name: "x", afterMinutes: 5 },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("no thread to wake");
   });
 });
 

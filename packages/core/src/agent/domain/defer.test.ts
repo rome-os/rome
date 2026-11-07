@@ -14,7 +14,7 @@ describe("parseDeferInput", () => {
   it("trims the name", () => {
     const r = parseDeferInput({ name: "  check CI  ", afterMinutes: 5 }, NOW);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.name).toBe("check CI");
+    if (r.ok) expect(r.wakeUp.name).toBe("check CI");
   });
 
   it("requires exactly one of afterMinutes/at", () => {
@@ -33,9 +33,9 @@ describe("parseDeferInput", () => {
   it("resolves afterMinutes to an absolute minute-aligned instant", () => {
     const r = parseDeferInput({ name: "check CI", afterMinutes: 5 }, NOW);
     expect(r.ok).toBe(true);
-    if (r.ok && r.kind === "time") {
-      expect(r.name).toBe("check CI");
-      expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T12:05:00.000Z");
+    if (r.ok && r.wakeUp.kind === "time") {
+      expect(r.wakeUp.name).toBe("check CI");
+      expect(new Date(r.wakeUp.fireAtMs).toISOString()).toBe("2026-06-25T12:05:00.000Z");
     }
   });
 
@@ -44,15 +44,15 @@ describe("parseDeferInput", () => {
     const now = Date.parse("2026-06-25T12:00:30.000Z");
     const r = parseDeferInput({ name: "x", afterMinutes: 1 }, now);
     expect(r.ok).toBe(true);
-    if (r.ok && r.kind === "time")
-      expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T12:02:00.000Z");
+    if (r.ok && r.wakeUp.kind === "time")
+      expect(new Date(r.wakeUp.fireAtMs).toISOString()).toBe("2026-06-25T12:02:00.000Z");
   });
 
   it("accepts an absolute ISO instant", () => {
     const r = parseDeferInput({ name: "x", at: "2026-06-25T18:30:00Z" }, NOW);
     expect(r.ok).toBe(true);
-    if (r.ok && r.kind === "time")
-      expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T18:30:00.000Z");
+    if (r.ok && r.wakeUp.kind === "time")
+      expect(new Date(r.wakeUp.fireAtMs).toISOString()).toBe("2026-06-25T18:30:00.000Z");
   });
 
   it("rejects an at-instant in the past", () => {
@@ -78,8 +78,8 @@ describe("parseDeferInput with an event", () => {
       NOW,
     );
     expect(r.ok).toBe(true);
-    if (r.ok && r.kind === "event") {
-      expect(r.event).toEqual({
+    if (r.ok && r.wakeUp.kind === "event") {
+      expect(r.wakeUp.event).toEqual({
         eventName: "ci.done",
         sourcePattern: "connector",
         // `equals` is matched against payload values verbatim, so it isn't trimmed.

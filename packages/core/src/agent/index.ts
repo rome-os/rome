@@ -44,7 +44,7 @@ export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export type { Skill, SkillCatalog } from "./domain/skill.js";
 export type { AgentAction, AgentActions } from "./domain/agent-action.js";
 export type { AgentLog } from "./domain/agent-log.js";
-export { parseDeferInput, type DeferInput } from "./domain/defer.js";
+export type { WakeUp } from "./domain/defer.js";
 export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
 export { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
 export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
