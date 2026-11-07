@@ -95,6 +95,9 @@ export interface ConnectionView
    *  before the rename read. */
   service: string;
   label: string;
+  /** The kind's display name ("GitHub"), where `label` is the kind id until
+   *  someone renames the connection. */
+  kindLabel: string;
   /** Working or broken. Null for a placeholder, and for a connection a
    *  disconnect kept with no access. */
   state: ConnectionState | null;
@@ -179,6 +182,7 @@ function buildConnectionView(
     connectionKind: conn.connectionKind,
     service: conn.connectionKind,
     label: conn.label,
+    kindLabel: registry.getDescriptor(conn.connectionKind)?.label ?? conn.connectionKind,
     state: conn.state(),
     grants,
     display,
@@ -255,6 +259,7 @@ function placeholderView(
     connectionKind,
     service: connectionKind,
     label: connectionKind,
+    kindLabel: descriptor.label ?? connectionKind,
     state: null,
     grants,
     display,

@@ -303,6 +303,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
 
   return {
     connectionKind: "whatsapp",
+    label: "WhatsApp",
     reviveProfile: (record) => reviveWhatsAppProfile(record),
     accountIdOf: (record) => (typeof record.jid === "string" && record.jid) || null,
     grant: "session",

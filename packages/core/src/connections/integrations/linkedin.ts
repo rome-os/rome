@@ -272,6 +272,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
 
   return {
     connectionKind: "linkedin",
+    label: "LinkedIn",
     reviveProfile: (record) => reviveLinkedInProfile(record),
     accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
     grant: "session",

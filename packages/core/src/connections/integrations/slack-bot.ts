@@ -327,6 +327,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
 
   return {
     connectionKind: SLACK_BOT_KIND,
+    label: "Slack bot",
     severalAccounts: true,
     reviveProfile: (record) => reviveSlackBotProfile(record),
     accountIdOf: (record) => slackBotAccountId(record),

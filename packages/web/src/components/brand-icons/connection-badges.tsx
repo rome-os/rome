@@ -146,6 +146,11 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
 /** Services drawn with another service's mark: a Slack bot is still Slack. */
 const BADGE_OF_SERVICE: Readonly<Record<string, string>> = { slack_bot: "slack" };
 
+/** Whether a service has a brand mark of its own. */
+export function hasConnectionBrand(connection: string): boolean {
+  return (BADGE_OF_SERVICE[connection] ?? connection) in CONNECTION_BADGES;
+}
+
 /** Square brand badge for a unified Connection card header. An unknown service
  *  gets an empty bordered square. */
 export function ConnectionBrandBadge({

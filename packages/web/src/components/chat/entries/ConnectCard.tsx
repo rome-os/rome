@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { ConciergeConnectEntry } from "@rome/api-types/concierge";
 import { Spinner } from "@rome-os/ui/spinner";
+import { ConnectorIcon } from "@/components/brand-icons/connector-icon";
 import { Button } from "@/components/ui/button";
 import {
   isServiceWorking,
@@ -31,11 +32,13 @@ type Phase =
 export function ConnectCard({
   service,
   label,
+  icon,
   connect,
   chatId,
 }: {
   service: string;
   label: string;
+  icon?: string | null;
   connect: ConciergeConnectEntry;
   chatId: string;
 }) {
@@ -86,6 +89,7 @@ export function ConnectCard({
 
   return (
     <div className="flex w-full max-w-md items-center gap-3 rounded-16 border border-border bg-surface px-3 py-2">
+      <ConnectorIcon icon={icon} label={label} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-ui text-foreground">{label}</span>
         {unavailable ? (

@@ -2933,7 +2933,7 @@ describe("Concierge connect_card", () => {
   it("shows the card of a service that is not connected, with the label and entry the list gave it", async () => {
     const s = setup();
     const list = withServices(s, [
-      { service: "mail", label: "Mail", state: null, connect: MAIL_CONNECT },
+      { service: "mail", label: "Mail", icon: "glyph:gmail", state: null, connect: MAIL_CONNECT },
     ]);
 
     const result = await s.tool("connect_card", { service: "mail" });
@@ -2941,7 +2941,15 @@ describe("Concierge connect_card", () => {
     expect(result.isError).toBeFalsy();
     expect(list).toHaveBeenCalledWith("guardian");
     expect(cards(s)).toEqual([
-      [{ type: "connect_card", service: "mail", label: "Mail", connect: MAIL_CONNECT }],
+      [
+        {
+          type: "connect_card",
+          service: "mail",
+          label: "Mail",
+          icon: "glyph:gmail",
+          connect: MAIL_CONNECT,
+        },
+      ],
     ]);
     expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: "said-1" });
   });
@@ -2963,12 +2971,14 @@ describe("Concierge connect_card", () => {
     ["a service only Settings connects", { kind: "dashboard" }],
   ])("carries the entry of %s unchanged", async (_, connect) => {
     const s = setup();
-    withServices(s, [{ service: "code", label: "Code host", state: "broken", connect }]);
+    withServices(s, [
+      { service: "code", label: "Code host", icon: "brand:code", state: "broken", connect },
+    ]);
 
     await s.tool("connect_card", { service: "code" });
 
     expect(cards(s)).toEqual([
-      [{ type: "connect_card", service: "code", label: "Code host", connect }],
+      [{ type: "connect_card", service: "code", label: "Code host", icon: "brand:code", connect }],
     ]);
   });
 
@@ -2979,6 +2989,17 @@ describe("Concierge connect_card", () => {
     await s.tool("connect_card", { service: "code" });
 
     expect(cards(s)[0][0].connect).toEqual({ kind: "dashboard" });
+  });
+
+  it("carries no icon for a service whose source names none", async () => {
+    const s = setup();
+    withServices(s, [
+      { service: "code", label: "Code host", icon: null, state: null, connect: null },
+    ]);
+
+    await s.tool("connect_card", { service: "code" });
+
+    expect(cards(s)[0][0].icon).toBeNull();
   });
 
   it("says so and shows no card when the service already works", async () => {

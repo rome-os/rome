@@ -842,6 +842,7 @@ export async function buildConciergeTools(
               type: "connect_card",
               service: connector.service,
               label: connector.label,
+              icon: connector.icon,
               // A service with no entry can only be connected from Settings.
               connect: connector.connect ?? { kind: "dashboard" },
             },

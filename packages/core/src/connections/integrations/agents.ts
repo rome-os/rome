@@ -291,6 +291,7 @@ export function makeAgentsDescriptor(
 ): ConnectionDescriptor {
   return {
     connectionKind: AGENTS_KIND,
+    label: "Agents",
     reviveProfile: (record) => reviveAgentsProfile(record),
     // The agent Rome Cloud assigned this Rome.
     accountIdOf: (record) => (typeof record.agentId === "string" && record.agentId) || null,

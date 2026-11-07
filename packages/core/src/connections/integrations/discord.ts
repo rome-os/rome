@@ -239,6 +239,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
 
   return {
     connectionKind: "discord",
+    label: "Discord",
     severalAccounts: true,
     reviveProfile: (record) => reviveDiscordProfile(record),
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,

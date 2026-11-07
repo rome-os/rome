@@ -106,6 +106,7 @@ describe("GET /connections", () => {
       connectionKind: "fake-telegram",
       service: "fake-telegram",
       label: "Telegram",
+      kindLabel: "fake-telegram",
       state: "working",
       grants: { bot: "authorized" },
       display: {
@@ -213,6 +214,8 @@ describe("GET /connections", () => {
       connectionKind: "fake-discord",
       service: "fake-discord",
       label: "fake-discord",
+      // The fixture kind declares no display label, so the kind id stands in.
+      kindLabel: "fake-discord",
       state: null,
       grants: { bot: "unauthorized" },
       display: { bot: null },

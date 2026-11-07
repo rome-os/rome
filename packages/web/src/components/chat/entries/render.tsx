@@ -244,6 +244,7 @@ export function renderSingleEntry(
           key={key}
           service={block.service}
           label={block.label}
+          icon={block.icon}
           connect={block.connect}
           chatId={sid}
         />

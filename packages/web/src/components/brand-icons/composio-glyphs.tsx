@@ -272,6 +272,11 @@ const COMPOSIO_GLYPHS: Record<string, ReactNode> = {
   ),
 };
 
+/** Whether a glyph id names a drawn glyph. */
+export function hasComposioGlyph(glyph: string): boolean {
+  return Object.hasOwn(COMPOSIO_GLYPHS, glyph);
+}
+
 /** The badge for a Composio service row, sized like `ConnectionBrandBadge`.
  *  An unknown glyph falls back to a plug mark. */
 export function ComposioServiceBadge({

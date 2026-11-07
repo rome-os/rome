@@ -207,6 +207,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
 
   return {
     connectionKind: "telegram",
+    label: "Telegram",
     severalAccounts: true,
     reviveProfile: (record) => reviveTelegramProfile(record),
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,

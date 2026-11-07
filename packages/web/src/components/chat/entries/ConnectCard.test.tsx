@@ -56,10 +56,10 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderCard(connect: ConciergeConnectEntry = OAUTH) {
+function renderCard(connect: ConciergeConnectEntry = OAUTH, icon: string | null = "glyph:gmail") {
   return render(
     <MemoryRouter>
-      <ConnectCard service="mail" label="Mail" connect={connect} chatId="concierge" />
+      <ConnectCard service="mail" label="Mail" icon={icon} connect={connect} chatId="concierge" />
     </MemoryRouter>,
   );
 }
@@ -67,6 +67,22 @@ function renderCard(connect: ConciergeConnectEntry = OAUTH) {
 const notices = () => calls.filter((call) => call.key.endsWith("/service-connected"));
 
 describe("ConnectCard", () => {
+  it("puts the service's mark before its name", () => {
+    const { container } = renderCard();
+
+    const mark = container.querySelector("svg");
+    const name = screen.getByText("Mail");
+    expect(mark).not.toBeNull();
+    expect(mark?.compareDocumentPosition(name)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("shows a tile with the initial for a service with no icon", () => {
+    const { container } = renderCard(OAUTH, null);
+
+    expect(container.querySelector("svg")).toBeNull();
+    expect(screen.getByText("M")).toBeTruthy();
+  });
+
   it("shows the service and one button, and nothing else", async () => {
     renderCard();
 

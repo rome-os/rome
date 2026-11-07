@@ -50,6 +50,9 @@ export interface ConnectCardPart {
   type: "connect_card";
   service: string;
   label: string;
+  /** The id of the service's mark, as the connector list gave it. A card
+   * written before it existed has none. */
+  icon?: string | null;
   connect: ConciergeConnectEntry;
 }
 
