@@ -148,6 +148,12 @@ export {
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { forkSessionTools } from "./domain/session-tools.js";
+export {
+  storeForkParent,
+  storeSubagentParent,
+  walkToRoot,
+  type RootSession,
+} from "./domain/session-parent.js";
 export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";

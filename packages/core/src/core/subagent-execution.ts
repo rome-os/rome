@@ -1,7 +1,7 @@
-import { subagentSessionKey } from "./agent-session-key.js";
 import {
   refuseResume,
   storedAgentName,
+  storeSubagentParent,
   SubagentOutcomeReader,
   subagentRequest,
   subagentSessionName,
@@ -102,7 +102,7 @@ export function createSubagentExecutionService(deps: {
         child = await context.childManager.acquire(
           {
             agentName: name,
-            channelThreadKey: subagentSessionKey(context.parentChannelThreadKey),
+            channelThreadKey: storeSubagentParent(context.parentChannelThreadKey),
           },
           {
             workingDir: context.workingDir,
