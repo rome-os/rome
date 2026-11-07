@@ -1997,6 +1997,7 @@ async function main() {
       feedback: feedbackClient,
       provisionAfterLink: () => provisionAfterLink(),
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
+      cloudProfile: cloudProfileClient,
       nodeDevices,
       channelsService,
       chatSettings,

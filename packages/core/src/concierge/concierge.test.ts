@@ -153,6 +153,8 @@ function setup(
   const storedChats = new ChatsWebChatRepository(testDb.db);
   const approvalListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
+  /** Every guardian setting written, in order. */
+  const settingsWrites: [string, unknown][] = [];
   const turnOptions: (SystemTurnOptions | undefined)[] = [];
   /** Every push asked of Rome Cloud, in order. */
   const pushes: SystemNotifyContent[] = [];
@@ -195,6 +197,7 @@ function setup(
       return id;
     }),
     openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
+    sendAsGuardian: rs.fn(async () => {}),
     isRunning: rs.fn(() => false),
     activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
@@ -228,6 +231,9 @@ function setup(
         if (options.settingsDelayMs)
           await new Promise((resolve) => setTimeout(resolve, options.settingsDelayMs));
         return options.enabled ?? true;
+      },
+      set: async (key: string, value: unknown) => {
+        settingsWrites.push([key, value]);
       },
     },
     webchatRepo: {
@@ -412,6 +418,7 @@ function setup(
     taskRepo,
     storedChats,
     quietFlags,
+    settingsWrites,
     turnOptions,
     pushes,
     /** Runs the tools' turn as one the guardian did not start, pushed at this level. */
@@ -471,6 +478,7 @@ describe("Concierge tools", () => {
       "topic_start",
       "chat_forward",
       "chat_card",
+      "connect_card",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
     const off = setup({ enabled: false });
@@ -2899,5 +2907,166 @@ describe("Concierge chats", () => {
     });
     expect(await s.service.switchIfExhausted(TOPIC_CHAT)).toMatchObject({ from: "anthropic" });
     expect(await s.service.switchIfExhausted("task-1")).toBeNull();
+  });
+});
+
+describe("Concierge connect_card", () => {
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
+  const MAIL_CONNECT = {
+    kind: "composio",
+    method: "POST",
+    path: "/api/apps/connector/connectors",
+    body: { provider: "mail" },
+    needsLogin: true,
+    login: { method: "POST", path: "/api/apps/connector/login/start" },
+  } as const;
+
+  /** A list of services as the following list reads them. */
+  const withServices = (s: ReturnType<typeof setup>, connectors: Record<string, unknown>[]) => {
+    const list = rs.fn(async () => ({ connectors, rules: {} }));
+    s.service.attachFollowing({ list } as unknown as ConciergeFollowing);
+    return list;
+  };
+
+  const cards = (s: ReturnType<typeof setup>) =>
+    (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
+
+  it("shows the card of a service that is not connected, with the label and entry the list gave it", async () => {
+    const s = setup();
+    const list = withServices(s, [
+      { service: "mail", label: "Mail", icon: "glyph:gmail", state: null, connect: MAIL_CONNECT },
+    ]);
+
+    const result = await s.tool("connect_card", { service: "mail" });
+
+    expect(result.isError).toBeFalsy();
+    expect(list).toHaveBeenCalledWith("guardian");
+    expect(cards(s)).toEqual([
+      [
+        {
+          type: "connect_card",
+          service: "mail",
+          label: "Mail",
+          icon: "glyph:gmail",
+          connect: MAIL_CONNECT,
+        },
+      ],
+    ]);
+    expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: "said-1" });
+  });
+
+  it.each([
+    [
+      "a service Rome Cloud signs in",
+      {
+        kind: "rome_oauth",
+        url: "https://cloud.test/connect",
+        available: true,
+        unavailableReason: null,
+      },
+    ],
+    [
+      "a service Rome Cloud cannot sign in here",
+      { kind: "rome_oauth", url: null, available: false, unavailableReason: "Not set up" },
+    ],
+    ["a service only Settings connects", { kind: "dashboard" }],
+  ])("carries the entry of %s unchanged", async (_, connect) => {
+    const s = setup();
+    withServices(s, [
+      { service: "code", label: "Code host", icon: "brand:code", state: "broken", connect },
+    ]);
+
+    await s.tool("connect_card", { service: "code" });
+
+    expect(cards(s)).toEqual([
+      [{ type: "connect_card", service: "code", label: "Code host", icon: "brand:code", connect }],
+    ]);
+  });
+
+  it("falls back to Settings for a service that is not connected and lists no entry", async () => {
+    const s = setup();
+    withServices(s, [{ service: "code", label: "Code host", state: null, connect: null }]);
+
+    await s.tool("connect_card", { service: "code" });
+
+    expect(cards(s)[0][0].connect).toEqual({ kind: "dashboard" });
+  });
+
+  it("carries no icon for a service whose source names none", async () => {
+    const s = setup();
+    withServices(s, [
+      { service: "code", label: "Code host", icon: null, state: null, connect: null },
+    ]);
+
+    await s.tool("connect_card", { service: "code" });
+
+    expect(cards(s)[0][0].icon).toBeNull();
+  });
+
+  it("says so and shows no card when the service already works", async () => {
+    const s = setup();
+    withServices(s, [{ service: "mail", label: "Mail", state: "working", connect: null }]);
+
+    const result = await s.tool("connect_card", { service: "mail" });
+
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toMatchObject({ connected: true });
+    expect(cards(s)).toEqual([]);
+  });
+
+  it("refuses a service the list does not have", async () => {
+    const s = setup();
+    withServices(s, [{ service: "mail", label: "Mail", state: null, connect: MAIL_CONNECT }]);
+
+    const result = await s.tool("connect_card", { service: "fax" });
+
+    expect(result.isError).toBe(true);
+    expect(cards(s)).toEqual([]);
+  });
+});
+
+describe("Concierge first sign-in and connection notices", () => {
+  it("turns the Concierge on, makes its main chat, and sends the guardian's message into it", async () => {
+    const s = setup({ startEvents: false });
+
+    const chatId = await s.service.startMainChat("Help me follow Gmail.");
+
+    expect(chatId).toBe(CONCIERGE_CHAT);
+    expect(s.settingsWrites).toEqual([["experimentalConcierge", true]]);
+    expect(s.chats.sendAsGuardian).toHaveBeenCalledTimes(1);
+    expect(s.chats.sendAsGuardian).toHaveBeenCalledWith(CONCIERGE_CHAT, "Help me follow Gmail.");
+    // The message is the guardian's own, so no system turn or input is made for it.
+    expect(s.backendTurns).toEqual([]);
+  });
+
+  it("only turns the Concierge on when there is no message to send", async () => {
+    const s = setup({ startEvents: false });
+
+    expect(await s.service.startMainChat(null)).toBe(CONCIERGE_CHAT);
+
+    expect(s.settingsWrites).toEqual([["experimentalConcierge", true]]);
+    expect(s.chats.sendAsGuardian).not.toHaveBeenCalled();
+  });
+
+  it("answers the chat even when the message cannot be sent", async () => {
+    const s = setup({ startEvents: false });
+    s.chats.sendAsGuardian = rs.fn(async () => {
+      throw new Error("no model");
+    });
+
+    expect(await s.service.startMainChat("Help me follow Gmail.")).toBe(CONCIERGE_CHAT);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+
+  it("tells the Concierge of a connected service quietly, in the chat it was connected from", async () => {
+    const s = setup({ startEvents: false });
+
+    s.service.serviceConnected(TOPIC_CHAT, 'ma"il');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0]).toMatchObject({ threadId: TOPIC_CHAT });
+    expect(s.backendTurns[0].prompt).toContain('<service_connected service="ma&quot;il"/>');
+    expect(s.turnOptions[0]).toEqual({ quiet: true, inputLabel: "Service connected" });
   });
 });

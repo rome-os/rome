@@ -66,6 +66,16 @@ const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
   ["shopify", "store", { accessToken: "shpat_live", refreshToken: "shprt_live" }],
 ];
 
+describe("OAuth connection kinds' display labels", () => {
+  it("name each kind as a person reads it, not by its id", () => {
+    expect(
+      (["github", "google", "slack", "shopify"] as const).map(
+        (provider) => makeOAuthProviderDescriptor(provider).label,
+      ),
+    ).toEqual(["GitHub", "Google", "Slack", "Shopify"]);
+  });
+});
+
 describe("OAuth profile revival", () => {
   it("revives GitHub's stored schema: login is the handle, committer identity fields survive", () => {
     const revive = makeOAuthProviderDescriptor("github").reviveProfile;

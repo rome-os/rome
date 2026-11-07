@@ -410,3 +410,79 @@ describe("/concierge/chats", () => {
     expect((await app().request("/concierge/chats", guardian)).status).toBe(404);
   });
 });
+
+describe("POST /concierge/chats/:chatId/service-connected", () => {
+  let testDb: TestDb;
+  let enabled: boolean;
+  const serviceConnected = rs.fn();
+  const chatOwners: Record<string, string> = { concierge: "guardian", "topic-1": "guardian" };
+
+  const app = () => {
+    const concierge = {
+      isEnabled: async () => enabled,
+      following: {
+        list: async () => ({
+          connectors: [
+            { service: "mail", state: "working" },
+            { service: "code", state: null },
+            { service: "chat", state: "broken" },
+          ],
+          rules: {},
+        }),
+      },
+      conciergeChat: async (id: string) =>
+        id in chatOwners ? { id, name: id, main: false } : null,
+      ownerOfChat: async (id: string) => chatOwners[id] ?? null,
+      serviceConnected,
+    } as unknown as ConciergeService;
+    return mount(testDb, concierge, {} as ApiDeps["webchatRepo"]);
+  };
+
+  const post = (chatId: string, body: unknown, who: object = guardian) =>
+    app().request(`/concierge/chats/${chatId}/service-connected`, {
+      method: "POST",
+      headers: { ...(who as { headers: object }).headers, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    enabled = true;
+    serviceConnected.mockClear();
+  });
+
+  afterEach(() => testDb.close());
+
+  it("tells the Concierge in that chat of a service that works now", async () => {
+    const res = await post("topic-1", { service: "mail" });
+
+    expect(res.status).toBe(202);
+    expect(serviceConnected).toHaveBeenCalledWith("topic-1", "mail");
+  });
+
+  it.each(["code", "chat", "fax", ""])("refuses %j, which is not working", async (service) => {
+    const res = await post("concierge", { service });
+
+    expect(res.status).toBe(409);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("refuses a body that names no service", async () => {
+    expect((await post("concierge", {})).status).toBe(409);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("404s a chat that is not a Concierge chat of the caller", async () => {
+    expect((await post("gone", { service: "mail" })).status).toBe(404);
+    // Ann's own Concierge is not the guardian's chat.
+    expect((await post("concierge", { service: "mail" }, ann)).status).toBe(404);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("answers 401 to a caller with no Concierge, and 404 while the setting is off", async () => {
+    expect((await post("concierge", { service: "mail" }, appUser)).status).toBe(401);
+    enabled = false;
+    expect((await post("concierge", { service: "mail" })).status).toBe(404);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+});

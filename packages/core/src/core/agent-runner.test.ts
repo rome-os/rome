@@ -2477,7 +2477,7 @@ describe("AgentRunner", () => {
     });
 
     it("publishes an empty result for a middleware turn that emits no terminal", async () => {
-      // welcome-to-rome parks a turn on a question card this way.
+      // A scripted conversation parks a turn on a question card this way.
       const session = await openMiddlewareSession(async (ctx) => {
         ctx.emit({ type: "text", content: "Pick one" });
       });

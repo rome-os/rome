@@ -19,6 +19,8 @@ import type { ConnectionView } from "../api/routes/connections.js";
 export interface ProviderService {
   service: string;
   label: string;
+  /** The provider's id for the service's mark, such as a Composio catalog glyph. */
+  glyph?: string;
   state: "working" | "broken" | null;
   connect: Extract<ConciergeConnectEntry, { kind: "composio" }> | null;
 }
@@ -103,7 +105,8 @@ export function mergeConnectors(input: {
   const sectionOf = (service: string) => input.watch.find((s) => s.service === service);
   const fromConnections: ConciergeConnectorDto[] = input.connections.map((view) => ({
     service: view.connectionKind,
-    label: view.label,
+    label: view.kindLabel,
+    icon: `brand:${view.connectionKind}`,
     origin: "connection",
     connectionId: view.id,
     state: view.state,
@@ -132,6 +135,7 @@ export function mergeConnectors(input: {
     return {
       service: service.service,
       label: service.label,
+      icon: service.glyph ? `glyph:${service.glyph}` : null,
       origin: "composio",
       connectionId: null,
       state: service.state,
