@@ -6,7 +6,7 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   type AgentTurnFailedBeforeStart,
   createAgentLifecycleDispatcher,
@@ -155,8 +155,8 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("loads a no-tier YAML pin and uses it on the first and later turns", async () => {
-    expect(loader.get(AGENT)).toMatchObject({ providerId: "openai", modelId: MODEL });
-    expect(loader.get(AGENT).tier).toBeUndefined();
+    expect(loader.find(AGENT)?.definition).toMatchObject({ providerId: "openai", modelId: MODEL });
+    expect(loader.find(AGENT)?.definition.tier).toBeUndefined();
     const session = await createManager().acquire(key, { workingDir: directory });
     await collect(session.sendTurn({ prompt: "first" }).events);
     await collect(session.sendTurn({ prompt: "second" }).events);

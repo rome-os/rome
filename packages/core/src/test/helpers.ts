@@ -10,7 +10,8 @@ import type { DrizzleDb } from "../db/index.js";
 import { givenGrant } from "../connections/connection.js";
 import type { GrantValue } from "../connections/grant.js";
 import type { Credential } from "../connections/types.js";
-import type { AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
+import type { AgentEvent, OutgoingMessage } from "../types.js";
+import type { Agent, AgentDefinition } from "../agent/index.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -19,7 +20,8 @@ import type {
   ModelSessionParams,
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
+import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
 import { SkillLoader } from "../agent/index.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import {
@@ -502,9 +504,12 @@ export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMe
   };
 }
 
-// buildAgentConfig — AgentConfig factory with defaults
+// buildAgentConfig — an agent file's contents, with defaults
 
-export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
+/** What an agent's file holds: its definition and its local name. */
+export type TestAgentFile = AgentDefinition & { name: string };
+
+export function buildAgentConfig(overrides?: Partial<TestAgentFile>): TestAgentFile {
   return {
     name: "test-agent",
     description: "A test agent",
@@ -515,6 +520,15 @@ export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig 
     permissionMode: "default",
     ...overrides,
   };
+}
+
+/** An installed core agent, for tests that stub the catalog. Its local name is the id's last part unless `name` says otherwise. */
+export function buildAgent(id: string, overrides?: Partial<TestAgentFile>): Agent {
+  const { name: localName, ...definition } = buildAgentConfig({
+    name: id.split(":").pop() ?? id,
+    ...overrides,
+  });
+  return { name: id, localName, ownerType: "core", ownerId: "core", definition };
 }
 
 // buildTestDeps — wires real repos from a test DB plus mock channels
@@ -885,6 +899,7 @@ export async function buildTestDeps(
     appStore,
     actionRegistry,
     agentLoader,
+    agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
     accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),

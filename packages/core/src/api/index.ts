@@ -219,6 +219,7 @@ export function buildApp(
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db, "chats"),
     agentLoader: deps.agentLoader,
+    agentsByName: deps.agentsByName,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
       readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),

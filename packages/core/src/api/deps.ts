@@ -34,7 +34,7 @@ import type { AppManager } from "../apps/manager.js";
 import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
-import type { AgentLoader } from "../core/agent-loader.js";
+import type { Agent, AgentCatalog, AgentLoader } from "../agent/index.js";
 import type { SkillCatalog } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -143,6 +143,8 @@ export interface ApiDeps {
   routineRunsRepo: RoutineRunsRepository;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
+  /** The agents under every name they have had, for reading names stored before ids were canonical. */
+  agentsByName: () => ReadonlyMap<string, Agent>;
   /** Social card PNGs rendered by apps/og/subscriber.ts. */
   ogImageStore: OgImageStore;
   /** AppManager — sole writer for install/uninstall/setEnabled. */
@@ -151,7 +153,7 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
-  agentLoader: AgentLoader;
+  agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */
   accountListening: Pick<AccountListening, "changed">;

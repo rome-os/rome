@@ -41,6 +41,12 @@ export {
 } from "./domain/model-resolution.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
+export {
+  requireAgent,
+  type Agent,
+  type AgentCatalog,
+  type AgentDefinition,
+} from "./domain/agent-definition.js";
 export type { Skill, SkillCatalog } from "./domain/skill.js";
 export type { AgentAction, AgentActions } from "./domain/agent-action.js";
 export type { AgentLog } from "./domain/agent-log.js";
@@ -131,6 +137,7 @@ export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { SkillLoader } from "./infrastructure/skill-loader.js";
+export { AgentLoader } from "./infrastructure/agent-loader.js";
 
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.

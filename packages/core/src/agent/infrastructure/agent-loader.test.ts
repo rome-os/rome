@@ -3,14 +3,19 @@ import { AgentLoader } from "./agent-loader.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import type { AppCatalog } from "../apps/catalog.js";
-import { createEmptyLegacyArtifactBindings, formatArtifactId } from "../apps/artifact-id.js";
+import type { AppCatalog } from "../../apps/catalog.js";
+import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
+import type { Agent } from "../domain/agent-definition.js";
 
-rs.mock("../apps/core-artifacts.js", () => ({
+rs.mock("../../apps/core-artifacts.js", () => ({
   listCoreAgents: async () => [],
 }));
 
-const FIXTURES_DIR = join(import.meta.dirname, "..", "test", "fixtures", "agents");
+const FIXTURES_DIR = join(import.meta.dirname, "..", "..", "test", "fixtures", "agents");
+
+/** The loaded agents by canonical id. */
+const byId = (catalog: { list(): readonly Agent[] }) =>
+  new Map(catalog.list().map((agent) => [agent.name, agent]));
 
 describe("AgentLoader", () => {
   let loader: AgentLoader;
@@ -56,8 +61,7 @@ describe("AgentLoader", () => {
 
       await namespaced.loadFromCatalog(catalog);
 
-      expect(namespaced.has("@foo/bar:baz")).toBe(true);
-      expect(namespaced.getRecord("@foo/bar:baz").metadata.ownerId).toBe("@foo/bar");
+      expect(namespaced.find("@foo/bar:baz")?.ownerId).toBe("@foo/bar");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -65,7 +69,8 @@ describe("AgentLoader", () => {
 
   describe("loadAll()", () => {
     it("loads all YAML files from a directory", async () => {
-      const agents = await loader.loadAll(FIXTURES_DIR);
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
 
       expect(agents.size).toBe(7);
       expect(agents.has("core:test-all-actions")).toBe(true);
@@ -78,8 +83,9 @@ describe("AgentLoader", () => {
     });
 
     it("parses outputSchema when declared", async () => {
-      const agents = await loader.loadAll(FIXTURES_DIR);
-      const structured = agents.get("core:test-structured")!;
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
+      const structured = agents.get("core:test-structured")!.definition;
       expect(structured.outputSchema).toBeDefined();
       expect(structured.outputSchema).toMatchObject({
         type: "object",
@@ -87,7 +93,7 @@ describe("AgentLoader", () => {
       });
 
       // Agents without outputSchema get undefined.
-      const main = agents.get("core:test-main")!;
+      const main = agents.get("core:test-main")!.definition;
       expect(main.outputSchema).toBeUndefined();
     });
 
@@ -151,10 +157,11 @@ describe("AgentLoader", () => {
     });
 
     it("parses agent name, tier, tools, and permissions", async () => {
-      const agents = await loader.loadAll(FIXTURES_DIR);
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
 
-      const main = agents.get("core:test-main")!;
-      expect(main.name).toBe("test-main");
+      expect(agents.get("core:test-main")!.localName).toBe("test-main");
+      const main = agents.get("core:test-main")!.definition;
       expect(main.tier).toBe("large");
       expect(main.reasoningEffort).toBe("high");
       expect(main.tools).toEqual(["Read", "Edit"]);
@@ -163,20 +170,21 @@ describe("AgentLoader", () => {
       expect(main.allowedSubagents).toEqual(["core:test-explore"]);
       expect(main.description).toBe("Test main agent for unit tests.");
 
-      const sentinel = agents.get("core:test-sentinel")!;
+      const sentinel = agents.get("core:test-sentinel")!.definition;
       expect(sentinel.tier).toBe("small");
       expect(sentinel.permissionMode).toBe("bypassPermissions");
       expect(sentinel.tools).toEqual(["Read", "Glob"]);
 
-      const allActions = agents.get("core:test-all-actions")!;
+      const allActions = agents.get("core:test-all-actions")!.definition;
       expect(allActions.actions).toEqual(["*"]);
       expect(allActions.reasoningEffort).toBe("low");
     });
 
     it("validates that referenced subagents exist", async () => {
       // The fixtures have valid subagent refs, so loading should succeed
-      const agents = await loader.loadAll(FIXTURES_DIR);
-      const main = agents.get("core:test-main")!;
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
+      const main = agents.get("core:test-main")!.definition;
       expect(main.allowedSubagents).toContain("core:test-explore");
     });
 
@@ -197,8 +205,9 @@ describe("AgentLoader", () => {
       await writeFile(join(root, "helper.yaml"), agentYaml("helper", []), "utf-8");
 
       try {
-        const agents = await loader.loadAll(root);
-        expect(agents.get("core:main")!.allowedSubagents).toEqual(["core:helper"]);
+        await loader.loadAll(root);
+        const agents = byId(loader);
+        expect(agents.get("core:main")!.definition.allowedSubagents).toEqual(["core:helper"]);
         expect(loader.getRegistryLoadFailures()).toEqual([]);
       } finally {
         await rm(root, { recursive: true, force: true });
@@ -237,8 +246,8 @@ describe("AgentLoader", () => {
       } as unknown as AppCatalog;
 
       try {
-        const agents = await loader.loadFromCatalog(catalog);
-        expect(agents.has("radar:scout")).toBe(false);
+        await loader.loadFromCatalog(catalog);
+        expect(loader.find("radar:scout")).toBeUndefined();
         expect(loader.getRegistryLoadFailures()).toEqual([
           expect.objectContaining({ ownerId: "radar", publicName: "scout" }),
         ]);
@@ -261,65 +270,55 @@ describe("AgentLoader", () => {
     it("maps legacy `model: opus|sonnet|haiku` to tier", async () => {
       // test-main, test-sentinel, test-explore use the legacy `model:` field —
       // loader should normalize silently to the corresponding tier.
-      const agents = await loader.loadAll(FIXTURES_DIR);
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
 
-      expect(agents.get("core:test-main")!.tier).toBe("large");
-      expect(agents.get("core:test-sentinel")!.tier).toBe("small");
-      expect(agents.get("core:test-explore")!.tier).toBe("small");
+      expect(agents.get("core:test-main")!.definition.tier).toBe("large");
+      expect(agents.get("core:test-sentinel")!.definition.tier).toBe("small");
+      expect(agents.get("core:test-explore")!.definition.tier).toBe("small");
     });
 
     it("accepts the new `tier:` field directly", async () => {
       // test-all-actions uses `tier: medium` (the new field) — verify it
       // passes through unchanged.
-      const agents = await loader.loadAll(FIXTURES_DIR);
-      expect(agents.get("core:test-all-actions")!.tier).toBe("medium");
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
+      expect(agents.get("core:test-all-actions")!.definition.tier).toBe("medium");
     });
 
     it("maps `provider:` to providerId, absent when unpinned", async () => {
-      const agents = await loader.loadAll(FIXTURES_DIR);
-      expect(agents.get("core:test-pinned")!.providerId).toBe("openai");
-      expect(agents.get("core:test-main")!.providerId).toBeUndefined();
+      await loader.loadAll(FIXTURES_DIR);
+      const agents = byId(loader);
+      expect(agents.get("core:test-pinned")!.definition.providerId).toBe("openai");
+      expect(agents.get("core:test-main")!.definition.providerId).toBeUndefined();
     });
 
-    it("stores configs retrievable via get()", async () => {
+    it("finds an agent by its local name", async () => {
       await loader.loadAll(FIXTURES_DIR);
 
-      const config = loader.get("test-main");
-      expect(config.name).toBe("test-main");
-      expect(config.tier).toBe("large");
+      const agent = loader.find("test-main");
+      expect(agent?.name).toBe("core:test-main");
+      expect(agent?.definition.tier).toBe("large");
     });
   });
 
-  describe("get()", () => {
-    it("throws for unknown agent name when none loaded", () => {
-      expect(() => loader.get("nonexistent")).toThrow(/Agent "nonexistent" not found/);
+  describe("find()", () => {
+    it("finds nothing when none are loaded", () => {
+      expect(loader.find("nonexistent")).toBeUndefined();
     });
 
-    it("throws for unknown agent name after loading", async () => {
+    it("finds nothing for an unknown name after loading", async () => {
       await loader.loadAll(FIXTURES_DIR);
-      expect(() => loader.get("nonexistent")).toThrow(/Agent "nonexistent" not found/);
+      expect(loader.find("nonexistent")).toBeUndefined();
     });
   });
 
-  describe("getAll()", () => {
+  describe("list()", () => {
     it("returns a copy of all loaded agents", async () => {
       await loader.loadAll(FIXTURES_DIR);
-      const all = loader.getAll();
-      expect(all.size).toBe(7);
-      // Make sure it's a copy (different Map reference)
-      expect(all).not.toBe(loader.getAll());
+      const all = loader.list();
+      expect(all).toHaveLength(7);
+      expect(all).not.toBe(loader.list());
     });
-  });
-
-  it("lists legacy names only while their canonical agent is loaded", async () => {
-    const legacyBindings = createEmptyLegacyArtifactBindings();
-    const namespaced = new AgentLoader({ legacyBindings });
-    await namespaced.loadAll(FIXTURES_DIR);
-    legacyBindings.agent.orphan = formatArtifactId("missing-app", "reviewer");
-
-    const records = namespaced.getAllResolvableRecords();
-
-    expect(records.get("test-main")).toBe(records.get("core:test-main"));
-    expect(records.has("orphan")).toBe(false);
   });
 });

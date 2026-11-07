@@ -10,6 +10,7 @@ import type { Tracer } from "@opentelemetry/api";
 import {
   createTestDb,
   buildAgentConfig,
+  type TestAgentFile,
   channelNamed,
   createTestConnections,
   noAccounts,
@@ -36,7 +37,7 @@ import { chatsWiring } from "../../chats-wiring.js";
 import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
-import { AgentLoader } from "../../core/agent-loader.js";
+import { AgentLoader } from "../../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../agent/index.js";
@@ -47,7 +48,7 @@ import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { AgentConfig, AgentEvent } from "../../types.js";
+import type { AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
@@ -62,7 +63,7 @@ import { testChannelSurface } from "../channel-surface.js";
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
-  agents?: AgentConfig[];
+  agents?: TestAgentFile[];
   /** Actions registered into the real ActionRegistry / ActionEngine. */
   actions?: Action[];
   /** Channel names to expose as FakeChannelEndpoints. */

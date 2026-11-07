@@ -115,11 +115,8 @@ function agentPolicySource(
   agentLoader: ApiDeps["agentLoader"],
   agentName: string,
 ): Parameters<typeof resolveAgentPolicy>[0] {
-  try {
-    return agentLoader.get(agentName);
-  } catch {
-    return { name: agentName };
-  }
+  const agent = agentLoader.find(agentName);
+  return agent ? { name: agent.localName, policy: agent.definition.policy } : { name: agentName };
 }
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
 const SESSIONS_HOST_APP_ID = "sessions";
@@ -2275,7 +2272,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   });
 
   app.get("/chat/agents", (c) => {
-    const records = deps.agentLoader.getAllRecords();
     const apps = deps.appCatalog.listResolved();
     const appById = new Map(apps.map((app) => [app.appId, app]));
 
@@ -2291,27 +2287,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     >();
 
-    for (const [name, { config, metadata }] of records) {
-      const resolved = appById.get(metadata.ownerId);
-      let group = groups.get(metadata.ownerId);
+    for (const agent of deps.agentLoader.list()) {
+      const resolved = appById.get(agent.ownerId);
+      let group = groups.get(agent.ownerId);
       if (!group) {
         group = {
-          ownerId: metadata.ownerId,
-          ownerType: metadata.ownerType,
+          ownerId: agent.ownerId,
+          ownerType: agent.ownerType,
           // Core agents live outside the app catalog, so `resolved` is empty
           // and the fallback would surface the raw ownerId ("core"). Render
           // them as "Rome" instead — that's the product name users know.
-          label:
-            metadata.ownerType === "core" ? "Rome" : (resolved?.displayName ?? metadata.ownerId),
+          label: agent.ownerType === "core" ? "Rome" : (resolved?.displayName ?? agent.ownerId),
           description: resolved?.manifest.description ?? "",
           iconUrl: resolved?.iconAbsolutePath
-            ? `/api/apps/${appIdToPathSegment(metadata.ownerId)}/icon`
+            ? `/api/apps/${appIdToPathSegment(agent.ownerId)}/icon`
             : null,
           agents: [],
         };
-        groups.set(metadata.ownerId, group);
+        groups.set(agent.ownerId, group);
       }
-      group.agents.push({ name, localName: config.name, description: config.description });
+      group.agents.push({
+        name: agent.name,
+        localName: agent.localName,
+        description: agent.definition.description,
+      });
     }
 
     for (const group of groups.values()) {
@@ -2439,15 +2438,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Reject unknown names up-front so the user gets immediate feedback in
     // the composer rather than a delayed turn-time error.
     const requestedAgentName = body.agentName?.trim() || null;
-    if (requestedAgentName && !isCoreMainAgentId(requestedAgentName)) {
-      if (!deps.agentLoader.has(requestedAgentName)) {
-        return answer({ error: `Agent "${requestedAgentName}" not found` }, 400);
-      }
-    }
-    const storedAgentName =
+    const requestedAgent =
       requestedAgentName && !isCoreMainAgentId(requestedAgentName)
-        ? deps.agentLoader.getCanonicalName(requestedAgentName)
+        ? deps.agentLoader.find(requestedAgentName)
         : null;
+    if (requestedAgent === undefined) {
+      return answer({ error: `Agent "${requestedAgentName}" not found` }, 400);
+    }
+    const storedAgentName = requestedAgent?.name ?? null;
 
     await deps.webchatRepo.createSession(
       id,
@@ -3626,7 +3624,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // workflow-planner). There is no cross-session reroute.
     const agentName = session.agentName ?? "main";
     if (!isCoreMainAgentId(agentName)) {
-      if (!deps.agentLoader.has(agentName)) {
+      if (!deps.agentLoader.find(agentName)) {
         return answer(
           {
             error: `Agent "${agentName}" is unavailable. The owning app may have been uninstalled.`,
@@ -4432,7 +4430,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return Boolean(session && isStoredWebchatSession(session));
     },
     async post(chatId, body, as) {
-      if (!deps.agentLoader.has(as.id)) {
+      if (!deps.agentLoader.find(as.id)) {
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
       const inputId = randomUUID();

@@ -8,6 +8,14 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 
 - In a chat, an agent is a participant ([Chats](chats.md#agent)). It speaks through its own account or answers on the guardian's behalf. When it wakes, what it reads and where it speaks is in [Participation](participation.md).
 - How an agent remembers what it observes in a chat or its threads is its own decision. Chats describes participants and messages and says nothing about memory.
+- An agent's name is the apps context's [artifact name](../concepts/apps.md#artifact-names-and-references): its canonical id, local name, aliases and legacy names. The agent context uses the name and does not define it.
+- In code an installed agent is `Agent`, and the agents Rome can run are the `AgentCatalog` port, both in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). An agent's owner there means only core, or the app that installed it.
+
+## Agent definition
+
+What an agent declares about itself in its file, in core or in an app. The fields are in [`concepts/agents.md`](../concepts/agents.md). Rome reads a definition and never stores or edits it. A session keeps the definition it opened with, which is why an agent's [policy](#agent-policy) is the same for every session of it.
+
+- In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). `AgentLoader` reads the files when apps change and fills the `AgentCatalog` port.
 
 ## Agent policy
 
@@ -36,6 +44,9 @@ The tools a session carries beyond the ones every session of its agent has, such
 
 An agent that another agent's turn hands work to. The session that runs it has that turn as its parent.
 
+- An agent names its subagents in its definition. When one is not installed, a core agent loads without it, because a core agent's subagents come from apps that may be reinstalling or disabled.
+- An app's agent that names a subagent that is not installed fails to load, and its app reports the failure.
+- A subagent that fails to load for its own reasons does not fail the agent that names it in the same load. That agent fails later, when a session opens it. The rule is `resolveSubagents` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts).
 - In code, the `Subagents` port is in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
 
 ## System prompt
