@@ -153,6 +153,7 @@ import {
   AgentLoader,
   AppTurnHooks,
   readAnswerShape,
+  TurnUsageReporter,
   requireAgent,
   TurnListeners,
 } from "./agent/index.js";
@@ -1106,7 +1107,6 @@ async function main() {
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
-      appCatalog,
       sessionRepository,
       systemPrompts,
       actionRegistry,
@@ -1124,7 +1124,7 @@ async function main() {
       turnMiddleware: turnMiddlewareChain,
       resolveProviderSessionReset: async (ref) =>
         (await chatSettings.get(ref)).effective.session.reset,
-      usageRecorder,
+      turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       channelSurface: (channel) => {
         if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
         const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))

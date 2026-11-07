@@ -104,6 +104,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 - Events queue in the instance database and are delivered at least once. Rome Cloud stores each at most once. A turn, action run, or login that happens while the instance is signed out of Rome Cloud is not recorded, and neither is an action run that ends in the first minute after signing in. Signing in again makes the instance a new one in Rome Cloud, so events still queued from the earlier sign-in are dropped rather than reported under the new one. A queued event older than 30 days is dropped.
 - Usage events never move money. Rome credit charges come only from the gateway's own ledger.
 - The guardian cannot turn reporting off.
+- A session reports each ended turn, and the metrics of its turns, through the `TurnUsageReporting` port in [`packages/core/src/agent/domain/turn-usage-reporting.ts`](../../packages/core/src/agent/domain/turn-usage-reporting.ts).
 
 **Not to be confused with:**
 

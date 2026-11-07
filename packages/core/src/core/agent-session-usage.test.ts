@@ -1,4 +1,4 @@
-import { readAnswerShape } from "../agent/index.js";
+import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,7 +10,7 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/help
 import type { ModelSessionEvent, ModelSessionParams } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import type { ModelLoginKind } from "../agent/index.js";
-import type { TurnUsageFacts } from "../usage/recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
 import { AgentLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
@@ -161,7 +161,9 @@ describe("AgentSession turn usage", () => {
         readAnswerShape,
         channelSurface: testChannelSurface,
         turnMiddleware,
-        usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+        turnUsage: new TurnUsageReporter({
+          usage: { recordTurn: (facts) => recorded.push(facts) },
+        }),
         sessionTools: async () => [
           {
             name: "say",

@@ -1,30 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { AgentAccounting, AgentTurnStatus, RomeSessionType } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
-import type { ModelLoginKind } from "../agent/index.js";
+import type { ModelLoginKind, TurnUsageFacts } from "../agent/index.js";
 import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
 
 const log = createLogger("usage-recorder");
 
-/** What AgentSession knows about a turn when it ends. */
-export interface TurnUsageFacts {
-  turnId: string;
-  romeSessionId: string;
-  romeSessionType: RomeSessionType;
-  agentName: string;
-  status: AgentTurnStatus;
-  /** The model session that served the turn. Accounting, when present, wins. */
-  provider: string;
-  model: string;
-  loginKind: ModelLoginKind | undefined;
-  providerTurnId: string | undefined;
-  accounting: AgentAccounting | undefined;
-  durationMs: number | undefined;
-  finishedAt: Date;
-}
-
-/** The turn-end seam AgentSession calls. Never throws and never blocks the turn. */
+/** The seam the turn usage reporter hands each ended turn to. Never throws and never blocks the turn. */
 export interface TurnUsageSink {
   recordTurn(facts: TurnUsageFacts): void;
 }

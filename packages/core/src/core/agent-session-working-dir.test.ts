@@ -1,4 +1,4 @@
-import { readAnswerShape } from "../agent/index.js";
+import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -87,6 +87,7 @@ describe("AgentSessionManager working dirs", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
+        turnUsage: new TurnUsageReporter(),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
