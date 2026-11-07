@@ -5,14 +5,9 @@ import type { UsageKind, UsageTrigger } from "./events.js";
 /** The initiator of the skill review core starts after a main-agent turn. */
 export const SKILL_REVIEW_INITIATOR = "system:skill-review";
 
-// A subagent can delegate again, and a fork can be forked. Lineage deeper than
-// this is treated as unreachable rather than walked further.
-const MAX_LINEAGE_DEPTH = 16;
-
 interface SessionRow {
   type: string;
   agentName: string | null;
-  parentSessionId: string | null;
   triggerExecutionId: string | null;
   rootActionExecutionId: string | null;
   triggerActionName: string | null;
@@ -26,6 +21,9 @@ interface ExecutionRow {
 
 export interface UsageAttributionSources {
   getSession(id: string): Promise<SessionRow | null>;
+  /** The root session of the session `id`, by the dashboard's id, or null
+   *  when there is no such session (the agent context's `rootSession`). */
+  rootSession(id: string): Promise<string | null>;
   getExecution(executionId: string): Promise<ExecutionRow | null>;
   /**
    * What fired the routine run rooted at `rootExecutionId`: a trigger type, or
@@ -55,9 +53,9 @@ export interface UsageAttribution {
 }
 
 /**
- * Resolves where a turn or an action run came from. Lineage is read from the
- * stored session rows when the event is recorded, so a child session's usage
- * is attributed without copying anything onto the parent.
+ * Resolves where a turn or an action run came from. A child session's root is
+ * found when the event is recorded, so its usage is attributed without
+ * copying anything onto the parent.
  */
 export class UsageAttributionResolver {
   constructor(
@@ -76,20 +74,13 @@ export class UsageAttributionResolver {
     agentName: string;
   }): Promise<UsageAttribution> {
     const agentAppId = this.apps.forAgent(params.agentName);
-    const own = await this.sources.getSession(params.romeSessionId);
-    if (!own) {
+    const rootId = await this.sources.rootSession(params.romeSessionId);
+    const session = rootId ? await this.sources.getSession(rootId) : null;
+    if (!session) {
       const kind = kindForSessionType(params.fallbackType);
       return kind
         ? { kind, appId: agentAppId, trigger: "user" }
         : { kind: "other", appId: agentAppId, trigger: "unknown" };
-    }
-    let session: SessionRow = own;
-    for (let depth = 0; isChildSession(session) && depth < MAX_LINEAGE_DEPTH; depth++) {
-      const parent: SessionRow | null = session.parentSessionId
-        ? await this.sources.getSession(session.parentSessionId)
-        : null;
-      if (!parent) break;
-      session = parent;
     }
     const direct = kindForSessionType(session.type);
     if (direct) return { kind: direct, appId: agentAppId, trigger: "user" };
@@ -188,10 +179,6 @@ function triggerForRoutineFire(firedBy: string | null): UsageTrigger {
     default:
       return "unknown";
   }
-}
-
-function isChildSession(session: SessionRow): boolean {
-  return session.type === "subagent" || session.type === "fork";
 }
 
 function kindForSessionType(type: string): UsageKind | null {
