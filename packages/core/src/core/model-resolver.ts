@@ -11,6 +11,7 @@ import {
   providerUsable,
   stripLegacyReasoningSuffix,
   type AccountedProviderId,
+  type CodexLogin,
   type CodexLogins,
   type ModelAccounts,
   type ModelAccountReports,
@@ -206,10 +207,18 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
-  /** Throws when the provider is read as unauthorized, expired or at its usage limit. */
-  const requireUsableProvider = (provider: ModelProvider, state: ModelAccountReports): void => {
+  /**
+   * Throws when the provider is unauthorized, expired or at its usage limit on
+   * `login`. Without a login it asks about the guardian's own account.
+   */
+  const requireUsableProvider = (
+    provider: ModelProvider,
+    state: ModelAccountReports,
+    login?: CodexLogin,
+  ): void => {
     const report = state[provider.id];
-    if (!report || providerUsable(report)) return;
+    const codexLogin = provider.id === "openai" ? login : undefined;
+    if (!report || providerAvailability(report, codexLogin) === "available") return;
     const providerId = provider.id as AccountedProviderId;
     refreshAfterFailure(providerId);
     throw new ModelResolutionError(
@@ -266,10 +275,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     if (!usingRomeCredits()) return state;
     return {
       ...state,
-      openai: {
-        state: providerAvailability(state.openai, options.codexLogins?.login()),
-        account: { loggedIn: true, usageLimited: false },
-      },
+      openai: { state: "available", account: { loggedIn: true, usageLimited: false } },
     };
   };
 
@@ -280,7 +286,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const { providerId, model } = request.exact;
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
-        requireUsableProvider(provider, state);
+        requireUsableProvider(provider, options.accounts.read(), options.codexLogins?.login());
         requireModelAccess(provider.id, model, state.openai, creditsServedModels());
         return { modelProvider: provider, model };
       }
@@ -289,7 +295,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const state = resolutionState();
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
-        requireUsableProvider(provider, state);
+        requireUsableProvider(provider, options.accounts.read(), options.codexLogins?.login());
         requireModelAccess(provider.id, selection.model, state.openai, creditsServedModels());
         return { modelProvider: provider, model: selection.model };
       }
