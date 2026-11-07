@@ -55,6 +55,10 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 
 - [x] Drawer: the coming-soon entries are gone; under Chat and Routines, a divider and a "Topic chats" section with + (44 pt) and each topic chat with its unread count. + opens a blank chat in Chat's style; nothing is created until the first send, which starts the chat and then sends to it; the chat then shows in the drawer with the name the server gives it. Each chat's Tasks lists its own tasks; a push for a topic chat opens it (`a4376ba1`, `f07c0ff5`, `80f71ff5`, `97f037a6`). 100 Mac Catalyst tests pass; snapshots `05-drawer`, `24-topic-chat`, `25-topic-blank` light and dark; checked on the Simulator against a local Rome (create from +, send, named in the drawer, reopen, a push opens it). Screenshots: notes folder `topic-chats/`.
 
+## Composer drafts
+
+- [ ] One local draft per chat (instance + chat: main, topic, task chats): text and photos, saved on each edit, restored on reopen and after a relaunch; cleared when a send succeeds, kept when it fails; wiped on sign-out; a blank topic chat's draft goes with it if never sent. No drawer marker (user, 2026-11-06). Queued to the iOS app worker after batch I–O.
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
