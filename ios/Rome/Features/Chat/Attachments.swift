@@ -24,20 +24,33 @@ enum ImageCompressor {
         return encode(image, maxBytes: maxBytes)
     }
 
-    /// A camera or pasteboard image.
+    /// A camera image: drawn once, upright, straight at the target size.
     nonisolated static func jpeg(from image: UIImage, longEdge: CGFloat = longEdge, maxBytes: Int = maxBytes) -> Data? {
-        // Drawing turns it upright; PNG keeps every pixel for the downsampling above.
-        guard let data = upright(image).pngData() else { return nil }
-        return jpeg(from: data, longEdge: longEdge, maxBytes: maxBytes)
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        guard pixels.width > 0, pixels.height > 0 else { return nil }
+        let factor = min(1, longEdge / max(pixels.width, pixels.height))
+        let target = CGSize(width: (pixels.width * factor).rounded(), height: (pixels.height * factor).rounded())
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let drawn = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        guard let cgImage = drawn.cgImage else { return nil }
+        return encode(cgImage, maxBytes: maxBytes)
     }
 
-    nonisolated private static func upright(_ image: UIImage) -> UIImage {
-        guard image.imageOrientation != .up else { return image }
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = image.scale
-        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: image.size))
-        }
+    /// A small, upright decode of any image file, at most `maxPixel` on the
+    /// long edge. It never decodes the whole picture.
+    nonisolated static func thumbnail(from data: Data, maxPixel: CGFloat) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     nonisolated private static func encode(_ image: CGImage, maxBytes: Int) -> Data? {
@@ -53,11 +66,27 @@ enum ImageCompressor {
     }
 }
 
-/// One photo waiting in the composer.
-struct ComposerImage: Identifiable, Equatable, Sendable {
-    let id = UUID()
+/// One photo waiting in the composer or going out with a message. Two are
+/// the same photo when their ids match; the bytes are never compared.
+struct ComposerImage: Identifiable, Hashable, Sendable {
+    let id: UUID
     /// The JPEG that is sent.
     let jpeg: Data
+    /// Made once, for the composer and the bubble.
+    let thumbnail: CGImage?
+
+    /// Big enough for a 200 pt bubble tile at 3x.
+    static let thumbnailPixels: CGFloat = 600
+
+    /// Decodes the thumbnail: call it off the main actor.
+    nonisolated init(id: UUID = UUID(), jpeg: Data) {
+        self.id = id
+        self.jpeg = jpeg
+        thumbnail = ImageCompressor.thumbnail(from: jpeg, maxPixel: Self.thumbnailPixels)
+    }
+
+    static func == (a: ComposerImage, b: ComposerImage) -> Bool { a.id == b.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// The photos in the composer: up to four per message.
@@ -66,38 +95,82 @@ struct ComposerImage: Identifiable, Equatable, Sendable {
 final class ComposerAttachments {
     static let limit = 4
     private(set) var images: [ComposerImage] = []
-    /// How many are being made small right now, so the + waits.
+    /// Slots held by photos still loading or being made small: Send and the
+    /// + wait for them.
     private(set) var preparing = 0
 
     var remaining: Int { max(0, Self.limit - images.count - preparing) }
     var isFull: Bool { remaining == 0 }
+    var isPreparing: Bool { preparing > 0 }
+
+    /// Holds up to `count` slots before the photos load. Returns how many.
+    func reserve(_ count: Int) -> Int {
+        let taken = min(count, remaining)
+        preparing += taken
+        return taken
+    }
+
+    /// Fills `reserved` slots with image files' bytes and gives back the rest.
+    func fill(reserved: Int, data items: [Data]) async {
+        defer { preparing -= reserved }
+        for item in items.prefix(reserved) {
+            let photo = await Task.detached(priority: .userInitiated) { () -> ComposerImage? in
+                ImageCompressor.jpeg(from: item).map { ComposerImage(jpeg: $0) }
+            }.value
+            if let photo { images.append(photo) }
+        }
+    }
 
     /// Adds image files' bytes, as many as fit. Returns how many were taken.
     @discardableResult
     func add(data items: [Data]) async -> Int {
-        let taken = Array(items.prefix(remaining))
-        guard !taken.isEmpty else { return 0 }
-        preparing += taken.count
-        defer { preparing -= taken.count }
-        for item in taken {
-            let jpeg = await Task.detached(priority: .userInitiated) { ImageCompressor.jpeg(from: item) }.value
-            if let jpeg { images.append(ComposerImage(jpeg: jpeg)) }
-        }
-        return taken.count
+        let taken = reserve(items.count)
+        guard taken > 0 else { return 0 }
+        await fill(reserved: taken, data: items)
+        return taken
     }
 
-    /// Adds camera or pasteboard images, as many as fit.
+    /// Adds pasted images, as many as fit. The slots are held while the
+    /// pasteboard's data loads, off the main actor.
+    @discardableResult
+    func add(providers: [NSItemProvider]) async -> Int {
+        let images = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }
+        let taken = reserve(images.count)
+        guard taken > 0 else { return 0 }
+        var files: [Data] = []
+        for provider in images.prefix(taken) {
+            if let data = await Self.load(provider) { files.append(data) }
+        }
+        await fill(reserved: taken, data: files)
+        return taken
+    }
+
+    private static func load(_ provider: NSItemProvider) async -> Data? {
+        await withCheckedContinuation { continuation in
+            _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                continuation.resume(returning: data)
+            }
+        }
+    }
+
+    /// Adds camera images, as many as fit.
     @discardableResult
     func add(images items: [UIImage]) async -> Int {
-        let taken = Array(items.prefix(remaining))
-        guard !taken.isEmpty else { return 0 }
-        preparing += taken.count
-        defer { preparing -= taken.count }
-        for item in taken {
-            let jpeg = await Task.detached(priority: .userInitiated) { ImageCompressor.jpeg(from: item) }.value
-            if let jpeg { images.append(ComposerImage(jpeg: jpeg)) }
+        let taken = reserve(items.count)
+        guard taken > 0 else { return 0 }
+        defer { preparing -= taken }
+        for item in items.prefix(taken) {
+            let photo = await Task.detached(priority: .userInitiated) { () -> ComposerImage? in
+                ImageCompressor.jpeg(from: item).map { ComposerImage(jpeg: $0) }
+            }.value
+            if let photo { images.append(photo) }
         }
-        return taken.count
+        return taken
+    }
+
+    /// Puts back photos from a saved draft.
+    func restore(_ photos: [ComposerImage]) {
+        images = Array(photos.prefix(Self.limit))
     }
 
     func remove(_ id: UUID) {
@@ -105,9 +178,9 @@ final class ComposerAttachments {
     }
 
     /// Hands the photos to a send and empties the composer.
-    func take() -> [Data] {
+    func take() -> [ComposerImage] {
         defer { images = [] }
-        return images.map(\.jpeg)
+        return images
     }
 }
 
@@ -118,9 +191,9 @@ struct OutgoingFile: Encodable, Equatable, Sendable {
     var dataBase64: String
 
     /// Photos named in the order they were attached.
-    static func photos(_ jpegs: [Data]) -> [OutgoingFile] {
-        jpegs.enumerated().map { index, data in
-            OutgoingFile(name: "photo-\(index + 1).jpg", mimeType: "image/jpeg", dataBase64: data.base64EncodedString())
+    static func photos(_ photos: [ComposerImage]) -> [OutgoingFile] {
+        photos.enumerated().map { index, photo in
+            OutgoingFile(name: "photo-\(index + 1).jpg", mimeType: "image/jpeg", dataBase64: photo.jpeg.base64EncodedString())
         }
     }
 }
@@ -148,6 +221,8 @@ enum UploadLines {
     nonisolated(unsafe) private static let line = try! NSRegularExpression(pattern: #"^- File \d+: \[(.*)\]\(<(.+)>\)$"#)
 
     /// The text the guardian wrote, and the files listed after it.
+    /// Only the server's own list counts: lines linking under /projects/, at
+    /// the very end, with a blank line (or nothing) before them.
     nonisolated static func split(_ text: String) -> (text: String, uploads: [Upload]) {
         var lines = text.components(separatedBy: "\n")
         var uploads: [Upload] = []
@@ -155,12 +230,14 @@ enum UploadLines {
             let range = NSRange(last.startIndex..., in: last)
             guard let match = line.firstMatch(in: last, range: range),
                   let name = Range(match.range(at: 1), in: last),
-                  let link = Range(match.range(at: 2), in: last)
+                  let link = Range(match.range(at: 2), in: last),
+                  last[link].hasPrefix("/projects/")
             else { break }
             uploads.insert(Upload(name: String(last[name]).replacingOccurrences(of: "\\", with: ""), linkPath: String(last[link])), at: 0)
             lines.removeLast()
         }
         guard !uploads.isEmpty else { return (text, []) }
+        if let before = lines.last, !before.trimmingCharacters(in: .whitespaces).isEmpty { return (text, []) }
         return (lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), uploads)
     }
 }

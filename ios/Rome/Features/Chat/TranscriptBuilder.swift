@@ -7,15 +7,15 @@ struct PendingSend: Identifiable, Hashable, Sendable {
 
     let id: String
     let text: String
-    /// Photos sent with it, as JPEG.
-    var images: [Data] = []
+    /// Photos sent with it.
+    var images: [ComposerImage] = []
     let createdAt: Date
     var state: State
 }
 
 /// A photo in the guardian's bubble: the one being sent, or a stored upload.
 enum UserImage: Hashable, Sendable {
-    case local(Data)
+    case local(ComposerImage)
     case stored(UploadLines.Upload)
 }
 

@@ -68,9 +68,11 @@ private func pixelSize(_ data: Data) -> CGSize? {
     @Test func takeHandsOverTheJPEGsAndEmpties() async {
         let attachments = ComposerAttachments()
         await attachments.add(data: [png(), png()])
-        let jpegs = attachments.take()
-        #expect(jpegs.count == 2)
-        #expect(jpegs.allSatisfy { $0.prefix(2) == Data([0xFF, 0xD8]) })
+        let photos = attachments.take()
+        #expect(photos.count == 2)
+        #expect(photos.allSatisfy { $0.jpeg.prefix(2) == Data([0xFF, 0xD8]) })
+        // The thumbnail is made once, small.
+        #expect(photos.allSatisfy { ($0.thumbnail?.width ?? 0) <= Int(ComposerImage.thumbnailPixels) })
         #expect(attachments.images.isEmpty)
     }
 
@@ -80,12 +82,12 @@ private func pixelSize(_ data: Data) -> CGSize? {
         let attachments = ComposerAttachments()
         let field = PastingTextView()
         field.pasteboard = pasteboard
-        var pasted: [UIImage] = []
+        var pasted: [NSItemProvider] = []
         field.onPasteImages = { pasted = $0 }
         #expect(field.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil))
         field.paste(nil)
         #expect(pasted.count == 2)
-        await attachments.add(images: pasted)
+        #expect(await attachments.add(providers: pasted) == 2)
         #expect(attachments.images.count == 2)
         UIPasteboard.remove(withName: pasteboard.name)
     }
@@ -113,7 +115,7 @@ private func pixelSize(_ data: Data) -> CGSize? {
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         let jpegs = [Data([0xFF, 0xD8, 1]), Data([0xFF, 0xD8, 2])]
-        #expect(store.send("Look at these", images: jpegs))
+        #expect(store.send("Look at these", images: jpegs.map { ComposerImage(jpeg: $0) }))
         await settle()
         #expect(backend.calls == ["send concierge Look at these [2 files]"])
         #expect(backend.sentFiles == [
@@ -125,7 +127,7 @@ private func pixelSize(_ data: Data) -> CGSize? {
     @Test func photosAloneAreAMessage() async {
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
-        #expect(store.send("   ", images: [Data([0xFF, 0xD8])]))
+        #expect(store.send("   ", images: [ComposerImage(jpeg: Data([0xFF, 0xD8]))]))
         await settle()
         #expect(backend.calls == ["send concierge  [1 files]"])
         // Nothing at all is not.
@@ -134,18 +136,61 @@ private func pixelSize(_ data: Data) -> CGSize? {
 
     @Test func thePendingBubbleShowsThePhotos() {
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: FakeBackend())
-        store.send("Hi", images: [Data([0xFF, 0xD8])])
+        let photo = ComposerImage(jpeg: Data([0xFF, 0xD8]))
+        store.send("Hi", images: [photo])
         // The typing dots follow it, so look for the bubble itself.
         let bubble = store.rows.compactMap { row -> (String, [UserImage])? in
             if case .userText(_, let text, let images, .some(.sending)) = row { return (text, images) }
             return nil
         }.first
         #expect(bubble?.0 == "Hi")
-        #expect(bubble?.1 == [.local(Data([0xFF, 0xD8]))])
+        #expect(bubble?.1 == [.local(photo)])
+    }
+}
+
+@MainActor
+@Suite struct PhotoSlotTests {
+    @Test func reservedSlotsHoldSendAndThePlus() async {
+        let attachments = ComposerAttachments()
+        #expect(attachments.reserve(6) == 4)
+        #expect(attachments.isPreparing && attachments.isFull)
+        let png = photo(width: 50, height: 50).pngData()!
+        await attachments.fill(reserved: 4, data: [png, png])
+        // Two loaded, two failed: all slots are given back.
+        #expect(!attachments.isPreparing)
+        #expect(attachments.images.count == 2)
+        #expect(attachments.remaining == 2)
+    }
+
+    @Test func aPhotoIsTheSameByIdNotByBytes() {
+        let a = ComposerImage(jpeg: Data([1]))
+        #expect(a == ComposerImage(id: a.id, jpeg: Data([2])))
+        #expect(a != ComposerImage(jpeg: Data([1])))
+    }
+}
+
+@Suite struct AssetQueryTests {
+    @Test func plusAmpersandAndEqualsAreEncoded() {
+        #expect(APIClient.strictQueryValue("projects/a/C++ & x=1.png") == "projects/a/C%2B%2B%20%26%20x%3D1.png")
+    }
+
+    @Test func chineseNamesAreEncoded() {
+        #expect(APIClient.strictQueryValue("projects/图.png") == "projects/%E5%9B%BE.png")
     }
 }
 
 @Suite struct UploadLineTests {
+    @Test func onlyLinksUnderProjectsCount() {
+        let message = "See\n\n- File 1: [x.png](</etc/x.png>)"
+        #expect(UploadLines.split(message).uploads.isEmpty)
+    }
+
+    @Test func theListMustFollowABlankLine() {
+        let message = "My notes\n- File 1: [x.png](</projects/a/x.png>)"
+        #expect(UploadLines.split(message).uploads.isEmpty)
+        #expect(UploadLines.split(message).text == message)
+    }
+
     @Test func splitsTheServersFileLinesOffTheText() {
         let stored = "Look at this\n\n- File 1: [photo-1.jpg](</projects/chats/2026/11/07/photo-1.jpg>)\n- File 2: [photo-2.jpg](</projects/chats/2026/11/07/photo-2.jpg>)"
         let (text, uploads) = UploadLines.split(stored)

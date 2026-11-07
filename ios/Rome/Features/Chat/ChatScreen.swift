@@ -44,7 +44,9 @@ struct ChatScreen: View {
                         ConciergeStarters { store.send($0.text) }
                     }
                     Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) {
-                        if store.send(draft, images: attachments.images.map(\.jpeg)) {
+                        // A photo still being made small would land in the next message.
+                        guard !attachments.isPreparing else { return }
+                        if store.send(draft, images: attachments.images) {
                             draft = ""
                             _ = attachments.take()
                         }

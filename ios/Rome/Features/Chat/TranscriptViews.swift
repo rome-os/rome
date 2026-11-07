@@ -71,24 +71,29 @@ private struct UserImageGrid: View {
 private struct UserImageTile: View {
     let image: UserImage
     @Environment(\.assetLoader) private var assetLoader
-    @State private var loaded: UIImage?
+    @State private var loaded: CGImage?
     @State private var failed = false
 
     var body: some View {
         switch image {
-        case .local(let data):
-            if let image = UIImage(data: data) {
-                Image(uiImage: image).resizable().scaledToFill()
+        case .local(let photo):
+            if let thumbnail = photo.thumbnail {
+                Image(decorative: thumbnail, scale: 1).resizable().scaledToFill()
                     .accessibilityLabel("Photo")
             } else {
                 attachmentLabel(nil)
             }
         case .stored(let upload):
             if let loaded {
-                Image(uiImage: loaded).resizable().scaledToFill()
+                Image(decorative: loaded, scale: 1).resizable().scaledToFill()
                     .accessibilityLabel("Photo")
-            } else if failed || !upload.isImage || assetLoader == nil {
+            } else if !upload.isImage || assetLoader == nil {
                 attachmentLabel(upload.name)
+            } else if failed {
+                // Offline for a moment, say: a tap, or the next time it scrolls in, tries again.
+                attachmentLabel(upload.name)
+                    .onTapGesture { failed = false }
+                    .onDisappear { failed = false }
             } else {
                 Palette.fill
                     .overlay { Spinner(size: 16, color: Palette.sub) }
@@ -99,17 +104,23 @@ private struct UserImageTile: View {
 
     private func load(_ upload: UploadLines.Upload) async {
         guard let assetLoader else { return }
-        if let cached = StoredImageCache.shared.object(forKey: upload.assetPath as NSString) {
+        if let cached = StoredImageCache.image(upload.assetPath) {
             loaded = cached
             return
         }
         do {
             let data = try await assetLoader(upload.assetPath)
-            guard let image = UIImage(data: data) else { throw APIError.network }
-            StoredImageCache.shared.setObject(image, forKey: upload.assetPath as NSString)
-            loaded = image
+            // Decoded small and off the main actor: an upload from the web may be huge.
+            let thumbnail = await Task.detached(priority: .userInitiated) {
+                ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
+            }.value
+            guard let thumbnail else { throw APIError.network }
+            StoredImageCache.store(thumbnail, for: upload.assetPath)
+            loaded = thumbnail
+        } catch is CancellationError {
+            // Scrolled away mid-load: the next appear loads it.
         } catch {
-            failed = true
+            if !Task.isCancelled { failed = true }
         }
     }
 
@@ -128,8 +139,27 @@ private struct UserImageTile: View {
 }
 
 /// Stored photos already loaded, so scrolling back does not fetch them again.
+/// It holds at most 64 MB of decoded pixels.
+@MainActor
 enum StoredImageCache {
-    @MainActor static let shared = NSCache<NSString, UIImage>()
+    private final class Box {
+        let image: CGImage
+        init(_ image: CGImage) { self.image = image }
+    }
+
+    private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.totalCostLimit = 64 * 1024 * 1024
+        return cache
+    }()
+
+    static func image(_ path: String) -> CGImage? {
+        cache.object(forKey: path as NSString)?.image
+    }
+
+    static func store(_ image: CGImage, for path: String) {
+        cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
+    }
 }
 
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
@@ -142,17 +172,24 @@ struct AgentBubble: View {
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     @State private var expanded = false
+    /// The reply's laid-out height, measured: Chinese fits far fewer
+    /// characters on a line than English, so characters cannot tell.
+    @State private var fullHeight: CGFloat = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// How many lines a bubble shows before it folds.
     nonisolated static let foldedLines = 15
 
-    /// Whether `text` runs past `foldedLines` in a bubble: each paragraph
-    /// counts its wrapped lines at about 34 characters a line.
-    nonisolated static func folds(_ text: String) -> Bool {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { total, line in
-            total + max(1, Int((Double(line.count) / 34).rounded(.up)))
-        }
-        return lines > foldedLines
+    /// The height of `foldedLines` lines of body text at a text size.
+    nonisolated static func foldHeight(for size: DynamicTypeSize) -> CGFloat {
+        let fontSize = ScaledFont.scaled(16, for: size)
+        // The system font's line height is about 1.2 em; MarkdownText adds 5 pt between lines.
+        return CGFloat(foldedLines) * (fontSize * 1.2 + 5)
+    }
+
+    /// Whether text that lays out `height` tall folds.
+    nonisolated static func folds(height: CGFloat, size: DynamicTypeSize) -> Bool {
+        height > foldHeight(for: size) + 1
     }
 
     private var shape: UnevenRoundedRectangle {
@@ -166,7 +203,7 @@ struct AgentBubble: View {
         )
     }
 
-    private var folds: Bool { Self.folds(text) }
+    private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -184,7 +221,9 @@ struct AgentBubble: View {
                 .buttonStyle(.plain)
             }
             MarkdownText(source: text)
-                .frame(maxHeight: folds && !expanded ? 330 : nil, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
+                .frame(maxHeight: folds && !expanded ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
                 .clipped()
                 .overlay(alignment: .bottom) {
                     if folds && !expanded {
@@ -313,10 +352,13 @@ struct Composer: View {
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
+    /// The text without what an input method is still composing (pinyin).
+    @State private var committedText = ""
 
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
+        guard !(attachments?.isPreparing ?? false) else { return false }
+        return !committedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
     }
 
     var body: some View {
@@ -337,8 +379,9 @@ struct Composer: View {
                     focused: $focused,
                     placeholder: placeholder,
                     onPasteImages: attachments.map { attachments in
-                        { images in Task { await attachments.add(images: images) } }
-                    }
+                        { providers in Task { await attachments.add(providers: providers) } }
+                    },
+                    committedText: $committedText
                 )
                 Group {
                     if stopVisible && !canSend {
@@ -374,8 +417,11 @@ struct Composer: View {
             .padding(.trailing, 7)
         }
         .frame(minHeight: 50)
-        // Glass like the header's buttons: the transcript shows through.
+        // Glass like the header's buttons: the transcript shows through. In
+        // light the glass alone barely parts from the page, so it keeps an edge.
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true)
+        .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
+        .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: attachments?.images.count)
@@ -388,12 +434,16 @@ struct Composer: View {
         .onChange(of: picked) { _, items in
             guard !items.isEmpty, let attachments else { return }
             picked = []
+            // The slots are held before loading: a spinner shows, the + and
+            // Send wait, and nothing picked is dropped.
+            let taken = attachments.reserve(items.count)
+            guard taken > 0 else { return }
             Task {
                 var files: [Data] = []
-                for item in items {
+                for item in items.prefix(taken) {
                     if let data = try? await item.loadTransferable(type: Data.self) { files.append(data) }
                 }
-                await attachments.add(data: files)
+                await attachments.fill(reserved: taken, data: files)
             }
         }
         .fullScreenCover(isPresented: $takingPhoto) {
@@ -440,8 +490,8 @@ private struct ComposerThumbnails: View {
                 ForEach(attachments.images) { image in
                     ZStack(alignment: .topTrailing) {
                         Group {
-                            if let preview = UIImage(data: image.jpeg) {
-                                Image(uiImage: preview).resizable().scaledToFill()
+                            if let thumbnail = image.thumbnail {
+                                Image(decorative: thumbnail, scale: 1).resizable().scaledToFill()
                             } else {
                                 Palette.fill
                             }

@@ -52,9 +52,21 @@ final class APIClient: Sendable {
         return try decode(data)
     }
 
-    /// The raw bytes of a GET, for files.
+    /// The raw bytes of a GET, for files. Query values are encoded strictly:
+    /// a `+` would otherwise reach the server as a space.
     func getData(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
-        try await send(request(path, query: query, method: "GET"))
+        var request = request(path, method: "GET")
+        if !query.isEmpty, let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.percentEncodedQueryItems = query.map { URLQueryItem(name: $0.name, value: Self.strictQueryValue($0.value ?? "")) }
+            request.url = components.url
+        }
+        return try await send(request)
+    }
+
+    /// Percent-encodes everything but unreserved characters and `/`.
+    static func strictQueryValue(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     @discardableResult

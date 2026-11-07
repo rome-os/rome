@@ -16,7 +16,7 @@ struct TopicChatScreen: View {
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
-    @State private var startingImages: [Data] = []
+    @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
     @State private var newName = ""
     @State private var composerFocused = false
@@ -128,7 +128,8 @@ struct TopicChatScreen: View {
 
     /// Sends the draft with the composer's photos.
     private func send() {
-        let images = attachments.images.map(\.jpeg)
+        guard !attachments.isPreparing else { return }
+        let images = attachments.images
         if let store {
             if store.send(draft, images: images) {
                 draft = ""
@@ -144,7 +145,7 @@ struct TopicChatScreen: View {
     }
 
     /// Sends `text`, starting the chat first when this one is blank.
-    private func send(text: String, images: [Data] = []) {
+    private func send(text: String, images: [ComposerImage] = []) {
         if let store {
             store.send(text, images: images)
             return

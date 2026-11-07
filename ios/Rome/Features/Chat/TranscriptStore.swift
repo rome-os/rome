@@ -279,7 +279,7 @@ final class TranscriptStore {
     @discardableResult
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
     /// message too.
-    func send(_ text: String, images: [Data] = []) -> Bool {
+    func send(_ text: String, images: [ComposerImage] = []) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return false }
         let inputId = UUID().uuidString.lowercased()
@@ -298,7 +298,7 @@ final class TranscriptStore {
         deliver(inputId: id, text: pending[index].text, images: pending[index].images)
     }
 
-    private func deliver(inputId: String, text: String, images: [Data]) {
+    private func deliver(inputId: String, text: String, images: [ComposerImage]) {
         Task {
             do {
                 let turn = try await backend.send(

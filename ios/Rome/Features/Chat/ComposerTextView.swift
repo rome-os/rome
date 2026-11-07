@@ -8,8 +8,10 @@ struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     let placeholder: String
-    /// Nil leaves images on the pasteboard alone.
-    var onPasteImages: (([UIImage]) -> Void)?
+    /// Gets the pasteboard's image items; nil leaves images alone.
+    var onPasteImages: (([NSItemProvider]) -> Void)?
+    /// The text without what an input method is still composing.
+    var committedText: Binding<String>? = nil
 
     static let maxLines = 6
 
@@ -19,7 +21,6 @@ struct ComposerTextView: UIViewRepresentable {
         view.backgroundColor = .clear
         view.textContainerInset = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         view.textContainer.lineFragmentPadding = 0
-        view.adjustsFontForContentSizeCategory = true
         view.isScrollEnabled = false
         view.tintColor = UIColor(Palette.primary)
         view.textColor = UIColor(Palette.fg)
@@ -34,7 +35,11 @@ struct ComposerTextView: UIViewRepresentable {
         if view.font != font { view.font = font }
         if view.text != text { view.text = text }
         view.placeholder = placeholder
+        view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
+        if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
+            DispatchQueue.main.async { committedText.wrappedValue = text }
+        }
         // Focus follows the binding both ways; the change waits a turn so it
         // never happens while SwiftUI is updating.
         if focused != view.isFirstResponder {
@@ -70,7 +75,19 @@ struct ComposerTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            parent.committedText?.wrappedValue = Self.committed(in: textView)
             (textView as? PastingTextView)?.setNeedsDisplay()
+            // Past six lines it scrolls: keep the caret in view.
+            if textView.isScrollEnabled { textView.scrollRangeToVisible(textView.selectedRange) }
+        }
+
+        /// The text minus the marked (uncommitted) range.
+        static func committed(in textView: UITextView) -> String {
+            guard let marked = textView.markedTextRange else { return textView.text }
+            let start = textView.offset(from: textView.beginningOfDocument, to: marked.start)
+            let length = textView.offset(from: marked.start, to: marked.end)
+            let text = textView.text as NSString
+            return text.replacingCharacters(in: NSRange(location: start, length: length), with: "")
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -85,7 +102,7 @@ struct ComposerTextView: UIViewRepresentable {
 
 /// A text view that pastes images out of the field and shows a placeholder.
 final class PastingTextView: UITextView {
-    var onPasteImages: (([UIImage]) -> Void)?
+    var onPasteImages: (([NSItemProvider]) -> Void)?
     var placeholder = "" { didSet { setNeedsDisplay() } }
     /// The general pasteboard; tests give it their own.
     var pasteboard: UIPasteboard = .general
@@ -99,8 +116,9 @@ final class PastingTextView: UITextView {
     }
 
     override func paste(_ sender: Any?) {
-        if let onPasteImages, pasteboard.hasImages, let images = pasteboard.images, !images.isEmpty {
-            onPasteImages(images)
+        if let onPasteImages, pasteboard.hasImages {
+            // Providers, not `images`: those would decode every picture here.
+            onPasteImages(pasteboard.itemProviders)
             // Text copied along with the images still lands in the field.
             if pasteboard.hasStrings, let string = pasteboard.string, !string.isEmpty { insertText(string) }
             return

@@ -92,7 +92,7 @@ final class Workspace {
     /// Starts a topic chat, then sends it its first message, in that order.
     /// Nothing exists on the server before this. Returns the new chat's id, or
     /// nil when the chat could not be started.
-    func startTopicChat(firstMessage text: String, images: [Data] = []) async -> String? {
+    func startTopicChat(firstMessage text: String, images: [ComposerImage] = []) async -> String? {
         guard let chat = try? await backend.startTopicChat() else { return nil }
         topics.add(chat)
         let store = topicStore(chat.id)

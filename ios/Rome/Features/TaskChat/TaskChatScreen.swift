@@ -49,7 +49,8 @@ struct TaskChatScreen: View {
                     focused: $composerFocused,
                     attachments: attachments,
                     onSend: {
-                        if store.send(draft, images: attachments.images.map(\.jpeg)) {
+                        guard !attachments.isPreparing else { return }
+                        if store.send(draft, images: attachments.images) {
                             draft = ""
                             _ = attachments.take()
                         }
