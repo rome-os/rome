@@ -461,7 +461,11 @@ struct TranscriptList<Row: View>: View {
                 proxy.size.height
             } action: { visibleHeight = $0 }
             .onChange(of: following) { _, now in
+                transcriptScrollLog.notice("following \(now, privacy: .public), bottom visible \(bottomVisible, privacy: .public)")
                 unseen = BackToBottom.unseen(unseen, following: now)
+            }
+            .onChange(of: bottomVisible) { _, now in
+                transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
             }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
@@ -579,7 +583,7 @@ private struct FollowBottom: ViewModifier {
                 .defaultScrollAnchor(following || holdOlder ? .bottom : .top, for: .sizeChanges)
                 .defaultScrollAnchor(.bottom)
                 .onScrollPhaseChange { old, phase, context in
-                    transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public)")
+                    transcriptScrollLog.notice("phase \(String(describing: old), privacy: .public) -> \(String(describing: phase), privacy: .public) at \(context.geometry.contentOffset.y, privacy: .public) of \(context.geometry.contentSize.height, privacy: .public), container \(context.geometry.containerSize.height, privacy: .public), insets \(context.geometry.contentInsets.top, privacy: .public)/\(context.geometry.contentInsets.bottom, privacy: .public), visible \(context.geometry.visibleRect.height, privacy: .public)")
                     atRest = phase == .idle || phase == .animating
                     switch phase {
                     case .interacting:
@@ -755,6 +759,12 @@ enum BackToBottom {
         return distance > height * (showing ? 1.7 : 2)
     }
 
+    /// How far the content's end is below the visible area, the bars' and
+    /// keyboard's insets left out: 0 at the bottom, with the keyboard up too.
+    static func distance(contentHeight: CGFloat, offset: CGFloat, topInset: CGFloat, visibleHeight: CGFloat) -> CGFloat {
+        contentHeight - (offset + topInset + visibleHeight)
+    }
+
     /// Far from the bottom, or at any distance once something new arrived
     /// while the guardian reads above it.
     static func visible(far: Bool, unseen: Int, following: Bool) -> Bool {
@@ -805,7 +815,7 @@ private struct DistanceFromBottom: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
             content.onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height
+                BackToBottom.distance(contentHeight: geometry.contentSize.height, offset: geometry.contentOffset.y, topInset: geometry.contentInsets.top, visibleHeight: geometry.containerSize.height)
             } action: { _, distance in
                 let next = BackToBottom.shows(showing, distance: distance, height: visibleHeight)
                 if next != showing {

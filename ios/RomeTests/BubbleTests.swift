@@ -89,6 +89,13 @@ import UIKit
         #expect(BackToBottom.visible(far: true, unseen: 0, following: false))
     }
 
+    /// Read from a phone: header and banner above, the keyboard below.
+    @Test func theBottomIsZeroWithTheKeyboardUp() {
+        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2395.67, topInset: 236, visibleHeight: 246) < 1)
+        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2102, topInset: 236, visibleHeight: 540) == 0)
+        #expect(BackToBottom.distance(contentHeight: 2878, offset: 2062, topInset: 236, visibleHeight: 540) == 40)
+    }
+
     @Test func theDotClearsOnceTheListFollowsAgain() {
         // A tap and a scroll down by hand both end in following.
         #expect(BackToBottom.unseen(2, following: false) == 2)
