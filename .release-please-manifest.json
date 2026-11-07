@@ -1,9 +1,9 @@
 {
-  "packages/app-runtime-sdk": "0.11.1",
+  "packages/app-runtime-sdk": "0.11.2",
   "packages/app-web-sdk": "0.4.0",
-  "packages/ui": "0.3.8",
+  "packages/ui": "0.3.9",
   "packages/lib": "0.0.3",
-  "packages/web-content": "0.1.24",
+  "packages/web-content": "0.1.25",
   "packages/rome-node-cli": "0.1.8",
   "packages/rome-node-core": "0.1.7"
 }

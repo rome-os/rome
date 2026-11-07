@@ -1,5 +1,19 @@
 # @rome-os/app-runtime
 
+## [0.11.2](https://github.com/rome-os/rome/compare/app-runtime-v0.11.1...app-runtime-v0.11.2) (2026-11-07)
+
+
+### Features
+
+* **app-runtime:** report a failed turn's provider error on the turn-finished event ([#1725](https://github.com/rome-os/rome/issues/1725)) ([c495179](https://github.com/rome-os/rome/commit/c495179439387780cf64c4a6b00996543b1ea74f))
+* **core:** give each dashboard person their own private Concierge ([#1759](https://github.com/rome-os/rome/issues/1759)) ([dc96ade](https://github.com/rome-os/rome/commit/dc96adea5f5db5aa3812a436bbae880b68ac1c2c))
+* **core:** hand the Cloud signup survey to the Concierge, add a Concierge connect card, remove welcome-to-rome ([#1846](https://github.com/rome-os/rome/issues/1846)) ([e378eec](https://github.com/rome-os/rome/commit/e378eec1606f92ac34a1f2c968ef6d494af97875))
+
+
+### Performance Improvements
+
+* **core:** register cached app actions without importing them at boot ([#1799](https://github.com/rome-os/rome/issues/1799)) ([657ea2f](https://github.com/rome-os/rome/commit/657ea2fb08f406425a5bb615c280999d487e88b4))
+
 ## [0.11.1](https://github.com/rome-os/rome/compare/app-runtime-v0.11.0...app-runtime-v0.11.1) (2026-11-05)
 
 
