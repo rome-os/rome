@@ -1,0 +1,12 @@
+language js
+
+or {
+  TsImportType() as $t where {
+    $t <: contains r".*agent/(?:domain|application|infrastructure)/.*",
+    register_diagnostic(span=$t, message="Import the agent context's layers through a top-level `import type`, so the boundary rules in biome.json can check it.")
+  },
+  `import($spec)` as $t where {
+    $spec <: r"`.*agent/(?:domain|application|infrastructure)/.*`",
+    register_diagnostic(span=$t, message="Write this dynamic import's path as a string literal, so the boundary rules in biome.json can check it.")
+  }
+}

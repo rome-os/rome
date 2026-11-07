@@ -86,10 +86,11 @@
             }
           }
         }
-      }
+      },
+      "plugins": ["./biome-plugins/agent-layer-import-forms.grit"]
     },
     {
-      "includes": ["packages/core/src/agent/domain/**"],
+      "includes": ["packages/core/src/agent/domain/*"],
       "linter": {
         "rules": {
           "style": {
@@ -109,7 +110,67 @@
       }
     },
     {
-      "includes": ["packages/core/src/agent/application/**"],
+      "includes": ["packages/core/src/agent/domain/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["../..", "../../**", "@/**"],
+                    "message": "agent/domain/ imports only agent/domain/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/domain/*/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["../../..", "../../../**", "@/**"],
+                    "message": "agent/domain/ imports only agent/domain/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/domain/*/*/*/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["..", "../**", "@/**"],
+                    "message": "agent/domain/ is nested deeper than its boundary overrides in biome.json cover; add an override for this depth. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/application/*"],
       "linter": {
         "rules": {
           "style": {
@@ -120,6 +181,66 @@
                   {
                     "group": ["..", "../**", "!../domain/**", "@/**"],
                     "message": "agent/application/ imports only agent/domain/, agent/application/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/application/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["../..", "../../**", "!../../domain/**", "@/**"],
+                    "message": "agent/application/ imports only agent/domain/, agent/application/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/application/*/*/*"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["../../..", "../../../**", "!../../../domain/**", "@/**"],
+                    "message": "agent/application/ imports only agent/domain/, agent/application/ and packages. See DEVELOPMENT.md#established-patterns."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/core/src/agent/application/*/*/*/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["..", "../**", "@/**"],
+                    "message": "agent/application/ is nested deeper than its boundary overrides in biome.json cover; add an override for this depth. See DEVELOPMENT.md#established-patterns."
                   }
                 ]
               }
