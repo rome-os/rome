@@ -2,7 +2,7 @@ import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
@@ -1793,18 +1793,11 @@ describe("AgentRunner", () => {
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
-      const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
-        const record = getRecord(name);
-        if (record.config.name !== "test-main") return record;
-        return {
-          ...record,
-          metadata: {
-            ...record.metadata,
-            ownerType: "app",
-            ownerId: "test-app",
-          },
-        };
+      const find = agentLoader.find.bind(agentLoader);
+      const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
+        const agent = find(name);
+        if (agent?.localName !== "test-main") return agent;
+        return { ...agent, ownerType: "app", ownerId: "test-app" };
       });
 
       try {
@@ -4145,18 +4138,11 @@ describe("AgentRunner", () => {
     });
 
     it("attributes app-store agents by listing id and omits local app attribution", async () => {
-      const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
-        const record = getRecord(name);
-        if (record.config.name !== "test-main") return record;
-        return {
-          ...record,
-          metadata: {
-            ...record.metadata,
-            ownerType: "app",
-            ownerId: "test-app",
-          },
-        };
+      const find = agentLoader.find.bind(agentLoader);
+      const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
+        const agent = find(name);
+        if (agent?.localName !== "test-main") return agent;
+        return { ...agent, ownerType: "app", ownerId: "test-app" };
       });
 
       try {

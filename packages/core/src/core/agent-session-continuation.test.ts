@@ -15,7 +15,7 @@ import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import {
   AgentRunner,

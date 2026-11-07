@@ -9,7 +9,7 @@ import {
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
-import type { AgentLoader } from "./agent-loader.js";
+import { requireAgent, type AgentCatalog, type AgentDefinition } from "../agent/index.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import {
@@ -388,7 +388,7 @@ export interface AgentSessionManager {
 }
 
 interface ManagerDeps {
-  agentLoader: AgentLoader;
+  agentLoader: AgentCatalog;
   appCatalog?: Pick<AppCatalog, "get">;
   sessionRepository: SessionRepository;
   systemPrompts: SystemPrompts;
@@ -511,7 +511,7 @@ export function createAgentSessionManager(
   const keyOf = (k: AgentSessionKey) => `${k.agentName}::${k.channelThreadKey}`;
   const canonicalizeKey = (key: AgentSessionKey): AgentSessionKey => ({
     ...key,
-    agentName: deps.agentLoader.getCanonicalName(key.agentName),
+    agentName: requireAgent(deps.agentLoader, key.agentName).name,
   });
 
   let sweeperTimer: ReturnType<typeof setInterval> | null = null;
@@ -900,14 +900,9 @@ function deprecatedSameAgent(
   requestedName: string,
 ): boolean {
   if (storedName === requestedName) return true;
-  try {
-    return (
-      deps.agentLoader.getCanonicalName(storedName) ===
-      deps.agentLoader.getCanonicalName(requestedName)
-    );
-  } catch {
-    return false;
-  }
+  const stored = deps.agentLoader.find(storedName);
+  const requested = deps.agentLoader.find(requestedName);
+  return stored !== undefined && requested !== undefined && stored.name === requested.name;
 }
 
 async function openSession(
@@ -916,9 +911,9 @@ async function openSession(
   init: AgentSessionInit,
   opts: OpenOptions,
 ): Promise<AgentSessionImpl> {
-  const { config, metadata } = deps.agentLoader.getRecord(key.agentName);
-  const owningApp =
-    metadata.ownerType === "app" ? deps.appCatalog?.get(metadata.ownerId) : undefined;
+  const agent = requireAgent(deps.agentLoader, key.agentName);
+  const config = agent.definition;
+  const owningApp = agent.ownerType === "app" ? deps.appCatalog?.get(agent.ownerId) : undefined;
   const appStoreListingId =
     owningApp?.source.mode === "appstore" ? owningApp.source.listingId : undefined;
 
@@ -1067,7 +1062,7 @@ async function openSession(
   });
 
   const systemPrompt = deps.systemPrompts.build(
-    { ...config, owner: metadata.ownerType },
+    { ...config, name: agent.localName, owner: agent.ownerType },
     { contextSuffix: init.contextSuffix, widgets },
   );
 
@@ -1232,7 +1227,10 @@ async function openSession(
       );
   const deferTool = (refs: TurnExecRefs) =>
     deferEnabled
-      ? { schedule: makeExecuteDefer(refs), finalText: resolveAgentPolicy(config).finalText }
+      ? {
+          schedule: makeExecuteDefer(refs),
+          finalText: resolveAgentPolicy({ name: agent.localName, policy: config.policy }).finalText,
+        }
       : undefined;
 
   const makeExecuteSubagent =
@@ -1652,7 +1650,7 @@ interface ImplArgs {
   /** The provider of the session the run opened. Unset for a code-backed agent. */
   modelProvider?: ModelProvider;
   deps: ManagerDeps;
-  config: ReturnType<AgentLoader["get"]>;
+  config: AgentDefinition;
   structuredOutputValidator?: CompiledOutputSchema;
   systemPrompt: string;
   workingDir: string;
@@ -1901,7 +1899,7 @@ class AgentSessionImpl implements AgentSession {
   /** Where the latest turn left the thread, if it did. A fork with no checkpoint branches here. */
   private lastPosition?: ModelPosition;
   private deps: ManagerDeps;
-  private config: ReturnType<AgentLoader["get"]>;
+  private config: AgentDefinition;
   private structuredOutputValidator?: CompiledOutputSchema;
   private systemPrompt: string;
   private workingDir: string;
@@ -3787,10 +3785,10 @@ class AgentSessionImpl implements AgentSession {
 // Helpers
 
 /** The subagents this agent may hand work to, as its definition names them. */
-function subagentsOf(agentLoader: AgentLoader, config: ReturnType<AgentLoader["get"]>): Subagent[] {
+function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] {
   return (config.allowedSubagents ?? []).map((name) => ({
     name,
-    description: agentLoader.get(name).description,
+    description: requireAgent(agents, name).definition.description,
   }));
 }
 

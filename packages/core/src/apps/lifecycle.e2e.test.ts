@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { create as tarCreate } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";

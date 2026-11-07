@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../host-execution/service.js";
 import { getDb } from "../db/index.js";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import { ActionRegistryImpl } from "./registry.js";
 import { ActionLoader } from "./loader.js";
 import { ActionEngine } from "./engine.js";

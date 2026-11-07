@@ -1,3 +1,5 @@
+import { requireAgent, type AgentCatalog } from "../agent/index.js";
+
 export type ArtifactReferenceKind = "agent" | "action";
 
 export interface ArtifactReferenceInput {
@@ -11,16 +13,14 @@ export interface ArtifactReferenceInput {
  * selects the registry for the requested artifact kind.
  */
 export function createArtifactReferenceResolver(deps: {
-  agentLoader: {
-    getCanonicalName(name: string): string;
-  };
+  agentLoader: AgentCatalog;
   actionRegistry: {
     getCanonicalName(name: string): string | undefined;
   };
 }): (input: ArtifactReferenceInput) => string {
   return (input) => {
     if (input.kind === "agent") {
-      return deps.agentLoader.getCanonicalName(input.value);
+      return requireAgent(deps.agentLoader, input.value).name;
     }
 
     const actionName = deps.actionRegistry.getCanonicalName(input.value);

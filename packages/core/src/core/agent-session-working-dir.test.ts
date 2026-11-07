@@ -6,7 +6,7 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
@@ -380,6 +380,19 @@ describe("AgentSessionManager working dirs", () => {
     );
     expect((await sessionRepository.session("legacy-session"))?.workingDir).toBe(
       join(directory, "projects", "default"),
+    );
+  });
+
+  it("refuses a session stored under one unknown agent when another unknown agent asks for it", async () => {
+    await sessionRepository.add(
+      Session.create("gone:writer", {
+        deprecatedId: "orphan-session",
+        continuityKey: "action:orphan",
+      }),
+    );
+
+    await expect(manager.acquireBySessionId!("orphan-session", "gone:reader")).rejects.toThrow(
+      'Agent session "orphan-session" was not found or cannot be resumed',
     );
   });
 });

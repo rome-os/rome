@@ -149,7 +149,7 @@ import { ActionExecutionsRepository } from "./db/repositories/action-executions.
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { AgentLoader } from "./core/agent-loader.js";
+import { AgentLoader } from "./agent/index.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
@@ -983,7 +983,7 @@ async function main() {
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,
-    listAgents: () => agentLoader.getAll().keys(),
+    listAgents: () => agentLoader.list().map((agent) => agent.name),
     onChanged: async ({ ref, actor, fields, reset }) => {
       await eventService.publish({
         name: "conversation-settings.changed",
@@ -1197,9 +1197,14 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    isTextPrivate: (agentName) =>
-      agentLoader.has(agentName) &&
-      resolveAgentPolicy(agentLoader.get(agentName)).finalText === "private",
+    isTextPrivate: (agentName) => {
+      const agent = agentLoader.find(agentName);
+      return (
+        agent !== undefined &&
+        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }).finalText ===
+          "private"
+      );
+    },
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);
@@ -1554,8 +1559,8 @@ async function main() {
       minIntervalMs: config.linkedinPollMinMinutes * 60_000,
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
-    listAgents: () => Array.from(agentLoader.getAll().keys()),
-    hasAgent: (name) => agentLoader.has(name),
+    listAgents: () => agentLoader.list().map((agent) => agent.name),
+    hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
@@ -1862,7 +1867,7 @@ async function main() {
     appLifecycle,
     appStore,
     systemUpgrade: systemUpgradeService,
-    hasAgent: (name) => agentLoader.has(name),
+    hasAgent: (name) => agentLoader.find(name) !== undefined,
     hasRegisteredAction: (name) => actionRegistry.has(name),
     isExplicitAction: (name) => actionRegistry.isExplicit(name),
     validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
@@ -2022,6 +2027,7 @@ async function main() {
       routinesRepo,
       routineRunsRepo,
       appCatalog,
+      artifactIdentity,
       appManager,
       romeCloudListings,
       appStore,
@@ -2174,17 +2180,16 @@ async function main() {
     .filter((channel) => channel.sendable)
     .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
-  const agentNames = Array.from(agentLoader.getAll().keys());
+  const agentNames = agentLoader.list().map((agent) => agent.name);
   const discoveredServers = Object.keys(capabilityDiscovery.getCdpMcpServers());
   const appIds = appCatalog.listResolved().map((app: ResolvedApp) => app.appId);
   const actionOwners = actionRegistry.list().map((name) => {
     const metadata = actionRegistry.getMetadata(name);
     return metadata ? `${name}:${metadata.ownerType === "app" ? metadata.ownerId : "core"}` : name;
   });
-  const agentOwners = Array.from(agentLoader.getAllRecords().entries()).map(
-    ([name, record]) =>
-      `${name}:${record.metadata.ownerType === "app" ? record.metadata.ownerId : "core"}`,
-  );
+  const agentOwners = agentLoader
+    .list()
+    .map((agent) => `${agent.name}:${agent.ownerType === "app" ? agent.ownerId : "core"}`);
   // Every boot step above is done, so app-started hooks can rely on actions,
   // routines, and agents. The API already serves requests, so an install may
   // be mid-refresh: open between refreshes, never inside one.

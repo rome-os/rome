@@ -11,7 +11,7 @@ import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/sche
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { buildAgent, createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 // The dashboard's repository over Chats' tables. What these pin: a dashboard
@@ -60,7 +60,7 @@ describe("ChatsWebChatRepository", () => {
     const deps = {
       db: testDb.db,
       settingsRepo: { get: async () => "Ray" },
-      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      agentLoader: { list: () => [buildAgent("core:concierge")] },
       appCatalog: { get: () => undefined },
     } as never;
     const sources = await repo.getUserMessageSources("old-chat");
@@ -112,7 +112,7 @@ describe("ChatsWebChatRepository", () => {
       db: testDb.db,
       webchatRepo: repo,
       settingsRepo: { get: async () => "Ray" },
-      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      agentLoader: { list: () => [buildAgent("core:concierge")] },
       appCatalog: { get: () => undefined },
     } as never;
     const senders = await resolveChatSenders(

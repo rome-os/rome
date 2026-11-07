@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as pathsModule from "../paths.js" with { rstest: "importActual" };
-import type { AgentConfig } from "../types.js";
+import type { TestAgentFile } from "./helpers.js";
 
 const mockPaths = rs.hoisted(() => ({
   projectRoot: "/tmp/rome-test-project-root",
@@ -26,7 +26,7 @@ rs.mock("../paths.js", () => ({
 
 import { createTestSystemPrompts } from "./system-prompts.js";
 
-const mainConfig: AgentConfig = {
+const mainConfig: TestAgentFile = {
   name: "main",
   description: "Main test agent",
   tier: "large",
@@ -40,7 +40,7 @@ type TestApps = NonNullable<Parameters<typeof createTestSystemPrompts>[0]>["apps
 
 const plainText = { widgets: "plain_text" } as const;
 
-function core(config: AgentConfig) {
+function core(config: TestAgentFile) {
   return { ...config, owner: "core" } as const;
 }
 
@@ -94,7 +94,7 @@ describe("the system prompt", () => {
       "# Memory\n\nPrivate guardian preference.",
     );
 
-    const subAgentConfig: AgentConfig = {
+    const subAgentConfig: TestAgentFile = {
       name: "envoy",
       description: "A non-main subagent",
       tier: "large",
@@ -237,7 +237,7 @@ describe("the system prompt", () => {
   });
 
   it("advertises the globally available Discord CLI to every agent", () => {
-    const subAgentConfig: AgentConfig = {
+    const subAgentConfig: TestAgentFile = {
       ...mainConfig,
       name: "envoy",
       systemPromptPrefix: "You are a subagent.",
@@ -323,7 +323,7 @@ describe("the system prompt", () => {
   });
 
   it("does not leak Rome's email address into non-main agents", () => {
-    const subAgentConfig: AgentConfig = {
+    const subAgentConfig: TestAgentFile = {
       name: "envoy",
       description: "A non-main subagent",
       tier: "large",
@@ -387,7 +387,7 @@ describe("the system prompt", () => {
       subscribe: () => () => {},
     } as unknown as TestApps;
 
-    const subAgentConfig: AgentConfig = {
+    const subAgentConfig: TestAgentFile = {
       name: "envoy",
       description: "A non-main subagent",
       tier: "large",
@@ -420,7 +420,7 @@ describe("the system prompt", () => {
       ],
       subscribe: () => () => {},
     } as unknown as TestApps;
-    const appConfig: AgentConfig = {
+    const appConfig: TestAgentFile = {
       ...mainConfig,
       name: "app-assistant",
       systemPromptPrefix: "You are the app's custom assistant.",

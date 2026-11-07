@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,

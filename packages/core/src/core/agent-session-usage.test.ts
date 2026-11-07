@@ -10,7 +10,7 @@ import type { ModelSessionEvent, ModelSessionParams } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import type { ModelLoginKind } from "../agent/index.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
