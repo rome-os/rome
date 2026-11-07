@@ -184,7 +184,7 @@ struct MainShell: View {
             case .settings(let routes):
                 settingsPath = routes ?? []
                 if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
-            case nil: break
+            case .suggestions, nil: break
             }
         }
         #endif
