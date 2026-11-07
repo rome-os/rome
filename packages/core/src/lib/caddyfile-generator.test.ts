@@ -57,6 +57,20 @@ describe("generateCaddyfile app document routes", () => {
   });
 });
 
+describe("app document authentication fallback", () => {
+  it("serves only the public shell for denied documents, never for API denials", () => {
+    const caddyfile = generateCaddyfile();
+    const document = caddyfile.split("handle @appDocs {")[1];
+    expect(document).toContain("@appAuthDenied status 401 403");
+    expect(document).toContain("handle_response @appAuthDenied");
+    expect(document).toContain("rewrite * /index.html");
+    expect(document).toContain('header Cache-Control "no-cache"');
+    const dynamic = caddyfile.split("handle @dynamic {")[1].split("handle /runtime-config.js")[0];
+    expect(dynamic).not.toContain("appAuthDenied");
+    expect(dynamic).not.toContain("file_server");
+  });
+});
+
 describe("generateCaddyfile social card images", () => {
   it("proxies /app-og through the dynamic matcher", () => {
     const caddyfile = generateCaddyfile();

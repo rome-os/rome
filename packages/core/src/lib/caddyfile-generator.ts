@@ -41,7 +41,7 @@ export function generateCaddyfile(): string {
   const webRoot = resolveWebRoot();
 
   const proxy = `reverse_proxy ${upstream}`;
-  const forwardAuth = `forward_auth ${upstream} {
+  const forwardAuth = (deniedResponse = "") => `forward_auth ${upstream} {
 \turi /api/auth/verify
 \tcopy_headers X-Rome-User-Id X-Rome-Visitor-Account-Id X-Rome-Visitor-Email
 \t# App WebSocket upgrades live under /api/apps/* and /api/app-api/*, so they
@@ -51,6 +51,14 @@ export function generateCaddyfile(): string {
 \t# probe copy only (header_up edits forward_auth's copy; the downstream
 \t# reverse_proxy still upgrades the original request) lets the upgrade through.
 \theader_up -Connection
+${deniedResponse ? `${indent(deniedResponse, 1)}\n` : ""}}`;
+  // The generic shell carries no app data. It preserves AuthGate's sign-in,
+  // onboarding and return-path handling when an app document is denied.
+  const appDocumentDenied = `@appAuthDenied status 401 403
+handle_response @appAuthDenied {
+\trewrite * /index.html
+\theader Cache-Control "no-cache"
+\tfile_server
 }`;
   // Boot-written runtime browser config. An explicit handle: the content
   // changes across container boots so it must never get the immutable-asset
@@ -123,7 +131,7 @@ handle @wsUpgrade {
 }
 @dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/*
 handle @dynamic {
-${indent(forwardAuth, 1)}
+${indent(forwardAuth(), 1)}
 \t${proxy}
 }
 ${runtimeConfigHandle}
@@ -143,7 +151,7 @@ handle @missingSpaAssets {
 }
 @appDocs path /apps /apps/* /full/apps /full/apps/*
 handle @appDocs {
-${indent(forwardAuth, 1)}
+${indent(forwardAuth(appDocumentDenied), 1)}
 \tencode zstd gzip
 \t${proxy}
 }

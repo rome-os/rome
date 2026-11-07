@@ -19,7 +19,7 @@ Two policies decide reach, each held as its own setting:
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.
 - An app manifest's no-auth declaration opens only its declared app-api paths. It never opens the dashboard-side data surface.
-- [Public app pages](../concepts/apps.md#public-app-pages) grant only matching documents and path-specific rendering manifests. The edge checks app documents before serving the shell.
+- [Public app pages](../concepts/apps.md#public-app-pages) grant only matching documents and path-specific rendering manifests. The edge checks app documents before serving app-specific metadata.
 
 ## Request flow
 
@@ -38,7 +38,7 @@ The edge consults the probe on routes configured with `forward_auth` and forward
 
 - The edge is fail-closed: every API path is private unless an explicit allow-list entry opens it. A newly added API route inherits the private default.
 - The probe reads only in-memory policy state. Policy writes refresh that state, so no request-time database read exists and a policy change takes effect immediately.
-- Generic SPA documents and static assets are public and carry no gated data. App documents follow app access and public-page declarations.
+- Generic SPA documents and static assets are public and carry no gated data. A denied app document receives only the generic shell for sign-in.
 - The app-API dispatch derives the [caller](../concepts/apps.md#caller-identity) from primary session material and strips inbound identity headers before a handler runs. An external caller cannot forge an identity.
 
 ## Visitor sign-in

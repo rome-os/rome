@@ -168,6 +168,7 @@ describe("AuthGate on an embedded app route", () => {
     cleanup();
     renderAt("/apps/jev-tracker/settings");
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("/login"));
+    expect(window.localStorage.getItem("rome-login-return")).toBe("/apps/jev-tracker/settings");
   });
 
   it("keeps the guardian in the shell", async () => {
