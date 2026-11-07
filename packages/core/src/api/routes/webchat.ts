@@ -684,6 +684,8 @@ interface ActiveWebchatStream {
   agentTurnId?: string;
   /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
   quiet?: boolean;
+  /** A Stop request reached the stream's turn. */
+  stopRequested?: boolean;
   startedAt: string;
   finished: boolean;
   // Keyed replay buffer: late subscribers receive the latest payload per key
@@ -3112,6 +3114,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!agentSess || agentSess.currentTurnId !== turnId) {
       return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
+    stream.stopRequested = true;
     await agentSess.interrupt("user-stop", turnId);
     return answer({ stopped: true });
   };
@@ -4310,7 +4313,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // merely because it reuses the same runtime session.
         if (owner?.currentTurnId === msg.turnId) {
           stream.interrupt = async (reason) => {
-            if (owner.currentTurnId === msg.turnId) await owner.interrupt(reason);
+            if (owner.currentTurnId !== msg.turnId) return;
+            // Marked only when the Stop reaches this turn: one that lands
+            // after a newer input ended it stops nothing.
+            if (reason === "user-stop") stream.stopRequested = true;
+            await owner.interrupt(reason);
           };
         }
       }
@@ -4370,7 +4377,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     await runOnStream(stream, "backend webchat task", async () => {
-      await task({ emit });
+      await task({ emit, stopRequested: () => stream.stopRequested === true });
       await recordedCardWrites;
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a

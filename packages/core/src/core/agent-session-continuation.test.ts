@@ -94,7 +94,6 @@ function createProvider(id: ProviderId) {
   });
   const provider: ModelProvider = {
     id,
-    displayName: id,
     builtinTools: new Set<string>(),
     openSession,
   };

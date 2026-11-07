@@ -164,6 +164,7 @@ import {
   CodexAppServerProvider,
   DrizzleSessionRepository,
   SharedCodexAccountService,
+  romeCreditsProxyRoutes,
 } from "./agent/index.js";
 import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
@@ -877,8 +878,8 @@ async function main() {
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
-      codexStatus: () => codexAccountService.getStatus(),
-      codexUsage: () => codexAccountService.getUsage(),
+      codexStatus: () => codexAccountService.status(),
+      codexUsage: () => codexAccountService.usage(),
     },
     onCodexLoginChanged: () => syncRomeCreditsPayer(),
     onCodexRefreshed: () => refreshRomeCredits(),
@@ -891,7 +892,7 @@ async function main() {
   refreshRomeCredits = () => void romeCreditsPayer.refresh();
   const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
   romeCreditsPayer.sync();
-  const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
+  const unsubscribeCodexAccountChanged = codexAccountService.onChanged(() => {
     void aiToolState.refresh("openai").catch((err) => {
       log.warn("Codex account change refresh failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -2066,6 +2067,7 @@ async function main() {
       agentTurnStreamRegistry,
       aiToolState,
       codexAccountService,
+      romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       publicAccessState,
       dashboardAccessState,
       relayDrainer,

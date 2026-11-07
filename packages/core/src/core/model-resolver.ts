@@ -8,8 +8,7 @@ import {
   type ProviderState,
 } from "./ai-tool-state.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
-import { matchesModelAlias } from "./model-alias.js";
-import { stripLegacyReasoningSuffix } from "../agent/index.js";
+import { matchesModelAlias, stripLegacyReasoningSuffix } from "./model-alias.js";
 import { createLogger } from "../logger.js";
 import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
@@ -167,14 +166,27 @@ function configuredTierModel(
   return typeof model === "string" && model.trim() ? model.trim() : null;
 }
 
+// What people call each provider. The port carries the provider's id only;
+// the label is Rome's wording, so it lives with the messages that use it.
+const PROVIDER_DISPLAY_NAMES: Record<ProviderId, string> = {
+  anthropic: "Claude",
+  openai: "Codex (ChatGPT)",
+  mock: "Mock",
+};
+
+function providerDisplayName(id: ProviderId): string {
+  return PROVIDER_DISPLAY_NAMES[id];
+}
+
 // Agents, apps, and logs see only the message, not the reason field, so the
 // message itself names the cause and when a usage limit ends.
 function unavailableCause(provider: ModelProvider, availability: ProviderState): string {
-  if (availability.loggedIn === false) return `${provider.displayName} is not signed in`;
+  const name = providerDisplayName(provider.id);
+  if (availability.loggedIn === false) return `${name} is not signed in`;
   const until = availability.quotaExhaustedUntil;
   return until
-    ? `${provider.displayName} has reached its usage limit until ${until}`
-    : `${provider.displayName} has reached its usage limit`;
+    ? `${name} has reached its usage limit until ${until}`
+    : `${name} has reached its usage limit`;
 }
 
 function providerState(state: AIToolStateValue, providerId: ProviderId): ProviderState | null {

@@ -56,7 +56,6 @@ describe("AgentSession turn push level", () => {
     opened = [];
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "anthropic",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         opened.push(params);

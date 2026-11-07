@@ -19,8 +19,8 @@ function setup() {
   const flushes: Array<{ ids: string[]; quiet: boolean; at: number }> = [];
   const rendered: string[][] = [];
   const gaveUp: string[] = [];
-  /** Whether the next turns run to their end. */
-  let runs = true;
+  /** How the next turns end. */
+  let outcome: "completed" | "stopped" | "interrupted" | "failed" = "completed";
   /** Settles the running flush's turn. */
   let endTurn: (() => void) | null = null;
   let holdTurns = false;
@@ -42,7 +42,7 @@ function setup() {
     deliver: async ({ prompt, quiet }) => {
       flushes.push({ ids: prompt.split(","), quiet, at: Date.now() });
       if (holdTurns) await new Promise<void>((resolve) => (endTurn = resolve));
-      return runs;
+      return outcome;
     },
     giveUp: (taskId) => gaveUp.push(taskId),
   });
@@ -53,7 +53,15 @@ function setup() {
     gaveUp,
     /** Makes the next turns fail, as when the Concierge is out of quota, or run again. */
     turnsRun: (value: boolean) => {
-      runs = value;
+      outcome = value ? "completed" : "failed";
+    },
+    /** Makes the next turns end the way a Stop ends them. */
+    turnsStopped: () => {
+      outcome = "stopped";
+    },
+    /** Makes the next turns end the way a newer message cuts them short. */
+    turnsInterrupted: () => {
+      outcome = "interrupted";
     },
     holdTurns: () => {
       holdTurns = true;
@@ -305,6 +313,47 @@ describe("TaskEventCoalescer", () => {
     expect(s.rendered.at(-1)).toEqual(["approval"]);
   });
 
+  it("never hands the changes of a turn the guardian stopped over again, but still delivers one that came while it ran", async () => {
+    const s = setup();
+    s.turnsStopped();
+    s.holdTurns();
+    s.coalescer.mark(urgent("a"));
+    s.coalescer.mark(urgent("b"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // The guardian presses Stop, and a change for "b" lands while the turn ends.
+    await rs.advanceTimersByTimeAsync(1_000);
+    s.coalescer.mark(urgent("b", "approval"));
+    await s.endTurn();
+    expect(s.coalescer.pending).toEqual(["b"]);
+    expect(s.gaveUp).toEqual(["a"]);
+
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    await s.endTurn();
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a", "b"], ["b"]]);
+    expect(s.rendered[1]).toEqual(["approval"]);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    await s.endTurn();
+    expect(
+      s.flushes
+        .map((flush) => flush.ids)
+        .flat()
+        .filter((id) => id === "a"),
+    ).toHaveLength(1);
+  });
+
+  it("tries a turn a newer message cut short again, since it may never have reached the model", async () => {
+    const s = setup();
+    s.turnsInterrupted();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.flushes).toHaveLength(1);
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.gaveUp).toEqual([]);
+  });
+
   it("waits to retry only the rows of a chat whose turn did not run", async () => {
     const delivered: string[] = [];
     const coalescer = new TaskEventCoalescer({
@@ -320,7 +369,7 @@ describe("TaskEventCoalescer", () => {
         })),
       deliver: async ({ chatId, prompt }) => {
         delivered.push(prompt);
-        return chatId !== "topic-1";
+        return chatId === "topic-1" ? "failed" : "completed";
       },
       giveUp: () => {},
     });
@@ -343,7 +392,7 @@ describe("TaskEventCoalescer", () => {
       ],
       deliver: async ({ prompt }) => {
         delivered.push(prompt);
-        return true;
+        return "completed";
       },
       giveUp: () => {},
     });
@@ -365,7 +414,7 @@ describe("TaskEventCoalescer", () => {
       deliver: async ({ chatId }) => {
         if (chatId === "topic-1") throw new Error("no runtime");
         delivered.push(chatId);
-        return true;
+        return "completed";
       },
       giveUp: () => {},
     });
@@ -402,7 +451,7 @@ describe("TaskEventCoalescer", () => {
       },
       deliver: async (delivery) => {
         delivered.push(delivery);
-        return true;
+        return "completed";
       },
       giveUp: () => {},
     });

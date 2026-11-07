@@ -79,12 +79,8 @@ import {
   type DynamicToolCallResponse,
 } from "./app-server-protocol.js";
 import { buildTurnInput } from "./turn-input.js";
-import {
-  buildOpenAiAccounting,
-  calculateOpenAiCostUsd,
-  stripLegacyReasoningSuffix,
-  type Usage,
-} from "./common.js";
+import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
+import { stripLegacyReasoningSuffix } from "../../../../core/model-alias.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -597,7 +593,6 @@ function classifyCodexFailure(
 export class CodexAppServerProvider implements ModelProvider {
   readonly id: ProviderId = "openai";
   private readonly liveThreads = new Set<LiveCodexThread>();
-  readonly displayName = "Codex (ChatGPT)";
   // Anthropic's set, so agent yamls stay provider-agnostic, plus ImageGeneration,
   // which only Codex provides.
   readonly builtinTools: ReadonlySet<string> = new Set([

@@ -83,14 +83,14 @@ describe("SharedCodexAccountService", () => {
     });
     const service = createService(rpc);
 
-    await expect(service.getStatus()).resolves.toEqual({
+    await expect(service.status()).resolves.toEqual({
       loggedIn: true,
       authMode: "chatgpt",
       planType: "pro",
       accountType: "pro",
       email: "live@example.com",
     });
-    await expect(service.getUsage()).resolves.toMatchObject({
+    await expect(service.usage()).resolves.toMatchObject({
       source: "codex app-server",
       fiveHour: { usedPercent: 12, remainingPercent: 88 },
       sevenDay: { usedPercent: 34, remainingPercent: 66 },
@@ -120,7 +120,7 @@ describe("SharedCodexAccountService", () => {
     });
     const service = createService(rpc);
 
-    const usage = await service.getUsage();
+    const usage = await service.usage();
 
     expect(usage).toMatchObject({
       source: "codex app-server",
@@ -148,7 +148,7 @@ describe("SharedCodexAccountService", () => {
       }),
     });
 
-    await expect(service.getStatus()).resolves.toMatchObject({
+    await expect(service.status()).resolves.toMatchObject({
       loggedIn: false,
       authMode: "chatgpt",
       needsReauth: true,
@@ -172,7 +172,7 @@ describe("SharedCodexAccountService", () => {
           : { loggedIn: true, authMode: "chatgpt", planType: "plus" },
     });
 
-    await expect(service.getStatus()).resolves.toMatchObject({
+    await expect(service.status()).resolves.toMatchObject({
       loggedIn: false,
       authMode: "chatgpt",
       needsReauth: true,
@@ -196,7 +196,7 @@ describe("SharedCodexAccountService", () => {
           : { loggedIn: true, authMode: "chatgpt", planType: "plus" },
     });
 
-    await expect(service.getStatus()).resolves.toMatchObject({
+    await expect(service.status()).resolves.toMatchObject({
       loggedIn: false,
       authMode: "chatgpt",
       needsReauth: true,
@@ -206,7 +206,7 @@ describe("SharedCodexAccountService", () => {
     // Under the credits payer Codex hides the account, and the marker keeps
     // the same login reading as needing re-login.
     rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
-    await expect(service.getStatus()).resolves.toMatchObject({
+    await expect(service.status()).resolves.toMatchObject({
       loggedIn: false,
       needsReauth: true,
     });
@@ -227,7 +227,7 @@ describe("SharedCodexAccountService", () => {
         readFileStatus: async () => fileStatus,
       });
 
-      await expect(service.getStatus()).resolves.toEqual({
+      await expect(service.status()).resolves.toEqual({
         loggedIn: false,
         authMode: fileStatus.authMode,
       });
@@ -247,8 +247,8 @@ describe("SharedCodexAccountService", () => {
     const markAuthRevoked = rs.fn(async () => {});
     const service = createService(rpc, { markAuthRevoked });
 
-    await service.startDeviceLogin();
-    await expect(service.getStatus()).resolves.toEqual({
+    await service.startDeviceAuthorization();
+    await expect(service.status()).resolves.toEqual({
       loggedIn: false,
       authMode: "chatgpt",
     });
@@ -273,8 +273,8 @@ describe("SharedCodexAccountService", () => {
     const markAuthRevoked = rs.fn(async () => {});
     const service = createService(rpc, { markAuthRevoked });
 
-    const status = service.getStatus();
-    await service.startDeviceLogin();
+    const status = service.status();
+    await service.startDeviceAuthorization();
     rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
     answerRead({ account: null, requiresOpenaiAuth: true });
 
@@ -300,8 +300,8 @@ describe("SharedCodexAccountService", () => {
     const markAuthRevoked = rs.fn(async () => {});
     const service = createService(rpc, { markAuthRevoked });
 
-    const status = service.getStatus();
-    await service.startDeviceLogin();
+    const status = service.status();
+    await service.startDeviceAuthorization();
     rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
     failRead(new Error("workspace routing discovery unauthorized (401)"));
 
@@ -315,7 +315,7 @@ describe("SharedCodexAccountService", () => {
     rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
     const service = createService(rpc);
 
-    await expect(service.getStatus()).resolves.toMatchObject({
+    await expect(service.status()).resolves.toMatchObject({
       loggedIn: true,
       authMode: "chatgpt",
       planType: "plus",
@@ -340,19 +340,19 @@ describe("SharedCodexAccountService", () => {
     });
     const service = createService(rpc);
     const changed = rs.fn();
-    service.onAccountChanged(changed);
+    service.onChanged(changed);
 
-    await expect(service.startBrowserLogin()).resolves.toMatchObject({
-      loginId: "browser-1",
+    await expect(service.startBrowserAuthorization()).resolves.toMatchObject({
+      authorizationId: "browser-1",
       authUrl: "https://auth.openai.com/browser-1",
     });
-    expect(service.getLoginState()).toMatchObject({ running: true, mode: "browser" });
+    expect(service.authorizationState()).toMatchObject({ running: true, mode: "browser" });
 
-    await expect(service.startDeviceLogin()).resolves.toMatchObject({
-      loginId: "device-1",
+    await expect(service.startDeviceAuthorization()).resolves.toMatchObject({
+      authorizationId: "device-1",
       userCode: "ABCD-EFGH",
     });
-    expect(service.getLoginState()).toEqual({
+    expect(service.authorizationState()).toEqual({
       running: true,
       mode: "device",
       userCode: "ABCD-EFGH",
@@ -370,7 +370,7 @@ describe("SharedCodexAccountService", () => {
       success: true,
       error: null,
     });
-    expect(service.getLoginState()).toMatchObject({ running: false, lastError: null });
+    expect(service.authorizationState()).toMatchObject({ running: false, lastError: null });
     expect(changed).toHaveBeenCalledTimes(1);
     service.close();
   });
@@ -384,15 +384,15 @@ describe("SharedCodexAccountService", () => {
     });
     const service = createService(rpc);
     const changed = rs.fn();
-    service.onAccountChanged(changed);
-    await service.startDeviceLogin();
+    service.onChanged(changed);
+    await service.startDeviceAuthorization();
 
     rpc.notify("account/login/completed", {
       loginId: "device-1",
       success: false,
       error: "device authorization declined",
     });
-    expect(service.getLoginState()).toMatchObject({
+    expect(service.authorizationState()).toMatchObject({
       running: false,
       lastError: "device authorization declined",
     });
@@ -409,7 +409,7 @@ describe("SharedCodexAccountService", () => {
     const rpc = new FakeAccountRpc();
     const service = createService(rpc);
     const changed = rs.fn();
-    service.onAccountChanged(changed);
+    service.onChanged(changed);
 
     rpc.notify(notification, {});
     expect(changed).toHaveBeenCalledTimes(1);
@@ -429,12 +429,12 @@ describe("SharedCodexAccountService", () => {
     rpc.queue("account/logout", {});
     const service = createService(rpc);
     const changed = rs.fn();
-    service.onAccountChanged(changed);
-    await service.startDeviceLogin();
+    service.onChanged(changed);
+    await service.startDeviceAuthorization();
 
-    await service.logout();
+    await service.revoke();
 
-    expect(service.getLoginState().running).toBe(false);
+    expect(service.authorizationState().running).toBe(false);
     expect(rpc.requests.map((request) => request.method)).toEqual([
       "account/login/start",
       "account/login/cancel",
@@ -456,11 +456,11 @@ describe("SharedCodexAccountService", () => {
     rpc.queue("account/login/cancel", { status: "canceled" });
     const service = createService(rpc);
 
-    const starting = service.startDeviceLogin();
+    const starting = service.startDeviceAuthorization();
     await rs.waitFor(() => {
       expect(rpc.requests.some((request) => request.method === "account/login/start")).toBe(true);
     });
-    await service.cancelLogin();
+    await service.cancelAuthorization();
     resolveStart({
       loginId: "device-1",
       userCode: "ABCD-EFGH",
@@ -472,7 +472,7 @@ describe("SharedCodexAccountService", () => {
       "account/login/start",
       "account/login/cancel",
     ]);
-    expect(service.getLoginState().running).toBe(false);
+    expect(service.authorizationState().running).toBe(false);
     service.close();
   });
 
@@ -487,9 +487,9 @@ describe("SharedCodexAccountService", () => {
     );
     const service = createService(rpc);
     const changed = rs.fn();
-    service.onAccountChanged(changed);
+    service.onChanged(changed);
 
-    const starting = service.startDeviceLogin();
+    const starting = service.startDeviceAuthorization();
     await rs.waitFor(() => {
       expect(rpc.requests.some((request) => request.method === "account/login/start")).toBe(true);
     });
@@ -504,8 +504,8 @@ describe("SharedCodexAccountService", () => {
       verificationUrl: "https://auth.openai.com/codex/device",
     });
 
-    await expect(starting).resolves.toMatchObject({ loginId: "device-1" });
-    expect(service.getLoginState().running).toBe(false);
+    await expect(starting).resolves.toMatchObject({ authorizationId: "device-1" });
+    expect(service.authorizationState().running).toBe(false);
     expect(changed).toHaveBeenCalledTimes(1);
     service.close();
   });
@@ -519,12 +519,12 @@ describe("SharedCodexAccountService", () => {
     });
     const service = createService(rpc);
     const changed = rs.fn();
-    service.onAccountChanged(changed);
-    await service.startDeviceLogin();
+    service.onChanged(changed);
+    await service.startDeviceAuthorization();
 
     rpc.exit(new Error("codex app-server exited (code 137)"));
 
-    expect(service.getLoginState()).toMatchObject({
+    expect(service.authorizationState()).toMatchObject({
       running: false,
       lastError: "Codex sign-in stopped: codex app-server exited (code 137)",
     });

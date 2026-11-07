@@ -52,7 +52,6 @@ describe("AgentSessionManager working dirs", () => {
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "anthropic",
       builtinTools: new Set<string>(),
       openSession: async (params) =>
         createSessionFromRun(

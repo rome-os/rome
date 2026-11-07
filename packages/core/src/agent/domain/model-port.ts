@@ -105,8 +105,6 @@ export type ModelSessionEvent =
 export interface ModelProvider {
   /** Stable id used for telemetry and to look the provider up in the registry. */
   readonly id: ProviderId;
-  /** Human-readable label for the dashboard. */
-  readonly displayName: string;
   /**
    * Names of tools the provider handles natively. These are Rome-canonical
    * names (Read / Edit / Bash / Glob / Grep / WebSearch / WebFetch / Task) —
