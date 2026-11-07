@@ -76,7 +76,7 @@ A turn is one request to an agent plus the agent work that follows until the age
 **Contracts:**
 
 - Usage reporting counts the user inputs, assistant output, and trace evidence of one turn once, not once per input. A turn can consume more than one user input.
-- A turn ends completed, failed, stopped or abandoned. A Rome stop (the user's Stop, or a `now` input superseding the turn) decides first, and the turn is stopped. Otherwise the terminal event decides: an error event fails the turn and a result completes it. A turn whose stream ends with no terminal event and no Rome stop is abandoned. On the wire these are `completed`, `error`, `interrupted` and `stopped`. The rule is `turnStatus` in [`packages/core/src/agent/domain/turn-end.ts`](../../packages/core/src/agent/domain/turn-end.ts).
+- A turn ends completed, failed, stopped or abandoned. A Rome stop (the user's Stop, or a `now` input superseding the turn) or the provider's own stop decides first, and the turn is stopped. Otherwise the terminal event decides: an error event fails the turn and a result completes it. A turn whose stream ends with no terminal event and no stop is abandoned. On the wire these are `completed`, `error`, `interrupted` and `stopped`. The rule is `turnStatus` in [`packages/core/src/agent/domain/turn-end.ts`](../../packages/core/src/agent/domain/turn-end.ts).
 - Failed and stopped turns still count as turns.
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
