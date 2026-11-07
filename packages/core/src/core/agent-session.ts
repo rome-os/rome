@@ -9,7 +9,14 @@ import {
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
-import { requireAgent, type AgentCatalog, type AgentDefinition } from "../agent/index.js";
+import {
+  requireAgent,
+  turnStatus,
+  turnStop,
+  type AgentCatalog,
+  type AgentDefinition,
+  type TurnEnding,
+} from "../agent/index.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import {
@@ -130,12 +137,10 @@ import {
 import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
 import {
   buildRequiredTiming,
-  classifyAgentTurnStatus,
   createAgentTurnRef,
   type AgentLifecycleDispatcher,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
-import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
@@ -2278,7 +2283,8 @@ class AgentSessionImpl implements AgentSession {
           // never fall back to (or race with) a later model-thread head.
           if (outbound.type === "result") {
             const interrupted =
-              sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
+              turnStatus({ terminal: outbound, stoppedByRome: sink.lifecycleInterrupted }) ===
+              "interrupted";
             if (!interrupted) this.lastPosition = position;
             await this.persistTurn(
               session,
@@ -2332,21 +2338,14 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /** Emit the turn_end bracket. `terminal` determines the status. */
-  private publishTurnEnd(sink: TurnSink, terminal: AgentEvent): void {
+  private publishTurnEnd(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
     // Turns that fail before dispatchTurnStarted have no start timestamp;
     // report 0 rather than a since-epoch wall clock.
     const startMs = sink.lifecycleStartedAtMs;
-    // Same precedence as classifyAgentTurnStatus: a user stop is reported as
-    // `interrupted` even when the provider surfaced the abort as an error
-    // block, so consumers can tell a graceful stop from a true failure
-    // without peeking back into the terminal's accounting.
-    const accounting =
-      terminal.type === "result" || terminal.type === "error" ? terminal.accounting : undefined;
-    const interrupted = sink.lifecycleInterrupted || isInterruptedAccounting(accounting);
     this.publishOutbound(sink, {
       type: "turn_end",
       turnId: sink.turnId,
-      status: interrupted ? "interrupted" : terminal.type === "error" ? "error" : "completed",
+      status: turnStatus({ terminal, stoppedByRome: sink.lifecycleInterrupted }),
       durationMs: startMs === undefined ? 0 : Date.now() - startMs,
     });
   }
@@ -2474,21 +2473,12 @@ class AgentSessionImpl implements AgentSession {
     if (!recorder || sink.usageRecorded) return;
     sink.usageRecorded = true;
     const accounting = terminal.accounting;
-    const stop = resolveTurnStop({
-      accounting,
-      terminalKind: terminal.type,
-      interrupted: sink.lifecycleInterrupted,
-    });
     recorder.recordTurn({
       turnId: sink.turnId,
       romeSessionId: sink.romeSessionId,
       romeSessionType: sink.romeSessionType,
       agentName: this.key.agentName,
-      status: classifyAgentTurnStatus({
-        terminalKind: terminal.type,
-        stop,
-        interrupted: sink.lifecycleInterrupted,
-      }),
+      status: turnStatus({ terminal, stoppedByRome: sink.lifecycleInterrupted }),
       provider: this.modelSession.providerId,
       model: this.modelSession.model,
       loginKind: sink.loginKind,
@@ -2729,24 +2719,15 @@ class AgentSessionImpl implements AgentSession {
     const startedAt = sink.lifecycleStartedAt ?? finishedAt;
     const durationMs =
       sink.lifecycleStartedAtMs === undefined ? 0 : finishedAtMs - sink.lifecycleStartedAtMs;
-    const terminalKind =
-      terminal?.type === "result" || terminal?.type === "error" ? terminal.type : undefined;
-    const accounting =
-      terminal && (terminal.type === "result" || terminal.type === "error")
-        ? terminal.accounting
-        : undefined;
+    const ending: TurnEnding = {
+      terminal: terminal?.type === "result" || terminal?.type === "error" ? terminal : undefined,
+      stoppedByRome: sink.lifecycleInterrupted,
+    };
+    const accounting = ending.terminal?.accounting;
     const stopReason =
       accounting?.stopReason ?? (sink.lifecycleInterrupted ? "interrupted" : undefined);
-    const stop = resolveTurnStop({
-      accounting,
-      terminalKind,
-      interrupted: sink.lifecycleInterrupted,
-    });
-    const status = classifyAgentTurnStatus({
-      terminalKind,
-      stop,
-      interrupted: sink.lifecycleInterrupted,
-    });
+    const stop = turnStop(ending);
+    const status = turnStatus(ending);
 
     dispatcher.dispatchFinished({
       type: "agent-turn-finished",
@@ -2969,11 +2950,7 @@ class AgentSessionImpl implements AgentSession {
           const terminal = isTerminalEvent(out);
           if (terminal) {
             terminalAccounting = out.accounting;
-            status = isInterruptedAccounting(out.accounting)
-              ? "interrupted"
-              : out.type === "error"
-                ? "error"
-                : "completed";
+            status = turnStatus({ terminal: out, stoppedByRome: false });
             terminalSeen = true;
           }
           // Relayed subagent blocks carry the child's agent tag; everything

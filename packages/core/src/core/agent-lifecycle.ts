@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentStop,
   AgentTurnFinishedEvent,
   AgentTurnFinishedHook,
   AgentTurnRef,
   AgentTurnStartedEvent,
   AgentTurnStartedHook,
-  AgentTurnStatus,
   AgentTurnTiming,
   LifecycleThreadContext,
 } from "@rome-os/app-runtime";
@@ -108,23 +106,6 @@ export function createAgentTurnRef(params: {
     threadContext: toLifecycleThreadContext(params.threadContext),
     parent: params.parent,
   };
-}
-
-export function classifyAgentTurnStatus(params: {
-  terminalKind?: "result" | "error";
-  stop?: AgentStop;
-  interrupted: boolean;
-}): AgentTurnStatus {
-  if (params.interrupted || params.stop?.reason === "interrupted") {
-    return "interrupted";
-  }
-  if (params.terminalKind === "error") {
-    return "error";
-  }
-  if (params.terminalKind === "result") {
-    return "completed";
-  }
-  return "stopped";
 }
 
 export function createAgentLifecycleDispatcher(
