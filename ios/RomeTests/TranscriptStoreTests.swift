@@ -82,9 +82,13 @@ final class FakeBackend: RomeBackend {
 
     func asset(path: String) async throws -> Data { throw APIError.notFound }
 
+    /// Off, every send fails, as it always did here.
+    var sendSucceeds = false
+
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
+        if sendSucceeds { return CreatedTurn(turnId: "turn", inputId: inputId, disposition: "started") }
         throw APIError.network
     }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.network }
