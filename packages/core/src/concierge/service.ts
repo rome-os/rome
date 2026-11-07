@@ -70,8 +70,6 @@ export {
 };
 /** The dashboard language the guardian picked: `en` or `zh-CN`. */
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
-/** The guardian setting that turns Concierge on. Any value but `true` is off. */
-const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
@@ -227,17 +225,6 @@ export class ConciergeService {
   get dashboard(): ConciergeDashboard {
     if (!this.attached) throw new Error("The dashboard is not up yet");
     return this.attached;
-  }
-
-  async isEnabled(): Promise<boolean> {
-    try {
-      return (await this.deps.settingsRepo.get(EXPERIMENTAL_CONCIERGE_SETTING_KEY)) === true;
-    } catch (error) {
-      log.warn("concierge setting unreadable, treating it as off", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
   }
 
   /** An owner's main Concierge chat's id, or null when it does not exist yet. */

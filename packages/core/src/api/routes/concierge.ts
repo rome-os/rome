@@ -36,13 +36,13 @@ export function conciergeRoutes(
   };
 
   // The caller's main Concierge chat, created on first use, and how many
-  // agent messages it got since it was last read. 404 while the setting is off.
+  // agent messages it got since it was last read. 404 without the Concierge service.
   app.get("/concierge/session", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
     const concierge = deps.concierge;
-    if (!concierge || !(await concierge.isEnabled())) {
-      return c.json({ error: "Concierge is off" }, 404);
+    if (!concierge) {
+      return c.json({ error: "Concierge is not available" }, 404);
     }
     const id = await concierge.ensureChatId(owner);
     const unread = await deps.webchatRepo.countUnreadAgentMessages(id, CONCIERGE_UNREAD_CAP);
@@ -50,13 +50,13 @@ export function conciergeRoutes(
   });
 
   // The caller's Concierge chats: the main chat, created on first use, then
-  // the topic chats, each with its unread count. 404 while the setting is off.
+  // the topic chats, each with its unread count. 404 without the Concierge service.
   app.get("/concierge/chats", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
     const concierge = deps.concierge;
-    if (!concierge || !(await concierge.isEnabled())) {
-      return c.json({ error: "Concierge is off" }, 404);
+    if (!concierge) {
+      return c.json({ error: "Concierge is not available" }, 404);
     }
     const chats = await Promise.all(
       (await concierge.listChats(owner)).map(async (chat) => ({
@@ -67,13 +67,13 @@ export function conciergeRoutes(
     return c.json({ chats } satisfies ConciergeChatsResponse);
   });
 
-  // Starts a topic chat for the caller on their main chat's model. 404 while off.
+  // Starts a topic chat for the caller on their main chat's model. 404 without the Concierge service.
   app.post("/concierge/chats", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
     const concierge = deps.concierge;
-    if (!concierge || !(await concierge.isEnabled())) {
-      return c.json({ error: "Concierge is off" }, 404);
+    if (!concierge) {
+      return c.json({ error: "Concierge is not available" }, 404);
     }
     const body = await c.req
       .json<Partial<ConciergeChatStartRequest>>()
@@ -87,13 +87,13 @@ export function conciergeRoutes(
   });
 
   // The caller's Concierge todo list: every open row whatever its age, and
-  // the finished ones of the last `doneDays` days. 404 while the setting is off.
+  // the finished ones of the last `doneDays` days. 404 without the Concierge service.
   app.get("/concierge/tasks", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
     const concierge = deps.concierge;
-    if (!concierge || !(await concierge.isEnabled())) {
-      return c.json({ error: "Concierge is off" }, 404);
+    if (!concierge) {
+      return c.json({ error: "Concierge is not available" }, 404);
     }
     const asked = Number(c.req.query("doneDays") ?? CONCIERGE_DONE_DAYS);
     const doneDays =
@@ -109,8 +109,8 @@ export function conciergeRoutes(
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
     const concierge = deps.concierge;
-    if (!concierge || !(await concierge.isEnabled())) {
-      return c.json({ error: "Concierge is off" }, 404);
+    if (!concierge) {
+      return c.json({ error: "Concierge is not available" }, 404);
     }
     return streamSSE(c, async (sse) => {
       let close!: () => void;
@@ -140,13 +140,13 @@ export function conciergeRoutes(
   // The Concierge's connectors: every tool it can act through or watch, with
   // what it follows there, and the rules. The same structure its following
   // list returns, read by native clients. The caller's follows and rules;
-  // 404 while off.
+  // 404 without the Concierge service.
   const followingOf = async (c: Context) => {
     const owner = await callerOwner();
     if (!owner) return { error: c.json({ error: "Not authenticated" }, 401) };
     const concierge = deps.concierge;
-    if (!concierge || !(await concierge.isEnabled())) {
-      return { error: c.json({ error: "Concierge is off" }, 404) };
+    if (!concierge) {
+      return { error: c.json({ error: "Concierge is not available" }, 404) };
     }
     return { following: concierge.following, owner };
   };

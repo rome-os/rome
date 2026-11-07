@@ -61,7 +61,6 @@ export interface TaskEventDelivery {
 
 export interface TaskEventDeps {
   now(): number;
-  isEnabled(): Promise<boolean>;
   /** The payloads for these rows, read from the database now, one per Concierge chat; empty when none of them exist any more. */
   render(tasks: DirtyTask[]): Promise<TaskEventDelivery[]>;
   /** Runs one payload as a system turn in its chat and answers how the turn ended. */
@@ -197,10 +196,6 @@ export class TaskEventCoalescer {
       entry.flushes += 1;
     }
     try {
-      if (!(await this.deps.isEnabled())) {
-        for (const [taskId] of taken) this.dirty.delete(taskId);
-        return;
-      }
       const tasks = taken.map(([taskId, entry]) => ({
         taskId,
         changes: entry.changes,

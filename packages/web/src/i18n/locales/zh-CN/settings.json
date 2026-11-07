@@ -684,14 +684,6 @@
     "features": {
       "title": "功能"
     },
-    "experimental": {
-      "badge": "实验",
-      "concierge": {
-        "title": "Concierge",
-        "description": "一个对话：代理用短消息和你聊天，较长的工作交给任务对话。",
-        "toggleLabel": "在对话中显示 Concierge"
-      }
-    },
     "developerSettings": {
       "title": "开发者设置"
     },

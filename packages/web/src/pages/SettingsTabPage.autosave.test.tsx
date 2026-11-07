@@ -127,11 +127,11 @@ describe("SettingsPage Advanced autosave", () => {
     );
   });
 
-  it("keeps Concierge under Features, outside Developer Settings", async () => {
+  it("keeps Presentation mode under Features, outside Developer Settings", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
-    const toggle = await screen.findByRole("switch", { name: "Show Concierge in Chats" });
+    const toggle = await screen.findByRole("switch", { name: "Mask agent identity in chat" });
     const section = toggle.closest("section");
     expect(section).not.toBeNull();
     expect(within(section as HTMLElement).getByRole("heading", { name: "Features" })).toBeTruthy();

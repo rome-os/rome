@@ -10,8 +10,6 @@ export const CONCIERGE_AGENT_ID = "core:concierge";
 export const CONCIERGE_CHAT_ID = "concierge";
 /** `triggerKind` of a task chat Concierge started. */
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
-/** The setting that turns Concierge on, under Settings → Experimental. */
-const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** The Concierge chat and its unread count; invalidate it to recount. */
 export const CONCIERGE_SESSION_QUERY_KEY = ["concierge-session"] as const;
 /** The Concierge chats, main first, with their unread counts; invalidate it to recount. */
@@ -58,7 +56,7 @@ const conciergeSessionQuery = {
   },
 };
 
-function useConciergeSession(enabled: boolean) {
+function useConciergeSession(enabled = true) {
   return useQuery({ ...conciergeSessionQuery, enabled, staleTime: 0 });
 }
 
@@ -81,13 +79,9 @@ export async function ensureConciergeChat(queryClient: QueryClient): Promise<str
 }
 
 export interface ConciergeChat {
-  /** The signed-in person's main Concierge chat once it exists, else null: Concierge is off or not loaded yet. */
+  /** The signed-in person's main Concierge chat once it exists, else null: not loaded yet. `ensureConciergeChat` waits for it. */
   chatId: string | null;
-  /** Whether Concierge is on. The chat may not exist yet; `ensureConciergeChat` waits for it. */
-  enabled: boolean;
-  /** Whether the setting is still loading, so `enabled` is not known yet. */
-  settingsLoading: boolean;
-  /** Whether the setting or the chat's creation is still in flight. */
+  /** Whether the chat's creation is still in flight. */
   loading: boolean;
 }
 
@@ -96,15 +90,8 @@ export interface ConciergeChat {
  * first request, and asks again on every mount, which recreates a deleted chat.
  */
 export function useConciergeChat(): ConciergeChat {
-  const { data: settings, isPending: settingsPending } = useSettings();
-  const enabled = settings?.[EXPERIMENTAL_CONCIERGE_SETTING_KEY] === true;
-  const { data, isSuccess, isPending } = useConciergeSession(enabled);
-  return {
-    chatId: enabled && isSuccess ? data.id : null,
-    enabled,
-    settingsLoading: settingsPending,
-    loading: settingsPending || (enabled && isPending),
-  };
+  const { data, isSuccess, isPending } = useConciergeSession();
+  return { chatId: isSuccess ? data.id : null, loading: isPending };
 }
 
 /**
@@ -116,7 +103,7 @@ export function useConciergeName(): string {
   return mainAgentDisplayName(useSettings().data?.agentName, "Concierge");
 }
 
-/** The Concierge chat's id, or null while Concierge is off or not loaded yet. */
+/** The Concierge chat's id, or null while it is not loaded yet. */
 export function useConciergeChatId(): string | null {
   return useConciergeChat().chatId;
 }
@@ -128,18 +115,16 @@ export function useConciergeUnread(chatId: string | null): number {
 
 /**
  * The Concierge chats: the main chat first, then the topic chats, each with
- * its unread count. Empty while Concierge is off or the list is loading.
+ * its unread count. Empty while the list is loading.
  */
 export function useConciergeChats(): ConciergeChatDto[] {
-  const { enabled } = useConciergeChat();
   const { data } = useQuery({
     queryKey: CONCIERGE_CHATS_QUERY_KEY,
     queryFn: ({ signal }) =>
       fetchJson<ConciergeChatsResponse>("/api/concierge/chats", { signal, fallback: "" }),
-    enabled,
     staleTime: 0,
   });
-  return enabled ? (data?.chats ?? []) : [];
+  return data?.chats ?? [];
 }
 
 /** Starts an untitled topic chat, which its first message names, and answers it. */

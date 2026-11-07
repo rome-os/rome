@@ -347,7 +347,6 @@ function setup(
   const ownerOfChat = async (id: string | null | undefined) =>
     (id && chatOwners.get(id)) || GUARDIAN_OWNER;
   const service = {
-    isEnabled: async () => true,
     findChatId: async (owner = GUARDIAN_OWNER) => mainChatIdOf(owner),
     ownerOfChat,
     isServed: async (owner: string) => !dropped.has(owner),

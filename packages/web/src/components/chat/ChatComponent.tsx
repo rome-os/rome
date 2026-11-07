@@ -130,12 +130,9 @@ export function ChatComponent({
   );
 
   const composerRef = useRef<ChatComposerHandle>(null);
-  // A topic chat's draft takes the Concierge's composer once the setting
-  // loads, and that composer takes the focus too.
-  const conciergeDraft = topicDraft && concierge.enabled;
   useEffect(() => {
     if (!sessionId && !coarsePointer) composerRef.current?.focus();
-  }, [sessionId, coarsePointer, conciergeDraft]);
+  }, [sessionId, coarsePointer, topicDraft]);
 
   const navigate = useNavigate();
   useEffect(() => {
@@ -273,7 +270,6 @@ export function ChatComponent({
   // first and 404; the chat waits for the creation and asks again.
   const queryClient = useQueryClient();
   const isConcierge = isListedConcierge || topicDraft;
-  const conciergeEnabled = isConcierge && concierge.enabled;
   const startTopicChat = useCallback(async () => {
     const chat = await startConciergeTopicChat();
     void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
@@ -282,8 +278,7 @@ export function ChatComponent({
   const recoverMissingSession = useCallback(
     async (missingSessionId: string) => {
       try {
-        // Only the caller's own main chat is made on demand. While the
-        // Concierge is off the server refuses, and nothing is recovered.
+        // Only the caller's own main chat is made on demand.
         return (await ensureConciergeChat(queryClient)) === missingSessionId;
       } catch {
         return false;
@@ -291,12 +286,6 @@ export function ChatComponent({
     },
     [queryClient],
   );
-
-  // The main chat opened directly: the setting decides whether the chat
-  // exists for this instance, so wait for it before choosing a layout. A
-  // topic chat takes the Concierge layout once the Concierge chat list, which
-  // the sidebar has usually loaded already, names it.
-  if (isConcierge && concierge.settingsLoading) return null;
 
   return (
     <>
@@ -314,11 +303,11 @@ export function ChatComponent({
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
         navbarSlot={navbarSlot}
-        recoverMissingSession={conciergeEnabled ? recoverMissingSession : undefined}
-        variant={conciergeEnabled ? "concierge" : "default"}
+        recoverMissingSession={isConcierge ? recoverMissingSession : undefined}
+        variant={isConcierge ? "concierge" : "default"}
         conciergeMainChatId={concierge.chatId ?? CONCIERGE_CHAT_ID}
         conciergeName={conciergeName}
-        startSession={topicDraft && concierge.enabled ? startTopicChat : undefined}
+        startSession={topicDraft ? startTopicChat : undefined}
         centerDraftComposer={greetingOnlyHome && !topicDraft}
         emptyState={
           <ChatEmptyState
