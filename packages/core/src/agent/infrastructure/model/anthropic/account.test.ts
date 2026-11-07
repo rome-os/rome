@@ -271,7 +271,10 @@ describe("ClaudeAccount", () => {
         authMethod: "stored-compatible",
         usageLimited: false,
       });
-      expect(await account.storedCredential()).toMatchObject({ provider: "deepseek" });
+      expect(await account.storedCredential()).toMatchObject({
+        credential: { provider: "deepseek" },
+        expired: false,
+      });
 
       await account.removeCredential();
       expect(changed).toHaveBeenCalledTimes(2);

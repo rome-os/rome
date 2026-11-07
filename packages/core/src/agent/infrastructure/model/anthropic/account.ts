@@ -11,7 +11,6 @@ import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
-  summarizeAnthropicCompatibleCredentialsForEditing,
 } from "../../../../lib/anthropic-compatible-providers.js";
 import { getErrorMessage, readClaudeOAuthUsage } from "../../../../lib/provider-usage.js";
 import { createLogger } from "../../../../logger.js";
@@ -20,7 +19,7 @@ import type {
   ModelAccountStatus,
   ModelAccountUsage,
 } from "../../../domain/model-account.js";
-import type { ClaudeLogins, ClaudeStoredCredential } from "../../../domain/model-login.js";
+import type { ClaudeLogins } from "../../../domain/model-login.js";
 import type { ModelAccountReport } from "../../../domain/model-account-report.js";
 import { accountReport, refusalAfterReport, usageShowsCapacity } from "../account-report.js";
 import {
@@ -204,25 +203,19 @@ export class ClaudeAccount implements ModelAccount, ClaudeLogins, LearnsRefusedT
     this.emitChanged();
   }
 
-  async storedCredential(): Promise<(ClaudeStoredCredential & { needsReauth: boolean }) | null> {
+  async storedCredential(): ReturnType<ClaudeLogins["storedCredential"]> {
     const { settingsRepo } = this.options;
-    const [credentials, needsReauth] = await Promise.all([
+    const [credential, expired] = await Promise.all([
       getStoredAnthropicCompatibleCredentials(settingsRepo),
       isAnthropicCompatibleAuthRevoked(settingsRepo),
     ]);
-    const view = summarizeAnthropicCompatibleCredentialsForEditing(credentials);
-    return view ? { ...view, needsReauth } : null;
+    return credential ? { credential, expired } : null;
   }
 
-  async storeCredential(
-    credential: StoredAnthropicCompatibleCredentials,
-  ): Promise<ClaudeStoredCredential> {
+  async storeCredential(credential: StoredAnthropicCompatibleCredentials): Promise<void> {
     await this.settings().set(ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING, credential);
     await clearStoredAnthropicCompatibleAuthRevoked();
     this.emitChanged();
-    const view = summarizeAnthropicCompatibleCredentialsForEditing(credential);
-    if (!view) throw new Error("Claude credential has no summary");
-    return view;
   }
 
   async removeCredential(): Promise<void> {

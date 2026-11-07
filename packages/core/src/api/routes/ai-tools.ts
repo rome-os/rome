@@ -15,6 +15,10 @@ import {
   isAnthropicCompatibleProviderId,
   listAnthropicCompatibleProviderSummaries,
 } from "@rome/api-types/anthropic-compatible-providers";
+import {
+  summarizeAnthropicCompatibleCredentials,
+  summarizeAnthropicCompatibleCredentialsForEditing,
+} from "../../lib/anthropic-compatible-providers.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
 import { fetchRomeCredits } from "../../lib/rome-credits.js";
@@ -55,9 +59,8 @@ function codexStatusJson(report: ModelAccountReport | undefined) {
 /** Status never carries `env`: a custom credential's secret is in it. */
 async function anthropicCompatibleJson(claude: Pick<ClaudeLogins, "storedCredential">) {
   const stored = await claude.storedCredential();
-  if (!stored) return null;
-  const { env: _secret, needsReauth, ...summary } = stored;
-  return { ...summary, needsReauth: needsReauth || undefined };
+  const summary = summarizeAnthropicCompatibleCredentials(stored?.credential ?? null);
+  return summary ? { ...summary, needsReauth: stored?.expired || undefined } : null;
 }
 
 export function aiToolsRoutes(
@@ -134,9 +137,13 @@ export function aiToolsRoutes(
   });
 
   app.get("/ai-tools/anthropic-compatible-providers", async (c) => {
+    const stored = await deps.claudeAccount.storedCredential();
+    const configured = summarizeAnthropicCompatibleCredentialsForEditing(
+      stored?.credential ?? null,
+    );
     return c.json({
       providers: listAnthropicCompatibleProviderSummaries(),
-      configured: await deps.claudeAccount.storedCredential(),
+      configured: configured ? { ...configured, needsReauth: stored?.expired } : null,
     });
   });
 
@@ -151,13 +158,17 @@ export function aiToolsRoutes(
         return c.json({ error: validated.error }, 400);
       }
 
-      const configured = await deps.claudeAccount.storeCredential({
+      const credential = {
         provider: CUSTOM_ANTHROPIC_PROVIDER_ID,
         env: validated.env,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      await deps.claudeAccount.storeCredential(credential);
       await deps.modelAccounts.refresh("anthropic");
-      return c.json({ ok: true, configured });
+      return c.json({
+        ok: true,
+        configured: summarizeAnthropicCompatibleCredentialsForEditing(credential),
+      });
     }
 
     if (!isAnthropicCompatibleProviderId(provider)) {
@@ -167,13 +178,13 @@ export function aiToolsRoutes(
       return c.json({ error: "API key is required" }, 400);
     }
 
-    const configured = await deps.claudeAccount.storeCredential({
-      provider,
-      apiKey: apiKey.trim(),
-      updatedAt: new Date().toISOString(),
-    });
+    const credential = { provider, apiKey: apiKey.trim(), updatedAt: new Date().toISOString() };
+    await deps.claudeAccount.storeCredential(credential);
     await deps.modelAccounts.refresh("anthropic");
-    return c.json({ ok: true, configured });
+    return c.json({
+      ok: true,
+      configured: summarizeAnthropicCompatibleCredentialsForEditing(credential),
+    });
   });
 
   app.delete("/ai-tools/anthropic-compatible-credentials", async (c) => {

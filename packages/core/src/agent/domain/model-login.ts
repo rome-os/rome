@@ -4,10 +4,7 @@
 // picks the login Codex runs on; this context runs on what it is told.
 // docs/domains/agents.md carries the language.
 
-import type {
-  AnthropicCompatibleCredentialsSummary,
-  StoredAnthropicCompatibleCredentials,
-} from "@rome/api-types/anthropic-compatible-providers";
+import type { StoredAnthropicCompatibleCredentials } from "@rome/api-types/anthropic-compatible-providers";
 import type {
   ModelAuthorizationState,
   ModelBrowserAuthorization,
@@ -73,25 +70,21 @@ export interface CodexLogins extends ModelProviderLogins {
   useLogin(login: CodexLoginChoice): void;
 }
 
-/** The stored credential as the dashboard's editor shows it. `env` holds a custom credential's secret. */
-export interface ClaudeStoredCredential extends AnthropicCompatibleCredentialsSummary {
-  env?: Record<string, string>;
-}
-
 /** The credential Rome keeps for Claude, and logging out of the CLI. */
 export interface ClaudeLogins extends ModelProviderLogins {
   /** Logs the Claude CLI out. A stored credential stays, and stays the login. */
   revoke(): Promise<void>;
-  /** The stored credential and whether the provider refused it, or null when there is none. */
-  storedCredential(): Promise<(ClaudeStoredCredential & { needsReauth: boolean }) | null>;
+  /** The stored credential, secret included, and whether the provider stopped accepting it. Null when there is none. */
+  storedCredential(): Promise<{
+    credential: StoredAnthropicCompatibleCredentials;
+    expired: boolean;
+  } | null>;
   /**
    * `credential` is already validated. Replaces what is stored, clears the
    * mark that the provider refused the stored credential, then tells the
    * account. Throws when Rome has no settings to write to.
    */
-  storeCredential(
-    credential: StoredAnthropicCompatibleCredentials,
-  ): Promise<ClaudeStoredCredential>;
+  storeCredential(credential: StoredAnthropicCompatibleCredentials): Promise<void>;
   /** Removes it and clears the same mark, then tells the account. A held usage refusal stays. */
   removeCredential(): Promise<void>;
 }
