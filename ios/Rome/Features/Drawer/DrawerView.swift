@@ -47,10 +47,11 @@ struct DrawerView: View {
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button(action: onNewTopic) {
-                    // Muted like the header beside it, so it does not outweigh the list.
+                    // Lighter and thinner than the header beside it, so it
+                    // never outweighs the list.
                     Image(systemName: "plus")
-                        .romeFont(15, .regular)
-                        .foregroundStyle(Palette.sub)
+                        .romeFont(15, .light)
+                        .foregroundStyle(Palette.sub.opacity(0.75))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -154,7 +155,8 @@ private struct TopicItem: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(verbatim: TopicChatsStore.title(chat))
-                    .romeFont(16, selected ? .semibold : .regular)
+                    // The highlight shows the selection; the weight stays.
+                    .romeFont(16)
                     .foregroundStyle(Palette.fg)
                     .lineLimit(1)
                 Spacer(minLength: 8)

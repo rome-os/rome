@@ -96,6 +96,10 @@ enum SnapshotRunner {
             await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.routines) }
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.search) }
             await capture("24-topic-chat", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-trip")) }
+            // The drawer over a topic chat: its row selected.
+            await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+            model.debugCommand = .drawer(false)
+            try? await Task.sleep(for: .seconds(0.8))
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
             await capture("34-photo-viewer", style: styleName, in: directory, wait: 2) { model.debugCommand = .photoViewer(true) }
