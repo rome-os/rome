@@ -1118,7 +1118,7 @@ async function main() {
       readAnswerShape,
       webchatRepo,
       // Catch-up reads what was said where the session stands from Chats.
-      turnLinks: chatsWired.links,
+      promptFacts: chatsWired.links,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
