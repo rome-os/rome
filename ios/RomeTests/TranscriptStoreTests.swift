@@ -17,6 +17,11 @@ final class FakeBackend: RomeBackend {
 
     /// Runs while an older page is in flight, after the page was read.
     var duringOlderFetch: (() async -> Void)?
+    /// How many times the newest page and the task list were fetched.
+    var newestFetches = 0
+    var taskFetches = 0
+    /// Runs while the newest page is in flight.
+    var duringNewestFetch: (() async -> Void)?
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
@@ -25,6 +30,13 @@ final class FakeBackend: RomeBackend {
         if before != nil, let hook = duringOlderFetch {
             duringOlderFetch = nil
             await hook()
+        }
+        if before == nil {
+            newestFetches += 1
+            if let hook = duringNewestFetch {
+                duringNewestFetch = nil
+                await hook()
+            }
         }
         return page
     }
@@ -41,7 +53,10 @@ final class FakeBackend: RomeBackend {
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.network }
     func markRead(sessionId: String) async {}
     func sessions() async throws -> [ChatSession] { [] }
-    func tasks() async throws -> [ConciergeTask] { [] }
+    func tasks() async throws -> [ConciergeTask] {
+        taskFetches += 1
+        return []
+    }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
     func resolveApproval(id: String, approve: Bool) async throws { throw APIError.network }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
