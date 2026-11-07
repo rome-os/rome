@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import UIKit
 
 /// Delivers events inside the app, for the demo backend.
 @MainActor
@@ -40,6 +41,8 @@ final class DemoBackend: RomeBackend {
     private var chats: [String: ChatSession] = [:]
     private var tasks: [ConciergeTask] = []
     private var topicChats: [ConciergeChat] = []
+    /// Files sent with messages, by their asset path.
+    private var assets: [String: Data] = [:]
     private var approvals: [String: ApprovalRecord] = [:]
     private var running: [String: String] = [:]
     private var counter = 0
@@ -81,6 +84,12 @@ final class DemoBackend: RomeBackend {
         return chat
     }
 
+    func asset(path: String) async throws -> Data {
+        try await pause(0.2)
+        guard let data = assets[path] else { throw APIError.notFound }
+        return data
+    }
+
     func renameChat(_ id: String, to name: String) async throws {
         try await pause(0.2)
         if let index = topicChats.firstIndex(where: { $0.id == id }) { topicChats[index].name = name }
@@ -102,10 +111,17 @@ final class DemoBackend: RomeBackend {
         return MessagePage(messages: Array(all[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
     }
 
-    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         try await pause(0.35)
         if text.contains("失败") { throw APIError.network }
-        insert(sessionId, user(inputId, text, at: .now, session: sessionId))
+        // Stored the way the server stores it: a line per file after the text.
+        let lines = files.enumerated().map { index, file in
+            let path = "projects/demo/\(inputId)/\(file.name)"
+            assets[path] = Data(base64Encoded: file.dataBase64)
+            return "- File \(index + 1): [\(file.name)](</\(path)>)"
+        }
+        let stored = ([text] + (lines.isEmpty ? [] : [lines.joined(separator: "\n")])).filter { !$0.isEmpty }.joined(separator: "\n\n")
+        insert(sessionId, user(inputId, stored, at: .now, session: sessionId))
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
         let topic = topicChats.firstIndex { $0.id == sessionId }
@@ -411,9 +427,17 @@ final class DemoBackend: RomeBackend {
             agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
             agent("酒店比较好了：河原町那家离车站最近，价格中等。要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
         ]
+        // A photo the guardian sent, stored the way the server stores it, and a long reply.
+        let kitchen = "projects/demo/home/kitchen.jpg"
+        assets[kitchen] = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 450)).image { context in
+            UIColor(red: 0.85, green: 0.72, blue: 0.55, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 450))
+            UIColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
+        }.jpegData(compressionQuality: 0.8)
         messages["topic-home"] = [
-            user("h1", "厨房翻新，记下要找的师傅。", at: at(20, 10, daysAgo: 1), session: "topic-home"),
-            agent("记下了：水电、瓷砖、橱柜三位。", at: at(20, 11, daysAgo: 1), session: "topic-home"),
+            user("h1", "厨房翻新，记下要找的师傅。\n\n- File 1: [kitchen.jpg](</\(kitchen)>)", at: at(20, 10, daysAgo: 1), session: "topic-home"),
+            agent((1...20).map { "\($0). 第 \($0) 步：量好尺寸，确认材料和师傅的时间。" }.joined(separator: "\n"), at: at(20, 11, daysAgo: 1), session: "topic-home"),
         ]
 
         // Concierge, as on the design's Chat board.

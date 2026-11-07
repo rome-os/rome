@@ -12,7 +12,8 @@ struct TaskChatScreen: View {
     @Environment(\.openURL) private var openURL
     @State private var store: TranscriptStore?
     @State private var draft = ""
-    @FocusState private var composerFocused: Bool
+    @State private var composerFocused = false
+    @State private var attachments = ComposerAttachments()
 
     private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
 
@@ -42,11 +43,17 @@ struct TaskChatScreen: View {
             if let store {
                 Composer(
                     text: $draft,
-                    placeholder: "Reply to this task",
+                    placeholder: String(localized: "Reply to this task"),
                     stopVisible: store.running,
                     stopping: store.stopping,
-                    focus: $composerFocused,
-                    onSend: { if store.send(draft) { draft = "" } },
+                    focused: $composerFocused,
+                    attachments: attachments,
+                    onSend: {
+                        if store.send(draft, images: attachments.images.map(\.jpeg)) {
+                            draft = ""
+                            _ = attachments.take()
+                        }
+                    },
                     onStop: { store.stopTurn() }
                 )
                 .padding(.horizontal, Metrics.pagePadding)
@@ -153,11 +160,11 @@ struct TaskChatScreen: View {
             } else {
                 TimeSeparator(date: date)
             }
-        case .userText(let id, let text, let pending):
+        case .userText(let id, let text, let images, let pending):
             if let briefID, id.hasPrefix(briefID + ":") {
                 BriefCard(text: text)
             } else {
-                UserBubble(text: text, pending: pending) { store.retry(id) }
+                UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)

@@ -4,6 +4,8 @@
 <dict>
 	<!-- Debug builds only. Same as Rome/Info.plist, plus plain HTTP to a Rome
 	     on this Mac or the LAN (ROME_LOCAL_*). Keep the two in step. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Rome uses the camera for photos you send in a chat.</string>
 	<key>RomeAPNsEnvironment</key>
 	<string>$(ROME_APS_ENVIRONMENT)</string>
 	<key>RomeCloudOrigin</key>

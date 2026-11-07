@@ -9,7 +9,8 @@ struct ChatScreen: View {
 
     @Environment(AppModel.self) private var model
     @State private var draft = ""
-    @FocusState private var composerFocused: Bool
+    @State private var composerFocused = false
+    @State private var attachments = ComposerAttachments()
 
     private var store: TranscriptStore { workspace.concierge }
 
@@ -31,14 +32,22 @@ struct ChatScreen: View {
         }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        #if DEBUG
+        .onChange(of: model.debugCommand) { _, command in
+            if case .composerPhotos(let count) = command { Task { await debugPhotos(count) } }
+        }
+        #endif
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
                 VStack(spacing: 10) {
                     if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    Composer(text: $draft, placeholder: "Message", focus: $composerFocused) {
-                        if store.send(draft) { draft = "" }
+                    Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) {
+                        if store.send(draft, images: attachments.images.map(\.jpeg)) {
+                            draft = ""
+                            _ = attachments.take()
+                        }
                     }
                 }
                 .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
@@ -48,6 +57,21 @@ struct ChatScreen: View {
             }
         }
     }
+
+    #if DEBUG
+    /// Snapshot runs only: sample photos in the composer.
+    private func debugPhotos(_ count: Int) async {
+        _ = attachments.take()
+        let colors: [UIColor] = [.systemOrange, .systemTeal, .systemIndigo, .systemPink]
+        let images = (0..<count).map { index in
+            UIGraphicsImageRenderer(size: CGSize(width: 400, height: 300)).image { context in
+                colors[index % colors.count].setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+            }
+        }
+        await attachments.add(images: images)
+    }
+    #endif
 
     @ViewBuilder
     private var banners: some View {
@@ -146,8 +170,8 @@ struct ConciergeRow: View {
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
-        case .userText(let id, let text, let pending):
-            UserBubble(text: text, pending: pending) { store.retry(id) }
+        case .userText(let id, let text, let images, let pending):
+            UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
         case .taskCard(_, let chatId, let title):

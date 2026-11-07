@@ -77,8 +77,14 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
-    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
-        calls.append("send \(sessionId) \(text)")
+    /// The files of the last send.
+    var sentFiles: [OutgoingFile] = []
+
+    func asset(path: String) async throws -> Data { throw APIError.notFound }
+
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+        sentFiles = files
+        calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
         throw APIError.network
     }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.network }

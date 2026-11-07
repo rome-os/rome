@@ -1,8 +1,16 @@
+import PhotosUI
 import SwiftUI
 
-/// The guardian's bubble: coral, right-aligned, fully round.
+/// Loads a stored upload's bytes; the shell sets it from the open instance.
+extension EnvironmentValues {
+    @Entry var assetLoader: (@MainActor (String) async throws -> Data)? = nil
+}
+
+/// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
+/// it sit above the text.
 struct UserBubble: View {
     let text: String
+    var images: [UserImage] = []
     let pending: PendingSend.State?
     var onRetry: () -> Void = {}
 
@@ -14,15 +22,22 @@ struct UserBubble: View {
                         .frame(width: 28, height: 28)
                         .accessibilityLabel("Not sent. Tap to retry.")
                 }
-                Text(text)
-                    .romeFont(16)
-                    .lineSpacing(5)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                    .opacity(pending == .sending ? 0.55 : 1)
-                    .contextMenu { CopyButton(text: text) }
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !images.isEmpty {
+                        UserImageGrid(images: images)
+                    }
+                    if !text.isEmpty {
+                        Text(text)
+                            .romeFont(16)
+                            .lineSpacing(5)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                            .contextMenu { CopyButton(text: text) }
+                    }
+                }
+                .opacity(pending == .sending ? 0.55 : 1)
             }
             if pending == .failed {
                 Button("Not sent · Tap to retry", action: onRetry)
@@ -34,6 +49,87 @@ struct UserBubble: View {
         .padding(.leading, 56)
         .animation(.easeOut(duration: 0.2), value: pending)
     }
+}
+
+/// One photo large, or two to a row.
+private struct UserImageGrid: View {
+    let images: [UserImage]
+
+    var body: some View {
+        let side: CGFloat = images.count == 1 ? 200 : 110
+        let columns = Array(repeating: GridItem(.fixed(side), spacing: 6), count: min(2, images.count))
+        LazyVGrid(columns: columns, alignment: .trailing, spacing: 6) {
+            ForEach(Array(images.enumerated()), id: \.offset) { _, image in
+                UserImageTile(image: image)
+                    .frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+}
+
+private struct UserImageTile: View {
+    let image: UserImage
+    @Environment(\.assetLoader) private var assetLoader
+    @State private var loaded: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        switch image {
+        case .local(let data):
+            if let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+                    .accessibilityLabel("Photo")
+            } else {
+                attachmentLabel(nil)
+            }
+        case .stored(let upload):
+            if let loaded {
+                Image(uiImage: loaded).resizable().scaledToFill()
+                    .accessibilityLabel("Photo")
+            } else if failed || !upload.isImage || assetLoader == nil {
+                attachmentLabel(upload.name)
+            } else {
+                Palette.fill
+                    .overlay { Spinner(size: 16, color: Palette.sub) }
+                    .task(id: upload) { await load(upload) }
+            }
+        }
+    }
+
+    private func load(_ upload: UploadLines.Upload) async {
+        guard let assetLoader else { return }
+        if let cached = StoredImageCache.shared.object(forKey: upload.assetPath as NSString) {
+            loaded = cached
+            return
+        }
+        do {
+            let data = try await assetLoader(upload.assetPath)
+            guard let image = UIImage(data: data) else { throw APIError.network }
+            StoredImageCache.shared.setObject(image, forKey: upload.assetPath as NSString)
+            loaded = image
+        } catch {
+            failed = true
+        }
+    }
+
+    /// A file that cannot be shown as a picture.
+    private func attachmentLabel(_ name: String?) -> some View {
+        Palette.fill.overlay {
+            VStack(spacing: 4) {
+                Image(systemName: "paperclip").romeFont(16, .medium)
+                Text("Attachment").romeFont(12, .medium)
+            }
+            .foregroundStyle(Palette.sub)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(name.map { Text(verbatim: $0) } ?? Text("Attachment"))
+    }
+}
+
+/// Stored photos already loaded, so scrolling back does not fetch them again.
+enum StoredImageCache {
+    @MainActor static let shared = NSCache<NSString, UIImage>()
 }
 
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
@@ -205,59 +301,212 @@ enum TranscriptSpacing {
 /// The capsule composer: a growing text field and a round send button.
 struct Composer: View {
     @Binding var text: String
-    let placeholder: LocalizedStringKey
+    let placeholder: String
     var stopVisible = false
     var stopping = false
-    var focus: FocusState<Bool>.Binding
+    @Binding var focused: Bool
+    /// Photos to send with the message; nil leaves out the +.
+    var attachments: ComposerAttachments? = nil
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
-    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    @State private var choosingPhotos = false
+    @State private var takingPhoto = false
+    @State private var picked: [PhotosPickerItem] = []
+
+    private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
+    private var canSend: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
+    }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .romeFont(16)
-                .lineLimit(1...6)
-                .focused(focus)
-                .padding(.vertical, 14)
-                .tint(Palette.primary)
-            Group {
-                if stopVisible && !canSend {
-                    Button(action: onStop) {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(Palette.bg)
-                            .frame(width: 12, height: 12)
-                            .frame(width: 36, height: 36)
-                            .background(Palette.fg, in: Circle())
-                            .opacity(stopping ? 0.5 : 1)
-                    }
-                    .disabled(stopping)
-                    .accessibilityLabel("Stop")
-                    .transition(.scale.combined(with: .opacity))
-                } else {
-                    Button(action: onSend) {
-                        Image(systemName: "arrow.up")
-                            .romeFont(16, .bold)
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Palette.primary, in: Circle())
-                            .opacity(canSend ? 1 : 0.35)
-                    }
-                    .disabled(!canSend)
-                    .accessibilityLabel("Send")
-                    .transition(.scale.combined(with: .opacity))
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            if let attachments, !attachments.images.isEmpty || attachments.preparing > 0 {
+                ComposerThumbnails(attachments: attachments)
+                    .padding(.top, 10)
+                    .padding(.leading, 12)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            .buttonStyle(PressScaleStyle(scale: 0.9))
-            .padding(.bottom, 7)
+            HStack(alignment: .bottom, spacing: 8) {
+                if let attachments {
+                    plusMenu(attachments)
+                        .padding(.bottom, 7)
+                }
+                ComposerTextView(
+                    text: $text,
+                    focused: $focused,
+                    placeholder: placeholder,
+                    onPasteImages: attachments.map { attachments in
+                        { images in Task { await attachments.add(images: images) } }
+                    }
+                )
+                Group {
+                    if stopVisible && !canSend {
+                        Button(action: onStop) {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(Palette.bg)
+                                .frame(width: 12, height: 12)
+                                .frame(width: 36, height: 36)
+                                .background(Palette.fg, in: Circle())
+                                .opacity(stopping ? 0.5 : 1)
+                        }
+                        .disabled(stopping)
+                        .accessibilityLabel("Stop")
+                        .transition(.scale.combined(with: .opacity))
+                    } else {
+                        Button(action: onSend) {
+                            Image(systemName: "arrow.up")
+                                .romeFont(16, .bold)
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(Palette.primary, in: Circle())
+                                .opacity(canSend ? 1 : 0.35)
+                        }
+                        .disabled(!canSend)
+                        .accessibilityLabel("Send")
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .buttonStyle(PressScaleStyle(scale: 0.9))
+                .padding(.bottom, 7)
+            }
+            .padding(.leading, attachments == nil ? 18 : 7)
+            .padding(.trailing, 7)
         }
-        .padding(.leading, 18)
-        .padding(.trailing, 7)
         .frame(minHeight: 50)
         // Glass like the header's buttons: the transcript shows through.
         .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: canSend)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: stopVisible)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: attachments?.images.count)
+        .photosPicker(
+            isPresented: $choosingPhotos,
+            selection: $picked,
+            maxSelectionCount: max(1, attachments?.remaining ?? 1),
+            matching: .images
+        )
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty, let attachments else { return }
+            picked = []
+            Task {
+                var files: [Data] = []
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self) { files.append(data) }
+                }
+                await attachments.add(data: files)
+            }
+        }
+        .fullScreenCover(isPresented: $takingPhoto) {
+            CameraPicker { image in
+                guard let attachments else { return }
+                Task { await attachments.add(images: [image]) }
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private func plusMenu(_ attachments: ComposerAttachments) -> some View {
+        Menu {
+            Button {
+                takingPhoto = true
+            } label: {
+                Label("Take photo", systemImage: "camera")
+            }
+            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+            Button {
+                choosingPhotos = true
+            } label: {
+                Label("Choose from library", systemImage: "photo.on.rectangle")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .romeFont(17, .medium)
+                .foregroundStyle(attachments.isFull ? Palette.sub.opacity(0.5) : Palette.sub)
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
+        }
+        .disabled(attachments.isFull)
+        .accessibilityLabel("Add photos")
+    }
+}
+
+/// The photos waiting in the composer, each with an ×.
+private struct ComposerThumbnails: View {
+    let attachments: ComposerAttachments
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(attachments.images) { image in
+                    ZStack(alignment: .topTrailing) {
+                        Group {
+                            if let preview = UIImage(data: image.jpeg) {
+                                Image(uiImage: preview).resizable().scaledToFill()
+                            } else {
+                                Palette.fill
+                            }
+                        }
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .accessibilityLabel("Photo")
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { attachments.remove(image.id) }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .romeFont(9, .bold)
+                                .foregroundStyle(.white)
+                                .frame(width: 20, height: 20)
+                                .background(.black.opacity(0.6), in: Circle())
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .offset(x: 8, y: -8)
+                        .accessibilityLabel("Remove photo")
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
+                ForEach(0..<attachments.preparing, id: \.self) { _ in
+                    Palette.fill
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay { Spinner(size: 14, color: Palette.sub) }
+                }
+            }
+            .padding(.top, 8)
+            .padding(.trailing, 12)
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
+/// The system camera, for one photo.
+struct CameraPicker: UIViewControllerRepresentable {
+    let onPhoto: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraPicker
+
+        init(parent: CameraPicker) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage { parent.onPhoto(image) }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }

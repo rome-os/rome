@@ -117,6 +117,16 @@
         }
       }
     },
+    "Add photos" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加照片"
+          }
+        }
+      }
+    },
     "After signing out, sign in with Rome Cloud to open Rome again." : {
       "localizations" : {
         "zh-Hans" : {
@@ -187,6 +197,16 @@
         }
       }
     },
+    "Attachment" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附件"
+          }
+        }
+      }
+    },
     "Back" : {
       "localizations" : {
         "zh-Hans" : {
@@ -243,6 +263,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "检查网络后再试一次。"
+          }
+        }
+      }
+    },
+    "Choose from library" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从相册选择"
           }
         }
       }
@@ -1117,6 +1147,16 @@
         }
       }
     },
+    "Photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        }
+      }
+    },
     "Plan my weekend trip and check the weather" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1143,6 +1183,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已拒绝"
+          }
+        }
+      }
+    },
+    "Remove photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除照片"
           }
         }
       }
@@ -1490,22 +1540,22 @@
         }
       }
     },
-    "Show full text" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "展开全文"
-          }
-        }
-      }
-    },
     "Show less" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "收起"
+          }
+        }
+      }
+    },
+    "Show more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展开"
           }
         }
       }
@@ -1687,6 +1737,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换实例"
+          }
+        }
+      }
+    },
+    "Take photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍照"
           }
         }
       }

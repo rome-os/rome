@@ -82,6 +82,7 @@ struct RootView: View {
                 Color.clear
             } else if model.phase == .ready, let workspace = model.workspace {
                 MainShell(workspace: workspace)
+                    .environment(\.assetLoader) { [backend = workspace.backend] path in try await backend.asset(path: path) }
                     .id(ObjectIdentifier(workspace))
                     .transition(.opacity)
             } else {

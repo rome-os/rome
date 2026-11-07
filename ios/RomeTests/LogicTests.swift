@@ -205,7 +205,8 @@ final class StubBackend: RomeBackend {
     func renameChat(_ id: String, to name: String) async throws {}
     func archiveChat(_ id: String) async throws {}
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage { .init(messages: []) }
-    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn { .init() }
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn { .init() }
+    func asset(path: String) async throws -> Data { throw APIError.notFound }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {}
     func markRead(sessionId: String) async {}
     func sessions() async throws -> [ChatSession] { [] }

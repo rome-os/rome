@@ -16,9 +16,11 @@ struct TopicChatScreen: View {
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
+    @State private var startingImages: [Data] = []
     @State private var renaming = false
     @State private var newName = ""
-    @FocusState private var composerFocused: Bool
+    @State private var composerFocused = false
+    @State private var attachments = ComposerAttachments()
 
     private var store: TranscriptStore? { chatId.map(workspace.topicStore) }
 
@@ -70,7 +72,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                Composer(text: $draft, placeholder: "Message", focus: $composerFocused) { send() }
+                Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) { send() }
             }
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
@@ -98,7 +100,9 @@ struct TopicChatScreen: View {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {
                 VStack(spacing: 8) {
-                    UserBubble(text: starting, pending: startFailed ? .failed : .sending) { send(text: starting) }
+                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed : .sending) {
+                        send(text: starting, images: startingImages)
+                    }
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -122,28 +126,34 @@ struct TopicChatScreen: View {
         }
     }
 
-    /// Sends the draft.
+    /// Sends the draft with the composer's photos.
     private func send() {
+        let images = attachments.images.map(\.jpeg)
         if let store {
-            if store.send(draft) { draft = "" }
+            if store.send(draft, images: images) {
+                draft = ""
+                _ = attachments.take()
+            }
             return
         }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || !images.isEmpty else { return }
         draft = ""
-        send(text: text)
+        _ = attachments.take()
+        send(text: text, images: images)
     }
 
     /// Sends `text`, starting the chat first when this one is blank.
-    private func send(text: String) {
+    private func send(text: String, images: [Data] = []) {
         if let store {
-            store.send(text)
+            store.send(text, images: images)
             return
         }
         starting = text
+        startingImages = images
         startFailed = false
         Task {
-            if let id = await workspace.startTopicChat(firstMessage: text) {
+            if let id = await workspace.startTopicChat(firstMessage: text, images: images) {
                 starting = nil
                 onCreated(id)
             } else {

@@ -7,8 +7,16 @@ struct PendingSend: Identifiable, Hashable, Sendable {
 
     let id: String
     let text: String
+    /// Photos sent with it, as JPEG.
+    var images: [Data] = []
     let createdAt: Date
     var state: State
+}
+
+/// A photo in the guardian's bubble: the one being sent, or a stored upload.
+enum UserImage: Hashable, Sendable {
+    case local(Data)
+    case stored(UploadLines.Upload)
 }
 
 /// Where a bubble sits in its run of same-sender bubbles. It decides the
@@ -20,7 +28,7 @@ enum BubblePosition: Hashable, Sendable {
 /// One row of a transcript, ready to draw.
 enum TranscriptRow: Identifiable, Hashable {
     case separator(id: String, date: Date)
-    case userText(id: String, text: String, pending: PendingSend.State?)
+    case userText(id: String, text: String, images: [UserImage] = [], pending: PendingSend.State?)
     case agentText(id: String, text: String, long: Bool, forwardedFrom: MessagePart.ForwardedFrom?, position: BubblePosition)
     case taskCard(id: String, chatId: String, title: String)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
@@ -32,7 +40,7 @@ enum TranscriptRow: Identifiable, Hashable {
 
     var id: String {
         switch self {
-        case .separator(let id, _), .userText(let id, _, _), .agentText(let id, _, _, _, _),
+        case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id), .error(let id, _), .tools(let id, _, _):
             return id
@@ -99,7 +107,8 @@ enum TranscriptBuilder {
                 case .text(let text, let long, let forwarded):
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                     if message.isUser {
-                        rows.append(.userText(id: id, text: text, pending: nil))
+                        let (body, uploads) = UploadLines.split(text)
+                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: nil))
                     } else {
                         bubbles.append(rows.count)
                         rows.append(.agentText(id: id, text: text, long: long, forwardedFrom: forwarded, position: .single))
@@ -126,7 +135,7 @@ enum TranscriptBuilder {
         for send in pending.sorted(by: { $0.createdAt < $1.createdAt }) where !storedIDs.contains(send.id) {
             entries.append(Entry(
                 id: send.id, date: send.createdAt, guardian: true,
-                rows: [.userText(id: send.id, text: send.text, pending: send.state)],
+                rows: [.userText(id: send.id, text: send.text, images: send.images.map(UserImage.local), pending: send.state)],
                 bubbleIndexes: []
             ))
         }

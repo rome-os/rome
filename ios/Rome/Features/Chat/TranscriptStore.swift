@@ -277,31 +277,34 @@ final class TranscriptStore {
     // MARK: Sending
 
     @discardableResult
-    func send(_ text: String) -> Bool {
+    /// Sends the guardian's text with any photos (JPEG). Photos alone are a
+    /// message too.
+    func send(_ text: String, images: [Data] = []) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty || !images.isEmpty else { return false }
         let inputId = UUID().uuidString.lowercased()
-        pending.append(PendingSend(id: inputId, text: trimmed, createdAt: .now, state: .sending))
+        pending.append(PendingSend(id: inputId, text: trimmed, images: images, createdAt: .now, state: .sending))
         if kind == .concierge {
             markRunning()
             visibleTurn = true
         }
-        deliver(inputId: inputId, text: trimmed)
+        deliver(inputId: inputId, text: trimmed, images: images)
         return true
     }
 
     func retry(_ id: String) {
         guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
         pending[index].state = .sending
-        deliver(inputId: id, text: pending[index].text)
+        deliver(inputId: id, text: pending[index].text, images: pending[index].images)
     }
 
-    private func deliver(inputId: String, text: String) {
+    private func deliver(inputId: String, text: String, images: [Data]) {
         Task {
             do {
                 let turn = try await backend.send(
                     sessionId: sessionId,
                     text: text,
+                    files: OutgoingFile.photos(images),
                     inputId: inputId,
                     priority: kind == .concierge ? .now : .next
                 )

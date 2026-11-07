@@ -31,7 +31,9 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
-    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
+    /// A file in the chats' project folder, by its `/projects/…` path without the slash.
+    func asset(path: String) async throws -> Data
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws
     func markRead(sessionId: String) async
     func sessions() async throws -> [ChatSession]
@@ -93,12 +95,16 @@ final class LiveBackend: RomeBackend {
         return try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: query)
     }
 
-    func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
-        try await client.post(
-            "/chat/sessions/\(escape(sessionId))/turns",
-            json: .object(["text": .string(text), "inputId": .string(inputId), "priority": .string(priority.rawValue)]),
-            as: CreatedTurn.self
-        )
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+        var body: [String: JSONValue] = ["text": .string(text), "inputId": .string(inputId), "priority": .string(priority.rawValue)]
+        if !files.isEmpty {
+            body["files"] = .array(files.map { .object(["name": .string($0.name), "mimeType": .string($0.mimeType), "dataBase64": .string($0.dataBase64)]) })
+        }
+        return try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(body), as: CreatedTurn.self)
+    }
+
+    func asset(path: String) async throws -> Data {
+        try await client.getData("/projects/asset", query: [URLQueryItem(name: "path", value: path)])
     }
 
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {

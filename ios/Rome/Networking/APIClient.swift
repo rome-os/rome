@@ -52,6 +52,11 @@ final class APIClient: Sendable {
         return try decode(data)
     }
 
+    /// The raw bytes of a GET, for files.
+    func getData(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await send(request(path, query: query, method: "GET"))
+    }
+
     @discardableResult
     func post(_ path: String, json: JSONValue? = nil) async throws -> Data {
         var request = request(path, method: "POST")

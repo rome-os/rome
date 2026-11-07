@@ -113,7 +113,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
             messages: [message("a", [text("x")], at: 0), message("in-1", role: "user", [text("hello")], at: 100)],
             pending: [pending], answers: [:], options: .init()
         )
-        #expect(!rows.contains { if case .userText(_, _, .some) = $0 { return true } else { return false } })
+        #expect(!rows.contains { if case .userText(_, _, _, .some) = $0 { return true } else { return false } })
     }
 
     @Test func toolSummariesOnlyInTaskChats() {
