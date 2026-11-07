@@ -15,7 +15,7 @@ import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillLoader } from "../agent/index.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -82,7 +82,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const testDb = createTestDb();
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
     tracer: options.tracer,
@@ -102,7 +102,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const manager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
-    promptBuilder,
+    systemPrompts,
     actionRegistry,
     modelResolver,
     actionEngine,

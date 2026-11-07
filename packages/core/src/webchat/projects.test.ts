@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 
 import {
   getWebchatProjectDisplayName,
+  getWebchatProjectsRoot,
   normalizeSelectedWebchatProjectPath,
   normalizeWebchatProjectPath,
+  projectRelativePath,
   resolveAgentProjectPath,
   resolveProjectWorkingDirWithinRoot,
   resolveWebchatContinuationDeviceFolder,
@@ -21,6 +23,18 @@ describe("webchat project helpers", () => {
   afterEach(async () => {
     await Promise.all(tempRoots.map((root) => rm(root, { recursive: true, force: true })));
     tempRoots.length = 0;
+  });
+
+  it("gives a project's path relative to the projects root", () => {
+    const root = getWebchatProjectsRoot();
+    expect(projectRelativePath(join(root, "default"))).toBe("default");
+    expect(projectRelativePath(join(root, "landingpage/content"))).toBe("landingpage/content");
+  });
+
+  it("gives no relative path for the root itself or a path outside it", () => {
+    const root = getWebchatProjectsRoot();
+    expect(projectRelativePath(root)).toBeNull();
+    expect(projectRelativePath("/var/data/field-notes")).toBeNull();
   });
 
   it("normalizes nested relative project paths", () => {

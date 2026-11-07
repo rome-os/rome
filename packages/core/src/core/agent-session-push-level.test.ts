@@ -19,7 +19,7 @@ import { createAgentSessionManager, type AgentSessionManager } from "./agent-ses
 import type { SessionToolContext } from "./session-tools.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -72,14 +72,14 @@ describe("AgentSession turn push level", () => {
     };
 
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("push level test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("push level test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         webchatRepo: new ChatsWebChatRepository(testDb.db),
-        promptBuilder,
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({

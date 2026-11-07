@@ -35,6 +35,22 @@ export function getWebchatProjectsRoot(): string {
   return getProjectsRoot();
 }
 
+/**
+ * The project's path relative to the webchat projects root: the same value
+ * webchat already shows (e.g. `default`) and that the `/projects/...` web route
+ * keys off. Null when `absolutePath` is not a clean subpath of the root, such as
+ * a working dir on a messaging channel that is not a project.
+ */
+export function projectRelativePath(absolutePath: string): string | null {
+  try {
+    const rel = relative(getWebchatProjectsRoot(), absolutePath);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
 function formatTimestamp(value?: Date): string | undefined {
   return value ? value.toISOString() : undefined;
 }

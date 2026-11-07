@@ -38,7 +38,7 @@ import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.j
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
-import { PromptBuilder } from "../../core/prompt-builder.js";
+import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../core/model-resolver.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
@@ -70,7 +70,7 @@ export interface TestRomeOptions {
   /** Forwarded to the agent session manager (Phase 4 keep-alive). */
   keepAliveAcrossTurns?: boolean;
   /**
-   * "real" (default) keeps the caller's project/core roots, so PromptBuilder
+   * "real" (default) keeps the caller's project/core roots, so SystemPrompts
    * reads the production repo context (CHARTER.md, repo apps) — versioned
    * content, deterministic everywhere. "empty" points them at the sandbox for
    * tests that want a bare repo view.
@@ -170,7 +170,7 @@ export async function createTestRome(options: TestRomeOptions = {}): Promise<Tes
   // data, lockfiles) — resolves under `root` and is deleted on cleanup, never
   // under the developer's real ~/.rome; projects root likewise. Read-only
   // repo roots (project/core: CHARTER.md, repo apps) stay real by default so
-  // PromptBuilder produces the production system prompt — they're versioned
+  // SystemPrompts produces the production system prompt — they're versioned
   // content, equally deterministic everywhere.
   const savedEnv = new Map<string, string | undefined>(
     SCOPED_ENV_KEYS.map((key) => [key, process.env[key]]),
@@ -269,12 +269,12 @@ async function buildHarness(
     },
   );
 
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
       sessionRepository: repos.sessions,
-      promptBuilder,
+      systemPrompts,
       actionRegistry,
       modelResolver,
       actionEngine,

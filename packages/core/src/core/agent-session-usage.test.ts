@@ -16,7 +16,7 @@ import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { ModelAccountReports } from "../agent/index.js";
@@ -125,8 +125,8 @@ describe("AgentSession turn usage", () => {
       anthropic: reportOf("unauthorized"),
     };
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Usage test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Usage test prompt");
     const turnMiddleware: TurnMiddlewareChain = {
       loadFromCatalog: async () => [],
       run: async (_ctx, terminal) => {
@@ -139,7 +139,7 @@ describe("AgentSession turn usage", () => {
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
-        promptBuilder,
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({

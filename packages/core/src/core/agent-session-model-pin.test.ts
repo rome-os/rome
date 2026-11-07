@@ -21,7 +21,7 @@ import {
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { SkillLoader } from "../agent/index.js";
 import {
@@ -105,13 +105,13 @@ describe("agent model pins through AgentSessionManager", () => {
     lifecycleDispatcher = createAgentLifecycleDispatcher(),
   ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Model pin test prompt");
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
-        promptBuilder,
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
