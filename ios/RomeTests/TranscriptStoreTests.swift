@@ -268,3 +268,42 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.hasOlder)
     }
 }
+
+/// A first message never sends the chat back to a loading state.
+@MainActor
+@Suite struct FirstSendTests {
+    private func hasBubble(_ store: TranscriptStore, _ text: String) -> Bool {
+        store.rows.contains { if case .userText(_, let body, _, _) = $0 { return body == text } else { return false } }
+    }
+
+    @Test func anEmptyChatStaysLoadedThroughItsFirstSend() async {
+        let backend = FakeBackend()
+        backend.sendSucceeds = true
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        #expect(store.loaded && store.rows.isEmpty)
+        var loadedDuringFetch: Bool?
+        backend.duringNewestFetch = { loadedDuringFetch = store.loaded }
+        store.send("Plan my week")
+        #expect(store.loaded && hasBubble(store, "Plan my week"))
+        await store.reload()
+        #expect(loadedDuringFetch == true)
+        #expect(store.loaded && hasBubble(store, "Plan my week"))
+    }
+
+    /// A blank topic chat hands its message to the new chat's store, shown at once.
+    @Test func aNewTopicChatShowsItsFirstMessageWithoutLoading() async {
+        let backend = FakeBackend()
+        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "first-send-\(UUID().uuidString)"), instance: "t"))
+        var loadedDuringFetch: Bool?
+        backend.duringNewestFetch = { loadedDuringFetch = workspace.topicStore("topic-1").loaded }
+        let id = await workspace.startTopicChat(firstMessage: "Trip ideas")
+        #expect(id == "topic-1")
+        let store = workspace.topicStore("topic-1")
+        #expect(store.loaded)
+        #expect(hasBubble(store, "Trip ideas"))
+        for _ in 0..<20 where loadedDuringFetch == nil { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(loadedDuringFetch == true)
+        #expect(store.loaded && hasBubble(store, "Trip ideas"))
+    }
+}

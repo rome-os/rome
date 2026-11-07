@@ -123,6 +123,7 @@ final class Workspace {
         }
         topics.add(chat)
         let store = topicStore(chat.id)
+        store.beginEmpty()
         store.start()
         // The send keeps it under the new chat first, then the blank slot goes.
         store.send(text, images: images)

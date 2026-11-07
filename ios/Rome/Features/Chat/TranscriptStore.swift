@@ -91,6 +91,15 @@ final class TranscriptStore {
         Task { await reload() }
     }
 
+    /// A chat made just now holds nothing yet: it counts as loaded at once,
+    /// so its first message shows in the list instead of behind a spinner
+    /// while the first fetch runs.
+    func beginEmpty() {
+        guard !loaded else { return }
+        loaded = true
+        hasOlder = false
+    }
+
     func stop() {
         for token in tokens { backend.events.unsubscribe(token) }
         tokens = []
