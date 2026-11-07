@@ -23,7 +23,8 @@ import type {
   ModelDeviceAuthorization,
 } from "../../../domain/model-account.js";
 import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL } from "../../../domain/model-selection.js";
-import { usageShowsCapacity } from "../../../domain/provider-availability.js";
+import type { ProviderAvailability } from "../../../domain/provider-availability.js";
+import { accountAvailability, usageShowsCapacity } from "../account-availability.js";
 import {
   type LearnsRefusedTurns,
   type RefusedTurn,
@@ -167,6 +168,8 @@ export class SharedCodexAccountService
   private lastLoginError: string | null = null;
   /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
   private refusal: UsageRefusal | undefined;
+  /** The last report, so a limit still ahead survives a usage read that fails. */
+  private last: ProviderAvailability | undefined;
   private readonly now: () => number;
   private closed = false;
 
@@ -196,14 +199,24 @@ export class SharedCodexAccountService
     ];
   }
 
+  /**
+   * Reads the status and the usage together. A usage read that shows
+   * capacity after the hold ends a refusal; one in the hold describes the
+   * account before the refused turn.
+   */
+  async availability(): Promise<ProviderAvailability> {
+    const readAt = this.now();
+    const [status, usage] = await Promise.all([this.status(), this.usage()]);
+    if (usage && usageShowsCapacity(usage) && this.refusal) {
+      if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
+    }
+    this.last = accountAvailability(status, usage, this.heldRefusal(), this.now(), this.last);
+    return this.last;
+  }
+
   async status(): Promise<ModelAccountStatus> {
     const read = await this.readStatus();
-    const facts = planFacts(read);
-    return {
-      ...read,
-      ...facts,
-      ...(facts.usageLimited && this.heldRefusal() ? { usageLimitUntil: this.refusal?.until } : {}),
-    };
+    return { ...read, ...planFacts(read) };
   }
 
   /** The refusal still held: one whose end has not passed. */
@@ -300,22 +313,6 @@ export class SharedCodexAccountService
   }
 
   async usage(): Promise<AIToolUsageStatus | null> {
-    const readAt = this.now();
-    const usage = await this.readUsage();
-    if (
-      usage &&
-      usageShowsCapacity(usage) &&
-      this.refusal &&
-      usageReadClearsRefusal(this.refusal, readAt)
-    ) {
-      // A status read alongside this one may have carried the refusal.
-      this.refusal = undefined;
-      this.emitAccountChanged();
-    }
-    return usage;
-  }
-
-  private async readUsage(): Promise<AIToolUsageStatus | null> {
     return await readLiveOrCachedUsage(
       async () => {
         try {

@@ -21,7 +21,8 @@ import type {
   ModelAccountStatus,
   ModelAccountUsage,
 } from "../../../domain/model-account.js";
-import { usageShowsCapacity } from "../../../domain/provider-availability.js";
+import type { ProviderAvailability } from "../../../domain/provider-availability.js";
+import { accountAvailability, usageShowsCapacity } from "../account-availability.js";
 import {
   type LearnsRefusedTurns,
   type RefusedTurn,
@@ -93,28 +94,42 @@ async function logoutClaude(): Promise<void> {
 export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
   private readonly options: ClaudeAccountOptions;
   private readonly listeners = new Set<() => void>();
-  /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
+  /** The usage refusal the adapter last saw, until its end or a later usage read shows capacity. */
   private refusal: UsageRefusal | undefined;
+  /** The last report, so a limit still ahead survives a usage read that fails. */
+  private last: ProviderAvailability | undefined;
 
   constructor(options: ClaudeAccountOptions = {}) {
     this.options = options;
   }
 
+  /**
+   * Reads the status and the usage together. A usage read that shows
+   * capacity after the hold ends a refusal; one in the hold describes the
+   * account before the refused turn.
+   */
+  async availability(): Promise<ProviderAvailability> {
+    const readAt = this.now();
+    const [status, usage] = await Promise.all([this.status(), this.usage()]);
+    if (usage && usageShowsCapacity(usage) && this.refusal) {
+      if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
+    }
+    this.last = accountAvailability(status, usage, this.heldRefusal(), this.now(), this.last);
+    return this.last;
+  }
+
   async status(): Promise<ModelAccountStatus> {
     const base = await this.readStatus();
-    const usageLimited = !UNLIMITED_AUTH_METHODS.has(base.authMethod ?? "");
-    return {
-      ...base,
-      usageLimited,
-      ...(usageLimited && this.heldRefusal() ? { usageLimitUntil: this.refusal?.until } : {}),
-    };
+    return { ...base, usageLimited: !UNLIMITED_AUTH_METHODS.has(base.authMethod ?? "") };
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
   }
 
   /** The refusal still held: one whose end has not passed. */
   private heldRefusal(): UsageRefusal | undefined {
-    if (this.refusal && usageRefusalEnded(this.refusal, (this.options.now ?? Date.now)())) {
-      this.refusal = undefined;
-    }
+    if (this.refusal && usageRefusalEnded(this.refusal, this.now())) this.refusal = undefined;
     return this.refusal;
   }
 
@@ -144,25 +159,22 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
     return await (this.options.readCliStatus ?? readClaudeCliStatus)();
   }
 
+  /** The usage, or an error read, or null for an account with no usage windows. */
   async usage(): Promise<ModelAccountUsage | null> {
     // An account billed per use has no usage windows. The OAuth endpoint
     // would answer for a subscription login that may still be on disk, which
     // is not this account's usage.
     if (await this.billedPerUse()) return null;
-    const readAt = (this.options.now ?? Date.now)();
     // Claude keeps no local usage files, so the OAuth endpoint is the one source.
-    const usage = await (this.options.readUsage ?? readClaudeOAuthUsage)();
-    if (
-      usage &&
-      usageShowsCapacity(usage) &&
-      this.refusal &&
-      usageReadClearsRefusal(this.refusal, readAt)
-    ) {
-      // A status read alongside this one may have carried the refusal.
-      this.refusal = undefined;
-      this.emitChanged();
+    try {
+      return await (this.options.readUsage ?? readClaudeOAuthUsage)();
+    } catch (err) {
+      return {
+        checkedAt: new Date(this.now()).toISOString(),
+        source: "claude oauth usage",
+        error: getErrorMessage(err),
+      };
     }
-    return usage;
   }
 
   async revoke(): Promise<void> {
@@ -173,7 +185,7 @@ export class ClaudeAccount implements ModelAccount, LearnsRefusedTurns {
 
   refusedTurn(refusal: RefusedTurn): void {
     if (refusal.kind === "usage") {
-      this.refusal = usageRefusalAt(refusal, (this.options.now ?? Date.now)());
+      this.refusal = usageRefusalAt(refusal, this.now());
     }
     this.emitChanged();
   }

@@ -132,7 +132,7 @@ describe("SharedCodexAccountService", () => {
     const capacity = {
       rateLimits: { primary: { usedPercent: 10 }, secondary: { usedPercent: 10 } },
     };
-    rpc.queue("account/read", ...Array(4).fill({ account: { type: "chatgpt", planType: "pro" } }));
+    rpc.queue("account/read", ...Array(2).fill({ account: { type: "chatgpt", planType: "pro" } }));
     rpc.queue("account/rateLimits/read", capacity, capacity);
     const service = createService(rpc, { now: () => now });
     const changed = rs.fn();
@@ -140,16 +140,14 @@ describe("SharedCodexAccountService", () => {
 
     service.refusedTurn({ kind: "usage", until: "2026-11-07T03:00:00.000Z" });
     expect(changed).toHaveBeenCalledTimes(1);
-    await expect(service.status()).resolves.toMatchObject({
-      usageLimitUntil: "2026-11-07T03:00:00.000Z",
-    });
-    await service.usage();
-    await expect(service.status()).resolves.toMatchObject({
+    // The usage read in the hold shows capacity but describes the account
+    // before the refused turn.
+    await expect(service.availability()).resolves.toMatchObject({
+      state: "usage_limit_reached",
       usageLimitUntil: "2026-11-07T03:00:00.000Z",
     });
     now += USAGE_REFUSAL_HOLD_MS;
-    await service.usage();
-    await expect(service.status()).resolves.not.toHaveProperty("usageLimitUntil");
+    await expect(service.availability()).resolves.toMatchObject({ state: "available" });
   });
 
   it("classifies the current single-window rate-limit response by duration", async () => {

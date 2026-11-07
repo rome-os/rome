@@ -693,11 +693,16 @@ export async function buildTestDeps(
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: ModelAccount & ModelAccountAuthorization = {
-    async status() {
-      return { loggedIn: true, authMode: "chatgpt", planType: "plus", accountType: "plus" };
-    },
-    async usage() {
-      return null;
+    async availability() {
+      return {
+        state: "available" as const,
+        account: {
+          loggedIn: true,
+          authMode: "chatgpt" as const,
+          planType: "plus" as const,
+          accountType: "plus",
+        },
+      };
     },
     authorizationState() {
       return {

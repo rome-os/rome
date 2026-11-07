@@ -2,8 +2,6 @@
 // tells its own account, and the account reports it from then on. Nothing
 // outside the adapters' folder carries it.
 
-import { USAGE_LIMIT_FALLBACK_MS } from "../../domain/provider-availability.js";
-
 export type RefusedTurn =
   /** The provider no longer accepts the credential. The adapter has persisted its marker. */
   | { kind: "credential" }
@@ -13,6 +11,14 @@ export type RefusedTurn =
 export interface LearnsRefusedTurns {
   refusedTurn(refusal: RefusedTurn): void;
 }
+
+/**
+ * A usage limit with no known end ends this long after it was seen, unless a
+ * read or a refusal confirms it again. Waiting for a usage read that shows
+ * capacity can wait forever: the Claude CLI renews its token only on a Claude
+ * turn, and the resolver sends none to a provider at its limit.
+ */
+export const USAGE_LIMIT_FALLBACK_MS = 5 * 60 * 60 * 1000;
 
 /**
  * How long a usage refusal holds against a usage read that shows capacity.
@@ -25,7 +31,7 @@ export const USAGE_REFUSAL_HOLD_MS = 5 * 60_000;
 
 /** A usage refusal the account holds: when it ends, and when the adapter saw it. */
 export interface UsageRefusal {
-  /** The provider's stated end, else the domain's fallback after the refusal. */
+  /** The provider's stated end, else the fallback after the refusal. */
   until: string;
   refusedAt: number;
 }

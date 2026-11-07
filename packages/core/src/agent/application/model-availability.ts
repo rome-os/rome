@@ -1,27 +1,22 @@
-// Model availability: knows, for each provider, whether a run can use it now
-// and why not, from the account's own reports. It leaves learning from a
-// refused turn to the provider's adapter, choosing a provider to the
-// resolver, and the dashboard's response shape to the API. The rules are in
-// domain/provider-availability.ts; this module holds the state and drives
-// the reads.
+// Model availability: remembers, for each provider, what its account last
+// reported, so the resolver, the concierge and the dashboard can read it
+// without waiting on the provider's process. It reads the accounts at start,
+// hourly, when an account says it changed and when asked, and tells its
+// listeners after each read. The accounts decide what they report
+// (domain/model-account.ts); this module decides only when to ask.
 
-import type {
-  ModelAccount,
-  ModelAccountStatus,
-  ModelAccountUsage,
-} from "../domain/model-account.js";
+import type { ModelAccount } from "../domain/model-account.js";
 import type { ProviderId } from "../domain/model-port.js";
 import {
-  availabilityFromAccount,
   currentAvailability,
-  providerAuthorized,
   type ModelAvailabilityState,
   type ProviderAvailability,
+  providerAuthorized,
 } from "../domain/provider-availability.js";
 
 /**
  * "authorization" when a provider's authorized state changed, "refreshed"
- * when a read of it settled, whether or not the reads succeeded.
+ * when a read of it settled, whether or not the read succeeded.
  */
 export type ModelAvailabilityChange = "authorization" | "refreshed";
 
@@ -60,10 +55,8 @@ export function createModelAvailability(
   const accounts = Object.entries(options.accounts).filter(
     (entry): entry is [ProviderId, ModelAccount] => entry[1] !== undefined,
   );
-  const stored: ModelAvailabilityState = {};
+  const remembered: ModelAvailabilityState = {};
   const listeners = new Set<(provider: ProviderId, change: ModelAvailabilityChange) => void>();
-  // Logged when it changes, not on every read that confirms it.
-  const loggedAtLimit = new Map<ProviderId, boolean>();
   // One read per provider at a time. A refresh asked during one joins it.
   const inFlight = new Map<ProviderId, Promise<void>>();
   // Providers whose account changed during a read: read again when it settles.
@@ -84,88 +77,37 @@ export function createModelAvailability(
     }
   };
 
-  const logLimitChange = (provider: ProviderId, source: string): void => {
-    const availability = stored[provider];
-    if (!availability) return;
-    const current = currentAvailability(availability, now());
-    const atLimit = current.state === "usage_limit_reached";
-    if (atLimit === (loggedAtLimit.get(provider) ?? false)) return;
-    loggedAtLimit.set(provider, atLimit);
-    if (atLimit) {
-      log?.warn("model provider usage limit reached", {
+  const remember = (provider: ProviderId, next: ProviderAvailability): void => {
+    const previous = remembered[provider];
+    remembered[provider] = next;
+    if (previous?.state !== next.state) {
+      log?.info("model provider availability changed", {
         provider,
-        source,
-        until: current.usageLimitUntil,
-        fiveHourUsedPercent: current.usage?.fiveHour?.usedPercent,
-        sevenDayUsedPercent: current.usage?.sevenDay?.usedPercent,
-      });
-    } else {
-      log?.info("model provider usage limit cleared", {
-        provider,
-        source: availability.state === "usage_limit_reached" ? "end time passed" : source,
+        from: previous?.state ?? "unread",
+        to: next.state,
+        until: next.usageLimitUntil,
       });
     }
+    if (providerAuthorized(previous) !== providerAuthorized(next)) emit(provider, "authorization");
   };
 
-  /** Stores the read and reports whether the authorized state flipped. */
-  const store = (
-    provider: ProviderId,
-    status: ModelAccountStatus,
-    usage: ModelAccountUsage | null,
-  ): boolean => {
-    const previous = stored[provider];
-    const next: ProviderAvailability = availabilityFromAccount(status, usage, now(), previous);
-    stored[provider] = next;
-    const flipped = providerAuthorized(previous) !== providerAuthorized(next);
-    if (flipped) emit(provider, "authorization");
-    return flipped;
-  };
-
-  /**
-   * Reads status and usage together. The status lands as soon as it answers,
-   * with the usage last read, so an authorization change never waits on a
-   * usage read that may stall. The usage is folded in when it settles.
-   */
   const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
-    // Settled from the start: a usage read that fails while the status is
-    // still pending is a failed read, not an unhandled rejection.
-    const usagePending = Promise.allSettled([Promise.resolve().then(() => account.usage())]);
-    const status = await Promise.allSettled([account.status()]).then(([result]) => result);
-    if (closed) return;
-    if (status.status === "rejected") {
-      log?.warn("model account status read failed", {
+    try {
+      const next = await account.availability();
+      if (!closed) remember(provider, next);
+    } catch (err) {
+      log?.warn("model account read failed", {
         provider,
-        error: status.reason instanceof Error ? status.reason.message : String(status.reason),
+        error: err instanceof Error ? err.message : String(err),
       });
     }
-    const readStatus = status.status === "fulfilled" ? status.value : stored[provider]?.account;
-    if (!readStatus) {
-      await usagePending;
-      return;
-    }
-    // An authorization change can restart the provider's process under the
-    // usage read already running, so the usage is read once more after it.
-    if (store(provider, readStatus, stored[provider]?.usage ?? null)) rereadAfter.add(provider);
-    const [usage] = await usagePending;
-    if (closed) return;
-    const readUsage =
-      usage.status === "fulfilled"
-        ? usage.value
-        : {
-            checkedAt: now().toISOString(),
-            source: "usage read",
-            error: usage.reason instanceof Error ? usage.reason.message : String(usage.reason),
-          };
-    store(provider, readStatus, readUsage);
   };
 
   const refreshProvider = (provider: ProviderId, account: ModelAccount): Promise<void> => {
     const existing = inFlight.get(provider);
     if (existing) return existing;
-    logLimitChange(provider, "end time passed");
     const pending = readAccount(provider, account).finally(() => {
       if (inFlight.get(provider) === pending) inFlight.delete(provider);
-      logLimitChange(provider, "usage read");
       if (closed) return;
       emit(provider, "refreshed");
       if (rereadAfter.delete(provider)) void refreshProvider(provider, account);
@@ -174,24 +116,17 @@ export function createModelAvailability(
     return pending;
   };
 
-  /**
-   * The account says it changed. A read already in flight may have asked the
-   * account before the change, so its answer cannot be trusted to carry it:
-   * read once more when it settles.
-   */
-  const readChangedAccount = (provider: ProviderId, account: ModelAccount): void => {
-    if (inFlight.has(provider)) rereadAfter.add(provider);
-    else void refreshProvider(provider, account);
-  };
-
   const refresh = async (provider?: ProviderId): Promise<void> => {
     const targets = provider ? accounts.filter(([id]) => id === provider) : accounts;
     await Promise.all(targets.map(([id, account]) => refreshProvider(id, account)));
   };
 
+  // A read in flight may have asked the account before it changed, so its
+  // answer cannot be trusted to carry the change: read once more after it.
   const unsubscribers = accounts.map(([provider, account]) =>
     account.onChanged(() => {
-      readChangedAccount(provider, account);
+      if (inFlight.has(provider)) rereadAfter.add(provider);
+      else void refreshProvider(provider, account);
     }),
   );
 
@@ -213,7 +148,7 @@ export function createModelAvailability(
     read() {
       const at = now();
       const state: ModelAvailabilityState = {};
-      for (const [provider, availability] of Object.entries(stored) as Array<
+      for (const [provider, availability] of Object.entries(remembered) as Array<
         [ProviderId, ProviderAvailability]
       >) {
         state[provider] = currentAvailability(availability, at);

@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider } from "./agent-runner.js";
 import {
+  ClaudeAccount,
   createModelAvailability,
   type ModelAccount,
   type ModelAccountUsage,
@@ -698,21 +699,19 @@ describe("ModelResolver", () => {
         source: "test",
         fiveHour: { usedPercent: 100, resetsAt },
       });
-      const account = (
-        status: { loggedIn: boolean; authMethod?: string },
-        usage: () => Promise<ModelAccountUsage | null> = async () => null,
-      ): ModelAccount => ({
-        status: async () => status,
-        usage,
+      const codexAccount: ModelAccount = {
+        availability: async () => ({ state: "unauthorized", account: { loggedIn: false } }),
         revoke: async () => {},
         onChanged: () => () => {},
         close: () => {},
+      };
+      const claudeAccount = new ClaudeAccount({
+        env: {},
+        readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+        readUsage: claudeUsage,
       });
       const availability = createModelAvailability({
-        accounts: {
-          openai: account({ loggedIn: false }),
-          anthropic: account({ loggedIn: true, authMethod: "oauth" }, claudeUsage),
-        },
+        accounts: { openai: codexAccount, anthropic: claudeAccount },
         startRefresh: false,
         refreshIntervalMs: null,
       });

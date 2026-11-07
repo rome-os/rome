@@ -41,7 +41,6 @@ export {
 } from "./domain/model-selection.js";
 export {
   accountAllowsModel,
-  availabilityFromAccount,
   currentAvailability,
   providerAuthorized,
   providerUsable,

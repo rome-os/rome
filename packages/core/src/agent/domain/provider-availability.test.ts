@@ -1,151 +1,37 @@
 import { describe, expect, it } from "@rstest/core";
 import {
   accountAllowsModel,
-  availabilityFromAccount,
   currentAvailability,
+  type ProviderAvailability,
   providerAuthorized,
   providerUsable,
-  USAGE_LIMIT_FALLBACK_MS,
 } from "./provider-availability.js";
 
 const readAt = new Date("2026-11-07T00:00:00Z");
 const hourLater = new Date(readAt.getTime() + 3_600_000).toISOString();
-const fallback = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS).toISOString();
-const usage = (resetsAt?: string) => ({
-  checkedAt: readAt.toISOString(),
-  source: "test",
-  fiveHour: { usedPercent: 100, resetsAt },
-});
-
-describe("availabilityFromAccount", () => {
-  it("ranks expired over unauthorized over a usage limit", () => {
-    expect(
-      availabilityFromAccount({ loggedIn: false, needsReauth: true }, usage(hourLater), readAt),
-    ).toMatchObject({ state: "expired" });
-    expect(availabilityFromAccount({ loggedIn: false }, usage(hourLater), readAt)).toMatchObject({
-      state: "unauthorized",
-    });
-    expect(availabilityFromAccount({ loggedIn: true }, usage(hourLater), readAt)).toMatchObject({
-      state: "usage_limit_reached",
-      usageLimitUntil: hourLater,
-    });
-  });
-
-  it("ends a limit at the exhausted window's reset even when the refusal says later", () => {
-    const stated = new Date(readAt.getTime() + 6 * 3_600_000).toISOString();
-    expect(
-      availabilityFromAccount(
-        { loggedIn: true, usageLimitUntil: stated },
-        usage(hourLater),
-        readAt,
-      ),
-    ).toMatchObject({ state: "usage_limit_reached", usageLimitUntil: hourLater });
-  });
-
-  it.each([
-    "invalid",
-    "2000-01-01T00:00:00Z",
-  ])("reads a refusal whose end is %s as over, whatever usage is readable", (until) => {
-    const status = { loggedIn: true, usageLimitUntil: until };
-    expect(availabilityFromAccount(status, null, readAt)).toMatchObject({ state: "available" });
-    const capacity = {
-      checkedAt: readAt.toISOString(),
-      source: "test",
-      fiveHour: { usedPercent: 10 },
-    };
-    expect(availabilityFromAccount(status, capacity, readAt)).toMatchObject({ state: "available" });
-    // Reading the same refusal again never renews it.
-    const later = new Date(readAt.getTime() + 10 * 60 * 60 * 1000);
-    expect(availabilityFromAccount(status, null, later)).toMatchObject({ state: "available" });
-  });
-
-  it("ends a refusal with the exhausted windows' reset when the usage shows one", () => {
-    const assumed = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS).toISOString();
-    const inThreeDays = new Date(readAt.getTime() + 3 * 24 * 3_600_000).toISOString();
-    const inTwoHours = new Date(readAt.getTime() + 2 * 3_600_000).toISOString();
-    const status = { loggedIn: true, usageLimitUntil: assumed };
-    // A weekly window outlasts the refusal's assumed end.
-    expect(availabilityFromAccount(status, usage(inThreeDays), readAt)).toMatchObject({
-      state: "usage_limit_reached",
-      usageLimitUntil: inThreeDays,
-    });
-    // A five-hour window may reset before it.
-    expect(availabilityFromAccount(status, usage(inTwoHours), readAt)).toMatchObject({
-      usageLimitUntil: inTwoHours,
-    });
-    // With no exhausted window the refusal's end holds.
-    const capacity = {
-      checkedAt: readAt.toISOString(),
-      source: "test",
-      fiveHour: { usedPercent: 10 },
-    };
-    expect(availabilityFromAccount(status, capacity, readAt)).toMatchObject({
-      usageLimitUntil: assumed,
-    });
-  });
-
-  it("assumes the fallback end for an exhausted window with no reset, counted from when the usage was checked", () => {
-    expect(availabilityFromAccount({ loggedIn: true }, usage(), readAt)).toMatchObject({
-      state: "usage_limit_reached",
-      usageLimitUntil: fallback,
-    });
-    // The same usage read again an hour later keeps its end.
-    const hourLaterRead = new Date(readAt.getTime() + 3_600_000);
-    expect(availabilityFromAccount({ loggedIn: true }, usage(), hourLaterRead)).toMatchObject({
-      usageLimitUntil: fallback,
-    });
-    // And once that end has passed, it is no longer evidence of a limit.
-    const afterFallback = new Date(readAt.getTime() + USAGE_LIMIT_FALLBACK_MS + 1);
-    expect(availabilityFromAccount({ loggedIn: true }, usage(), afterFallback)).toMatchObject({
-      state: "available",
-    });
-  });
-
-  it("never limits an account whose usage the provider does not limit", () => {
-    expect(
-      availabilityFromAccount(
-        { loggedIn: true, usageLimited: false, usageLimitUntil: hourLater },
-        usage(hourLater),
-        readAt,
-      ),
-    ).toMatchObject({ state: "available" });
-  });
-
-  it("carries a limit still ahead through usage it could not read, and drops a passed one", () => {
-    const previous = availabilityFromAccount({ loggedIn: true }, usage(hourLater), readAt);
-    expect(availabilityFromAccount({ loggedIn: true }, null, readAt, previous)).toMatchObject({
-      state: "usage_limit_reached",
-      usageLimitUntil: hourLater,
-    });
-    const failed = { checkedAt: readAt.toISOString(), source: "test", error: "boom" };
-    expect(availabilityFromAccount({ loggedIn: true }, failed, readAt, previous)).toMatchObject({
-      state: "usage_limit_reached",
-      usage: failed,
-    });
-    const later = new Date(Date.parse(hourLater) + 1);
-    expect(availabilityFromAccount({ loggedIn: true }, null, later, previous)).toMatchObject({
-      state: "available",
-    });
-  });
-
-  it("keeps the account's reports as read and drops unreadable usage", () => {
-    const status = { loggedIn: true, email: "g@example.com", modelsDenied: ["gpt-6-luna"] };
-    const result = availabilityFromAccount(status, null, readAt);
-    expect(result.account).toEqual(status);
-    expect(result.usage).toBeUndefined();
-  });
-});
+const limited: ProviderAvailability = {
+  state: "usage_limit_reached",
+  usageLimitUntil: hourLater,
+  account: { loggedIn: true },
+};
 
 describe("currentAvailability", () => {
   it("reads a passed limit as available and leaves the rest alone", () => {
-    const limited = availabilityFromAccount({ loggedIn: true }, usage(hourLater), readAt);
     expect(currentAvailability(limited, readAt)).toBe(limited);
-    const after = new Date(Date.parse(hourLater));
-    expect(currentAvailability(limited, after)).toEqual({
+    expect(currentAvailability(limited, new Date(hourLater))).toEqual({
       state: "available",
       account: { loggedIn: true },
-      usage: usage(hourLater),
     });
+    const expired: ProviderAvailability = {
+      state: "expired",
+      account: { loggedIn: false, needsReauth: true },
+    };
+    expect(currentAvailability(expired, new Date(hourLater))).toBe(expired);
+  });
+
+  it("reads a limit with an unreadable end as over", () => {
+    const odd = { ...limited, usageLimitUntil: "invalid" };
+    expect(currentAvailability(odd, readAt)).toMatchObject({ state: "available" });
   });
 });
 
@@ -153,10 +39,12 @@ describe("predicates", () => {
   it("treat an unread provider as usable and authorized", () => {
     expect(providerUsable(undefined)).toBe(true);
     expect(providerAuthorized(undefined)).toBe(true);
-    const expired = availabilityFromAccount({ loggedIn: false, needsReauth: true }, null, readAt);
+    const expired: ProviderAvailability = {
+      state: "expired",
+      account: { loggedIn: false, needsReauth: true },
+    };
     expect(providerUsable(expired)).toBe(false);
     expect(providerAuthorized(expired)).toBe(false);
-    const limited = availabilityFromAccount({ loggedIn: true }, usage(hourLater), readAt);
     expect(providerUsable(limited)).toBe(false);
     expect(providerAuthorized(limited)).toBe(true);
   });

@@ -1,30 +1,27 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type {
-  ModelAccount,
-  ModelAccountStatus,
-  ModelAccountUsage,
-} from "../domain/model-account.js";
+import type { ModelAccount } from "../domain/model-account.js";
+import type { ProviderAvailability } from "../domain/provider-availability.js";
 import { createModelAvailability } from "./model-availability.js";
 
 const readAt = new Date("2026-11-07T00:00:00.000Z");
+const available: ProviderAvailability = { state: "available", account: { loggedIn: true } };
+const unauthorized: ProviderAvailability = { state: "unauthorized", account: { loggedIn: false } };
+const limited: ProviderAvailability = {
+  state: "usage_limit_reached",
+  usageLimitUntil: "2026-11-07T01:00:00.000Z",
+  account: { loggedIn: true },
+};
 
-/** An account whose answers the test hands out, one status read at a time. */
-function fakeAccount(initial: ModelAccountStatus) {
-  let status = initial;
-  let usage: ModelAccountUsage | null = null;
-  const pendingStatus: Array<(status: ModelAccountStatus) => void> = [];
-  const pendingUsage: Array<(usage: ModelAccountUsage | null) => void> = [];
-  let holdStatus = false;
-  let holdUsage = false;
+/** An account whose answers the test hands out, one read at a time. */
+function fakeAccount(initial: ProviderAvailability) {
+  let answer = initial;
+  let hold = false;
+  const pending: Array<(availability: ProviderAvailability) => void> = [];
   const listeners = new Set<() => void>();
   const account: ModelAccount = {
-    status: rs.fn(() => {
-      if (!holdStatus) return Promise.resolve(status);
-      return new Promise<ModelAccountStatus>((resolve) => pendingStatus.push(resolve));
-    }),
-    usage: rs.fn(() => {
-      if (!holdUsage) return Promise.resolve(usage);
-      return new Promise<ModelAccountUsage | null>((resolve) => pendingUsage.push(resolve));
+    availability: rs.fn(() => {
+      if (!hold) return Promise.resolve(answer);
+      return new Promise<ProviderAvailability>((resolve) => pending.push(resolve));
     }),
     async revoke() {},
     onChanged(listener) {
@@ -35,31 +32,23 @@ function fakeAccount(initial: ModelAccountStatus) {
   };
   return {
     account,
-    set(next: ModelAccountStatus, nextUsage: ModelAccountUsage | null = null) {
-      status = next;
-      usage = nextUsage;
+    set(next: ProviderAvailability) {
+      answer = next;
     },
     /** The account changed, as its adapter would say. */
-    changed(next: ModelAccountStatus) {
-      status = next;
+    changed(next: ProviderAvailability) {
+      answer = next;
       for (const listener of listeners) listener();
     },
     hold() {
-      holdStatus = true;
+      hold = true;
     },
-    holdUsage() {
-      holdUsage = true;
+    /** Answers the oldest held read. */
+    release(next: ProviderAvailability) {
+      hold = false;
+      pending.shift()?.(next);
     },
-    releaseUsage(answer: ModelAccountUsage | null) {
-      holdUsage = false;
-      pendingUsage.shift()?.(answer);
-    },
-    /** Answers the oldest held status read with the status at the time it was asked. */
-    release(answer: ModelAccountStatus) {
-      holdStatus = false;
-      pendingStatus.shift()?.(answer);
-    },
-    statusReads: () => (account.status as ReturnType<typeof rs.fn>).mock.calls.length,
+    reads: () => (account.availability as ReturnType<typeof rs.fn>).mock.calls.length,
   };
 }
 
@@ -67,7 +56,7 @@ const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("createModelAvailability", () => {
   it("knows nothing about a provider until its account was read", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const codex = fakeAccount(available);
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
       startRefresh: false,
@@ -76,17 +65,13 @@ describe("createModelAvailability", () => {
     });
     expect(availability.read()).toEqual({});
     await availability.refresh();
-    expect(availability.read().openai).toMatchObject({ state: "available" });
+    expect(availability.read().openai).toBe(available);
     availability.close();
   });
 
   it("reads a limit whose end has passed as available without a refresh", async () => {
     let now = readAt;
-    const codex = fakeAccount({
-      loggedIn: true,
-      usageLimited: true,
-      usageLimitUntil: "2026-11-07T01:00:00.000Z",
-    });
+    const codex = fakeAccount(limited);
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
       startRefresh: false,
@@ -94,18 +79,14 @@ describe("createModelAvailability", () => {
       now: () => now,
     });
     await availability.refresh("openai");
-    expect(availability.read().openai).toMatchObject({
-      state: "usage_limit_reached",
-      usageLimitUntil: "2026-11-07T01:00:00.000Z",
-    });
+    expect(availability.read().openai).toBe(limited);
     now = new Date("2026-11-07T01:00:01.000Z");
-    expect(availability.read().openai).toMatchObject({ state: "available" });
-    expect(availability.read().openai).not.toHaveProperty("usageLimitUntil");
+    expect(availability.read().openai).toEqual({ state: "available", account: { loggedIn: true } });
     availability.close();
   });
 
   it("runs one read per provider for refreshes asked while it is in flight", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const codex = fakeAccount(available);
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
       startRefresh: false,
@@ -114,14 +95,14 @@ describe("createModelAvailability", () => {
     codex.hold();
     const first = availability.refresh("openai");
     const second = availability.refresh();
-    codex.release({ loggedIn: true, usageLimited: true });
+    codex.release(available);
     await Promise.all([first, second]);
-    expect(codex.statusReads()).toBe(1);
+    expect(codex.reads()).toBe(1);
     availability.close();
   });
 
   it("tells listeners when the authorized state flips and after every read", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const codex = fakeAccount(available);
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
       startRefresh: false,
@@ -131,10 +112,10 @@ describe("createModelAvailability", () => {
     availability.onChanged((provider, change) => changes.push(`${provider}:${change}`));
     await availability.refresh();
     expect(changes).toEqual(["openai:refreshed"]);
-    codex.set({ loggedIn: true, usageLimited: true, usageLimitUntil: "2026-11-07T05:00:00.000Z" });
+    codex.set(limited);
     await availability.refresh();
     expect(changes).toEqual(["openai:refreshed", "openai:refreshed"]);
-    codex.set({ loggedIn: false });
+    codex.set(unauthorized);
     await availability.refresh();
     expect(changes).toEqual([
       "openai:refreshed",
@@ -146,7 +127,7 @@ describe("createModelAvailability", () => {
   });
 
   it("reads an account again when it says it changed", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const codex = fakeAccount(available);
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
       startRefresh: false,
@@ -154,21 +135,14 @@ describe("createModelAvailability", () => {
       now: () => readAt,
     });
     await availability.refresh();
-    codex.changed({
-      loggedIn: true,
-      usageLimited: true,
-      usageLimitUntil: "2026-11-07T05:00:00.000Z",
-    });
+    codex.changed(limited);
     await settle();
-    expect(availability.read().openai).toMatchObject({
-      state: "usage_limit_reached",
-      usageLimitUntil: "2026-11-07T05:00:00.000Z",
-    });
+    expect(availability.read().openai).toBe(limited);
     availability.close();
   });
 
   it("reads once more when the account changes during a read, so the change is not lost", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+    const codex = fakeAccount(available);
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
       startRefresh: false,
@@ -178,77 +152,19 @@ describe("createModelAvailability", () => {
     codex.hold();
     const read = availability.refresh("openai");
     // The provider refuses a turn while the read is waiting on the account.
-    const refused = {
-      loggedIn: true,
-      usageLimited: true,
-      usageLimitUntil: "2026-11-07T05:00:00.000Z",
-    };
-    codex.changed(refused);
-    codex.changed(refused);
+    codex.changed(limited);
+    codex.changed(limited);
     // The read that began before the refusal answers with what it saw then.
-    codex.release({ loggedIn: true, usageLimited: true });
+    codex.release(available);
     await read;
     await settle();
-    expect(codex.statusReads()).toBe(2);
-    expect(availability.read().openai).toMatchObject({ state: "usage_limit_reached" });
+    expect(codex.reads()).toBe(2);
+    expect(availability.read().openai).toBe(limited);
     availability.close();
   });
 
-  it("lands an authorization change as soon as the status answers, before the usage read settles", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
-    const availability = createModelAvailability({
-      accounts: { openai: codex.account },
-      startRefresh: false,
-      refreshIntervalMs: null,
-      now: () => readAt,
-    });
-    await availability.refresh();
-    const changes: string[] = [];
-    availability.onChanged((provider, change) => changes.push(`${provider}:${change}`));
-    codex.holdUsage();
-    codex.set({ loggedIn: false, needsReauth: true });
-    const read = availability.refresh("openai");
-    await settle();
-    expect(availability.read().openai).toMatchObject({ state: "expired" });
-    expect(changes).toEqual(["openai:authorization"]);
-    codex.releaseUsage(null);
-    await read;
-    expect(changes.slice(0, 2)).toEqual(["openai:authorization", "openai:refreshed"]);
-    // The change can restart the provider's process under the usage read, so
-    // the account is read once more.
-    await settle();
-    expect(codex.statusReads()).toBe(3);
-    availability.close();
-  });
-
-  it("treats a usage read that fails while the status is pending as a failed read", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
-    const availability = createModelAvailability({
-      accounts: { openai: codex.account },
-      startRefresh: false,
-      refreshIntervalMs: null,
-      now: () => readAt,
-    });
-    const unhandled = rs.fn();
-    process.on("unhandledRejection", unhandled);
-    try {
-      codex.hold();
-      (codex.account.usage as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("gone"));
-      const read = availability.refresh("openai");
-      await settle();
-      codex.release({ loggedIn: true, usageLimited: true });
-      await read;
-      await settle();
-      expect(unhandled).not.toHaveBeenCalled();
-      expect(availability.read().openai).toMatchObject({ usage: { error: "gone" } });
-    } finally {
-      process.off("unhandledRejection", unhandled);
-      availability.close();
-    }
-  });
-
-  it("keeps the last status when a read fails and drops the usage into an error", async () => {
-    const codex = fakeAccount({ loggedIn: true, usageLimited: true });
+  it("keeps the last answer when a read fails, and says the read settled", async () => {
+    const codex = fakeAccount(available);
     const warn = rs.fn();
     const availability = createModelAvailability({
       accounts: { openai: codex.account },
@@ -258,15 +174,15 @@ describe("createModelAvailability", () => {
       now: () => readAt,
     });
     await availability.refresh();
-    (codex.account.status as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("down"));
-    (codex.account.usage as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("no usage"));
+    const changes: string[] = [];
+    availability.onChanged((provider, change) => changes.push(`${provider}:${change}`));
+    (codex.account.availability as ReturnType<typeof rs.fn>).mockRejectedValueOnce(
+      new Error("down"),
+    );
     await availability.refresh();
-    expect(availability.read().openai).toMatchObject({
-      state: "available",
-      account: { loggedIn: true },
-      usage: { error: "no usage" },
-    });
-    expect(warn).toHaveBeenCalledWith("model account status read failed", {
+    expect(availability.read().openai).toBe(available);
+    expect(changes).toEqual(["openai:refreshed"]);
+    expect(warn).toHaveBeenCalledWith("model account read failed", {
       provider: "openai",
       error: "down",
     });

@@ -1,16 +1,19 @@
 // The model provider account: whose subscription the agent's turns run under
 // when Rome credits is not the payer (the payer is `ModelFunding` in
-// model-port.ts). The account reports its own status and usage, and Rome
-// derives neither: a turn the provider refuses is learned by the provider's
-// adapter and shows in the account's next report. The guardian authorizes
-// Rome to run models under their subscription, by browser or by device code,
-// may cancel an authorization in progress, and revokes it.
+// model-port.ts). The account reports its own availability, with the status
+// and usage it read it off, and Rome derives none of it: a turn the provider
+// refuses is learned by the provider's adapter and shows in the account's
+// next report. The guardian authorizes Rome to run models under their
+// subscription, by browser or by device code, may cancel an authorization in
+// progress, and revokes it.
 //
 // Rome never acts or chats as this account, so it is not a connection
 // (docs/domains/connections.md), and the guardian signing in to Rome is a
 // different act, so the port's operations say authorize and revoke. The one
 // exception is the status field `loggedIn`, which keeps the name the dashboard
 // reads today. docs/domains/agents.md carries the language.
+
+import type { ProviderAvailability } from "./provider-availability.js";
 
 /** The provider's subscription tier, as the provider reports it. */
 export type ModelPlanType =
@@ -43,13 +46,6 @@ export interface ModelAccountStatus {
    * subscription and not an account billed per use. Absent reads as limited.
    */
   usageLimited?: boolean;
-  /**
-   * The provider refused a turn for usage, until this time: the end the
-   * provider stated, or five hours after the adapter saw the refusal when it
-   * stated none. Dropped once the time passes or a later usage read shows
-   * capacity.
-   */
-  usageLimitUntil?: string;
 }
 
 /** One of the provider's rolling usage windows. */
@@ -94,16 +90,20 @@ export interface ModelDeviceAuthorization {
 }
 
 /**
- * The model provider account as this context reads it. The dashboard and
- * model availability call it; the agent run never does. The adapter in
- * infrastructure/ implements it on the provider's own process.
+ * The model provider account as this context reads it. Model availability
+ * reads it and remembers the answer; the dashboard revokes it; the agent run
+ * never calls it. The adapter in infrastructure/ implements it on the
+ * provider's own process.
  */
 export interface ModelAccount {
-  status(): Promise<ModelAccountStatus>;
-  usage(): Promise<ModelAccountUsage | null>;
+  /**
+   * Whether a run can use the provider now and why not, with the status and
+   * usage it was read off. Rejects when the account could not be read at all.
+   */
+  availability(): Promise<ProviderAvailability>;
   /** Takes the authorization back. */
   revoke(): Promise<void>;
-  /** Fires when the account's status may have changed; returns the unsubscribe. */
+  /** Fires when the account's availability may have changed; returns the unsubscribe. */
   onChanged(listener: () => void): () => void;
   close(): void;
 }
