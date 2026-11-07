@@ -133,7 +133,8 @@ export type {
   RomeTools,
 } from "./domain/rome-tools.js";
 export { subagentToolName, type Subagent, type Subagents } from "./domain/subagent.js";
-export { detachSessionTools, NO_ROME_TOOLS } from "./domain/rome-tools.js";
+export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
+export { forkSessionTools } from "./domain/session-tools.js";
 export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
