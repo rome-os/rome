@@ -69,10 +69,16 @@ struct TopicChatScreen: View {
             }
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments)
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
+                if startFailed && store == nil {
+                    Text("Could not start the chat")
+                        .romeFont(13, .medium)
+                        .foregroundStyle(Palette.destructive)
+                        .transition(.opacity)
+                }
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
@@ -162,11 +168,15 @@ struct TopicChatScreen: View {
         startingImages = images
         startFailed = false
         Task {
-            if let id = await workspace.startTopicChat(firstMessage: text, images: images) {
+            if let id = await workspace.startTopicChat(firstMessage: text, images: images, blankKey: draftKey) {
                 starting = nil
                 onCreated(id)
             } else {
+                // The message goes back into the composer, as the draft.
+                starting = nil
                 startFailed = true
+                draft = text
+                attachments.restore(images)
             }
         }
     }

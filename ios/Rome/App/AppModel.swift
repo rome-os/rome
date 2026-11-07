@@ -98,12 +98,35 @@ final class Workspace {
     /// Starts a topic chat, then sends it its first message, in that order.
     /// Nothing exists on the server before this. Returns the new chat's id, or
     /// nil when the chat could not be started.
-    func startTopicChat(firstMessage text: String, images: [ComposerImage] = []) async -> String? {
-        guard let chat = try? await backend.startTopicChat() else { return nil }
+    /// Each opened task chat's transcript, kept like the topic chats': a
+    /// failed send keeps its bubble and Retry when the guardian comes back.
+    @ObservationIgnored private var taskStores: [String: TranscriptStore] = [:]
+
+    func taskStore(_ chatId: String) -> TranscriptStore {
+        if let store = taskStores[chatId] { return store }
+        let store = TranscriptStore(sessionId: chatId, kind: .task, backend: backend)
+        store.drafts = ChatDrafts(store: drafts, chat: chatId)
+        taskStores[chatId] = store
+        return store
+    }
+
+    /// Starts a topic chat, then sends it its first message, in that order.
+    /// Until the chat exists, the message is kept under the blank chat's
+    /// draft key: a failed start or a kill does not lose it.
+    func startTopicChat(firstMessage text: String, images: [ComposerImage] = [], blankKey: String? = nil) async -> String? {
+        let startId = "start-\(UUID().uuidString)"
+        if let blankKey { drafts.sending(chat: blankKey, inputId: startId, text: text, photos: images) }
+        guard let chat = try? await backend.startTopicChat() else {
+            // The composer takes it back.
+            if let blankKey { drafts.delivered(chat: blankKey, inputId: startId) }
+            return nil
+        }
         topics.add(chat)
         let store = topicStore(chat.id)
         store.start()
+        // The send keeps it under the new chat first, then the blank slot goes.
         store.send(text, images: images)
+        if let blankKey { drafts.discard(chat: blankKey) }
         return chat.id
     }
 
@@ -169,6 +192,7 @@ final class Workspace {
         concierge.stop()
         topics.stop()
         for store in topicStores.values { store.stop() }
+        for store in taskStores.values { store.stop() }
         backend.events.pause()
     }
 }
@@ -466,6 +490,8 @@ final class AppModel {
 
     func appDidEnterBackground() {
         foreground.enteredBackground(at: .now)
+        // Drafts are written before the app may be killed.
+        if let drafts = workspace?.drafts { Task { await drafts.flush() } }
         workspace?.backend.events.pause()
     }
 
@@ -553,7 +579,7 @@ final class AppModel {
         instances = DemoBackend.instances
         currentInstanceID = DemoBackend.instances.first?.id
         Task {
-            await open(Workspace(backend: backend, instanceName: String(localized: "My Rome"), host: "me.romeos.cc", accountLabel: "lin@example.com"))
+            await open(Workspace(backend: backend, instanceName: String(localized: "My Rome"), host: "me.romeos.cc", accountLabel: "lin@example.com", drafts: DraftStore(instance: DraftStore.demoInstance)))
         }
     }
 
@@ -581,7 +607,7 @@ final class AppModel {
         instances = [local]
         currentInstanceID = local.id
         let client = APIClient(origin: url, token: { [token] in token.token })
-        await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user))
+        await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user, drafts: DraftStore(instance: DraftStore.localInstance(url.host() ?? origin))))
     }
     #endif
 }
