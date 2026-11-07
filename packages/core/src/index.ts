@@ -879,7 +879,7 @@ async function main() {
   const aiToolState = createAIToolState({
     settingsRepo,
     // The first refresh spawns the Codex app-server, which competes with boot
-    // for CPU on a small VM. It runs once Rome has started.
+    // for CPU on a small VM. It runs once Rome has started, with the warmup.
     startRefresh: false,
     probes: {
       codexStatus: () => codexAccountService.status(),
@@ -910,6 +910,7 @@ async function main() {
   });
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
+    warmup: false,
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
@@ -2217,6 +2218,11 @@ async function main() {
     discoveredCdpServers: discoveredServers.length > 0 ? discoveredServers : ["none"],
   });
 
+  void codexAppServerManager.warmup().catch((err) => {
+    log.warn("codex app-server warmup failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
   void aiToolState.refresh().catch((err) => {
     log.warn("initial AI tool state refresh failed", {
       error: err instanceof Error ? err.message : String(err),
