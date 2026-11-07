@@ -96,6 +96,26 @@ describe("accountAvailability", () => {
     ).toMatchObject({ state: "available" });
   });
 
+  it("carries the later of the refusal's end and the end last reported through unreadable usage", () => {
+    const inThreeDays = new Date(readAt + 3 * 24 * 3_600_000).toISOString();
+    const refusal = usageRefusalAt({}, readAt);
+    const weekly = accountAvailability(signedIn, usage(inThreeDays), refusal, readAt);
+    expect(weekly).toMatchObject({ usageLimitUntil: inThreeDays });
+    const failed = { checkedAt: new Date(readAt).toISOString(), source: "test", error: "boom" };
+    expect(
+      accountAvailability(signedIn, failed, refusal, readAt + 3_600_000, weekly),
+    ).toMatchObject({
+      state: "usage_limit_reached",
+      usageLimitUntil: inThreeDays,
+    });
+    // After the refusal's assumed end, the weekly end still holds.
+    const afterRefusal = readAt + USAGE_LIMIT_FALLBACK_MS + 1;
+    expect(accountAvailability(signedIn, null, undefined, afterRefusal, weekly)).toMatchObject({
+      state: "usage_limit_reached",
+      usageLimitUntil: inThreeDays,
+    });
+  });
+
   it("reads unreadable usage as no evidence, and keeps the reports as read", () => {
     const failed = { checkedAt: new Date(readAt).toISOString(), source: "test", error: "boom" };
     const status = { loggedIn: true, email: "g@example.com", modelsDenied: ["gpt-6-luna"] };

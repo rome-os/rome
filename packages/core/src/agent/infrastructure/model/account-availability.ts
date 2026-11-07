@@ -61,8 +61,8 @@ export function refusalAfterReport(
  * A window without a reset time is assumed to end the fallback after the
  * usage was checked, so reading the same usage again never moves the end.
  * Usage that could not be read (null, or an error) proves neither capacity
- * nor a limit, so a limit still ahead carries over from `previous`, the
- * account's last report.
+ * nor a limit, so a limit still ahead carries over from the refusal or from
+ * `previous`, the account's last report, whichever ends later.
  */
 export function accountAvailability(
   status: ModelAccountStatus,
@@ -83,7 +83,11 @@ export function accountAvailability(
     usageLimitUntil: until,
   });
   if (!usage || usage.error) {
-    const carried = ahead(refusal?.until, now) ?? ahead(previous?.usageLimitUntil, now);
+    // The later of the refusal's end and the end last reported: a weekly
+    // window read earlier outlasts a refusal's assumed end.
+    const carried = [ahead(refusal?.until, now), ahead(previous?.usageLimitUntil, now)]
+      .filter((until): until is string => until !== undefined)
+      .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
     return carried ? limit(carried) : base;
   }
   const exhausted = [usage.fiveHour, usage.sevenDay].filter(windowExhausted);
