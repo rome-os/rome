@@ -200,5 +200,8 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         let origin = URL(string: "https://me.romeos.cc")!
         #expect(WebOnlyCard.url(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
         #expect(WebOnlyCard.url(origin: origin, sessionId: nil) == origin)
+        // The main chat opens by its id on the server, or the dashboard's chat page.
+        #expect(WebOnlyCard.url(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
+        #expect(WebOnlyCard.url(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/chat")
     }
 }

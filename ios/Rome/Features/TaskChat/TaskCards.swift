@@ -582,10 +582,13 @@ struct WebOnlyCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
 
-    /// The web dashboard's page for a chat: `/chat/<id>`.
-    static func url(origin: URL, sessionId: String?) -> URL {
+    /// The web dashboard's page for a chat: `/chat/<id>`. The main chat goes
+    /// by its id on the server; until that is known, `/chat`.
+    static func url(origin: URL, sessionId: String?, mainChatServerID: String? = nil) -> URL {
         guard let sessionId, !sessionId.isEmpty else { return origin }
-        return origin.appending(path: "chat").appending(path: sessionId)
+        let chat = origin.appending(path: "chat")
+        guard sessionId == conciergeChatID else { return chat.appending(path: sessionId) }
+        return mainChatServerID.map { chat.appending(path: $0) } ?? chat
     }
 
     var body: some View {
@@ -599,7 +602,9 @@ struct WebOnlyCard: View {
                 .romeFont(15)
             Spacer(minLength: 0)
             Button("Open") {
-                if let origin = model.webURL { openURL(Self.url(origin: origin, sessionId: sessionId)) }
+                if let origin = model.webURL {
+                    openURL(Self.url(origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
+                }
             }
             .romeFont(14, .semibold)
             .foregroundStyle(Palette.fg)

@@ -62,6 +62,9 @@ final class Workspace {
     private(set) var topicLatest: [String: Int] = [:]
     private(set) var conciergeState: ConciergeState = .loading
     private(set) var unreadAtOpen = 0
+    /// The guardian's own main chat on the server; the app reads it as
+    /// `conciergeChatID`, the dashboard by this id.
+    private(set) var mainChatServerID: String?
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
     /// Goes up when Chat must show its newest rows: a tapped push.
@@ -173,6 +176,7 @@ final class Workspace {
         do {
             let info = try await backend.conciergeSession()
             unreadAtOpen = info.unread
+            mainChatServerID = info.id
             conciergeState = .ready
             concierge.start()
         } catch APIError.conciergeOff {
