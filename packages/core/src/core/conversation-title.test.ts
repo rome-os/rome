@@ -31,7 +31,6 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
 function generatorFor(session: ModelSession) {
   const provider: ModelProvider = {
     id: "mock",
-    displayName: "Mock",
     builtinTools: new Set(),
     openSession: rs.fn(async () => session),
   };
@@ -47,7 +46,6 @@ describe("conversation title generation", () => {
     let openParams: ModelSessionParams | undefined;
     const provider: ModelProvider = {
       id: "mock",
-      displayName: "Mock",
       builtinTools: new Set(),
       openSession: rs.fn(async (params) => {
         openParams = params;
@@ -131,7 +129,6 @@ describe("conversation title generation", () => {
     const session = resultSession("Bounded title");
     const provider: ModelProvider = {
       id: "mock",
-      displayName: "Mock",
       builtinTools: new Set(),
       openSession: rs.fn(async () => session),
     };
@@ -167,7 +164,6 @@ describe("conversation title generation", () => {
       );
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "Mock",
         builtinTools: new Set(),
         openSession,
       };

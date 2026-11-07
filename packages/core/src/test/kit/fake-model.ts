@@ -71,7 +71,6 @@ export interface ReplyBuilder {
 
 export class FakeModel implements ModelProvider {
   readonly id = "mock" as const;
-  readonly displayName = "Fake Model";
   builtinTools: ReadonlySet<string> = new Set();
 
   /** Every turn the model was asked to run, in order. */

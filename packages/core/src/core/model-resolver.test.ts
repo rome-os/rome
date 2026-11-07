@@ -7,8 +7,8 @@ import {
 } from "./ai-tool-state.js";
 import { createModelResolver, TIER_MODEL_MAPPINGS_SETTING_KEY } from "./model-resolver.js";
 
-const codex = { id: "openai", displayName: "Codex" } as ModelProvider;
-const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
+const codex = { id: "openai" } as ModelProvider;
+const claude = { id: "anthropic" } as ModelProvider;
 
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
@@ -484,7 +484,7 @@ describe("ModelResolver", () => {
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
       }).getModelProvider({ tier: "small", providerId: "openai" }),
     ).rejects.toMatchObject({
-      message: "Selected model provider is unavailable: Codex is not signed in",
+      message: "Selected model provider is unavailable: Codex (ChatGPT) is not signed in",
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
@@ -506,13 +506,14 @@ describe("ModelResolver", () => {
       }).getModelProvider({ tier: "large", providerId: "openai" }),
     ).rejects.toMatchObject({
       message:
-        "Selected model provider is unavailable: Codex has reached its usage limit until 2026-10-21T14:59:00.000Z",
+        "Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit until 2026-10-21T14:59:00.000Z",
       reason: "quota_exhausted",
     });
     await expect(
       resolver({ codex: codexState }).getModelProvider({ tier: "large", providerId: "openai" }),
     ).rejects.toMatchObject({
-      message: "Selected model provider is unavailable: Codex has reached its usage limit",
+      message:
+        "Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit",
       reason: "quota_exhausted",
     });
   });

@@ -92,7 +92,6 @@ describe("AgentSession turn usage", () => {
     providerCalls = 0;
     const provider: ModelProvider = {
       id: "openai",
-      displayName: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         if (params.thread.kind === "branch") {

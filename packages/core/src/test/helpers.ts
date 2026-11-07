@@ -263,7 +263,6 @@ export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number
 
 export class MockModelProvider implements ModelProvider {
   readonly id = "mock" as const;
-  readonly displayName = "Mock";
   builtinTools: ReadonlySet<string> = new Set();
   private responses: AgentEvent[][];
   private callIndex = 0;

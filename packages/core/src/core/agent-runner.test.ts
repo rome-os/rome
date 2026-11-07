@@ -229,7 +229,6 @@ describe("AgentRunner", () => {
     // code-backed short-circuit.
     const anthropic: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       // A code-backed agent never opens a provider query; if reuse breaks and the
       // session is reopened, this would still not run (null session), so the only
@@ -320,7 +319,6 @@ describe("AgentRunner", () => {
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "Deferred check done." };
@@ -355,7 +353,6 @@ describe("AgentRunner", () => {
     await webchatRepo.createSession("chat-answer", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "Deferred check done." };
@@ -398,7 +395,6 @@ describe("AgentRunner", () => {
     const opened: ModelSessionParams["thread"][] = [];
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         opened.push(params.thread);
@@ -443,7 +439,6 @@ describe("AgentRunner", () => {
     });
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "" };
@@ -2143,7 +2138,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-detached",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -2676,7 +2670,6 @@ describe("AgentRunner", () => {
       });
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
@@ -2776,7 +2769,6 @@ describe("AgentRunner", () => {
       });
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
@@ -3200,7 +3192,6 @@ describe("AgentRunner", () => {
     it("does not persist a provider checkpoint for an interrupted turn", async () => {
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           const session = createSessionFromRun(
@@ -3256,7 +3247,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         async openSession(params) {
           const session = createSessionFromRun(
@@ -3726,7 +3716,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-reused-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -3777,7 +3766,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-closable-session",
         builtinTools: new Set<string>(),
         openSession: async (params) => createClosableModelSession(params),
       };
@@ -3851,7 +3839,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-lifecycle-nested",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImplNested),
       };
@@ -3927,7 +3914,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id,
-        displayName: id,
         builtinTools: new Set(),
         openSession: makeOpenSessionFromRun(id, async function* () {
           yield { type: "error", error: message, code, httpStatus, providerError };
@@ -4107,7 +4093,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-shared-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -4290,7 +4275,6 @@ describe("AgentRunner", () => {
     function alwaysResultProvider(): ModelProvider {
       return {
         id: "mock",
-        displayName: "mock-thread-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* () {
           yield { type: "result", content: "ok" };
@@ -4465,7 +4449,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-no-conversation-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4541,7 +4524,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-linked-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4597,7 +4579,6 @@ describe("AgentRunner", () => {
       const prompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-linked-starter",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           prompts.push(input.prompt);
@@ -4697,7 +4678,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-runtime-reply",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4782,7 +4762,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const anthropic: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           anthropicSessions.push(params);
@@ -4797,7 +4776,6 @@ describe("AgentRunner", () => {
       };
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4853,7 +4831,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const anthropic: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           anthropicSessions.push(params);
@@ -4868,7 +4845,6 @@ describe("AgentRunner", () => {
       };
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4905,7 +4881,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4966,7 +4941,6 @@ describe("AgentRunner", () => {
       const claudeOpens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           const session = createSessionFromRun(
@@ -4983,7 +4957,6 @@ describe("AgentRunner", () => {
       };
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           claudeOpens.push(params);
@@ -5035,7 +5008,6 @@ describe("AgentRunner", () => {
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -5100,7 +5072,6 @@ describe("AgentRunner", () => {
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -5152,7 +5123,6 @@ describe("AgentRunner", () => {
       };
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) =>
           createSessionFromRun(
@@ -5166,7 +5136,6 @@ describe("AgentRunner", () => {
       };
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) =>
           createSessionFromRun(
@@ -5213,13 +5182,11 @@ describe("AgentRunner", () => {
     // so a test can assert which concrete model actually ran.
     function recordingProvider(
       id: ProviderId,
-      displayName: string,
       modelThreadId: string,
       opens: ModelSessionParams[],
     ): ModelProvider {
       return {
         id,
-        displayName,
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -5236,10 +5203,10 @@ describe("AgentRunner", () => {
     }
 
     const codexProvider = (opens: ModelSessionParams[]): ModelProvider =>
-      recordingProvider("openai", "Codex", "codex-thread", opens);
+      recordingProvider("openai", "codex-thread", opens);
 
     const claudeProvider = (opens: ModelSessionParams[]): ModelProvider =>
-      recordingProvider("anthropic", "Claude", "claude-thread", opens);
+      recordingProvider("anthropic", "claude-thread", opens);
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
@@ -5284,7 +5251,6 @@ describe("AgentRunner", () => {
       const opens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -5337,7 +5303,6 @@ describe("AgentRunner", () => {
       const claudeOpens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           claudeOpens.push(params);
@@ -5793,7 +5758,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-action",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImplAction),
       };
@@ -5956,7 +5920,6 @@ describe("AgentRunner", () => {
       });
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
         openSession: openFromRun,
       };
@@ -6004,7 +5967,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-live-catalog",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -6079,7 +6041,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-allow-list",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -6157,7 +6118,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-legacy-action",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -6275,7 +6235,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-subagent-preview",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -6353,7 +6312,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider & { calls: import("./agent-runner.js").ModelRunParams[] } = {
         id: "mock",
-        displayName: "mock-nested",
         builtinTools: new Set<string>(),
         calls: nestedCalls,
         openSession: makeOpenSessionFromRun("mock", runImplNested),
@@ -6456,7 +6414,6 @@ describe("AgentRunner", () => {
         sessions: import("./agent-runner.js").ModelSessionParams[];
       } = {
         id: "mock",
-        displayName: "mock-structured",
         builtinTools: new Set<string>(),
         sessions: [],
         openSession: async (params) => {

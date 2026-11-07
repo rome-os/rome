@@ -431,7 +431,6 @@ async function getStoredTimezone(
 
 export class AnthropicProvider implements ModelProvider {
   readonly id = "anthropic" as const;
-  readonly displayName = "Claude";
   readonly builtinTools: ReadonlySet<string> = new Set([
     "Read",
     "Edit",
