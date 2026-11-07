@@ -70,10 +70,7 @@ import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
 import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
-import {
-  buildWorkspaceContextSection,
-  type WorkspaceContextSnapshot,
-} from "../../core/prompt-builder.js";
+import { buildWorkspaceContextSection, type WorkspaceContextSnapshot } from "../../agent/index.js";
 import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
 import { buildSlashSkillPrompt, parseSlashSkillInvocation } from "../../agent/index.js";
@@ -1784,7 +1781,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * session, so it stays in the cacheable system prefix). The per-thread,
    * dynamic thread + project framing is rendered separately as a
    * `<thread_context>` block on the session's first user message — see
-   * `buildThreadContextBlock` in prompt-builder.ts and AgentSession.runOneTurn.
+   * `buildThreadContextBlock` in agent/domain/prompt.ts and AgentSession.runOneTurn.
    */
   const readGuardianProfile = (): string | null => {
     try {

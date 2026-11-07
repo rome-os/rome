@@ -24,17 +24,15 @@ import {
   type SessionRepository,
   type Skill,
   type SkillCatalog,
-  resolveAgentPolicy,
-} from "../agent/index.js";
-import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
-import {
   buildContinuationBlock,
-  buildInteractiveSurfaceGuidanceSection,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
-  type PromptBuilder,
-} from "./prompt-builder.js";
+  resolveAgentPolicy,
+} from "../agent/index.js";
+import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
+import { buildInteractiveSurfaceGuidanceSection, type PromptBuilder } from "./prompt-builder.js";
+import { projectRelativePath } from "../webchat/projects.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
@@ -3516,7 +3514,11 @@ class AgentSessionImpl implements AgentSession {
       // replaced it on another provider, has not seen the block yet.
       if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
-        const block = buildThreadContextBlock(tc, this.workingDir);
+        const projectPath = this.workingDir?.trim();
+        const block = buildThreadContextBlock(tc, {
+          path: projectPath,
+          relativePath: projectPath ? projectRelativePath(projectPath) : null,
+        });
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
         }

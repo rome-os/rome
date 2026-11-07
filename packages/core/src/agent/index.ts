@@ -31,6 +31,14 @@ export { ActiveSessionExistsError, type SessionRepository } from "./domain/sessi
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export type { Skill, SkillCatalog } from "./domain/skill.js";
 export {
+  buildContinuationBlock,
+  buildDeviceFolderBlock,
+  buildThreadContextBlock,
+  buildWorkspaceContextSection,
+  FETCH_CHANNEL_HISTORY_ACTION,
+  type WorkspaceContextSnapshot,
+} from "./domain/prompt.js";
+export {
   buildSlashSkillPrompt,
   parseSlashSkillInvocation,
   type SlashSkillInvocation,
