@@ -11,6 +11,8 @@ enum DebugCommand: Equatable {
     case section(MainSection)
     /// The Settings sheet with these pages pushed in it; nil closes it.
     case settings([SettingsRoute]?)
+    /// Puts sample photos in Chat's composer.
+    case composerPhotos(Int)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -47,6 +49,9 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
+            await capture("30-composer-photos", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .composerPhotos(2) }
+            model.debugCommand = .composerPhotos(0)
+            try? await Task.sleep(for: .seconds(0.4))
             await capture("05-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
@@ -84,6 +89,7 @@ enum SnapshotRunner {
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.search) }
             await capture("24-topic-chat", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-trip")) }
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
+            await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
             await capture("15-task-answered", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
             }
