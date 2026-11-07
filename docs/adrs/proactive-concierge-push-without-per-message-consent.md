@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-11-06
 - **Architecture**: [Notification delivery](../architecture/notification-delivery.md)
+- **Amends**: [The notification body is sender-supplied](sender-supplied-notification-body-over-contentless-push.md)
 
 ## Context
 
@@ -22,11 +23,15 @@ The instance pushes the first message of every Concierge turn the guardian did n
 - **A per-guardian setting that turns proactive pushes on.** Rejected because the phone's notification permission is already that switch. A second switch on the instance would leave the guardian reasoning about two settings for one behavior, the failure the [notification body ADR](sender-supplied-notification-body-over-contentless-push.md) names for a preview toggle.
 - **Push only important alerts.** Rejected because a task chat that finished or asks a question is as much news as a followed event, and the guardian wants the digest on the phone too. The digest arrives without an alert, which keeps its cost low.
 
+## Amendment to the notification body record
+
+This record amends [the notification body record](sender-supplied-notification-body-over-contentless-push.md), which holds that a caller-supplied tap payload reopens it. A request now also carries routing data that only the instance sets: `level`, whether the push alerts, and `chatId`, the chat a tap opens. Neither is shown, so the body stays the only content the guardian reads, and no agent input reaches either field. The instance also builds the body of these pushes itself, as a preview of the Concierge's own words. Rome Cloud stays the single place that enforces the body. The agent-facing action is unchanged: it supplies a body alone.
+
 ## Consequences
 
 The guardian learns of a proactive message wherever they are, and taps it to open the chat it was said in. Nothing in the agent decides whether to push, so a model cannot forget the push or push a reply the guardian asked for.
 
-A forwarded task answer can hold a one-time code, and the Concierge's instructions alone cannot keep it off the lock screen, so a forward or a card pushes the Concierge's intro or the task's title instead of the forwarded text. The Concierge is told that its first message in such a turn can show on the lock screen, as `send_notification` tells its callers.
+A forwarded task answer can hold a one-time code, and the Concierge's instructions alone cannot keep it off the lock screen. A task's title and a chat's name can come from the same output. So a forward pushes the Concierge's intro, and a forward with no intro or a card pushes a fixed line, never the forwarded text, the title or the name. The Concierge is told that its first message in such a turn can show on the lock screen, as `send_notification` tells its callers.
 
 A turn the guardian did not start pushes even when the guardian has the chat open. One turn pushes once, however many messages it says. A proactive turn that writes its message outside `say` and is then reminded pushes nothing, since the reminder carries no push.
 
