@@ -81,6 +81,10 @@ Agreed design: the instance decides when to push and sends `{body, level, chatId
 - [ ] Login page with the mascot: centered where the launch logo sits, "Rome" and the sign-in line below, an occasional blink; stopped / no-instance states use the mascot instead of the power icon (user, 2026-11-06). Queued after the update page.
 - [ ] Settings: the X at top right stays fixed while the list scrolls (user, 2026-11-06). Queued.
 
+## Images
+
+- [ ] Tap any photo to open it full screen (zoom, swipe down to close, swipe between a message's images, share); Markdown images in replies show in the bubble (internal ones through the asset endpoints, external https without credentials). Plain links to image files stay links, like the web (user, 2026-11-06: the simpler option). Queued after the draft fixes.
+
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
