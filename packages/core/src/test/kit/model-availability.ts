@@ -41,7 +41,6 @@ export function fakeAvailability(
   return { read, refresh: async () => {} };
 }
 
-/** A ChatGPT plan that serves Terra alone. */
 /** A ChatGPT plan that withholds the frontier models, so a tier resolves to Terra. */
 export const RESTRICTED_PLAN = {
   modelsDenied: [
