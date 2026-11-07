@@ -6,8 +6,10 @@
 //
 // Rome never acts or chats as this account, so it is not a connection
 // (docs/domains/connections.md), and the guardian signing in to Rome is a
-// different act. Both words stay out of this port. docs/domains/agents.md
-// carries the language.
+// different act, so the port's operations say authorize and revoke. The one
+// exception is the status field `loggedIn`, which keeps the name the dashboard
+// reads today; renaming it is the application layer's move.
+// docs/domains/agents.md carries the language.
 
 /** The provider's subscription tier, as the provider reports it. */
 export type ModelPlanType =
