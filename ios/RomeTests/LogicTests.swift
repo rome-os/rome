@@ -261,3 +261,12 @@ final class StubBackend: RomeBackend {
     func startUpgrade(target: String) async throws -> UpgradeStarted { throw APIError.network }
     func buildInfo() async throws -> BuildInfo { throw APIError.network }
 }
+
+@Suite struct AppLanguageTests {
+    /// Named in its own language, from what iOS resolved for the app.
+    @Test func namesTheResolvedLanguage() {
+        #expect(AppLanguage.name("zh-Hans") == "简体中文")
+        #expect(AppLanguage.name("en") == "English")
+        #expect(AppLanguage.name(nil) == "English")
+    }
+}

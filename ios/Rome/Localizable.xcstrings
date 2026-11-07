@@ -780,6 +780,16 @@
         }
       }
     },
+    "Language" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语言"
+          }
+        }
+      }
+    },
     "Last run failed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1197,6 +1207,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在打开你的 Rome"
+          }
+        }
+      }
+    },
+    "Opens Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置"
           }
         }
       }

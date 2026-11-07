@@ -42,6 +42,17 @@ struct PageHeader: View {
     }
 }
 
+/// The app's languages, each named in its own language, as iOS's picker shows them.
+enum AppLanguage {
+    /// `preferredLocalizations.first`: the language iOS resolved for the app.
+    static func name(_ localization: String?) -> String {
+        switch localization {
+        case let code? where code.hasPrefix("zh"): return "简体中文"
+        default: return "English"
+        }
+    }
+}
+
 /// An inset group: a white rounded card with hairline rows.
 struct SettingsGroup<Content: View>: View {
     var header: LocalizedStringKey? = nil
@@ -140,6 +151,28 @@ struct SettingsScreen: View {
                         .accessibilityLabel("Appearance")
                         .accessibilityValue(Text(model.appearance.current.title))
                     }
+                    // iOS keeps the app's language: its own picker, in the app's
+                    // page in Settings, relaunches the app when it changes.
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    } label: {
+                        SettingsRow(systemImage: "globe", title: "Language") {
+                            HStack(spacing: 6) {
+                                Text(verbatim: AppLanguage.name(Bundle.main.preferredLocalizations.first))
+                                    .romeFont(17)
+                                    .foregroundStyle(Palette.sub)
+                                Image(systemName: "arrow.up.right")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
+                        }
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Language")
+                    .accessibilityValue(Text(verbatim: AppLanguage.name(Bundle.main.preferredLocalizations.first)))
+                    .accessibilityHint("Opens Settings")
+                    .accessibilityAddTraits(.isButton)
                     SettingsRow(systemImage: "bell", title: "Notifications") {
                         Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: setNotifications))
                             .labelsHidden()
