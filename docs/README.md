@@ -1,6 +1,6 @@
 # docs/
 
-Durable design documentation for Rome. For the rules used when writing docs, see [CLAUDE.md](CLAUDE.md).
+Durable design documentation for Rome. For the rules on writing docs, see [CLAUDE.md](CLAUDE.md).
 
 ## What lives where
 
