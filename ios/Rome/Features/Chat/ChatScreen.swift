@@ -30,7 +30,7 @@ struct ChatScreen: View {
                 banners
             }
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in

@@ -20,7 +20,9 @@ enum Palette {
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))
     static let scrim = dynamic(rgba: (0x1A130F, 0.25), (0x000000, 0.55))
-    static let drawerScrim = dynamic(rgba: (0x1A130F, 0.12), (0x000000, 0.35))
+    /// The page pushed aside by the open drawer: a step above the page,
+    /// below the agent bubble in dark.
+    static let drawerPage = dynamic(0xE4DED4, 0x151210)
     static let cardShadow = dynamic(rgba: (0x3C2814, 0.16), (0x000000, 0.5))
     static let softShadow = dynamic(rgba: (0x1A130F, 0.06), (0x000000, 0.3))
 
@@ -39,6 +41,20 @@ enum Palette {
     static let runningText = dynamic(0x0069CA, 0x58B0FF)
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
+
+    /// `from` blended toward `to` by `amount` (0…1), in each appearance.
+    static func blend(_ from: Color, _ to: Color, _ amount: CGFloat) -> Color {
+        let t = min(1, max(0, amount))
+        return Color(UIColor { traits in
+            let a = UIColor(from).resolvedColor(with: traits)
+            let b = UIColor(to).resolvedColor(with: traits)
+            var (r1, g1, b1, a1) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+            var (r2, g2, b2, a2) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+            a.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+            b.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+            return UIColor(red: r1 + (r2 - r1) * t, green: g1 + (g2 - g1) * t, blue: b1 + (b2 - b1) * t, alpha: a1 + (a2 - a1) * t)
+        })
+    }
 
     private static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
         dynamic(rgba: (light, 1), (dark, 1))
@@ -68,7 +84,25 @@ enum Metrics {
     static let bubbleMaxWidthRatio: CGFloat = 0.78
 }
 
+extension EnvironmentValues {
+    /// The background of a page that can sit beside the drawer. The shell
+    /// moves it toward `Palette.drawerPage` as the drawer opens.
+    @Entry var pageBackground: Color = Palette.bg
+}
+
+/// Paints the page's background from the environment.
+private struct PageBackground: ViewModifier {
+    @Environment(\.pageBackground) private var color
+
+    func body(content: Content) -> some View {
+        content.background(color.ignoresSafeArea())
+    }
+}
+
 extension View {
+    /// The page background of a page that can sit beside the drawer.
+    func pageBackground() -> some View { modifier(PageBackground()) }
+
     /// The design's "soft" elevation: a hairline ring plus a faint two-layer drop shadow.
     func softElevation(radius: CGFloat) -> some View {
         self

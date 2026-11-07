@@ -65,7 +65,7 @@ struct TopicChatScreen: View {
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {

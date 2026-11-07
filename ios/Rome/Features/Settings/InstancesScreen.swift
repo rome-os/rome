@@ -231,7 +231,7 @@ struct SearchScreen: View {
                 .scrollDismissesKeyboard(.immediately)
             }
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .onAppear { focused = true }
@@ -314,7 +314,7 @@ struct RoutinesScreen: View {
             }
             .padding(.bottom, 32)
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
     }

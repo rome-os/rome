@@ -86,12 +86,14 @@ struct MainShell: View {
                         destination(route)
                     }
                 }
+                // Pushed aside, the page becomes a card of its own color, following the drag.
+                .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
                 .frame(width: geometry.size.width, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
                 .overlay {
                     if progress > 0 {
                         RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
-                            .fill(Palette.drawerScrim.opacity(progress))
+                            .fill(Color.clear)
                             .contentShape(Rectangle())
                             .onTapGesture { closeDrawer() }
                     }
