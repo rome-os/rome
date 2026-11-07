@@ -85,6 +85,17 @@ final class APIClient: Sendable {
     /// The live-events socket's upgrade was refused with a 401.
     func reportUnauthorized() { onUnauthorized() }
 
+    /// A GET that finds its pooled connection dead is sent once more. The
+    /// first request after the app was suspended often does: the system
+    /// closed the connection while the app slept.
+    static func data(for request: URLRequest, in session: URLSession) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch let error as URLError where error.code == .networkConnectionLost && request.httpMethod == "GET" {
+            return try await session.data(for: request)
+        }
+    }
+
     /// A request carrying the session cookie, for the live-events socket.
     func socketRequest(_ path: String) -> URLRequest {
         var components = URLComponents(url: origin.appending(path: path), resolvingAgainstBaseURL: false)!
@@ -120,7 +131,7 @@ final class APIClient: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await Self.data(for: request, in: session)
         } catch let error as URLError {
             switch error.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
