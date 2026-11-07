@@ -202,6 +202,8 @@ final class StubBackend: RomeBackend {
     func conciergeSession() async throws -> ConciergeSessionInfo { .init(id: "concierge", unread: 0) }
     func conciergeChats() async throws -> [ConciergeChat] { [] }
     func startTopicChat() async throws -> ConciergeChat { throw APIError.network }
+    func renameChat(_ id: String, to name: String) async throws {}
+    func archiveChat(_ id: String) async throws {}
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage { .init(messages: []) }
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn { .init() }
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {}

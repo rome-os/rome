@@ -54,6 +54,38 @@ import Testing
         #expect(TopicChatsStore.title(store.chat("topic-1")) == "Kyoto trip")
     }
 
+    @Test func renameSendsTheNameAndUpdatesTheDrawer() async {
+        let backend = FakeBackend()
+        backend.topicChats = [ConciergeChat(id: "topic-1", name: "Old", main: false, unread: 0)]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.renameTopic("topic-1", to: "  Kyoto trip "))
+        #expect(backend.calls == ["rename topic-1 Kyoto trip"])
+        #expect(workspace.topics.chat("topic-1")?.name == "Kyoto trip")
+        // A blank name is not sent.
+        #expect(await !workspace.renameTopic("topic-1", to: "   "))
+        #expect(backend.calls.count == 1)
+    }
+
+    @Test func archiveRemovesTheChatFromTheDrawer() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Trip", main: false, unread: 0),
+            ConciergeChat(id: "topic-2", name: "Home", main: false, unread: 0),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.archiveTopic("topic-1"))
+        #expect(backend.calls == ["archive topic-1"])
+        #expect(workspace.topics.chats.map(\.id) == ["topic-2"])
+        // A refetch agrees: the server no longer lists it.
+        workspace.topics.refresh()
+        await settle()
+        #expect(workspace.topics.chats.map(\.id) == ["topic-2"])
+    }
+
     @Test func aTurnInAnUnknownChatRefetchesTheList() async {
         let backend = FakeBackend()
         let store = TopicChatsStore(backend: backend)

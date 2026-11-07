@@ -62,6 +62,16 @@ final class TopicChatsStore {
         refresh()
     }
 
+    /// A rename this app made: shown now, ahead of its `session_name` event.
+    func rename(_ id: String, to name: String) {
+        if let index = chats.firstIndex(where: { $0.id == id }) { chats[index].name = name }
+    }
+
+    /// An archived chat leaves the list.
+    func remove(_ id: String) {
+        apply(chats.filter { $0.id != id })
+    }
+
     func chat(_ id: String) -> ConciergeChat? {
         chats.first { $0.id == id }
     }

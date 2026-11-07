@@ -81,6 +81,17 @@ final class DemoBackend: RomeBackend {
         return chat
     }
 
+    func renameChat(_ id: String, to name: String) async throws {
+        try await pause(0.2)
+        if let index = topicChats.firstIndex(where: { $0.id == id }) { topicChats[index].name = name }
+        bus.emit(LiveTopic.chat(id), .sessionName(sessionId: id, name: name))
+    }
+
+    func archiveChat(_ id: String) async throws {
+        try await pause(0.2)
+        topicChats.removeAll { $0.id == id }
+    }
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         try await pause(0.3)
         // Pages from the newest back, as the server does; the cursor is the

@@ -27,6 +27,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func conciergeChats() async throws -> [ConciergeChat]
     /// Starts an untitled topic chat, which its first message names.
     func startTopicChat() async throws -> ConciergeChat
+    func renameChat(_ id: String, to name: String) async throws
+    /// Archives a chat; a Concierge topic chat retires with it.
+    func archiveChat(_ id: String) async throws
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws
@@ -74,6 +77,14 @@ final class LiveBackend: RomeBackend {
 
     func startTopicChat() async throws -> ConciergeChat {
         try await client.post("/concierge/chats", json: .object([:]), as: ConciergeChat.self)
+    }
+
+    func renameChat(_ id: String, to name: String) async throws {
+        try await client.patch("/chat/sessions/\(escape(id))/name", json: .object(["name": .string(name)]))
+    }
+
+    func archiveChat(_ id: String) async throws {
+        try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
     }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {

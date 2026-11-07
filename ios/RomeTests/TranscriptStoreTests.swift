@@ -67,6 +67,16 @@ final class FakeBackend: RomeBackend {
         return chat
     }
 
+    func renameChat(_ id: String, to name: String) async throws {
+        calls.append("rename \(id) \(name)")
+        if let index = topicChats.firstIndex(where: { $0.id == id }) { topicChats[index].name = name }
+    }
+
+    func archiveChat(_ id: String) async throws {
+        calls.append("archive \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         calls.append("send \(sessionId) \(text)")
         throw APIError.network

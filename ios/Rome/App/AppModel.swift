@@ -101,6 +101,25 @@ final class Workspace {
         return chat.id
     }
 
+    /// Renames a topic chat. Returns whether the server took it.
+    @discardableResult
+    func renameTopic(_ chatId: String, to name: String) async -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, (try? await backend.renameChat(chatId, to: trimmed)) != nil else { return false }
+        topics.rename(chatId, to: trimmed)
+        return true
+    }
+
+    /// Archives a topic chat and drops it from the drawer. Returns whether the
+    /// server took it.
+    @discardableResult
+    func archiveTopic(_ chatId: String) async -> Bool {
+        guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+        topics.remove(chatId)
+        topicStores.removeValue(forKey: chatId)?.stop()
+        return true
+    }
+
     /// A tapped push for a topic chat: its newest rows, fetched again.
     func showLatest(inTopic chatId: String) {
         topicLatest[chatId, default: 0] += 1
