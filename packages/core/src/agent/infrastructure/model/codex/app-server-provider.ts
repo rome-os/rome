@@ -436,6 +436,12 @@ interface ActiveTurn {
 
 interface CodexAppServerProviderOptions {
   appServerManager?: CodexAppServerManager;
+  /**
+   * Starts the app-server on construction so the first turn finds it ready.
+   * Defaults to true. Rome's boot passes false and warms the shared manager
+   * once it has started, so the spawn does not compete with boot for CPU.
+   */
+  warmup?: boolean;
   /** Update runtime auth state before an auth-revoked terminal is exposed. */
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
@@ -613,11 +619,13 @@ export class CodexAppServerProvider implements ModelProvider {
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.appServerManager = options.appServerManager ?? new CodexAppServerManager();
-    void this.appServerManager.warmup().catch((err) => {
-      log.warn("codex app-server warmup failed", {
-        error: err instanceof Error ? err.message : String(err),
+    if (options.warmup !== false) {
+      void this.appServerManager.warmup().catch((err) => {
+        log.warn("codex app-server warmup failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
+    }
   }
 
   close(): void {
