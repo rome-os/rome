@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readEnvInstanceSlug } from "./instance-env.js";
 
 export function runningInsideDocker(): boolean {
   return existsSync("/.dockerenv");
@@ -16,8 +17,7 @@ export function runningInsideDocker(): boolean {
  * all flip together.
  */
 export function resolveInstanceSlug(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const slug = env.PANTHEON_SLUG?.trim();
-  return slug ? slug : undefined;
+  return readEnvInstanceSlug(env);
 }
 
 /**

@@ -2,7 +2,6 @@ import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
 import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops.js";
-import { resolveInstanceSlug } from "./lib/runtime.js";
 
 /**
  * A relay drain URL must be a parseable ws/wss URL pointing at a `/c/{mailboxId}`
@@ -20,15 +19,9 @@ function isWssDrainUrl(value: string): boolean {
 }
 
 const configSchema = z.object({
-  // Instance slug — the stable per-instance identifier (the `PANTHEON_SLUG`
-  // tenant slug; the local Rome Cloud `dev` tenant in dev). Absent when this
-  // instance has no slug. Surfaced here so rollout gating can key on it; see
-  // `resolveInstanceSlug`.
-  instanceSlug: z.string().optional(),
-
   // Statsig server secret key. When present, the cloud-auth rollout gate
   // (`rome_cloud_auth`) is evaluated against Statsig live on each /login, keyed
-  // on `instanceSlug`. Absent leaves the gate to the all-off default (fail
+  // on the instance slug. Absent leaves the gate to the all-off default (fail
   // closed to local auth) plus any `FEATURE_GATE_*` env override.
   statsigServerSecretKey: z.string().optional(),
 
@@ -133,13 +126,6 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   // the gate entirely.
   if (env.STATSIG_SERVER_SECRET_KEY) {
     raw.statsigServerSecretKey = env.STATSIG_SERVER_SECRET_KEY;
-  }
-
-  // Instance slug, normalized from PANTHEON_SLUG. Left absent (not "") when
-  // unset/blank so the schema's optional stays undefined rather than a bucket.
-  const instanceSlug = resolveInstanceSlug(env);
-  if (instanceSlug !== undefined) {
-    raw.instanceSlug = instanceSlug;
   }
 
   // Scalars

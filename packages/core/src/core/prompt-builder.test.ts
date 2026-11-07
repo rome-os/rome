@@ -357,24 +357,25 @@ describe("PromptBuilder", () => {
   });
 
   it("surfaces Rome's own public web address in the main-agent runtime context", () => {
-    const systemPrompt = new PromptBuilder(undefined, undefined, "https://acme.romeos.cc").build(
-      mainConfig,
-      corePromptOptions,
-    );
+    const systemPrompt = new PromptBuilder(
+      undefined,
+      undefined,
+      () => "https://acme.romeos.cc",
+    ).build(mainConfig, corePromptOptions);
 
     expect(systemPrompt).toContain("# Runtime Context");
     expect(systemPrompt).toContain("Your public web address is `https://acme.romeos.cc`");
   });
 
   it("omits the public web address line when the instance has no public domain", () => {
-    const undefinedOrigin = new PromptBuilder(undefined, undefined, undefined).build(
+    const undefinedOrigin = new PromptBuilder(undefined, undefined, () => undefined).build(
       mainConfig,
       corePromptOptions,
     );
     expect(undefinedOrigin).toContain("# Runtime Context");
     expect(undefinedOrigin).not.toContain("Your public web address");
 
-    const blankOrigin = new PromptBuilder(undefined, undefined, "   ").build(
+    const blankOrigin = new PromptBuilder(undefined, undefined, () => "   ").build(
       mainConfig,
       corePromptOptions,
     );

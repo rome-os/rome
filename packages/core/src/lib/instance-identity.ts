@@ -2,6 +2,7 @@ import { requestSignerToken, SignerError, signerHealth } from "@rome-os/node-cor
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 import { type CloudProfile, readCloudProfile } from "./cloud-profile.js";
+import { readEnvInstanceToken } from "./instance-env.js";
 
 const log = createLogger("instance-identity");
 
@@ -192,11 +193,7 @@ export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<v
 
 // The token a hosted `.env` injects. Dev can ignore it to boot un-enrolled.
 function envInstanceToken(): string | null {
-  // Dev only: force the box to boot un-enrolled even when a token is in the env,
-  // so the dev stack exercises the real browser consent → enroll round trip
-  // instead of short-circuiting to the seeded token. Prod never sets this.
-  if (process.env.ROME_DEV_SKIP_TOKEN_SEED === "1") return null;
-  const envToken = process.env.ROME_INSTANCE_TOKEN?.trim();
+  const envToken = readEnvInstanceToken();
   return isValidInstanceToken(envToken) ? envToken : null;
 }
 
@@ -250,6 +247,10 @@ export interface InstanceIdentity {
   /** Rome Cloud profile picture for the account owner. Null means Cloud knows
    *  the account has no picture; undefined means the response omitted the field. */
   avatarUrl?: string | null;
+  /** The slug of the Pantheon-hosted Rome this credential is the provisioned one
+   *  of, as whoami names it. Absent when whoami says null or, from an older Rome
+   *  Cloud, omits it: either way this is not a hosted instance. */
+  hostedSlug?: string;
   /** The whole whoami account, for `system:get_guardian_cloud_profile`. */
   profile?: CloudProfile;
 }
@@ -356,6 +357,7 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
 
   const data = (await response.json().catch(() => null)) as {
     instanceId?: unknown;
+    hostedSlug?: unknown;
     account?: { id?: unknown; email?: unknown; avatarUrl?: unknown } | null;
   } | null;
   const instanceId = typeof data?.instanceId === "string" ? data.instanceId : null;
@@ -369,9 +371,18 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
         : null
       : undefined;
 
+  const hostedSlug = typeof data?.hostedSlug === "string" ? data.hostedSlug : undefined;
+
   return {
     status: "ok",
-    identity: { accountId, instanceId, email, avatarUrl, profile: readCloudProfile(data?.account) },
+    identity: {
+      accountId,
+      instanceId,
+      email,
+      avatarUrl,
+      ...(hostedSlug === undefined ? {} : { hostedSlug }),
+      profile: readCloudProfile(data?.account),
+    },
   };
 }
 
