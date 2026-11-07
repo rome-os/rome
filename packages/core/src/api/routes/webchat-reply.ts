@@ -1,7 +1,7 @@
 // Builds the snapshot a WebChat reply stores and quotes to the agent.
 
 import { REPLY_TO_TEXT_MAX_LENGTH, type ReplyToPart } from "@rome/api-types/chat";
-import { replyContextLine } from "../../core/reply-context.js";
+import { replyContextLine } from "../../agent/index.js";
 import type { ApiDeps } from "../deps.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { promptSafeSourceName } from "../../webchat/automated-source.js";

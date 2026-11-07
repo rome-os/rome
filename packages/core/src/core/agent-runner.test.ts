@@ -2250,7 +2250,7 @@ describe("AgentRunner", () => {
         ...(options.resetPolicy
           ? { resolveProviderSessionReset: async () => options.resetPolicy! }
           : {}),
-        ...(options.turnLinks ? { turnLinks: options.turnLinks } : {}),
+        ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );

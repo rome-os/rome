@@ -43,6 +43,14 @@ export { ActiveSessionExistsError, type SessionRepository } from "./domain/sessi
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
+export { catchUpPrompt } from "./domain/catch-up.js";
+export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
+export {
+  currentMessageSection,
+  replyContextLine,
+  replyContextSection,
+  withReplyContext,
+} from "./domain/reply-context.js";
 export type {
   ReportedAgent,
   SessionServed,

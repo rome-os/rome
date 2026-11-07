@@ -22,6 +22,9 @@ import {
   type AnswerShape,
   type ReadAnswerShape,
   type TurnAttribution,
+  catchUpPrompt,
+  type PromptFacts,
+  type PromptMessage,
   type TurnUsageReporting,
 } from "../agent/index.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
@@ -134,72 +137,11 @@ import { isGuardianFacingChannel } from "./guardian-channel.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
-import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
-
-/** One line of the context a turn's prompt opens with. */
-interface ConversationContextLine {
-  id: string;
-  sender: string | null;
-  text: string;
-  createdAt?: Date;
-}
-
-function contextLine(message: ContextLine): ConversationContextLine {
-  return {
-    id: String(message.id),
-    sender: message.senderName,
-    text: message.text,
-    createdAt: message.at,
-  };
-}
-
-function conversationContextLine(line: ConversationContextLine): string {
-  return replyContextLine({
-    createdAt: line.createdAt,
-    sender: line.sender?.trim() || "Unknown sender",
-    text: line.text,
-  });
-}
-
-/** How many of the messages the agent has not seen a turn's prompt carries.
- *  The rest are counted, not shown. */
-const CATCH_UP_LIMIT = 20;
-
-function prependConversationContext(
-  prompt: string,
-  context: {
-    notifications: ConversationContextLine[];
-    omittedNotificationCount: number;
-    repliedTo: ConversationContextLine | null;
-  },
-): string {
-  const sections: string[] = [];
-  const notifications = context.repliedTo
-    ? context.notifications.filter((message) => message.id !== context.repliedTo?.id)
-    : context.notifications;
-  if (notifications.length > 0 || context.omittedNotificationCount > 0) {
-    sections.push(
-      "<conversation_context>",
-      ...(context.omittedNotificationCount > 0
-        ? [`[${context.omittedNotificationCount} earlier messages omitted]`]
-        : []),
-      ...notifications.map(conversationContextLine),
-      "</conversation_context>",
-    );
-  }
-  if (context.repliedTo) {
-    sections.push(...replyContextSection(conversationContextLine(context.repliedTo)));
-  }
-  if (sections.length === 0) return prompt;
-  sections.push(...currentMessageSection(prompt));
-  return sections.join("\n");
-}
 
 export interface AgentSessionKey {
   agentName: string;
@@ -302,9 +244,9 @@ export interface SendTurnOptions {
   romeSessionType?: RomeSessionType;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
-  /** The line `replyTo` names, as Rome holds it where the turn's session
-   *  stands, or null when Rome holds none. Read only with `turnLinks`. */
-  quoted?: ContextLine | null;
+  /** The message `replyTo` names, as Rome holds it where the turn's session
+   *  stands, or null when Rome holds none. Read only with `promptFacts`. */
+  quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   /** Pushes the first message said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: NotifyLevel;
@@ -389,10 +331,10 @@ interface ManagerDeps {
   readAnswerShape: ReadAnswerShape;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
-  /** Each session's links to what was said where it stands, which a wake's
-   *  catch-up reads and marks. Absent, a channel session catches up on
+  /** What was said where each session stands that it has not seen, which a
+   *  wake's catch-up reads and marks. Absent, a channel session catches up on
    *  nothing. */
-  turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+  promptFacts?: PromptFacts;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
@@ -1729,7 +1671,7 @@ interface TurnSink {
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
-  quoted?: ContextLine | null;
+  quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   pushLevel?: NotifyLevel;
   lifecycleFinishDispatched: boolean;
@@ -3267,7 +3209,7 @@ class AgentSessionImpl implements AgentSession {
       // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
-      let unseenLineIds: number[] = [];
+      let unseenMessageIds: number[] = [];
       // A channel conversation stores lines the agent never saw as turns. The
       // surface says whether this channel does; webchat, for one, does not.
       const channel = sink.threadContext?.channel;
@@ -3277,32 +3219,15 @@ class AgentSessionImpl implements AgentSession {
         sink.threadContext &&
         channel &&
         channelSurfaceOf(this.deps, channel).promptContext;
-      if (catchesUp && this.deps.turnLinks) {
-        // The agent catches up on the lines said where its session stands
+      if (catchesUp && this.deps.promptFacts) {
+        // The agent catches up on the messages said where its session stands
         // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
-        const unseen = this.deps.turnLinks.unseen(sink.romeSessionId);
-        const shown = unseen.slice(-CATCH_UP_LIMIT);
-        // Rome's first line in a thread quotes the line that started it, said
-        // in the chat outside the thread. No line in the thread is a starter.
-        const threadStarter =
-          unseen.find((line) => line.fromRome && line.quotesOutside)?.quoted ?? null;
-        const repliedTo = sink.quoted
-          ? contextLine(sink.quoted)
-          : sink.replyTo?.content
-            ? {
-                id: `runtime-reply:${sink.replyTo.messageId}`,
-                sender: sink.replyTo.senderName ?? null,
-                text: sink.replyTo.content,
-              }
-            : null;
-        unseenLineIds = unseen.map((line) => line.id);
-        userPrompt = prependConversationContext(userPrompt, {
-          notifications: [
-            ...(threadStarter ? [contextLine(threadStarter)] : []),
-            ...shown.map(contextLine),
-          ],
-          omittedNotificationCount: unseen.length - shown.length,
-          repliedTo,
+        const unseen = this.deps.promptFacts.unseen(sink.romeSessionId);
+        unseenMessageIds = unseen.map((message) => message.id);
+        userPrompt = catchUpPrompt(userPrompt, {
+          unseen,
+          quoted: sink.quoted,
+          replyTo: sink.replyTo,
         });
       }
       // Every turn, subagents included: the folder is where the work happens.
@@ -3467,9 +3392,9 @@ class AgentSessionImpl implements AgentSession {
             // Taking the input may have replaced a Claude query, and its login kind.
             sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
-            if (this.deps.turnLinks && unseenLineIds.length > 0) {
+            if (this.deps.promptFacts && unseenMessageIds.length > 0) {
               try {
-                this.deps.turnLinks.seen(unseenLineIds, sink.romeSessionId, sink.turnId);
+                this.deps.promptFacts.seen(unseenMessageIds, sink.romeSessionId, sink.turnId);
               } catch (err) {
                 // As below: the turn goes on, and a later turn retries.
                 log.warn("failed to mark conversation context seen", {

@@ -73,6 +73,7 @@ The words a turn was asked, plus what Rome adds about where the turn stands: whe
 
 - What Rome adds can change from turn to turn, so it stays in the prompt and never in the system prompt.
 - In code, the blocks Rome adds are in [`packages/core/src/agent/domain/prompt.ts`](../../packages/core/src/agent/domain/prompt.ts).
+- A turn shows the last 20 messages the agent has not seen and counts the rest. In code, that rule is `catchUpPrompt` in [`packages/core/src/agent/domain/catch-up.ts`](../../packages/core/src/agent/domain/catch-up.ts), and the messages reach it through the `PromptFacts` port.
 
 ## Model provider account
 

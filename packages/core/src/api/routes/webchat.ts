@@ -98,7 +98,7 @@ import type {
   BackendTurnOptions,
 } from "../../actions/backend-turn.js";
 import { z } from "zod";
-import { withReplyContext } from "../../core/reply-context.js";
+import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 
 const log = createLogger("api:webchat");
