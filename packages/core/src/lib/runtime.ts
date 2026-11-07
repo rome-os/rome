@@ -21,9 +21,10 @@ export function resolveInstanceSlug(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 /**
- * Milliseconds since this container's PID 1 started, or null outside a Linux
- * container or when `/proc` cannot be read. Assumes the kernel's 100 Hz clock
- * tick, which every Linux build Rome ships on uses.
+ * Milliseconds since PID 1 started, which inside Docker is the container's
+ * init, or null when `/proc` cannot be read. On a bare Linux host PID 1 is the
+ * host's init, so the value is close to the system uptime. Assumes the
+ * kernel's 100 Hz clock tick, which every Linux build Rome ships on uses.
  */
 export function containerUptimeMs(
   read: (path: string) => string = (path) => readFileSync(path, "utf-8"),
