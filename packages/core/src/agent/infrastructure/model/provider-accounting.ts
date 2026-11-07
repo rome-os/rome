@@ -1,5 +1,10 @@
-import type { AgentAccounting, AgentContextUsage, AgentStop, AgentTokenUsage } from "../types.js";
-import { matchesModelAlias } from "../agent/index.js";
+import type {
+  AgentAccounting,
+  AgentContextUsage,
+  AgentStop,
+  AgentTokenUsage,
+} from "../../../types.js";
+import { matchesModelAlias } from "../../domain/model-alias.js";
 
 interface TokenRates {
   inputUsdPerMillion: number;

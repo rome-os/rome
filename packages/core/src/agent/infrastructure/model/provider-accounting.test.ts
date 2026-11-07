@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { MODEL_SELECTIONS } from "../agent/index.js";
+import { MODEL_SELECTIONS } from "../../domain/model-selection.js";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "./provider-accounting.js";
 
 describe("provider-accounting", () => {
