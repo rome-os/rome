@@ -44,7 +44,9 @@ function codexSmallSelection(codex: ProviderAvailability): ModelSelectionId {
 
 /**
  * The other provider's selection when `from` is at its limit (or `failed`
- * says its turn just was) and the other is an available subscription.
+ * says its turn just was) and the other is an available subscription. A
+ * source Rome has not read is taken at the failure's word: the refusal says
+ * it is a subscription at its limit.
  */
 export function usageSwitchTarget(
   state: ModelAvailabilityState,
@@ -52,7 +54,7 @@ export function usageSwitchTarget(
   failed = false,
 ): UsageSwitchTarget | null {
   const source = state[from];
-  if (!subscription(source)) return null;
+  if (source ? !subscription(source) : !failed) return null;
   if (!failed && !atUsageLimit(source)) return null;
   const provider: SwitchableProviderId = from === "openai" ? "anthropic" : "openai";
   const target = state[provider];

@@ -100,3 +100,9 @@ it("requires same-provider availability and model access", () => {
     ).toBeNull();
   }
 });
+
+it("switches away from a provider Rome has not read when its turn just failed for usage", () => {
+  const raw: ModelAvailabilityState = { openai: available() };
+  expect(usageSwitchTarget(raw, "anthropic", true)?.provider).toBe("openai");
+  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
+});
