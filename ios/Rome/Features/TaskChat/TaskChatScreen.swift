@@ -124,6 +124,7 @@ struct TaskChatScreen: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
+        .headerFade()
     }
 
     @ViewBuilder

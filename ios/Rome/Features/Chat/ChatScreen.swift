@@ -260,6 +260,16 @@ struct ChatHeader: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
+        .modifier(PlainTitleFade(active: plainTitle))
+    }
+}
+
+/// The fade a plain title needs; the main Chat's pill reads on its own.
+private struct PlainTitleFade: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active { content.headerFade() } else { content }
     }
 }
 

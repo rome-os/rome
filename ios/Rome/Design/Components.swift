@@ -45,7 +45,34 @@ extension View {
     }
 }
 
+/// Behind a header whose title has no pill: the page's color from the top
+/// down to just below the header, so rows scrolling under never show through
+/// the title.
+private struct HeaderFade: ViewModifier {
+    @Environment(\.pageBackground) private var page
+
+    func body(content: Content) -> some View {
+        content.background(alignment: .top) {
+            LinearGradient(
+                stops: [
+                    .init(color: page, location: 0),
+                    .init(color: page, location: 0.62),
+                    .init(color: page.opacity(0), location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.bottom, -22)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 extension View {
+    /// A page-colored fade behind a header with a plain title.
+    func headerFade() -> some View { modifier(HeaderFade()) }
+
     /// Fades scrolled content gradually under a floating top bar, instead of
     /// the hard cut-off line the system can choose.
     @ViewBuilder
