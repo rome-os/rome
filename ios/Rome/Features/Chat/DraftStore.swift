@@ -137,6 +137,23 @@ final class DraftStore {
         }
     }
 
+    /// A chat's drafts go by another id: what was kept under `from` moves to
+    /// `to`, unless `to` holds drafts of its own.
+    func move(chat from: String, to: String) {
+        guard from != to else { return }
+        if let draft = pending.removeValue(forKey: from), pending[to] == nil { pending[to] = draft }
+        debounce[from]?.cancel()
+        debounce[from] = nil
+        let source = folder(from), target = folder(to)
+        disk.run {
+            let manager = FileManager.default
+            guard manager.fileExists(atPath: source.path(percentEncoded: false)),
+                  !manager.fileExists(atPath: target.path(percentEncoded: false))
+            else { return }
+            try? manager.moveItem(at: source, to: target)
+        }
+    }
+
     /// Drops everything the chat holds: a blank chat left without sending.
     func discard(chat: String) {
         debounce[chat]?.cancel()

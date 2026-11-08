@@ -48,7 +48,12 @@ final class FakeBackend: RomeBackend {
         if interruptEndsTurn { turns.removeAll { $0.turnId == turnId } }
     }
 
-    func conciergeSession() async throws -> ConciergeSessionInfo { throw APIError.network }
+    /// The person's main chat, as `/concierge/session` names it; nil fails.
+    var mainChat: ConciergeSessionInfo?
+    func conciergeSession() async throws -> ConciergeSessionInfo {
+        guard let mainChat else { throw APIError.network }
+        return mainChat
+    }
 
     /// Topic chats and the calls that start and write to them, in order.
     var topicChats: [ConciergeChat] = []
@@ -110,7 +115,8 @@ final class FakeBackend: RomeBackend {
     func aiTools() async throws -> AIToolsStatus { throw APIError.network }
     func setConciergeEnabled(_ enabled: Bool) async throws {}
     func search(_ query: String) async throws -> [SearchHit] { [] }
-    func me() async throws -> AccountIdentity? { nil }
+    var identity: Result<AccountIdentity?, Error> = .success(nil)
+    func me() async throws -> AccountIdentity? { try identity.get() }
     func sendFeedback(_ text: String) async throws {}
 
     // MARK: Connect cards

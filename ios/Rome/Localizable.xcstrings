@@ -237,6 +237,16 @@
         }
       }
     },
+    "Ask the owner of this Rome to turn it on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请让这个 Rome 的所有者打开它。"
+          }
+        }
+      }
+    },
     "Asking Rome Cloud to start the update…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1171,6 +1181,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通知"
+          }
+        }
+      }
+    },
+    "Only the owner of this Rome can approve this" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有这个 Rome 的所有者能批准"
           }
         }
       }

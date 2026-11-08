@@ -48,6 +48,7 @@ final class TopicChatsStore {
                 refreshAgain = false
                 // Off or unreachable: keep what is held.
                 if let all = try? await backend.conciergeChats() {
+                    mainChatId = all.first { $0.main }?.id
                     apply(Self.topics(in: all))
                 }
             } while refreshAgain
@@ -89,6 +90,9 @@ final class TopicChatsStore {
         all.filter { !$0.main && $0.id != conciergeChatID }
     }
 
+    /// This person's main chat on the server: a visitor's is not `concierge`.
+    private var mainChatId: String?
+
     private func apply(_ list: [ConciergeChat]) {
         chats = list
         loaded = true
@@ -112,7 +116,8 @@ final class TopicChatsStore {
             // A turn starting in a chat this list does not hold may be a new
             // topic chat; a turn ending in one it holds changes the unread count.
             let held = chat(id) != nil
-            if (running && !held && id != conciergeChatID) || (!running && held) { refresh() }
+            let main = id == conciergeChatID || id == mainChatId
+            if (running && !held && !main) || (!running && held) { refresh() }
         case .reconnected:
             refresh()
         default:

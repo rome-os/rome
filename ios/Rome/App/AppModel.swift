@@ -58,7 +58,7 @@ final class Workspace {
     /// The Rome Cloud picture of who is signed in, when they have one.
     private(set) var avatarURL: URL?
     let tasks: TasksStore
-    let concierge: TranscriptStore
+    private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
     /// Each opened topic chat's transcript, kept while the instance is open so
@@ -68,11 +68,33 @@ final class Workspace {
     private(set) var topicLatest: [String: Int] = [:]
     private(set) var conciergeState: ConciergeState = .loading
     private(set) var unreadAtOpen = 0
-    /// The guardian's own main chat on the server; the app reads it as
-    /// `conciergeChatID`, the dashboard by this id.
+    /// This person's main chat on the server: the guardian's is `concierge`, a
+    /// visitor's its own id. The app names the main chat `conciergeChatID` in
+    /// its screens; everything sent to the server uses this id.
     private(set) var mainChatServerID: String?
-    /// The instance's guardian, not a visitor: Apps shows for the guardian only.
-    private(set) var isGuardian = false
+    /// Whose session this is. Apps, the update page, AI tool usage, approvals
+    /// and the instance's own settings are the guardian's; a visitor never sees
+    /// them. Unknown (not read yet, or unreadable) is treated as the guardian,
+    /// so a slow network never hides the owner's controls.
+    enum Role: Equatable { case unknown, guardian, visitor }
+    private(set) var role: Role = .unknown
+    /// Apps shows for the guardian only, once that is known.
+    var isGuardian: Bool { role == .guardian }
+    var isVisitor: Bool { role == .visitor }
+
+    /// Reads who this session is from `/auth/me`.
+    func readRole() async {
+        do {
+            let identity = try await backend.me()
+            role = identity?.isGuardian == true ? .guardian : .visitor
+            if let identity {
+                accountLabel = identity.name
+                avatarURL = identity.avatarURL
+            }
+        } catch {
+            role = .unknown
+        }
+    }
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
     /// A prompt for the main Chat's composer, unsent; Chat takes it once its
@@ -96,8 +118,10 @@ final class Workspace {
         self.accountLabel = accountLabel
         self.drafts = drafts ?? DraftStore(instance: host)
         tasks = TasksStore(backend: backend)
-        concierge = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
-        concierge.drafts = ChatDrafts(store: self.drafts, chat: conciergeChatID)
+        // The guardian's main chat until the server names this person's.
+        let main = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        main.drafts = ChatDrafts(store: self.drafts, chat: conciergeChatID)
+        concierge = main
         topics = TopicChatsStore(backend: backend)
     }
 
@@ -184,13 +208,7 @@ final class Workspace {
         drafts.discardBlankChats()
         tasks.start()
         topics.start()
-        Task {
-            if let identity = try? await backend.me() {
-                accountLabel = identity.name
-                avatarURL = identity.avatarURL
-            }
-        }
-        Task { isGuardian = await backend.isGuardian() }
+        if role == .unknown { Task { await readRole() } }
         await openConcierge()
     }
 
@@ -200,6 +218,7 @@ final class Workspace {
             let info = try await backend.conciergeSession()
             unreadAtOpen = info.unread
             mainChatServerID = info.id
+            useMainChat(info.id)
             conciergeState = .ready
             concierge.start()
         } catch APIError.conciergeOff {
@@ -207,6 +226,24 @@ final class Workspace {
         } catch {
             conciergeState = .failed
         }
+    }
+
+    /// A visitor's main chat is not `concierge`: its transcript, sends, live
+    /// topic and drafts go by its own id. What this phone kept as `concierge`
+    /// before moves with it, so no draft is lost. Nothing has loaded yet: the
+    /// store starts once the id is known.
+    private func useMainChat(_ id: String) {
+        guard !id.isEmpty, id != concierge.sessionId else { return }
+        concierge.stop()
+        drafts.move(chat: concierge.sessionId, to: id)
+        let store = TranscriptStore(sessionId: id, kind: .concierge, backend: backend)
+        store.drafts = ChatDrafts(store: drafts, chat: id)
+        concierge = store
+    }
+
+    /// The id this person's main chat goes by, here and on the server.
+    func isMainChat(_ id: String) -> Bool {
+        id == conciergeChatID || id == mainChatServerID || id == concierge.sessionId
     }
 
     func enableConcierge() async {
@@ -514,7 +551,9 @@ final class AppModel {
         // Its own task: the poll that reports the finish is cancelled when the
         // reopened workspace attaches, and would cancel the reopen with it.
         update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
-        if let id = currentInstanceID {
+        // Updating the instance is the guardian's call: a visitor never sees the page.
+        await workspace.readRole()
+        if let id = currentInstanceID, !workspace.isVisitor {
             Task { await update.attach(backend: workspace.backend, instanceID: id) }
             // Hold the loading state briefly for the check, so a Rome that is
             // behind goes straight to the update page instead of showing Chat

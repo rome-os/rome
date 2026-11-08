@@ -196,7 +196,7 @@ struct SearchScreen: View {
                             Button { onOpen(hit) } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
-                                        Text(hit.session.id == conciergeChatID ? "Chat" : hit.session.name)
+                                        Text(workspace.isMainChat(hit.session.id) ? "Chat" : hit.session.name)
                                             .romeFont(13, .semibold)
                                             .foregroundStyle(Palette.sub)
                                             .lineLimit(1)

@@ -123,11 +123,14 @@ struct SettingsScreen: View {
                 accountCard
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                SettingsGroup(header: "AI tool usage") {
-                    UsageRow(name: "Claude", provider: usage?.claude, last: false)
-                    UsageRow(name: "Codex", provider: usage?.codex, last: true)
+                // The guardian's own subscriptions: not a visitor's to see.
+                if !workspace.isVisitor {
+                    SettingsGroup(header: "AI tool usage") {
+                        UsageRow(name: "Claude", provider: usage?.claude, last: false)
+                        UsageRow(name: "Codex", provider: usage?.codex, last: true)
+                    }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
                         Menu {
@@ -173,13 +176,16 @@ struct SettingsScreen: View {
                     .accessibilityValue(Text(verbatim: AppLanguage.name(Bundle.main.preferredLocalizations.first)))
                     .accessibilityHint("Opens Settings")
                     .accessibilityAddTraits(.isButton)
-                    SettingsRow(systemImage: "bell", title: "Notifications") {
-                        Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: setNotifications))
-                            .labelsHidden()
-                            .tint(Palette.primary)
+                    // Pushes reach the guardian only.
+                    if !workspace.isVisitor {
+                        SettingsRow(systemImage: "bell", title: "Notifications") {
+                            Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: setNotifications))
+                                .labelsHidden()
+                                .tint(Palette.primary)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
-                    .accessibilityElement(children: .combine)
-                    if model.push.needsSystemSettings {
+                    if !workspace.isVisitor, model.push.needsSystemSettings {
                         SystemSettingsNote {
                             if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
                         }
@@ -195,14 +201,17 @@ struct SettingsScreen: View {
                         }
                     }
                     .buttonStyle(RowPressStyle())
-                    Button { showFeedback = true } label: {
-                        SettingsRow(systemImage: "bubble.left.and.text.bubble.right", title: "Send feedback") {
-                            Image(systemName: "chevron.right")
-                                .romeFont(13, .semibold)
-                                .foregroundStyle(Palette.sub)
+                    // Feedback goes out as the guardian's.
+                    if !workspace.isVisitor {
+                        Button { showFeedback = true } label: {
+                            SettingsRow(systemImage: "bubble.left.and.text.bubble.right", title: "Send feedback") {
+                                Image(systemName: "chevron.right")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
                         }
+                        .buttonStyle(RowPressStyle())
                     }
-                    .buttonStyle(RowPressStyle())
                     SettingsRow(systemImage: "info.circle", title: "Version", last: true) {
                         Text(appVersion)
                             .romeFont(17, monospacedDigits: true)
@@ -237,7 +246,7 @@ struct SettingsScreen: View {
         .floatingTopBar { PageHeader(title: "Settings", onClose: onClose, inSheet: true) }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .task { usage = try? await workspace.backend.aiTools() }
+        .task { if !workspace.isVisitor { usage = try? await workspace.backend.aiTools() } }
         .task {
             await model.push.refresh()
             notificationsOn = model.push.isOn

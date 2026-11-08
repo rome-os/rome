@@ -192,6 +192,8 @@ struct ApprovalCardView: View {
     let submitting: Bool?
     let error: String?
     let resolvedAt: Date?
+    /// A visitor sees the card but cannot answer it.
+    var canResolve = true
     let onResolve: (Bool) -> Void
 
     private var title: String { part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName) }
@@ -285,41 +287,49 @@ struct ApprovalCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            HStack(spacing: 10) {
-                Button { onResolve(false) } label: {
-                    Group {
-                        if submitting == false {
-                            Spinner(size: 18, lineWidth: 2.4, color: Palette.fg, trackOpacity: 0.2)
-                        } else {
-                            Text("Reject")
+            if canResolve {
+                HStack(spacing: 10) {
+                    Button { onResolve(false) } label: {
+                        Group {
+                            if submitting == false {
+                                Spinner(size: 18, lineWidth: 2.4, color: Palette.fg, trackOpacity: 0.2)
+                            } else {
+                                Text("Reject")
+                            }
                         }
+                        .romeFont(17, .semibold)
+                        .foregroundStyle(Palette.fg)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Palette.fill, in: Capsule())
                     }
-                    .romeFont(17, .semibold)
-                    .foregroundStyle(Palette.fg)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Palette.fill, in: Capsule())
-                }
-                .opacity(submitting == true ? 0.45 : 1)
-                Button { onResolve(true) } label: {
-                    Group {
-                        if submitting == true {
-                            Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
-                        } else {
-                            Text("Approve")
+                    .opacity(submitting == true ? 0.45 : 1)
+                    Button { onResolve(true) } label: {
+                        Group {
+                            if submitting == true {
+                                Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
+                            } else {
+                                Text("Approve")
+                            }
                         }
+                        .romeFont(17, .semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Palette.primary, in: Capsule())
+                        .shadow(color: Palette.primary.opacity(0.5), radius: 7, x: 0, y: 6)
                     }
-                    .romeFont(17, .semibold)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Palette.primary, in: Capsule())
-                    .shadow(color: Palette.primary.opacity(0.5), radius: 7, x: 0, y: 6)
+                    .opacity(submitting == false ? 0.45 : 1)
                 }
-                .opacity(submitting == false ? 0.45 : 1)
+                .buttonStyle(PressScaleStyle(scale: 0.97))
+                .disabled(submitting != nil)
+            } else {
+                // Approvals are the owner's: the server answers a visitor 403.
+                Text("Only the owner of this Rome can approve this")
+                    .romeFont(14)
+                    .foregroundStyle(Palette.sub)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(PressScaleStyle(scale: 0.97))
-            .disabled(submitting != nil)
         }
         .padding(16)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))

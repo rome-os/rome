@@ -97,6 +97,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.isVisitor, workspace.isVisitor)
                 // Pushed aside, the page becomes a card of its own color, following the drag.
                 .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
                 .frame(width: geometry.size.width, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
@@ -308,7 +309,7 @@ struct MainShell: View {
                 })
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
-                    if hit.session.id == conciergeChatID {
+                    if workspace.isMainChat(hit.session.id) {
                         show(.chat)
                     } else if workspace.topics.chat(hit.session.id) != nil {
                         show(.topic(hit.session.id))

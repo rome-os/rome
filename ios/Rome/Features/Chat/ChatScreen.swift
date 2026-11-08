@@ -35,7 +35,7 @@ struct ChatScreen: View {
             }
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: conciergeChatID, text: $draft, attachments: attachments, transcript: workspace.concierge, prefill: Binding(
+        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, prefill: Binding(
             get: { workspace.composerPrefill },
             set: { workspace.composerPrefill = $0 }
         )) { composerFocused = true }
@@ -113,7 +113,7 @@ struct ChatScreen: View {
 
     /// Offered once Concierge is open, never while it loads or is off.
     private var offersPush: Bool {
-        workspace.conciergeState == .ready && model.push.offersPrompt()
+        workspace.conciergeState == .ready && !workspace.isVisitor && model.push.offersPrompt()
     }
 
     @ViewBuilder
@@ -124,11 +124,16 @@ struct ChatScreen: View {
             Spinner(size: 22, color: Palette.sub)
             Spacer()
         case .off:
-            CenteredMessage(
-                title: "Chat is off",
-                detail: "Turn it on to chat here.",
-                actionTitle: "Turn on Chat"
-            ) { Task { await workspace.enableConcierge() } }
+            if workspace.isVisitor {
+                // Turning Chat on is the owner's setting.
+                CenteredMessage(title: "Chat is off", detail: "Ask the owner of this Rome to turn it on.")
+            } else {
+                CenteredMessage(
+                    title: "Chat is off",
+                    detail: "Turn it on to chat here.",
+                    actionTitle: "Turn on Chat"
+                ) { Task { await workspace.enableConcierge() } }
+            }
         case .failed:
             CenteredMessage(
                 title: "Could not reach your Rome",
@@ -384,8 +389,9 @@ struct ChecklistGlyph: View {
 struct CenteredMessage: View {
     let title: LocalizedStringKey
     let detail: LocalizedStringKey
-    let actionTitle: LocalizedStringKey
-    let action: () -> Void
+    /// No button when nil: there is nothing this person can do here.
+    var actionTitle: LocalizedStringKey? = nil
+    var action: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 18) {
@@ -395,8 +401,10 @@ struct CenteredMessage: View {
                 Text(detail).romeFont(15).foregroundStyle(Palette.sub)
             }
             .multilineTextAlignment(.center)
-            PrimaryButton(title: actionTitle, action: action)
-                .frame(maxWidth: 240)
+            if let actionTitle {
+                PrimaryButton(title: actionTitle, action: action)
+                    .frame(maxWidth: 240)
+            }
             Spacer()
             Spacer()
         }

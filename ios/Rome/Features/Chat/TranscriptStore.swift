@@ -473,10 +473,7 @@ final class TranscriptStore {
             origin: backend.origin
         )
         connectRuns[rowId] = Task { [weak self] in
-            // The main chat goes by its own id on the server.
-            var chat: String? = chatId
-            if chatId == conciergeChatID { chat = try? await backend.conciergeSession().id }
-            let phase = await runner.run(service: part.service, chatId: chat)
+            let phase = await runner.run(service: part.service, chatId: chatId)
             guard !Task.isCancelled else { return }
             self?.connectPhases[rowId] = phase
             self?.connectRuns[rowId] = nil

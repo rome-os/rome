@@ -302,10 +302,13 @@ enum RomeDate {
 struct AccountIdentity: Equatable, Sendable {
     let name: String
     let avatarURL: URL?
+    /// The instance's guardian, not an allow-listed visitor.
+    let isGuardian: Bool
 
-    init(name: String, avatarURL: URL? = nil) {
+    init(name: String, avatarURL: URL? = nil, isGuardian: Bool = true) {
         self.name = name
         self.avatarURL = avatarURL
+        self.isGuardian = isGuardian
     }
 
     init?(json body: JSONValue) {
@@ -321,5 +324,6 @@ struct AccountIdentity: Equatable, Sendable {
             return nil
         }
         avatarURL = picture
+        isGuardian = body["kind"]?.string == "guardian"
     }
 }

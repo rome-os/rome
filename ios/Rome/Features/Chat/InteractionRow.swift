@@ -27,6 +27,7 @@ enum InteractionCard: Equatable {
 struct InteractionRow: View {
     let row: TranscriptRow
     let store: TranscriptStore
+    @Environment(\.isVisitor) private var isVisitor
 
     var body: some View {
         switch row {
@@ -38,11 +39,13 @@ struct InteractionRow: View {
                 status: store.approvals[part.approvalId] == nil ? nil : store.approvalStatus(part),
                 submitting: store.resolvingApproval[part.approvalId],
                 error: store.approvalErrors[part.approvalId],
-                resolvedAt: RomeDate.parse(store.approvals[part.approvalId]?.resolvedAt ?? store.approvals[part.approvalId]?.updatedAt)
+                resolvedAt: RomeDate.parse(store.approvals[part.approvalId]?.resolvedAt ?? store.approvals[part.approvalId]?.updatedAt),
+                canResolve: !isVisitor
             ) { approve in
                 store.resolve(part.approvalId, approve: approve)
             }
-            .onAppear { store.watchApproval(part.approvalId) }
+            // The record is the guardian's to read: a visitor would only get 403s.
+            .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
         case .question(_, let part, let sessionId, let answered):
             QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
                 store.answer(part, answers: answers, sessionId: sessionId)
