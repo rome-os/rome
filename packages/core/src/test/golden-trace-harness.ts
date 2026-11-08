@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
@@ -116,6 +117,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
+    log: createLogger("agent-session"),
   });
   const runner = new AgentRunner(
     manager,

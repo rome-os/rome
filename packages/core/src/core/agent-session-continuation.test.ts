@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -164,6 +165,7 @@ describe("continuation notice through AgentSessionManager", () => {
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
+        log: createLogger("agent-session"),
       },
       { keepAliveAcrossTurns: true },
     );

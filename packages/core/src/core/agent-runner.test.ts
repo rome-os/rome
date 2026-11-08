@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts } from "../agent/index.js";
@@ -2292,6 +2293,7 @@ describe("AgentRunner", () => {
       readAnswerShape,
       turnUsage: new TurnUsageReporter({ apps: appCatalog }),
       folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
+      log: createLogger("agent-session"),
       activeSubagentRegistry: createActiveSubagentRegistry(subagentCalls),
       subagentExecutionService: createSubagentExecutionService({
         calls: subagentCalls,

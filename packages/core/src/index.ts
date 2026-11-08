@@ -1164,6 +1164,7 @@ async function main() {
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
+      log: createLogger("agent-session"),
       eventSources,
       sessionTools: (context) => buildConciergeTools(concierge, context),
     },

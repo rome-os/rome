@@ -14,7 +14,7 @@ import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { isTransientDelta } from "./agent-message.js";
+import { isTransientDelta } from "../agent/index.js";
 import type { SessionChat } from "./session-conversation.js";
 
 export interface AgentTraceRecorderInput {

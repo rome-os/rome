@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { createHash } from "node:crypto";
@@ -504,6 +505,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
+    log: createLogger("agent-session"),
   });
 
   return { manager, provider, agentName };

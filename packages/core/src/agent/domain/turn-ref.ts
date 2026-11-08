@@ -1,8 +1,12 @@
 // Builds the turn ref and timing the agent context's lifecycle calls carry,
-// from Rome's thread context. Moves with the session into the agent context.
+// from Rome's thread context.
 
-import type { AgentTurnRef, AgentTurnTiming, LifecycleThreadContext } from "@rome-os/app-runtime";
-import type { ThreadContext } from "./types.js";
+import type {
+  AgentTurnRef,
+  AgentTurnTiming,
+  LifecycleThreadContext,
+  ThreadContext,
+} from "@rome-os/app-runtime";
 
 export interface AgentTurnParentRef {
   sessionId: string;
