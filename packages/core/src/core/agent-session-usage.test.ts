@@ -21,7 +21,7 @@ import { createAgentSessionManager, type AgentSessionManager } from "../agent/in
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
-import type { TurnMiddlewareChain } from "./turn-middleware.js";
+import type { TurnMiddleware } from "../agent/index.js";
 import type { ModelAccountReports } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
@@ -136,13 +136,11 @@ describe("AgentSession turn usage", () => {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Usage test prompt");
-    const turnMiddleware: TurnMiddlewareChain = {
-      loadFromCatalog: async () => [],
+    const turnMiddleware: TurnMiddleware = {
       run: async (_ctx, terminal) => {
         await beforeModelDispatch?.();
         if (!shortCircuit) await terminal();
       },
-      size: () => 1,
     };
     manager = createAgentSessionManager(
       {

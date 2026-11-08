@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createTurnMiddlewareChain } from "./turn-middleware.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { ArtifactRef } from "../apps/state.js";
-import type { AgentEvent, TurnMiddlewareContext } from "@rome-os/app-runtime";
+import { AppTurnMiddleware } from "./app-turn-middleware.js";
+import type { AppCatalog } from "../../apps/catalog.js";
+import type { ArtifactRef } from "../../apps/state.js";
+import type { AgentEvent } from "@rome-os/app-runtime";
+import type { TurnMiddleware } from "../domain/turn-middleware.js";
 
-describe("TurnMiddlewareChain", () => {
+describe("AppTurnMiddleware", () => {
   const tempDirs: string[] = [];
 
   afterEach(async () => {
@@ -15,8 +16,7 @@ describe("TurnMiddlewareChain", () => {
   });
 
   it("runs the terminal directly when no middleware is loaded (passthrough)", async () => {
-    const chain = createTurnMiddlewareChain();
-    expect(chain.size()).toBe(0);
+    const chain = new AppTurnMiddleware();
 
     let terminalRan = false;
     await chain.run(makeCtx(), async () => {
@@ -31,9 +31,8 @@ describe("TurnMiddlewareChain", () => {
       "passthrough",
       `{ order: 0, async handle(ctx, next) { await next(); } }`,
     );
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     expect(await chain.loadFromCatalog(catalogWithHooks([hookRef("app.pass", dir)]))).toEqual([]);
-    expect(chain.size()).toBe(1);
 
     let terminalRan = false;
     await chain.run(makeCtx(), async () => {
@@ -54,7 +53,7 @@ describe("TurnMiddlewareChain", () => {
         },
       }`,
     );
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     await chain.loadFromCatalog(catalogWithHooks([hookRef("app.scripted", dir)]));
 
     // Matching session → short-circuit, terminal never runs.
@@ -85,7 +84,7 @@ describe("TurnMiddlewareChain", () => {
         },
       }`,
     );
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     await chain.loadFromCatalog(catalogWithHooks([hookRef("app.rewrite", dir)]));
 
     const ctx = makeCtx();
@@ -105,7 +104,7 @@ describe("TurnMiddlewareChain", () => {
       "inner",
       `{ order: 10, async handle(ctx, next) { ctx.input.prompt += ":inner-in"; await next(); ctx.input.prompt += ":inner-out"; } }`,
     );
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     // Register inner before outer to prove sort order — not registration order — wins.
     await chain.loadFromCatalog(
       catalogWithHooks([hookRef("app.inner", inner), hookRef("app.outer", outer)]),
@@ -124,7 +123,7 @@ describe("TurnMiddlewareChain", () => {
       "boom",
       `{ order: 0, async handle() { throw new Error("kaboom"); } }`,
     );
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     await chain.loadFromCatalog(catalogWithHooks([hookRef("app.boom", boom)]));
 
     let terminalRan = false;
@@ -139,7 +138,7 @@ describe("TurnMiddlewareChain", () => {
       "boom-closed",
       `{ order: 0, onError: "fail-closed", async handle() { throw new Error("hard stop"); } }`,
     );
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     await chain.loadFromCatalog(catalogWithHooks([hookRef("app.boomclosed", boom)]));
 
     let terminalRan = false;
@@ -153,12 +152,11 @@ describe("TurnMiddlewareChain", () => {
 
   it("reports artifacts that do not implement handle()", async () => {
     const dir = await createMiddlewareDir("invalid", `{ order: 0 }`);
-    const chain = createTurnMiddlewareChain();
+    const chain = new AppTurnMiddleware();
     const failures = await chain.loadFromCatalog(catalogWithHooks([hookRef("app.invalid", dir)]));
     expect(failures).toEqual([
       expect.objectContaining({ appId: "app.invalid", error: expect.stringContaining("handle") }),
     ]);
-    expect(chain.size()).toBe(0);
   });
 
   async function createMiddlewareDir(name: string, hookLiteral: string): Promise<string> {
@@ -173,12 +171,16 @@ describe("TurnMiddlewareChain", () => {
   }
 });
 
-function makeCtx(agentName = "main", emitInto: AgentEvent[] = []): TurnMiddlewareContext {
+function makeCtx(
+  agentName = "main",
+  emitInto: AgentEvent[] = [],
+): Parameters<TurnMiddleware["run"]>[0] {
   return {
+    sessionId: "session-1",
+    agentName,
+    continuityKey: `webchat:${agentName}`,
     input: { prompt: "hello" },
-    session: { id: "session-1", agentName, channelThreadKey: `webchat:${agentName}` },
     emit: (event) => emitInto.push(event),
-    meta: {},
   };
 }
 

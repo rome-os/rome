@@ -94,14 +94,18 @@ import {
   type AgentSessionManager,
   type AgentTurnHandle,
 } from "../agent/index.js";
-import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { SkillLoader } from "../agent/index.js";
-import { AppTurnHooks, TurnListeners, type TurnLifecycle } from "../agent/index.js";
+import {
+  AppTurnHooks,
+  AppTurnMiddleware,
+  TurnListeners,
+  type TurnLifecycle,
+  type TurnMiddleware,
+} from "../agent/index.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
-  TurnMiddlewareContext,
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
@@ -2349,13 +2353,16 @@ describe("AgentRunner", () => {
 
     async function openMiddlewareSession(
       middleware:
-        | TurnMiddlewareChain
-        | ((ctx: TurnMiddlewareContext, next: () => Promise<void>) => Promise<void>),
+        | TurnMiddleware
+        | ((
+            turn: Parameters<TurnMiddleware["run"]>[0],
+            next: () => Promise<void>,
+          ) => Promise<void>),
       agentName = "test-main",
     ): Promise<AgentSession> {
-      let turnMiddleware: TurnMiddlewareChain;
+      let turnMiddleware: TurnMiddleware;
       if (typeof middleware === "function") {
-        turnMiddleware = createTurnMiddlewareChain();
+        turnMiddleware = new AppTurnMiddleware();
         rs.spyOn(turnMiddleware, "run").mockImplementation(middleware);
       } else {
         turnMiddleware = middleware;
@@ -2458,7 +2465,7 @@ describe("AgentRunner", () => {
           }\n`,
           "utf-8",
         );
-        const chain = createTurnMiddlewareChain();
+        const chain = new AppTurnMiddleware();
         const failures = await chain.loadFromCatalog({
           get: () => null,
           listArtifacts: (kind: string) =>
@@ -2585,7 +2592,7 @@ describe("AgentRunner", () => {
       const exit = new Promise<void>((resolve) => {
         confirmExit = resolve;
       });
-      const turnMiddleware = createTurnMiddlewareChain();
+      const turnMiddleware = new AppTurnMiddleware();
       rs.spyOn(turnMiddleware, "run").mockImplementation(async (_ctx, next) => {
         await middlewareGate;
         await next();

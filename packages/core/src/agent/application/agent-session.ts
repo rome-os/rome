@@ -17,6 +17,7 @@ import {
 import { storeForkParent } from "../domain/session-parent.js";
 import { turnStatus, type TurnEnding } from "../domain/turn-end.js";
 import { endedTurn, type TurnLifecycle } from "../domain/turn-lifecycle.js";
+import type { TurnMiddleware } from "../domain/turn-middleware.js";
 import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/answer-shape.js";
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
 import { type SessionSettings, restoresSavedSelection } from "../domain/session-settings.js";
@@ -91,7 +92,6 @@ import type {
   RomeSessionRef,
   RomeSessionType,
   StreamAgentEvent,
-  TurnMiddlewareContext,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./null-model-session.js";
@@ -113,7 +113,6 @@ import type {
   SubagentSessions,
 } from "./subagent-calls.js";
 import { translateTurnSpans, type CapturedEvent } from "./turn-spans.js";
-import type { TurnMiddlewareChain } from "../../core/turn-middleware.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
 export interface AgentSessionKey {
@@ -325,9 +324,8 @@ interface ManagerDeps {
     parentLink: string,
     inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
   ) => SubagentSessions;
-  /** Turn-middleware onion. Optional — when absent, every turn runs the
-   *  model terminal directly (behavior identical to a chain of size 0). */
-  turnMiddleware?: TurnMiddlewareChain;
+  /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
+  turnMiddleware?: TurnMiddleware;
   /** What each chat set for its sessions. Absent, no saved model is restored. */
   sessionSettings?: SessionSettings;
   /** Where agents work: the default working directory and the projects folder. */
@@ -3038,13 +3036,11 @@ class AgentSessionImpl implements AgentSession {
       let droppedAfterTerminal = false;
       let droppedDuringModel = false;
       let modelRan = false;
-      const mwCtx: TurnMiddlewareContext = {
+      const mwTurn: Parameters<TurnMiddleware["run"]>[0] = {
+        sessionId: this.sessionId,
+        agentName: this.key.agentName,
+        continuityKey: this.key.channelThreadKey,
         input: mwInput,
-        session: {
-          id: this.sessionId,
-          agentName: this.key.agentName,
-          channelThreadKey: this.key.channelThreadKey,
-        },
         emit: (event) => {
           if (sink.done) return;
           // A middleware's first terminal ends its stream, as the model's
@@ -3093,7 +3089,6 @@ class AgentSessionImpl implements AgentSession {
           }
           this.publishOutbound(sink, outbound);
         },
-        meta: {},
       };
 
       // The events loop closes the sink on the model's `result`/`error`.
@@ -3172,7 +3167,7 @@ class AgentSessionImpl implements AgentSession {
       const chain = this.deps.turnMiddleware;
       if (chain) {
         try {
-          await chain.run(mwCtx, runModelTerminal);
+          await chain.run(mwTurn, runModelTerminal);
         } catch (err) {
           // A fail-closed throw after the terminal, or after next() started
           // the model, cannot change the outcome, so the turn ends on the

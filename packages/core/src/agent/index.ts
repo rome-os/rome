@@ -71,6 +71,7 @@ export {
   type TurnLifecycle,
   type TurnLifecycleListener,
 } from "./domain/turn-lifecycle.js";
+export type { TurnMiddleware } from "./domain/turn-middleware.js";
 export {
   buildRequiredTiming,
   createAgentTurnRef,
@@ -235,6 +236,10 @@ export {
   AppTurnHooks,
   type TurnLifecycleHookLoadFailure,
 } from "./infrastructure/app-turn-hooks.js";
+export {
+  AppTurnMiddleware,
+  type TurnMiddlewareLoadFailure,
+} from "./infrastructure/app-turn-middleware.js";
 export { TurnListeners } from "./infrastructure/turn-listeners.js";
 
 // The model port's adapters, for the composition root alone. Everything else
