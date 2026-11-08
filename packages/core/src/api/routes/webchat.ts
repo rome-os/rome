@@ -54,7 +54,7 @@ import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
-import type { AgentTurnHandle } from "../../core/agent-session.js";
+import type { AgentTurnHandle } from "../../agent/index.js";
 import { openedInChat } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";

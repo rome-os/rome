@@ -195,7 +195,7 @@ import {
 } from "./agent/index.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager } from "./core/agent-session.js";
+import { createAgentSessionManager } from "./agent/index.js";
 import {
   type ChannelSurfaces,
   sessionOpeningFor,

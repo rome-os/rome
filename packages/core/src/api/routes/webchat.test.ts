@@ -17,7 +17,7 @@ import {
   AgentInputQueue,
   type AgentInputReceipt,
   type SubmitInputOptions,
-} from "../../core/agent-input-queue.js";
+} from "../../agent/index.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import {
@@ -36,7 +36,7 @@ import type {
   AgentTurnHandle,
   AgentTurnInput,
   SendTurnOptions,
-} from "../../core/agent-session.js";
+} from "../../agent/index.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
 import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";

@@ -40,7 +40,7 @@ import {
 } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
-import { createAgentSessionManager } from "../core/agent-session.js";
+import { createAgentSessionManager } from "../agent/index.js";
 import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "../core/subagent-execution.js";

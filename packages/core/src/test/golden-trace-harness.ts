@@ -14,7 +14,7 @@ import {
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";

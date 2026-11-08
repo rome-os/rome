@@ -11,63 +11,74 @@ import {
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import {
   requireAgent,
-  storeForkParent,
-  turnStatus,
-  endedTurn,
   type AgentCatalog,
   type AgentDefinition,
-  type TurnEnding,
-  type TurnLifecycle,
-  shapedResult,
-  type AnswerShape,
-  type ReadAnswerShape,
-  type TurnAttribution,
-  type SessionSettings,
-  restoresSavedSelection,
-  evaluateProviderSessionReset,
-  type AgentFolders,
-  projectPath,
-  catchUpPrompt,
-  type PromptFacts,
-  type PromptMessage,
-  type TurnUsageReporting,
-  type AgentLog,
-  type DeferTool,
-  type SessionTools,
-  type TurnFacts,
-  type PushLevel,
-} from "../agent/index.js";
+} from "../domain/agent-definition.js";
+import { storeForkParent } from "../domain/session-parent.js";
+import { turnStatus, type TurnEnding } from "../domain/turn-end.js";
+import { endedTurn, type TurnLifecycle } from "../domain/turn-lifecycle.js";
+import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/answer-shape.js";
+import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
+import { type SessionSettings, restoresSavedSelection } from "../domain/session-settings.js";
+import { evaluateProviderSessionReset } from "../domain/session-reset.js";
+import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
+import { catchUpPrompt } from "../domain/catch-up.js";
+import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js";
+import { type AgentLog } from "../domain/agent-log.js";
+import { type DeferTool } from "./ask-user-tools.js";
+import { type SessionTools, forkSessionTools } from "../domain/session-tools.js";
+import { type TurnFacts, type PushLevel } from "../domain/turn-facts.js";
 import {
   NO_ROME_TOOLS,
-  Session,
+  type RomeTool,
+  type RomeToolDefinition,
+  type RomeTools,
+  type ModelToolCallContext,
+} from "../domain/rome-tools.js";
+import { Session } from "../domain/session.js";
+import {
   type ModelSessionEvent,
   type ModelTurnStartedEvent,
   type ModelPosition,
   type ModelProvider,
   type ThreadStart,
-  type SessionRepository,
-  type Skill,
-  type SkillCatalog,
-  type SystemPrompts,
+  type McpServerConfig,
+  type ModelSession,
+  type ModelSessionParams,
+  type ModelReasoningEffort,
+  type ProviderId,
+} from "../domain/model-port.js";
+import { type SessionRepository } from "../domain/session-repository.js";
+import { type Skill, type SkillCatalog } from "../domain/skill.js";
+import { type SystemPrompts } from "./system-prompts.js";
+import {
   buildContinuationBlock,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
-  resolveAgentPolicy,
-  createRomeTools,
-  forkSessionTools,
-  showsWidgets,
-  widgetDrawingFor,
-  type AgentAction,
-  type AgentActions,
-  type WakeUp,
-  type RomeTool,
-  type RomeToolDefinition,
-  subagentToolName,
-  type Subagent,
-  type RomeTools,
-} from "../agent/index.js";
-import type { McpServerConfig } from "../agent/index.js";
+} from "../domain/prompt.js";
+import { resolveAgentPolicy } from "../domain/agent-policy.js";
+import { createRomeTools } from "./rome-tools.js";
+import { showsWidgets, widgetDrawingFor } from "../domain/widget-drawing.js";
+import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
+import { type WakeUp } from "../domain/defer.js";
+import { subagentToolName, type Subagent } from "../domain/subagent.js";
+import { type ModelTier } from "../domain/model-tier.js";
+import { modelResolutionRequest } from "../domain/model-resolution.js";
+import {
+  toModelResolutionErrorPayload,
+  type ModelResolution,
+  type ModelResolutionErrorPayload,
+  type ModelResolver,
+} from "./model-resolver.js";
+import { type ModelLoginKind } from "../domain/model-login.js";
+import { type ModelSelectionId } from "../domain/model-selection.js";
+import { isTerminalEvent, isTransientDelta } from "../domain/turn-events.js";
+import {
+  buildRequiredTiming,
+  createAgentTurnRef,
+  type AgentTurnParentRef,
+} from "../domain/turn-ref.js";
 import type {
   AgentEvent,
   ForkRunMode,
@@ -83,26 +94,9 @@ import type {
   TurnMiddlewareContext,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
-import { createNullModelSession } from "./agent-runner.js";
-import type {
-  ModelSession,
-  ModelSessionParams,
-  ModelReasoningEffort,
-  ModelTier,
-  ModelToolCallContext,
-  ProviderId,
-} from "../agent/index.js";
-import {
-  modelResolutionRequest,
-  toModelResolutionErrorPayload,
-  type ModelLoginKind,
-  type ModelResolution,
-  type ModelResolutionErrorPayload,
-  type ModelResolver,
-  type ModelSelectionId,
-} from "../agent/index.js";
-import { enterSession } from "../telemetry-context.js";
-import { getTracer, startRomeSpan, withRomeSpan } from "../telemetry.js";
+import { createNullModelSession } from "./null-model-session.js";
+import { enterSession } from "../../telemetry-context.js";
+import { getTracer, startRomeSpan, withRomeSpan } from "../../telemetry.js";
 import {
   context,
   SpanStatusCode,
@@ -112,21 +106,18 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
-import { isTerminalEvent, isTransientDelta } from "../agent/index.js";
-import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
+import type {
+  ActiveSubagentRegistry,
+  ParentSubagentRef,
+} from "../../core/active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
   SubagentExecution,
   SubagentExecutionService,
-} from "./subagent-execution.js";
-import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
-import {
-  buildRequiredTiming,
-  createAgentTurnRef,
-  type AgentTurnParentRef,
-} from "../agent/index.js";
-import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import { KeyedMutex } from "../lib/keyed-mutex.js";
+} from "../../core/subagent-execution.js";
+import { translateTurnSpans, type CapturedEvent } from "../../core/turn-span-translator.js";
+import type { TurnMiddlewareChain } from "../../core/turn-middleware.js";
+import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
 export interface AgentSessionKey {
   agentName: string;

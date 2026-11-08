@@ -8,7 +8,7 @@ import type {
   AgentSessionManager,
   AgentTurnInput,
   SendTurnOptions,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import {
   createSubagentCalls,
   WebChatDashboardSessions,

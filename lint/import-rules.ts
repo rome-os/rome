@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { layerRules } from "./rules/layers.js";
+import { layerRules, listedCrossings } from "./rules/layers.js";
 
 /**
  * One import as the rules see it. Paths are relative to the scanned src/
@@ -34,6 +34,20 @@ export interface ImportRule {
   rejects(imp: Import): boolean;
 }
 
+/**
+ * One import that breaks a rule, allowed for now and tracked by a ticket. A
+ * listed crossing names the rule, the importing file and the file it
+ * resolves to, all relative to the scanned src directory. A listed crossing
+ * that no longer occurs is itself reported, so the list only shrinks.
+ */
+export interface ListedCrossing {
+  rule: string;
+  from: string;
+  to: string;
+  ticket: string;
+  why: string;
+}
+
 /** One import that breaks a rule. `at` is `file:line`, relative to the scanned src directory. */
 export interface ImportViolation {
   at: string;
@@ -50,17 +64,20 @@ interface ImportSite {
 
 /**
  * Checks every `.ts` and `.tsx` file under `srcDir` against `rules`. An
- * import that breaks several rules is reported once per rule. `tsconfigPath`
- * gives the resolver options, including path aliases.
+ * import that breaks several rules is reported once per rule, unless
+ * `listed` names that rule, file and target. `tsconfigPath` gives the
+ * resolver options, including path aliases.
  */
 export function checkImports(
   srcDir: string,
   tsconfigPath: string,
   rules: readonly ImportRule[],
+  listed: readonly ListedCrossing[] = [],
 ): ImportViolation[] {
   const options = readCompilerOptions(tsconfigPath);
   const cache = ts.createModuleResolutionCache(srcDir, (name) => name, options);
   const violations: ImportViolation[] = [];
+  const unseen = new Set(listed);
 
   for (const path of listSourceFiles(srcDir)) {
     const from = toPosix(relative(srcDir, path));
@@ -95,10 +112,25 @@ export function checkImports(
       }
       for (const rule of rules) {
         if (!rule.rejects(imp)) continue;
+        const crossing =
+          imp.kind === "file" &&
+          listed.find((c) => c.rule === rule.name && c.from === imp.from && c.to === imp.to);
+        if (crossing) {
+          unseen.delete(crossing);
+          continue;
+        }
         const specifier = imp.kind === "file" ? `${imp.specifier} (${imp.to})` : imp.specifier;
         violations.push({ at, specifier, rule: rule.name, reason: rule.description });
       }
     }
+  }
+  for (const crossing of unseen) {
+    violations.push({
+      at: crossing.from,
+      specifier: crossing.to,
+      rule: "stale-listing",
+      reason: `The crossing listed under ${crossing.ticket} for ${crossing.rule} no longer occurs. Remove it from the list.`,
+    });
   }
   return violations;
 }
@@ -171,13 +203,20 @@ function toPosix(path: string): string {
 export function runCli(): number {
   const core = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core");
   const rules = [...layerRules];
-  const violations = checkImports(join(core, "src"), join(core, "tsconfig.json"), rules);
+  const violations = checkImports(
+    join(core, "src"),
+    join(core, "tsconfig.json"),
+    rules,
+    listedCrossings,
+  );
   if (violations.length > 0) {
     for (const violation of violations) console.error(`  - ${formatImportViolation(violation)}`);
     console.error(`import-rules: ${violations.length} import(s) break a rule`);
     return 1;
   }
-  console.log(`import-rules: packages/core/src follows all ${rules.length} import rules`);
+  console.log(
+    `import-rules: packages/core/src follows all ${rules.length} import rules, with ${listedCrossings.length} listed crossing(s)`,
+  );
   return 0;
 }
 

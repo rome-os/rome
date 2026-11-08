@@ -182,6 +182,21 @@ export {
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
+export {
+  createAgentSessionManager,
+  type AgentSession,
+  type AgentSessionInit,
+  type AgentSessionKey,
+  type AgentSessionManager,
+  type AgentTurnHandle,
+  type AgentTurnInput,
+  type SendTurnOptions,
+} from "./application/agent-session.js";
+export {
+  AgentInputQueue,
+  type AgentInputReceipt,
+  type SubmitInputOptions,
+} from "./application/agent-input-queue.js";
 export type { PushLevel, TurnFacts } from "./domain/turn-facts.js";
 export type { DeferTool } from "./application/ask-user-tools.js";
 export {

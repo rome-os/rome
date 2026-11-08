@@ -18,7 +18,7 @@ import {
   type AgentSessionInit,
   type AgentSessionKey,
   type AgentSessionManager,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import { eq } from "drizzle-orm";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
