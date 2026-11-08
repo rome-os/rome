@@ -3092,10 +3092,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ stopped: false, reason: "no_running_turn" }, 404);
     }
     if (!stream && agentTurnStream) {
-      if (!agentTurnStream.interrupt) {
+      const turn = deps.agentSessionManager.turn(turnId);
+      const stopped = turn ? await turn.stop("user-stop") : "ended";
+      if (stopped === "cannot_stop") {
         return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
       }
-      await agentTurnStream.interrupt("user-stop");
+      if (stopped === "ended") return answer({ stopped: false, reason: "no_running_turn" }, 404);
       return answer({ stopped: agentTurnStream.finished }, agentTurnStream.finished ? 200 : 202);
     }
     if (!stream) return answer({ stopped: false, reason: "no_running_turn" }, 404);
@@ -3162,8 +3164,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const stream = streamsByTurnId.get(turnId);
     if (!stream) {
-      const agentTurnStream = deps.agentTurnStreamRegistry.get(turnId);
-      if (!agentTurnStream) return c.json({ error: "No stream for turn" }, 404);
+      const turn = deps.agentTurnStreamRegistry.get(turnId)
+        ? deps.agentSessionManager.turn(turnId)
+        : undefined;
+      if (!turn) return c.json({ error: "No stream for turn" }, 404);
       return streamSSE(c, async (sse) => {
         const builder = createSegmentBuilder({
           idPrefix: turnId,
@@ -3210,15 +3214,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             write("summary_update", builder.snapshot().summary);
           }
         };
-        const replay = [...agentTurnStream.messages()];
-        const unsubscribe = agentTurnStream.subscribe(project);
-        for (const message of replay) project(message);
+        let aborted = false;
         const keepalive = setInterval(() => {
           queue = queue.then(() => sse.writeSSE({ event: "keepalive", data: "" }));
         }, TURN_STREAM_KEEPALIVE_INTERVAL_MS);
-        sse.onAbort(unsubscribe);
+        sse.onAbort(() => {
+          aborted = true;
+        });
         try {
-          if (!agentTurnStream.finished) await agentTurnStream.waitForFinish();
+          for await (const message of turn.events()) {
+            if (aborted) break;
+            project(message);
+          }
           write("done", {
             success: !terminalError,
             ...(interrupted ? { stopped: true } : {}),
@@ -3227,7 +3234,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           await queue;
         } finally {
           clearInterval(keepalive);
-          unsubscribe();
         }
       });
     }

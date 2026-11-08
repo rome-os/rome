@@ -1164,7 +1164,7 @@ describe("AgentRunner", () => {
     }
   });
 
-  it("publishes forked runs for live session inspection", async () => {
+  it("lists a forked run as a live turn of its own session", async () => {
     const source = {
       key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
       sessionId: "source-session",
@@ -1214,24 +1214,17 @@ describe("AgentRunner", () => {
       value: { type: "turn_start", sessionId: "fork-session", turnId: "fork-turn" },
     });
     const active = turnStreams.get("fork-turn");
-    expect(active).toBeDefined();
-    expect(active?.sessionId).toBe("fork-session");
-    expect(active?.interrupt).toBeUndefined();
-    expect(active?.messages().map((message) => message.type)).toEqual(["turn_start"]);
-
-    await iterator.next();
-    expect(active?.messages().map((message) => message.type)).toEqual(["turn_start", "text_delta"]);
+    expect(active).toMatchObject({
+      sessionId: "fork-session",
+      chatId: "fork-session",
+      finished: false,
+    });
+    expect(turnStreams.listBySession("fork-session")).toHaveLength(1);
     while (!(await iterator.next()).done) {
       // Drain the remainder so AgentRunner closes the live stream in `finally`.
     }
 
     expect(active?.finished).toBe(true);
-    expect(active?.messages().map((message) => message.type)).toEqual([
-      "turn_start",
-      "text_delta",
-      "result",
-      "turn_end",
-    ]);
     expect(turnStreams.listBySession("fork-session")).toEqual([]);
   });
 
@@ -2906,6 +2899,7 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
+        turn: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -2960,6 +2954,7 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
+        turn: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);

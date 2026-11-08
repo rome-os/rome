@@ -52,20 +52,19 @@ function setup(rows: Record<string, DashboardSession> = {}) {
     },
   };
   const logged: StreamAgentEvent[] = [];
-  const published: StreamAgentEvent[] = [];
   const finish = rs.fn();
-  const stops: Array<(reason?: string) => Promise<void>> = [];
+  const registered: Array<{ sessionId: string; turnId: string }> = [];
   const calls = createSubagentCalls({
     dashboard,
     turnLog: { open: () => ({ record: async (e) => void logged.push(e) }) },
     liveTurns: {
       register: (turn) => {
-        stops.push(turn.stop);
-        return { publish: (e) => void published.push(e), finish };
+        registered.push(turn);
+        return { finish };
       },
     },
   });
-  return { calls, added, order, logged, published, finish, stops };
+  return { calls, added, order, logged, finish, registered };
 }
 
 const parentRow: DashboardSession = {
@@ -89,7 +88,7 @@ function callingTurn(sessions: SubagentSessions, toolUseId = "tool-1"): CallingT
 
 describe("SubagentCalls", () => {
   it("opens a fresh session, adds it to the dashboard, and answers with the turn's result", async () => {
-    const { calls, added, order, logged, published, finish } = setup({ chat: parentRow });
+    const { calls, added, order, logged, finish, registered } = setup({ chat: parentRow });
     const child = fakeSession("sub-1", answering("done"));
     const sessions: SubagentSessions = {
       open: async () => {
@@ -123,8 +122,8 @@ describe("SubagentCalls", () => {
       turnId: "sub-1-turn",
     });
     await expect(call.outcome).resolves.toEqual({ status: "completed", output: "done" });
-    expect(published.map((e) => e.type)).toEqual(["text", "result", "turn_end"]);
-    expect(logged).toEqual(published);
+    expect(registered).toEqual([{ sessionId: "sub-1", turnId: "sub-1-turn" }]);
+    expect(logged.map((e) => e.type)).toEqual(["text", "result", "turn_end"]);
     await Promise.resolve();
     expect(finish).toHaveBeenCalledTimes(1);
   });
@@ -199,7 +198,7 @@ describe("SubagentCalls", () => {
   });
 
   it("cancels by stopping the turn, and does nothing once the outcome has settled", async () => {
-    const { calls, stops } = setup({ chat: parentRow });
+    const { calls } = setup({ chat: parentRow });
     const wait = gate();
     const child = fakeSession("sub", answering("done", wait.opened));
     const sessions: SubagentSessions = { open: async () => child.session, resume: rs.fn() };
@@ -210,7 +209,6 @@ describe("SubagentCalls", () => {
     wait.open();
     await call.outcome;
     await call.cancel("late");
-    await stops[0]("late");
     expect(child.session.stop).toHaveBeenCalledTimes(1);
   });
 

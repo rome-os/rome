@@ -84,15 +84,12 @@ export function subagentSessions(
 export function subagentLiveTurns(turnStreams: AgentTurnStreamRegistry): LiveTurns {
   return {
     register(turn) {
-      const stream = turnStreams.register({
+      return turnStreams.register({
         sessionId: turn.sessionId,
         // The subagent's chat is minted under its own session id.
         chatId: turn.sessionId,
         turnId: turn.turnId,
-        agentName: turn.agentName,
-        interrupt: turn.stop,
       });
-      return { publish: (event) => stream.publish(event), finish: () => stream.finish() };
     },
   };
 }

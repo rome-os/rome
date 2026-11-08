@@ -4,8 +4,8 @@ import type { Turn } from "../domain/turn.js";
 const ENDED_TURN_KEPT_MS = 30_000;
 
 /**
- * The turns a manager's sessions started, and the sessions they opened in
- * turn, found by id. A turn is found from its start until 30 s after it ends.
+ * The turns started by a manager's sessions and by the subagent and forked
+ * sessions they open, found by id from a turn's start until 30 s after it ends.
  */
 export interface TurnsById {
   add(turn: Turn): void;

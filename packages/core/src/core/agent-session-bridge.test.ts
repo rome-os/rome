@@ -37,7 +37,7 @@ class FakeChild extends EventEmitter {
 }
 
 describe("AgentSessionBridge turn routing", () => {
-  it("routes a started provider conversation to its exact interruptible turn", async () => {
+  it("lists a started provider conversation's turn in its chat and as a live turn", async () => {
     let startTurn!: () => void;
     const start = new Promise<void>((resolve) => {
       startTurn = resolve;
@@ -46,7 +46,6 @@ describe("AgentSessionBridge turn routing", () => {
     const finish = new Promise<void>((resolve) => {
       finishTurn = resolve;
     });
-    const interrupt = rs.fn(async () => undefined);
     const events = (async function* (): AsyncIterable<StreamAgentEvent> {
       await start;
       yield {
@@ -61,8 +60,7 @@ describe("AgentSessionBridge turn routing", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      sendTurn: () =>
-        testTurnHandle({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
+      sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
       acquire: async () => session,
@@ -117,8 +115,7 @@ describe("AgentSessionBridge turn routing", () => {
     await rs.waitFor(() => expect(chatTurns.runningIn(ref)?.turnId).toBe("turn-1"));
     expect(chatTurns.runningIn(ref)?.initiatorId).toBe("user-1");
 
-    await turns.get("turn-1")?.interrupt?.("chat-stop");
-    expect(interrupt).toHaveBeenCalledWith("chat-stop");
+    expect(turns.get("turn-1")).toMatchObject({ sessionId: "session-1", finished: false });
 
     finishTurn();
     await rs.waitFor(() => expect(chatTurns.runningIn(ref)).toBeUndefined());
@@ -733,10 +730,6 @@ describe("AgentSessionBridge worker disconnect", () => {
     await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
     expect(turn.interrupt).toHaveBeenCalledTimes(1);
     expect(turn.interrupt).toHaveBeenCalledWith("action worker disconnected");
-    expect(turns.get("turn-1")?.messages().at(-1)).toMatchObject({
-      type: "turn_end",
-      status: "interrupted",
-    });
   });
 
   it("interrupts a running turn when its worker exits", async () => {

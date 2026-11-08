@@ -411,17 +411,14 @@ export class AgentRunner {
           recorder = await this.createForkTraceRecorder(params, message, source);
           if (this.turnStreams) {
             try {
-              // Forks have their own session and trace, so publish them through
-              // the same late-attach registry as Child turns. They deliberately
-              // omit `interrupt`: AgentSession cannot currently stop one fork
-              // without risking the source session that owns it.
+              // Forks have their own session and trace, so they are listed
+              // with the same live turns as subagent turns.
               liveStream = this.turnStreams.register({
                 sessionId: message.sessionId,
                 // The fork is a chat of its own once its row is saved; one
                 // whose row could not be saved is open to no one.
                 chatId: message.sessionId,
                 turnId: message.turnId,
-                agentName: params.agentName,
               });
             } catch (err) {
               // Live inspection is best-effort and must never abort the fork.
@@ -439,7 +436,6 @@ export class AgentRunner {
             source: "agent-runner:fork",
           });
         }
-        liveStream?.publish(message);
         yield message;
       }
     } finally {

@@ -1056,7 +1056,7 @@ async function main() {
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       chatTurns,
-      turns: agentTurnStreamRegistry,
+      sessions: { turn: (id) => agentSessionManager.turn(id) },
       isGuardian: async (service, senderId) => {
         const platform = stopSenderPlatform(input.ref, service, {
           accountOf: (connectionId) => accounts.accountOf(connectionId),

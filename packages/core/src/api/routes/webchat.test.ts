@@ -273,7 +273,6 @@ describe("Webchat API", () => {
       sessionId: "runtime",
       chatId: "deleted-chat",
       turnId: "orphan-turn",
-      agentName: "main",
     });
     turn.finish();
     const orphan = await runWithSessionActor(guardian, () =>
@@ -316,7 +315,6 @@ describe("Webchat API", () => {
       sessionId: "helper",
       chatId: "helper",
       turnId: "helper-turn",
-      agentName: "researcher",
     });
     try {
       for (const [path, method] of [
@@ -667,6 +665,7 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
+      turn: () => undefined,
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -764,6 +763,7 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
+      turn: () => undefined,
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -828,6 +828,7 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
+      turn: () => undefined,
       shutdown: async () => {},
     };
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
@@ -4262,7 +4263,6 @@ describe("Webchat API", () => {
         sessionId: "branch",
         chatId: "branch",
         turnId: "fork-turn",
-        agentName: "main",
       });
       // A channel turn's stream names its runtime session and the ordinary
       // chat it is recorded in, which everyone may open.
@@ -4271,10 +4271,17 @@ describe("Webchat API", () => {
         sessionId: "runtime-session",
         chatId: "channel-chat",
         turnId: "channel-turn",
-        agentName: "main",
       });
       fork.finish();
       channelTurn.finish();
+      // Both turns have ended, and the session manager still finds them.
+      const ended = new Map(
+        ["fork-turn", "channel-turn"].map((turnId) => [
+          turnId,
+          testTurnHandle({ turnId, events: (async function* () {})() }),
+        ]),
+      );
+      rs.spyOn(deps.agentSessionManager, "turn").mockImplementation((id) => ended.get(id));
       const app = createWebchatRuntime(deps).routes;
       const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
       const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
@@ -6467,7 +6474,6 @@ describe("Webchat API", () => {
           sessionId: id,
           chatId: id,
           turnId,
-          agentName: "main",
         });
 
       const first = register("turn-1");
@@ -6509,7 +6515,6 @@ describe("Webchat API", () => {
         sessionId,
         chatId: sessionId,
         turnId: "branch-turn",
-        agentName: "main",
       });
       expect(await running()).toBe(true);
       turn.finish();
@@ -7604,6 +7609,7 @@ function fakeSessionManager(
     },
     peek: () => undefined,
     findWorkingDirBySessionId: () => undefined,
+    turn: () => undefined,
     shutdown: async () => undefined,
   };
 }

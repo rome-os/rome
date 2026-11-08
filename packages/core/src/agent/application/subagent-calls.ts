@@ -98,14 +98,9 @@ export interface SubagentTurnLog {
   }): { record(event: StreamAgentEvent): Promise<void> };
 }
 
-/** The live turns the dashboard watches, for a subagent's turn. */
+/** The live turns the dashboard watches, told when a subagent's turn starts and finishes. */
 export interface LiveTurns {
-  register(turn: {
-    sessionId: SessionId;
-    turnId: string;
-    agentName: AgentName;
-    stop(reason?: string): Promise<void>;
-  }): { publish(event: StreamAgentEvent): void; finish(): void };
+  register(turn: { sessionId: SessionId; turnId: string }): { finish(): void };
 }
 
 const callKey = (key: SubagentCallKey): string =>
@@ -159,12 +154,7 @@ export function createSubagentCalls(deps: {
         if (settled) return;
         await session.stop(reason);
       };
-      const live = deps.liveTurns.register({
-        sessionId: session.id,
-        turnId: turn.turnId,
-        agentName: subagent,
-        stop: cancel,
-      });
+      const live = deps.liveTurns.register({ sessionId: session.id, turnId: turn.turnId });
 
       let settle!: (outcome: SubagentOutcome) => void;
       const outcome = new Promise<SubagentOutcome>((resolve) => {
@@ -199,7 +189,6 @@ export function createSubagentCalls(deps: {
         const reader = new SubagentOutcomeReader();
         try {
           for await (const event of turn.events) {
-            live.publish(event);
             await log.record(event);
             reader.read(event);
           }
