@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import {
+  newSubagentSession,
   refuseResume,
   storedAgentName,
   SubagentOutcomeReader,
@@ -88,6 +89,32 @@ describe("a subagent session's record", () => {
       "core:helper: Trip plan",
     );
     expect(subagentSessionName("core:helper", null, "core:main")).toBe("core:helper: core:main");
+  });
+
+  it("is added under the calling turn, in its parent's project", () => {
+    const from = { dashboardSessionId: "chat", turnId: "turn-1", agentName: "core:main" };
+    expect(
+      newSubagentSession(
+        "sub",
+        "core:main",
+        { name: null, projectName: "p", projectPath: "/p" },
+        from,
+      ),
+    ).toEqual({
+      id: "sub",
+      name: "core:main: core:main",
+      agentName: null,
+      projectName: "p",
+      projectPath: "/p",
+      parentSessionId: "chat",
+      parentTurnId: "turn-1",
+    });
+    expect(newSubagentSession("sub", "core:helper", null, from)).toMatchObject({
+      name: "core:helper: core:main",
+      agentName: "core:helper",
+      projectName: null,
+      projectPath: null,
+    });
   });
 
   it("stores no agent name for the core main agent", () => {

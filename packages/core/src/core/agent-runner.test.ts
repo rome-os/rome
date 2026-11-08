@@ -4,7 +4,7 @@ import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader, createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
@@ -23,6 +23,7 @@ import type { DrizzleDb } from "../db/index.js";
 import { openedInChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
+import { subagentLiveTurns, subagentTurnLog } from "./subagent-call-ports.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
@@ -2265,8 +2266,12 @@ describe("AgentRunner", () => {
     turnLifecycle?: TurnLifecycle,
     appCatalog?: Pick<AppCatalog, "get">,
   ) {
-    const activeSubagentRegistry = createActiveSubagentRegistry();
-    const turnStreams = createAgentTurnStreamRegistry();
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    const subagentCalls = createSubagentCalls({
+      dashboard: new WebChatDashboardSessions(webchatRepo),
+      turnLog: subagentTurnLog(webchatRepo),
+      liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
+    });
     return {
       agentLoader,
       sessionRepository,
@@ -2285,11 +2290,10 @@ describe("AgentRunner", () => {
       turnUsage: new TurnUsageReporter({ apps: appCatalog }),
       folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
       channelSurface: testChannelSurface,
-      activeSubagentRegistry,
+      activeSubagentRegistry: createActiveSubagentRegistry(subagentCalls),
       subagentExecutionService: createSubagentExecutionService({
-        webchatRepo: new ChatsWebChatRepository(testDb.db),
-        activeRegistry: activeSubagentRegistry,
-        turnStreams,
+        calls: subagentCalls,
+        webchatRepo,
       }),
     };
   }
