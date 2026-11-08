@@ -1,4 +1,4 @@
-// Where a chat moves when its provider reaches its usage limit: the other
+// Where a session moves when its provider reaches its usage limit: the other
 // provider when it can take the turn, else a different model of the same one.
 // Read off raw availability: the resolver's own view can include Rome credits,
 // which must not be spent on recovery.

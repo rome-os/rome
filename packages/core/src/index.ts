@@ -199,6 +199,7 @@ import {
   sessionOpeningFor,
   talkerChannelSurface,
 } from "./core/session-opening.js";
+import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -690,7 +691,7 @@ async function main() {
 
   // Subscribers ordered agentLoader → actionLoader → skillCatalog →
   // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);

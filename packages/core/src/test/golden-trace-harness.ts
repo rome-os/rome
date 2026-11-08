@@ -1,3 +1,4 @@
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { join } from "node:path";
@@ -90,7 +91,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     tracer: options.tracer,
   });
 
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   await agentLoader.loadAll(options.fixturesDir ?? FIXTURES_DIR);
 
   for (const action of options.extraActions ?? []) {
