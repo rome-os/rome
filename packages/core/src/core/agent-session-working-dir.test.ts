@@ -19,10 +19,10 @@ import { AgentLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import {
-  createAgentSessionManager,
+  createSessions,
   type AgentSessionInit,
   type AgentSessionKey,
-  type AgentSessionManager,
+  type Sessions,
 } from "../agent/index.js";
 import { eq } from "drizzle-orm";
 import { createModelResolver } from "../agent/index.js";
@@ -37,10 +37,10 @@ import { sessions } from "../db/schema.js";
 
 const AGENT = "worker";
 
-describe("AgentSessionManager working dirs", () => {
+describe("Sessions working dirs", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: Sessions;
   let sessionRepository: SessionRepository;
   let webchatRepo: WebChatRepository;
   const previousProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -85,7 +85,7 @@ describe("AgentSessionManager working dirs", () => {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Working dir test prompt");
-    manager = createAgentSessionManager(
+    manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository,
@@ -128,12 +128,12 @@ describe("AgentSessionManager working dirs", () => {
     await mkdir(parentDir);
     await mkdir(childDir);
 
-    const parent = await manager.acquire(
+    const parent = await manager.open(
       { agentName: AGENT, channelThreadKey: "webchat:working-dir" },
       { workingDir: parentDir },
     );
-    const childManager = (parent as unknown as { childManager: AgentSessionManager }).childManager;
-    const child = await childManager.acquire(
+    const childManager = (parent as unknown as { childManager: Sessions }).childManager;
+    const child = await childManager.open(
       { agentName: AGENT, channelThreadKey: "webchat:working-dir:subagent:1" },
       { workingDir: childDir },
     );
@@ -150,12 +150,12 @@ describe("AgentSessionManager working dirs", () => {
   it("finds the source session's working dir for an action called from its forked turn", async () => {
     const parentDir = join(directory, "parent-project");
     await mkdir(parentDir);
-    const parent = await manager.acquire(
+    const parent = await manager.open(
       { agentName: AGENT, channelThreadKey: "webchat:fork" },
       { workingDir: parentDir },
     );
 
-    const fork = parent.runForkedTurn!({ prompt: "side question" })[Symbol.asyncIterator]();
+    const fork = parent.fork!({ prompt: "side question" })[Symbol.asyncIterator]();
     const start = await fork.next();
     if (start.done || start.value.type !== "turn_start") throw new Error("expected turn_start");
     const forkSessionId = start.value.sessionId;
@@ -168,14 +168,14 @@ describe("AgentSessionManager working dirs", () => {
   it("resumes a session by id in the working dir it was created in", async () => {
     const projectDir = join(directory, "site");
     await mkdir(projectDir);
-    const original = await manager.acquire(
+    const original = await manager.open(
       { agentName: AGENT, channelThreadKey: "action:resume" },
       { workingDir: projectDir },
     );
     const sessionId = original.sessionId;
     await original.close("idle");
 
-    const resumed = await manager.acquireBySessionId(sessionId, AGENT);
+    const resumed = await manager.open({ id: sessionId, agent: AGENT });
 
     expect(resumed.sessionId).toBe(sessionId);
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(projectDir);
@@ -185,11 +185,11 @@ describe("AgentSessionManager working dirs", () => {
     const projectDir = join(directory, "site");
     await mkdir(projectDir);
     const key = { agentName: AGENT, channelThreadKey: "inbox:telegram:thread-1" };
-    const original = await manager.acquire(key, { workingDir: projectDir });
+    const original = await manager.open(key, { workingDir: projectDir });
     const sessionId = original.sessionId;
     await original.close("idle");
 
-    const reused = await manager.acquire(key);
+    const reused = await manager.open(key);
 
     expect(reused.sessionId).toBe(sessionId);
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(projectDir);
@@ -198,21 +198,21 @@ describe("AgentSessionManager working dirs", () => {
   it("refuses to resume a session whose recorded working dir is gone", async () => {
     const projectDir = join(directory, "renamed-later");
     await mkdir(projectDir);
-    const original = await manager.acquire(
+    const original = await manager.open(
       { agentName: AGENT, channelThreadKey: "action:gone" },
       { workingDir: projectDir },
     );
     await original.close("idle");
     await rm(projectDir, { recursive: true });
 
-    await expect(manager.acquireBySessionId!(original.sessionId, AGENT)).rejects.toThrow(
+    await expect(manager.open!({ id: original.sessionId, agent: AGENT })).rejects.toThrow(
       "which no longer exists",
     );
   });
 
   /** Acquires the way every opener does: the session, then the chat it names. */
   async function open(key: AgentSessionKey, chatId?: string, init: AgentSessionInit = {}) {
-    const session = await manager.acquire(key, init);
+    const session = await manager.open(key, init);
     await openedInChat(webchatRepo, session, chatId);
     return session;
   }
@@ -250,7 +250,7 @@ describe("AgentSessionManager working dirs", () => {
     expect(byKey.sessionId).toBe(sessionId);
     await byKey.close("idle");
 
-    const byId = await manager.acquireBySessionId(sessionId, AGENT);
+    const byId = await manager.open({ id: sessionId, agent: AGENT });
     await openedInChat(webchatRepo, byId, undefined);
     expect(byId.sessionId).toBe(sessionId);
     expect(await webchatRepo.chatOfSession(sessionId)).toMatchObject({ id: "stored" });
@@ -355,7 +355,7 @@ describe("AgentSessionManager working dirs", () => {
     });
     await original.close("idle");
 
-    const resumed = await manager.acquireBySessionId!(original.sessionId, AGENT);
+    const resumed = await manager.open!({ id: original.sessionId, agent: AGENT });
     await openedInChat(webchatRepo, resumed, original.sessionId);
 
     expect(await rowChat(original.sessionId)).toBe(original.sessionId);
@@ -367,19 +367,19 @@ describe("AgentSessionManager working dirs", () => {
     const thirdDir = join(directory, "third");
     await Promise.all([mkdir(firstDir), mkdir(secondDir), mkdir(thirdDir)]);
     const key = { agentName: AGENT, channelThreadKey: "webchat:moved" };
-    const original = await manager.acquire(key, { workingDir: firstDir });
+    const original = await manager.open(key, { workingDir: firstDir });
     const sessionId = original.sessionId;
     await original.close("idle");
 
-    const byId = await manager.acquireBySessionId!(sessionId, AGENT, { workingDir: secondDir });
+    const byId = await manager.open!({ id: sessionId, agent: AGENT }, { workingDir: secondDir });
     await byId.close("idle");
     expect((await sessionRepository.session(sessionId))?.workingDir).toBe(secondDir);
 
-    const byKey = await manager.acquire(key, { workingDir: thirdDir });
+    const byKey = await manager.open(key, { workingDir: thirdDir });
     await byKey.close("idle");
     expect((await sessionRepository.session(sessionId))?.workingDir).toBe(thirdDir);
 
-    await manager.acquireBySessionId(sessionId, AGENT);
+    await manager.open({ id: sessionId, agent: AGENT });
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(thirdDir);
   });
 
@@ -387,11 +387,11 @@ describe("AgentSessionManager working dirs", () => {
     const projectDir = join(directory, "deleted-later");
     await mkdir(projectDir);
     const key = { agentName: AGENT, channelThreadKey: "inbox:telegram:thread-2" };
-    const original = await manager.acquire(key, { workingDir: projectDir });
+    const original = await manager.open(key, { workingDir: projectDir });
     await original.close("idle");
     await rm(projectDir, { recursive: true });
 
-    const fresh = await manager.acquire(key);
+    const fresh = await manager.open(key);
 
     expect(fresh.sessionId).not.toBe(original.sessionId);
     expect(manager.findWorkingDirBySessionId!(fresh.sessionId)).toBe(
@@ -408,7 +408,7 @@ describe("AgentSessionManager working dirs", () => {
       Session.create(AGENT, { deprecatedId: "legacy-session", continuityKey: "action:legacy" }),
     );
 
-    await manager.acquireBySessionId!("legacy-session", AGENT);
+    await manager.open!({ id: "legacy-session", agent: AGENT });
 
     expect(manager.findWorkingDirBySessionId!("legacy-session")).toBe(
       join(directory, "projects", "default"),
@@ -426,7 +426,7 @@ describe("AgentSessionManager working dirs", () => {
       }),
     );
 
-    await expect(manager.acquireBySessionId!("orphan-session", "gone:reader")).rejects.toThrow(
+    await expect(manager.open!({ id: "orphan-session", agent: "gone:reader" })).rejects.toThrow(
       'Agent session "orphan-session" was not found or cannot be resumed',
     );
   });

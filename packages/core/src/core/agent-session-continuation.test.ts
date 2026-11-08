@@ -34,11 +34,7 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import {
-  createAgentSessionManager,
-  type AgentSession,
-  type AgentSessionManager,
-} from "../agent/index.js";
+import { createSessions, type AgentSession, type Sessions } from "../agent/index.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -120,7 +116,7 @@ function continuationOf(prompt: string | undefined): string | null {
   return prompt?.match(/<continuation[\s\S]*?<\/continuation>/)?.[0] ?? null;
 }
 
-describe("continuation notice through AgentSessionManager", () => {
+describe("continuation notice through Sessions", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -130,14 +126,14 @@ describe("continuation notice through AgentSessionManager", () => {
   let anthropic: ReturnType<typeof createProvider>;
   let artifactIdentity: ArtifactIdentityContext;
   let now: number;
-  const managers: AgentSessionManager[] = [];
+  const managers: Sessions[] = [];
 
   function at(seconds: number) {
     now = START + seconds * 1000;
     rs.setSystemTime(new Date(now));
   }
 
-  function createManager(): AgentSessionManager {
+  function createManager(): Sessions {
     const actionRegistry = new ActionRegistryImpl();
     actionRegistry.register({
       config: {
@@ -150,7 +146,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
-    const manager = createAgentSessionManager(
+    const manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository,
@@ -181,8 +177,8 @@ describe("continuation notice through AgentSessionManager", () => {
     return manager;
   }
 
-  function acquire(manager: AgentSessionManager, selectionId?: ModelSelectionId | null) {
-    return manager.acquire(key, {
+  function acquire(manager: Sessions, selectionId?: ModelSelectionId | null) {
+    return manager.open(key, {
       workingDir: directory,
       threadContext,
       ...(selectionId !== undefined ? { selectionId } : {}),
@@ -291,7 +287,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await acquire(manager, "gpt-6-luna");
 
     const events: AgentEvent[] = [];
-    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+    for await (const event of session.fork!({ prompt: "side question" })) {
       events.push(event);
     }
 
@@ -314,7 +310,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "second");
 
     const events: AgentEvent[] = [];
-    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+    for await (const event of session.fork!({ prompt: "side question" })) {
       events.push(event);
     }
 
@@ -446,7 +442,7 @@ describe("continuation notice through AgentSessionManager", () => {
     }
     const manager = createManager();
     const context = { ...threadContext, threadId: chatId, romeSessionId: chatId };
-    const session = await manager.acquire(
+    const session = await manager.open(
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, selectionId: from },
     );

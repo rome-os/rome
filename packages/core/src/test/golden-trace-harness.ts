@@ -14,7 +14,7 @@ import {
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
@@ -60,9 +60,9 @@ export interface GoldenTraceRig {
   transports: Map<string, FakeTransport>;
   actionEngine: ActionEngine;
   runner: AgentRunner;
-  /** Direct AgentSessionManager handle — for tests that bypass the channel
+  /** Direct Sessions handle — for tests that bypass the channel
    * adapter path (e.g. the webchat-style direct `sendTurn` flow). */
-  manager: AgentSessionManager;
+  manager: Sessions;
   /** Deliver one inbound message on `channel` through the real channel and
    *  instrumentation path, resolving once the rig's handler has finished
    *  with it. The message needs text, or the channel drops it (R2) and this
@@ -104,7 +104,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     providers: [options.modelProvider],
     accounts: fakeAccounts(bothAvailable()),
   });
-  const manager = createAgentSessionManager({
+  const manager = createSessions({
     agentLoader,
     sessionRepository,
     systemPrompts,

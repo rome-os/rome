@@ -2,7 +2,7 @@
 //
 // This is the implementation used inside action workers (forked subprocess).
 // It satisfies AgentRunnerInterface but never owns a ModelProvider locally;
-// every turn is an RPC into main where the AgentSessionManager keeps the SDK
+// every turn is an RPC into main where the Sessions keeps the SDK
 // CLI alive across turns.
 
 import { getWorkerIpc, type IpcRpc } from "../actions/ipc.js";

@@ -197,7 +197,7 @@ import {
 } from "./agent/index.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager } from "./agent/index.js";
+import { createSessions } from "./agent/index.js";
 import {
   type ChannelSurfaces,
   sessionOpeningFor,
@@ -1126,7 +1126,7 @@ async function main() {
     accounts: modelAccounts,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
-    agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
+    agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
@@ -1140,7 +1140,7 @@ async function main() {
     return talker ? talkerChannelSurface(talker) : null;
   };
   const openingFor = sessionOpeningFor({ channelSurface, connectionKindOfChannel });
-  const agentSessionManager = createAgentSessionManager(
+  const agentSessionManager = createSessions(
     {
       agentLoader,
       sessionRepository,

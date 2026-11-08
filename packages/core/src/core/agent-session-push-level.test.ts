@@ -23,7 +23,7 @@ import {
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -34,7 +34,7 @@ import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 describe("AgentSession turn push level", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: Sessions;
   let opened: ModelSessionParams[];
   let tools: SessionToolContext | undefined;
 
@@ -81,7 +81,7 @@ describe("AgentSession turn push level", () => {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("push level test prompt");
-    manager = createAgentSessionManager(
+    manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
@@ -126,7 +126,7 @@ describe("AgentSession turn push level", () => {
   });
 
   const resultOf = async (pushLevel?: "active" | "passive") => {
-    const session = await manager.acquire(
+    const session = await manager.open(
       { agentName: "worker", channelThreadKey: "webchat:worker" },
       { workingDir: directory },
     );

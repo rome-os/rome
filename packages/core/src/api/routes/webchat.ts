@@ -1480,7 +1480,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // resumes an evicted source from its persisted model thread, allowing
       // side chats from settled conversations after the first fork or a
       // backend restart.
-      const source = await deps.agentSessionManager.acquire(
+      const source = await deps.agentSessionManager.open(
         { agentName, channelThreadKey },
         {
           ...deps.sessionOpeningFor(channelThreadKey, threadContext),
@@ -2576,7 +2576,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
-    const sess = deps.agentSessionManager.peek({
+    const sess = deps.agentSessionManager.find({
       agentName: session?.agentName ?? "main",
       channelThreadKey: webchatSessionKey(sessionId),
     });
@@ -3109,15 +3109,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A stream without a turn-bound interrupt can only be cancelled through
     // its live session owner. Require the exact active turn so a queued turn
     // cannot cancel the turn currently producing output.
-    const agentSess = deps.agentSessionManager.peek({
+    const agentSess = deps.agentSessionManager.find({
       agentName: stream.agentName,
       channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
     });
-    if (!agentSess || agentSess.currentTurnId !== turnId) {
+    const turn = deps.agentSessionManager.turn(turnId);
+    if (!agentSess || agentSess.currentTurnId !== turnId || !turn) {
       return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
     stream.stopRequested = true;
-    await agentSess.interrupt("user-stop", turnId);
+    await turn.stop("user-stop");
     return answer({ stopped: true });
   };
 
@@ -3147,7 +3148,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           status:
             s.channelThreadKey &&
             (s.agentTurnId ?? s.turnId) ===
-              deps.agentSessionManager.peek({
+              deps.agentSessionManager.find({
                 agentName: s.agentName,
                 channelThreadKey: s.channelThreadKey,
               })?.currentTurnId
@@ -3703,7 +3704,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     let agentSess;
     try {
-      agentSess = await deps.agentSessionManager.acquire(
+      agentSess = await deps.agentSessionManager.open(
         {
           agentName,
           channelThreadKey,
@@ -4314,7 +4315,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       }
       if (msg.type === "turn_start" && stream.channelThreadKey) {
-        const owner = deps.agentSessionManager.peek({
+        const owner = deps.agentSessionManager.find({
           agentName: msg.agent ?? stream.agentName,
           channelThreadKey: stream.channelThreadKey,
         });
@@ -4326,7 +4327,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Marked only when the Stop reaches this turn: one that lands
             // after a newer input ended it stops nothing.
             if (reason === "user-stop") stream.stopRequested = true;
-            await owner.interrupt(reason);
+            await owner.stop(reason);
           };
         }
       }
@@ -4508,7 +4509,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
         senderBondLevel: "guardian",
       };
-      const opened = await deps.agentSessionManager.acquire(
+      const opened = await deps.agentSessionManager.open(
         { agentName: session.agentName ?? "main", channelThreadKey },
         {
           ...deps.sessionOpeningFor(channelThreadKey, threadContext),

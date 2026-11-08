@@ -33,7 +33,7 @@ import type {
   AgentSession,
   AgentSessionInit,
   AgentSessionKey,
-  AgentSessionManager,
+  Sessions,
   AgentTurnHandle,
   AgentTurnInput,
   SendTurnOptions,
@@ -652,18 +652,17 @@ describe("Webchat API", () => {
       currentTurnId: "input-turn",
       sendTurn: start,
       submitInput: (input, options) => queue.submit(input, options),
-      runForkedTurn: () => {
+      fork: () => {
         throw new Error("not forked");
       },
       subscribe: () => () => {},
       onStatusChange: () => () => {},
-      interrupt: async () => {},
+      stop: async () => {},
       close: async () => {},
     };
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => agent),
-      acquireBySessionId: rs.fn(async () => agent),
-      peek: () => agent,
+      open: rs.fn(async () => agent),
+      find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
       shutdown: async () => {},
@@ -755,13 +754,12 @@ describe("Webchat API", () => {
       },
       subscribe: () => () => {},
       onStatusChange: () => () => {},
-      interrupt,
+      stop: interrupt,
       close: async () => {},
     });
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => agent),
-      acquireBySessionId: rs.fn(async () => agent),
-      peek: () => agent,
+      open: rs.fn(async () => agent),
+      find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
       shutdown: async () => {},
@@ -820,13 +818,12 @@ describe("Webchat API", () => {
       },
       subscribe: () => () => {},
       onStatusChange: () => () => {},
-      interrupt,
+      stop: interrupt,
       close: async () => {},
     });
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => agent),
-      acquireBySessionId: rs.fn(async () => agent),
-      peek: () => agent,
+      open: rs.fn(async () => agent),
+      find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
       shutdown: async () => {},
@@ -869,7 +866,7 @@ describe("Webchat API", () => {
       });
 
       // Recorded before the agent failed to wake: said, so not answered failed.
-      deps.agentSessionManager.acquire = rs.fn(async () => {
+      deps.agentSessionManager.open = rs.fn(async () => {
         throw new Error("session store unavailable");
       });
       expect(await runtime.post(id, { text: "Trains too" }, concierge)).toMatchObject({
@@ -2049,7 +2046,7 @@ describe("Webchat API", () => {
             },
             subscribe: () => () => undefined,
             onStatusChange: () => () => undefined,
-            interrupt: async () => undefined,
+            stop: async () => undefined,
             close: async () => undefined,
           }) satisfies FakeSession,
       );
@@ -2473,7 +2470,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       } satisfies FakeSession;
     });
@@ -2545,7 +2542,7 @@ describe("Webchat API", () => {
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
-          interrupt: async () => undefined,
+          stop: async () => undefined,
           close: async () => undefined,
         } satisfies FakeSession;
       });
@@ -2675,14 +2672,14 @@ describe("Webchat API", () => {
 
   it("tells the Concierge when its task chat's turn fails before the agent runs", async () => {
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => {
+      open: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Claude", {
           code: "model_provider_unavailable",
           provider: "anthropic",
           reason: "not_logged_in",
         });
       }),
-      peek: () => undefined,
+      find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     const turnFailedBeforeStart = rs.fn();
@@ -2708,14 +2705,14 @@ describe("Webchat API", () => {
 
   it("accepts a logged-out provider as a persisted failed turn", async () => {
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => {
+      open: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
           reason: "not_logged_in",
         });
       }),
-      peek: () => undefined,
+      find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     const app = createWebchatRuntime(deps).routes;
@@ -2788,14 +2785,14 @@ describe("Webchat API", () => {
 
   it("uses an LLM-generated summary to name a new chat from its first user message", async () => {
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => {
+      open: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
           reason: "not_logged_in",
         });
       }),
-      peek: () => undefined,
+      find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     const generateTitle = rs.fn(async () => "Q4 Launch Plan");
@@ -2847,14 +2844,14 @@ describe("Webchat API", () => {
   it("opens a chat's runtime for a background turn as its first message would", async () => {
     const acquired: Array<[unknown, Record<string, unknown> | undefined]> = [];
     deps.agentSessionManager = {
-      acquire: rs.fn(async (key: unknown, init?: Record<string, unknown>) => {
+      open: rs.fn(async (key: unknown, init?: Record<string, unknown>) => {
         acquired.push([key, init]);
         return {
           sessionId: "runtime-topic",
           key: { agentName: "core:concierge", channelThreadKey: "webchat:topic-1" },
         };
       }),
-      peek: () => undefined,
+      find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     await deps.webchatRepo.createSession(
@@ -2881,14 +2878,14 @@ describe("Webchat API", () => {
 
   it("names an untitled topic chat from its first message, and never a named one or the main chat", async () => {
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => {
+      open: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
           reason: "not_logged_in",
         });
       }),
-      peek: () => undefined,
+      find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
@@ -2936,14 +2933,14 @@ describe("Webchat API", () => {
 
   it("does not delay the turn terminal event while conversation naming is still running", async () => {
     deps.agentSessionManager = {
-      acquire: rs.fn(async () => {
+      open: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
           reason: "not_logged_in",
         });
       }),
-      peek: () => undefined,
+      find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     let finishTitle!: (title: string) => void;
@@ -3001,7 +2998,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       }));
       const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
@@ -3219,7 +3216,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       }));
       deps.actionEngine = {
@@ -3729,7 +3726,7 @@ describe("Webchat API", () => {
           }),
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: wrongTurnInterrupt,
+        stop: wrongTurnInterrupt,
         close: async () => undefined,
       }));
       const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
@@ -3818,7 +3815,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       } satisfies FakeSession;
     });
@@ -3901,7 +3898,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       } satisfies FakeSession;
     });
@@ -3986,7 +3983,7 @@ describe("Webchat API", () => {
       },
       subscribe: () => () => undefined,
       onStatusChange: () => () => undefined,
-      interrupt: async () => undefined,
+      stop: async () => undefined,
       close: async () => undefined,
     }));
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
@@ -4060,7 +4057,7 @@ describe("Webchat API", () => {
       },
       subscribe: () => () => undefined,
       onStatusChange: () => () => undefined,
-      interrupt: async () => undefined,
+      stop: async () => undefined,
       close: async () => undefined,
     }));
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
@@ -4124,7 +4121,7 @@ describe("Webchat API", () => {
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
-          interrupt: async () => undefined,
+          stop: async () => undefined,
           close: async () => undefined,
         } satisfies FakeSession;
         return Promise.resolve(session);
@@ -4361,7 +4358,7 @@ describe("Webchat API", () => {
         },
       );
       expect(sent.status).toBe(200);
-      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+      expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.objectContaining({ selectionId: "gpt-6-luna" }),
       );
@@ -4378,8 +4375,8 @@ describe("Webchat API", () => {
         ...deps,
         accounts: deps.modelAccounts,
       } as unknown as ConciergeDeps);
-      const acquire = deps.agentSessionManager.acquire;
-      deps.agentSessionManager.acquire = rs.fn(
+      const open = deps.agentSessionManager.open;
+      deps.agentSessionManager.open = rs.fn(
         async (key: AgentSessionKey, init?: AgentSessionInit) => {
           if (key.channelThreadKey === "webchat:ordinary-quota")
             throw new ModelResolutionError("Claude quota exhausted", {
@@ -4387,9 +4384,9 @@ describe("Webchat API", () => {
               provider: "anthropic",
               reason: "quota_exhausted",
             });
-          return acquire(key, init);
+          return open(key, init);
         },
-      );
+      ) as unknown as Sessions["open"];
       const app = createWebchatRuntime(deps).routes;
       for (const id of ["concierge", "ordinary-quota"]) {
         await deps.webchatRepo.createSession(
@@ -4413,7 +4410,7 @@ describe("Webchat API", () => {
         expect((await deps.webchatRepo.getSession(id))?.largeModelSelection).toBe(
           id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
         );
-        expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
           expect.anything(),
           expect.objectContaining({
             selectionId: id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
@@ -4440,7 +4437,7 @@ describe("Webchat API", () => {
           body: JSON.stringify({ largeModelSelection }),
         });
       await drainTurn(app, await send("first"));
-      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+      expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.objectContaining({ selectionId: null }),
       );
@@ -4449,7 +4446,7 @@ describe("Webchat API", () => {
       expect(picked.status).toBe(200);
       await expect(picked.json()).resolves.toMatchObject({ largeModelSelection: "gpt-6-luna" });
       await drainTurn(app, await send("second"));
-      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+      expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.objectContaining({ selectionId: "gpt-6-luna" }),
       );
@@ -4458,7 +4455,7 @@ describe("Webchat API", () => {
       const cleared = await pick("auto");
       await expect(cleared.json()).resolves.toMatchObject({ largeModelSelection: null });
       await drainTurn(app, await send("third"));
-      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+      expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
         expect.objectContaining({ selectionId: null }),
       );
@@ -5243,7 +5240,7 @@ describe("Webchat API", () => {
           };
         },
       };
-      rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5582,7 +5579,7 @@ describe("Webchat API", () => {
           };
         },
       };
-      const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5671,7 +5668,7 @@ describe("Webchat API", () => {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
       const exactCheckpoint = rs
@@ -5723,7 +5720,7 @@ describe("Webchat API", () => {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         async *runForked() {},
       };
-      rs.spyOn(deps.agentSessionManager, "acquire").mockRejectedValue(
+      rs.spyOn(deps.agentSessionManager, "open").mockRejectedValue(
         new Error("source provider session is unavailable"),
       );
       const app = createWebchatRuntime(deps).routes;
@@ -5746,7 +5743,7 @@ describe("Webchat API", () => {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
@@ -5796,7 +5793,7 @@ describe("Webchat API", () => {
           };
         },
       };
-      rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5874,7 +5871,7 @@ describe("Webchat API", () => {
           };
         },
       };
-      rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5937,7 +5934,7 @@ describe("Webchat API", () => {
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
-          interrupt: async () => undefined,
+          stop: async () => undefined,
           close: async () => undefined,
         } satisfies FakeSession;
       });
@@ -6047,7 +6044,7 @@ describe("Webchat API", () => {
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
-          interrupt: async () => undefined,
+          stop: async () => undefined,
           close: async () => undefined,
         } satisfies FakeSession;
       });
@@ -6073,7 +6070,7 @@ describe("Webchat API", () => {
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
       // `persistForkThread` stored the row without a model-selection suffix. If
-      // a follow-up ever recomputed a suffixed key, `acquire` would open a
+      // a follow-up ever recomputed a suffixed key, `open` would open a
       // fresh model thread and lose the branch history with no error. The
       // selector setting must be ON or the selection is discarded before the
       // pin and this proves nothing.
@@ -6097,7 +6094,7 @@ describe("Webchat API", () => {
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
-          interrupt: async () => undefined,
+          stop: async () => undefined,
           close: async () => undefined,
         } satisfies FakeSession;
       });
@@ -6120,8 +6117,8 @@ describe("Webchat API", () => {
     it("retries backend continuation Stop without interrupting a later provider turn", async () => {
       const sessionId = "sess-backend-stop";
       await deps.webchatRepo.createSession(sessionId, "Backend stop");
-      const owner = { currentTurnId: "backend-provider-turn", interrupt: rs.fn(async () => {}) };
-      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const owner = { currentTurnId: "backend-provider-turn", stop: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "find").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
       let finish!: () => void;
       const gate = new Promise<void>((resolve) => {
@@ -6173,10 +6170,10 @@ describe("Webchat API", () => {
       finishOther();
       await other;
       expect((await stop()).status).toBe(202);
-      expect(owner.interrupt).toHaveBeenCalledTimes(2);
+      expect(owner.stop).toHaveBeenCalledTimes(2);
       owner.currentTurnId = "later-turn";
       await stop();
-      expect(owner.interrupt).toHaveBeenCalledTimes(2);
+      expect(owner.stop).toHaveBeenCalledTimes(2);
       finish();
       await task;
       expect(
@@ -6190,8 +6187,8 @@ describe("Webchat API", () => {
     it("marks no Stop on a background turn whose provider turn has already moved on", async () => {
       const sessionId = "sess-late-stop";
       await deps.webchatRepo.createSession(sessionId, "Late stop");
-      const owner = { currentTurnId: "superseded-turn", interrupt: rs.fn(async () => {}) };
-      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const owner = { currentTurnId: "superseded-turn", stop: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "find").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
       let stopRequested: (() => boolean) | undefined;
       let finish!: () => void;
@@ -6217,7 +6214,7 @@ describe("Webchat API", () => {
       // A newer input already ended the turn; the stream is still draining.
       owner.currentTurnId = "newer-turn";
       await routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
-      expect(owner.interrupt).not.toHaveBeenCalled();
+      expect(owner.stop).not.toHaveBeenCalled();
       expect(stopRequested?.()).toBe(false);
       finish();
       await task;
@@ -6795,8 +6792,8 @@ describe("Webchat API", () => {
       // name that id too, or the chat shows the turn twice.
       const sessionId = "sess-recorded-turn-id";
       await deps.webchatRepo.createSession(sessionId, "Recorded Turn Id");
-      const owner = { currentTurnId: "turn-real", interrupt: rs.fn(async () => {}) };
-      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const owner = { currentTurnId: "turn-real", stop: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "find").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
       const recorded = { recorded: true };
       let markStarted!: () => void;
@@ -6847,7 +6844,7 @@ describe("Webchat API", () => {
 
       const stop = await routes.request("/chat/turns/turn-real/interrupt", { method: "POST" });
       expect(stop.status).toBe(202);
-      expect(owner.interrupt).toHaveBeenCalledTimes(1);
+      expect(owner.stop).toHaveBeenCalledTimes(1);
 
       rs.useFakeTimers();
       release();
@@ -6968,7 +6965,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       }));
       await deps.webchatRepo.createSession("push-chat", "Push");
@@ -7010,7 +7007,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       }));
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
@@ -7063,7 +7060,7 @@ describe("Webchat API", () => {
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
-        interrupt: async () => undefined,
+        stop: async () => undefined,
         close: async () => undefined,
       }));
       if (options.agentName) {
@@ -7590,7 +7587,7 @@ describe("Webchat API", () => {
   });
 });
 
-type FakeSession = Omit<AgentSession, "submitInput" | "runForkedTurn" | "selectModel">;
+type FakeSession = Omit<AgentSession, "submitInput" | "fork" | "selectModel">;
 
 /**
  * A manager over fake sessions that script only `sendTurn`. Every submitted
@@ -7598,16 +7595,16 @@ type FakeSession = Omit<AgentSession, "submitInput" | "runForkedTurn" | "selectM
  * queued turn.
  */
 function fakeSessionManager(
-  acquire: (key: AgentSessionKey, init?: AgentSessionInit) => Promise<FakeSession> | FakeSession,
-): AgentSessionManager {
+  open: (key: AgentSessionKey, init?: AgentSessionInit) => Promise<FakeSession> | FakeSession,
+): Sessions {
   return {
-    acquire: rs.fn(async (key: AgentSessionKey, init?: AgentSessionInit) =>
-      withSubmitInput(await acquire(key, init)),
-    ),
-    acquireBySessionId: async () => {
-      throw new Error("fake manager cannot resume by session id");
-    },
-    peek: () => undefined,
+    open: rs.fn(
+      async (continuityKey: AgentSessionKey | { id: string }, init?: AgentSessionInit) => {
+        if ("id" in continuityKey) throw new Error("fake manager cannot resume by session id");
+        return withSubmitInput(await open(continuityKey, init));
+      },
+    ) as Sessions["open"],
+    find: () => undefined,
     findWorkingDirBySessionId: () => undefined,
     turn: () => undefined,
     shutdown: async () => undefined,
@@ -7631,7 +7628,7 @@ function withSubmitInput(fake: FakeSession): AgentSession {
       });
       return { inputId: input.inputId, turnId: handle.id, disposition: "started" };
     },
-    runForkedTurn: (): never => {
+    fork: (): never => {
       throw new Error("fake session cannot fork");
     },
   });

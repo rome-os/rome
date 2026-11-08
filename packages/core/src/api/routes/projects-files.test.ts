@@ -1621,10 +1621,10 @@ describe("Projects files API", () => {
       const closeMain = rs.fn(async () => undefined);
       const closeChild = rs.fn(async () => undefined);
       type LiveAgentSession = NonNullable<
-        ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["peek"]>
+        ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["find"]>
       >;
       const agentSessionManager: RouteDeps["agentSessionManager"] = {
-        peek: ({ agentName, channelThreadKey }) => {
+        find: ({ agentName, channelThreadKey }) => {
           if (agentName === "main" && channelThreadKey === "webchat:sess-demo") {
             return { close: closeMain } as unknown as LiveAgentSession;
           }
