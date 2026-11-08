@@ -153,6 +153,7 @@ import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocati
 import {
   AgentLoader,
   AppTurnHooks,
+  AppTurnMiddleware,
   readAnswerShape,
   TurnUsageReporter,
   ChatSessionSettings,
@@ -216,7 +217,6 @@ import { startConciergeFollowing, watchProvidersOf } from "./concierge/following
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
-import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
@@ -948,7 +948,7 @@ async function main() {
   // app lifecycle hooks (the `agentRunner` field is filled in below, before
   // any hook is loaded), so a scripted-conversation middleware can summon real
   // agents and reach its own app DB.
-  const turnMiddlewareChain = createTurnMiddlewareChain({
+  const turnMiddleware = new AppTurnMiddleware({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
   const appStartedDispatcher = createAppStartedDispatcher({
@@ -1158,7 +1158,7 @@ async function main() {
       }),
       subagentExecutionService,
       activeSubagentRegistry,
-      turnMiddleware: turnMiddlewareChain,
+      turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
@@ -1540,7 +1540,7 @@ async function main() {
   const reloadTurnMiddlewareHooks = await registerCatalogHookLoad({
     sourcePrefix: "turn-middleware",
     warnMessage: "some turn-middleware hooks failed to initialize",
-    load: () => turnMiddlewareChain.loadFromCatalog(appCatalog),
+    load: () => turnMiddleware.loadFromCatalog(appCatalog),
     failureSource: (failure) => `turn-middleware:${failure.path}`,
   });
 

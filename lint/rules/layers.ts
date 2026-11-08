@@ -95,13 +95,6 @@ export const listedCrossings: ListedCrossing[] = [
   {
     rule: "application-imports-inward",
     from: SESSION,
-    to: "core/turn-middleware.ts",
-    ticket: "ZHA-154",
-    why: "App reply handling, until apps act on a turn through a port the agent context owns.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: SESSION,
     to: "core/active-subagent-registry.ts",
     ticket: "ZHA-154",
     why: "Subagent calls, until the session calls subagents through the subagent ports.",
