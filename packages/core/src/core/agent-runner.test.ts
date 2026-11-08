@@ -20,6 +20,7 @@ import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
+import { noteOpenerChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -826,7 +827,7 @@ describe("AgentRunner", () => {
         peek: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
-      return { manager, turns };
+      return { manager, turns, session };
     }
 
     it("leaves a recorded channel conversation to the inbox", async () => {
@@ -1033,6 +1034,27 @@ describe("AgentRunner", () => {
 
         expect(turns[0]?.romeSessionId).toMatch(/^action:/);
         await expect(repo.getMessages("user-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("records into the chat an open session's opener named, until it is reopened", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new ChatsWebChatRepository(testDb.db);
+        await repo.createSession("user-chat", "User chat");
+        const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
+        // The session is still open from a caller that named the chat. A
+        // reopened one is the case above, which leaves the chat alone.
+        noteOpenerChat(session, "user-chat");
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toBe("user-chat");
       } finally {
         testDb.close();
       }

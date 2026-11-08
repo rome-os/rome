@@ -139,6 +139,7 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
+import { noteOpenerChat } from "./session-conversation.js";
 
 const log = createLogger("agent-session");
 
@@ -1539,6 +1540,9 @@ async function openSession(
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
   });
+  // Temporary (ZHA-157): turns on this open session that name no chat
+  // record into the chat its opener named.
+  noteOpenerChat(impl, requestedRomeSessionId);
 
   impl.startModelSessionEvents();
 

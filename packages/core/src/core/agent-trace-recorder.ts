@@ -74,7 +74,10 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
 }
 
 export interface TurnConversationInput extends RomeSessionIdInput {
-  /** The chat that has the session, read when the turn's caller names none. */
+  /** The chat the session's opener named. It wins over the one this turn's
+   *  caller names. Temporary, see `openerChat` (ZHA-157). */
+  openerChat?: string;
+  /** The chat that has the session, read when no chat is named. */
   sessionChat?: SessionChat;
 }
 
@@ -107,7 +110,7 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   promptPersisted: boolean;
   recorderOwned: boolean;
 } {
-  const named = input.romeSessionId;
+  const named = input.openerChat ?? input.romeSessionId;
   const found = named ? undefined : input.sessionChat;
   const ownedByRecorder =
     found !== undefined &&

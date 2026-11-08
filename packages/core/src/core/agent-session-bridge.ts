@@ -40,7 +40,7 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { findSessionChat } from "./session-conversation.js";
+import { findSessionChat, openerChat } from "./session-conversation.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -116,8 +116,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     });
     const required: string[] = [];
     const known = new Set<string>([session.sessionId]);
-    const chat = await findSessionChat(repo, session.sessionId);
-    if (chat) known.add(chat.id);
+    // Checked only when the session's opener named no chat, as when the
+    // session held its chat itself (temporary, ZHA-157).
+    if (!openerChat(session)) {
+      const chat = await findSessionChat(repo, session.sessionId);
+      if (chat) known.add(chat.id);
+    }
     const root = walkToRoot(session.key.channelThreadKey);
     for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
     const rootKey = parseSessionKey(root);
@@ -205,9 +209,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           agentName: req.key.agentName,
           agentSessionId: session.sessionId,
           romeSessionId: req.init?.romeSessionId,
-          sessionChat: req.init?.romeSessionId
-            ? undefined
-            : await findSessionChat(this.webchatRepo, session.sessionId),
+          openerChat: openerChat(session),
+          sessionChat:
+            (openerChat(session) ?? req.init?.romeSessionId)
+              ? undefined
+              : await findSessionChat(this.webchatRepo, session.sessionId),
           channelThreadKey: req.key.channelThreadKey,
           threadContext: req.init?.threadContext,
           actionContext: req.actionContext,

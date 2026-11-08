@@ -21,6 +21,7 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
+import { openerChat } from "./session-conversation.js";
 
 const AGENT = "worker";
 
@@ -285,6 +286,20 @@ describe("AgentSessionManager working dirs", () => {
 
     expect(reused.sessionId).toBe(original.sessionId);
     expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("legacy");
+  });
+
+  it("remembers the chat an open session's opener named, and forgets it on reopen", async () => {
+    const key = { agentName: AGENT, channelThreadKey: "webchat:opened" };
+    const opened = await manager.acquire(key, { romeSessionId: "opened" });
+    const reused = await manager.acquire(key);
+
+    expect(reused).toBe(opened);
+    expect(openerChat(reused)).toBe("opened");
+
+    await opened.close("idle");
+    const reopened = await manager.acquire(key);
+    expect(reopened.sessionId).toBe(opened.sessionId);
+    expect(openerChat(reopened)).toBeUndefined();
   });
 
   it("keeps a reused row's conversation when the caller names another", async () => {
