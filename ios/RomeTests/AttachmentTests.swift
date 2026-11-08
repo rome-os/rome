@@ -78,8 +78,8 @@ private func pixelSize(_ data: Data) -> CGSize? {
 
     @Test func pastedImagesBecomeAttachments() async {
         let pasteboard = UIPasteboard(name: UIPasteboard.Name("rome-test-\(UUID())"), create: true)!
-        pasteboard.images = [photo(width: 120, height: 80), photo(width: 80, height: 120)]
-        let attachments = ComposerAttachments()
+        let images = [photo(width: 120, height: 80), photo(width: 80, height: 120)]
+        pasteboard.images = images
         let field = PastingTextView()
         field.pasteboard = pasteboard
         var pasted: [NSItemProvider] = []
@@ -87,9 +87,12 @@ private func pixelSize(_ data: Data) -> CGSize? {
         #expect(field.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil))
         field.paste(nil)
         #expect(pasted.count == 2)
-        #expect(await attachments.add(providers: pasted) == 2)
-        #expect(attachments.images.count == 2)
         UIPasteboard.remove(withName: pasteboard.name)
+        // Providers of the same images, not the pasteboard's: under a parallel
+        // run the simulator's pasteboard server drops loads at random.
+        let attachments = ComposerAttachments()
+        #expect(await attachments.add(providers: images.map { NSItemProvider(object: $0) }) == 2)
+        #expect(attachments.images.count == 2)
     }
 
     @Test func pastedTextStillLandsInTheField() {
