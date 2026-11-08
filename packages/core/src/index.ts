@@ -155,7 +155,9 @@ import {
   readAnswerShape,
   TurnUsageReporter,
   ChatSessionSettings,
+  DrizzleDashboardSessions,
   requireAgent,
+  rootSession,
   TurnListeners,
 } from "./agent/index.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
@@ -1048,9 +1050,11 @@ async function main() {
     const origin = getRomeCloudOrigin();
     return credentialId && origin ? { credentialId, bearer: cloudBearer, origin } : null;
   };
+  const dashboardSessions = new DrizzleDashboardSessions(db);
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
+      rootSession: (id) => rootSession(dashboardSessions, id),
       getExecution: async (id) => {
         const row = await actionExecutionsRepo.findById(id);
         return row
