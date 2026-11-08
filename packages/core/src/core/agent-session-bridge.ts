@@ -26,7 +26,7 @@ import type {
 } from "./agent-session.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
-import type { SessionOpeningFor } from "./session-opening.js";
+import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import {
@@ -113,8 +113,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private runLineDeps?: RunLineDeps,
     /** The reset policy of a connected account's chat. Absent, no session is reset. */
     private resetPolicyOf?: ChatResetPolicy,
-    /** What this opener states for a session it opens. Absent, it states nothing. */
-    private sessionOpeningFor?: SessionOpeningFor,
+    /** What this opener states for a session it opens. Absent, no channel shows cards. */
+    private openingFor: SessionOpeningFor = sessionOpeningFor({
+      channelSurface: () => null,
+    }),
   ) {}
 
   /**
@@ -200,13 +202,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           const init = {
             ...sessionInit,
             // Stated here, never taken from the worker's request.
-            drawsCards: undefined,
-            guardianFacing: undefined,
-            toolEnv: undefined,
-            spanAttributes: undefined,
-            ...(openedKey
-              ? this.sessionOpeningFor?.(openedKey, sessionInit.threadContext)
-              : undefined),
+            ...this.openingFor(openedKey ?? "", sessionInit.threadContext),
             workingDir,
             isSubagent: true,
             // Read here, never taken from the worker's request.

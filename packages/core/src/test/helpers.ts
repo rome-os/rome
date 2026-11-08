@@ -676,7 +676,16 @@ export async function buildTestDeps(
     subagentExecutionService,
     activeSubagentRegistry,
   });
-  const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
+  const agentRunner = new AgentRunner(
+    agentSessionManager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),

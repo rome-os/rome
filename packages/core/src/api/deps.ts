@@ -195,8 +195,8 @@ export interface ApiDeps {
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionRepository: SessionRepository;
   agentSessionManager: AgentSessionManager;
-  /** What a route states for a session it opens. Absent, it states nothing. */
-  sessionOpeningFor?: SessionOpeningFor;
+  /** What a route states for a session it opens. */
+  sessionOpeningFor: SessionOpeningFor;
   /** Lightweight, tool-free small-model request used to name a new chat. */
   conversationTitleGenerator: ConversationTitleGenerator;
   /** Live agent runner used by API-owned background turns such as explicit

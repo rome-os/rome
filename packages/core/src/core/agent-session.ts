@@ -185,7 +185,11 @@ export interface AgentSessionInit {
    * scheduled back into it. Absent, it cannot.
    */
   guardianFacing?: boolean;
-  /** Name-value pairs the model session's tools run with. The session passes them through. */
+  /**
+   * Name-value pairs the model session's tools run with; a name given no
+   * value is cleared. The session passes them through. Absent, the tools run
+   * with Rome's own environment, so every opener states it.
+   */
   toolEnv?: Record<string, string | undefined>;
   /** Attributes stamped on the spans of every turn. The session passes them through. */
   spanAttributes?: Attributes;
