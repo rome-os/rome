@@ -1,4 +1,4 @@
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -77,6 +77,7 @@ describe("AgentSessionManager working dirs", () => {
         agentLoader: loader,
         sessionRepository,
         webchatRepo,
+        sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
         systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),

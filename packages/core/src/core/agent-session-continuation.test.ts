@@ -1,4 +1,4 @@
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -149,6 +149,7 @@ describe("continuation notice through AgentSessionManager", () => {
         agentLoader: loader,
         sessionRepository,
         webchatRepo,
+        sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
         systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),

@@ -22,6 +22,9 @@ import {
   type AnswerShape,
   type ReadAnswerShape,
   type TurnAttribution,
+  type SessionSettings,
+  restoresSavedSelection,
+  evaluateProviderSessionReset,
   type AgentFolders,
   projectPath,
   catchUpPrompt,
@@ -95,7 +98,6 @@ import type {
   ModelToolCallContext,
   ProviderId,
 } from "./agent-runner.js";
-import { isConciergeAgent } from "../concierge/service.js";
 import {
   modelResolutionRequest,
   toModelResolutionErrorPayload,
@@ -105,7 +107,6 @@ import {
   type ModelResolver,
   type ModelSelectionId,
 } from "../agent/index.js";
-import { resolveWebchatLargeModelSelection } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
 import { enterSession } from "../telemetry-context.js";
@@ -138,7 +139,6 @@ import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
@@ -340,8 +340,9 @@ interface ManagerDeps {
   /** Turn-middleware onion. Optional — when absent, every turn runs the
    *  model terminal directly (behavior identical to a chain of size 0). */
   turnMiddleware?: TurnMiddlewareChain;
-  /** Resolve the effective reset policy from the existing external thread identity. */
-  resolveProviderSessionReset?: (ref: ChatRef) => Promise<ProviderSessionResetPolicy>;
+  /** What each chat set for the sessions it opens. Absent, no reset is
+   *  checked and no saved model is restored. */
+  sessionSettings?: SessionSettings;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
@@ -478,9 +479,7 @@ export function createAgentSessionManager(
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
-      init?.applyProviderSessionReset &&
-      init.threadContext?.connectionId &&
-      deps.resolveProviderSessionReset
+      init?.applyProviderSessionReset && init.threadContext?.connectionId && deps.sessionSettings
         ? {
             connectionId: init.threadContext.connectionId,
             chatId: init.threadContext.threadId as ChatId,
@@ -488,47 +487,48 @@ export function createAgentSessionManager(
         : undefined;
     if (init && resetRef && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
-      const reset = await deps.resolveProviderSessionReset!(resetRef);
+      const reset = await deps.sessionSettings!.resetPolicy(resetRef);
       const chatId = init.romeSessionId ?? init.threadContext?.romeSessionId;
-      return await lifecycleMutex.runExclusive(k, async () => {
-        const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-        const decision = active
-          ? evaluateProviderSessionReset(reset, active, interactionAt)
-          : { due: false as const };
-        const cached = sessions.get(k);
-        if (decision.due) {
-          log.info("provider_session.reset_due", {
-            chatId,
-            agentName: key.agentName,
-            provider: active?.provider ?? undefined,
-            oldSessionId: active?.id,
-            resetReason: decision.reason,
-            policyMode: reset.mode,
-            elapsedMinutes: decision.elapsedMinutes,
-          });
-          if (cached && cached.status !== "closed") {
-            await waitUntilQuiescent(cached);
-            await cached.close("idle");
+      if (reset)
+        return await lifecycleMutex.runExclusive(k, async () => {
+          const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+          const decision = active
+            ? evaluateProviderSessionReset(reset, active, interactionAt)
+            : { due: false as const };
+          const cached = sessions.get(k);
+          if (decision.due) {
+            log.info("provider_session.reset_due", {
+              chatId,
+              agentName: key.agentName,
+              provider: active?.provider ?? undefined,
+              oldSessionId: active?.id,
+              resetReason: decision.reason,
+              policyMode: reset.mode,
+              elapsedMinutes: decision.elapsedMinutes,
+            });
+            if (cached && cached.status !== "closed") {
+              await waitUntilQuiescent(cached);
+              await cached.close("idle");
+            }
           }
-        }
-        let prepared: Session | undefined;
-        if (decision.due && active) {
-          warnOnConversationMismatch(key, active.id, active.deprecatedChatId, init.romeSessionId);
-          prepared = active.replace({ deprecatedChatId: init.romeSessionId });
-          await deps.sessionRepository.replace(active, prepared);
-          log.info("provider_session.rotated", {
-            chatId,
-            agentName: key.agentName,
-            provider: active.provider ?? undefined,
-            oldSessionId: active.id,
-            newSessionId: prepared.id,
-            resetReason: decision.reason,
-            policyMode: reset.mode,
-            result: "succeeded",
-          });
-        }
-        return await acquireInner(key, span, init, { prepared });
-      });
+          let prepared: Session | undefined;
+          if (decision.due && active) {
+            warnOnConversationMismatch(key, active.id, active.deprecatedChatId, init.romeSessionId);
+            prepared = active.replace({ deprecatedChatId: init.romeSessionId });
+            await deps.sessionRepository.replace(active, prepared);
+            log.info("provider_session.rotated", {
+              chatId,
+              agentName: key.agentName,
+              provider: active.provider ?? undefined,
+              oldSessionId: active.id,
+              newSessionId: prepared.id,
+              resetReason: decision.reason,
+              policyMode: reset.mode,
+              result: "succeeded",
+            });
+          }
+          return await acquireInner(key, span, init, { prepared });
+        });
     }
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
@@ -937,19 +937,14 @@ async function openSession(
       ? { providerId: resumed.provider as ProviderId, model: resumed.model }
       : undefined;
   // The conversation's stored selection restores a webchat chat's chosen model
-  // on cold resume. Only a Concierge chat also restores it over a pin, so its
-  // quota failover applies to background turns (docs/adrs/concierge-provider-failover.md).
-  // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
-  // Subagent keys carry a suffix, and app sessions use keys of their own.
+  // on cold resume. Only the chat's own session, keyed `webchat:<conversation id>`,
+  // reads it. Subagent keys carry a suffix, and app sessions use keys of their own.
   const chatId = webchatConversationOfKey(key.channelThreadKey);
   const persistedSelection =
     init.resumeSessionId &&
-    (!sessionPin || isConciergeAgent(key.agentName)) &&
-    !init.selectionId &&
+    restoresSavedSelection(config, { pinned: !!sessionPin, selected: !!init.selectionId }) &&
     chatId
-      ? resolveWebchatLargeModelSelection(
-          (await deps.webchatRepo?.getSession(chatId))?.largeModelSelection,
-        )
+      ? await deps.sessionSettings?.savedModelSelection(chatId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 

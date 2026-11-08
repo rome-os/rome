@@ -18,6 +18,9 @@ import {
 
 const log = createLogger("agent-loader");
 
+/** The Concierge agent's canonical id. */
+const CONCIERGE_AGENT_ID = "core:concierge";
+
 /** An agent's file as the packaging schema reads it: the definition and its local name. */
 type AgentFile = AgentDefinition & { name: string };
 
@@ -108,6 +111,9 @@ export class AgentLoader implements AgentCatalog {
         }
         definition.allowedSubagents = resolution.subagents;
       }
+      // The Concierge's quota failover must reach a resumed chat's background
+      // turns, so its chat's saved model outranks the session's pinned one.
+      if (id === CONCIERGE_AGENT_ID) definition.savedSelectionOutranksPin = true;
       agents.set(id, {
         name: id,
         localName,

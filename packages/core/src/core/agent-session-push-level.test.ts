@@ -1,4 +1,4 @@
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -81,6 +81,9 @@ describe("AgentSession turn push level", () => {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         webchatRepo: new ChatsWebChatRepository(testDb.db),
+        sessionSettings: new ChatSessionSettings({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+        }),
         systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),

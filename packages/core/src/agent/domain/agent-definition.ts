@@ -29,6 +29,13 @@ export interface AgentDefinition {
   /** Its turns come from a turn middleware, never a model, so its session opens no provider query. */
   codeBacked?: boolean;
   policy?: Partial<AgentPolicy>;
+  /**
+   * On a cold resume, the model a chat saved replaces the model the session is
+   * pinned to. Rome sets it for the Concierge, whose quota failover must reach
+   * background turns (docs/adrs/concierge-provider-failover.md). No agent file
+   * declares it.
+   */
+  savedSelectionOutranksPin?: boolean;
 }
 
 /** An installed agent. */
