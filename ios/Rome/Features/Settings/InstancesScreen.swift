@@ -138,6 +138,42 @@ private struct SkeletonRow: View {
     }
 }
 
+/// The search page's results. Only the newest search may fill them: an
+/// older one that answers late, or one still on its way when the field is
+/// cleared, changes nothing.
+@MainActor
+@Observable
+final class MessageSearch {
+    private(set) var hits: [SearchHit] = []
+    private(set) var searching = false
+    private(set) var searched = false
+    @ObservationIgnored private var latest = 0
+
+    func run(_ query: String, using search: (String) async throws -> [SearchHit]) async {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        latest += 1
+        let serial = latest
+        searching = hits.isEmpty
+        let result = (try? await search(trimmed)) ?? []
+        guard serial == latest else { return }
+        hits = result
+        searched = true
+        searching = false
+    }
+
+    /// The field was cleared or is too short to search: whatever is still
+    /// on its way is dropped.
+    func cancel(clearing: Bool) {
+        latest += 1
+        searching = false
+        if clearing {
+            hits = []
+            searched = false
+        }
+    }
+}
+
 /// Search across Chat and the task chats.
 struct SearchScreen: View {
     let workspace: Workspace
@@ -145,9 +181,10 @@ struct SearchScreen: View {
     let onOpen: (SearchHit) -> Void
 
     @State private var query = ""
-    @State private var hits: [SearchHit] = []
-    @State private var searching = false
-    @State private var searched = false
+    @State private var search = MessageSearch()
+    private var hits: [SearchHit] { search.hits }
+    private var searching: Bool { search.searching }
+    private var searched: Bool { search.searched }
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -160,9 +197,9 @@ struct SearchScreen: View {
                         .romeFont(17)
                         .focused($focused)
                         .submitLabel(.search)
-                        .onSubmit { run() }
+                        .onSubmit { Task { await run() } }
                     if !query.isEmpty {
-                        Button { query = ""; hits = []; searched = false } label: {
+                        Button { query = ""; search.cancel(clearing: true) } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.sub)
                         }
                         .accessibilityLabel("Clear")
@@ -240,23 +277,19 @@ struct SearchScreen: View {
         .onAppear { focused = true }
         .task(id: query) {
             let trimmed = query.trimmingCharacters(in: .whitespaces)
-            guard trimmed.count >= 2 else { return }
+            guard trimmed.count >= 2 else {
+                search.cancel(clearing: trimmed.isEmpty)
+                return
+            }
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            run()
+            await run()
         }
     }
 
-    private func run() {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        searching = hits.isEmpty
-        Task {
-            let result = (try? await workspace.backend.search(trimmed)) ?? []
-            hits = result
-            searched = true
-            searching = false
-        }
+    private func run() async {
+        let backend = workspace.backend
+        await search.run(query) { try await backend.search($0) }
     }
 
     private func highlighted(_ snippet: String) -> AttributedString {

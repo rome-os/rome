@@ -297,7 +297,8 @@ struct MainShell: View {
                     tasksChatId = conciergeChatID
                     showTasks = true
                 },
-                onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) }
+                onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) },
+                visible: section == .chat && path.isEmpty
             )
             .opacity(section == .chat ? 1 : 0)
             .allowsHitTesting(section == .chat)

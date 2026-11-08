@@ -10,6 +10,8 @@ struct ChatScreen: View {
     let onMenu: () -> Void
     let onTasks: () -> Void
     let onOpenChat: (String, String) -> Void
+    /// Chat is the page in front, with nothing pushed over it.
+    var visible = true
 
     @Environment(AppModel.self) private var model
     @State private var draft = ""
@@ -35,6 +37,8 @@ struct ChatScreen: View {
             }
         }
         .pageBackground()
+        // Also when the main chat's store is replaced by the one with its own id.
+        .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, prefill: Binding(
             get: { workspace.composerPrefill },
             set: { workspace.composerPrefill = $0 }
@@ -167,8 +171,8 @@ struct ChatScreen: View {
                         .padding(.top, TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
-                .onAppear { store.markRead() }
-                .onChange(of: store.arrivals) { store.markRead() }
+                .onAppear { store.arrived() }
+                .onChange(of: store.arrivals) { store.arrived() }
             }
         }
     }

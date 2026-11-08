@@ -217,6 +217,18 @@ final class TranscriptStore {
         Task { await backend.markRead(sessionId: sessionId) }
     }
 
+    /// Whether the guardian sees this chat now. The main Chat stays mounted,
+    /// hidden, under the other pages, so being mounted is not being seen:
+    /// its replies count as read only while it shows, and once it shows again.
+    var onScreen = false {
+        didSet { if onScreen, !oldValue { markRead() } }
+    }
+
+    /// New replies came in, or the list appeared: read, if the chat shows.
+    func arrived() {
+        if onScreen { markRead() }
+    }
+
     /// Keeps the server's order: a turn's rows stay together, turns ordered by
     /// when they started, rows in a turn by time. Times are whole seconds, so
     /// rows and turns that tie within a second keep the order they first

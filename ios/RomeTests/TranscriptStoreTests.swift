@@ -103,7 +103,9 @@ final class FakeBackend: RomeBackend {
         answeredSessions.append(sessionId)
         throw APIError.network
     }
-    func markRead(sessionId: String) async {}
+    /// The chats marked read, in order.
+    var reads: [String] = []
+    func markRead(sessionId: String) async { reads.append(sessionId) }
     func sessions() async throws -> [ChatSession] { [] }
     func tasks() async throws -> [ConciergeTask] {
         taskFetches += 1
