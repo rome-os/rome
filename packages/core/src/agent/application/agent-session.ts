@@ -113,6 +113,7 @@ import type {
   SubagentSessions,
 } from "./subagent-calls.js";
 import { translateTurnSpans, type CapturedEvent } from "./turn-spans.js";
+import { createTurnsById, type TurnsById } from "./turns-by-id.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
 export interface AgentSessionKey {
@@ -275,6 +276,12 @@ export interface AgentSessionManager {
    * open session has the id. Never opens a session.
    */
   findWorkingDirBySessionId(sessionId: string): string | undefined;
+  /**
+   * The turn with this id, started by one of this manager's sessions or by a
+   * subagent or forked session they opened. Found from its start until 30 s
+   * after it ends.
+   */
+  turn(id: string): Turn | undefined;
   shutdown(): Promise<void>;
 }
 
@@ -337,6 +344,8 @@ interface ManagerOptions {
    * action that renders an inline component).
    */
   isSubagent?: boolean;
+  /** The turns of the manager that opened this one, so one lookup finds both. */
+  turns?: TurnsById;
 }
 
 async function waitUntilQuiescent(session: AgentSessionImpl): Promise<void> {
@@ -364,6 +373,7 @@ export function createAgentSessionManager(
   const keepAlive = options.keepAliveAcrossTurns === true;
   const idleTtlMs = options.idleTtlMs ?? 30 * 60 * 1000;
   const isSubagent = options.isSubagent === true;
+  const turns = options.turns ?? createTurnsById();
 
   const keyOf = (k: AgentSessionKey) => `${k.agentName}::${k.channelThreadKey}`;
   const canonicalizeKey = (key: AgentSessionKey): AgentSessionKey => ({
@@ -518,6 +528,7 @@ export function createAgentSessionManager(
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
+        turns,
       });
       sessions.set(k, sess);
       return sess;
@@ -583,6 +594,7 @@ export function createAgentSessionManager(
       }
       return undefined;
     },
+    turn: (id) => turns.find(id),
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
       const all = [...sessions.values()];
@@ -598,6 +610,7 @@ interface OpenOptions {
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
+  turns: TurnsById;
 }
 
 /**
@@ -1152,6 +1165,7 @@ async function openSession(
           forkChildManager = createAgentSessionManager(deps, {
             keepAliveAcrossTurns: true,
             isSubagent: true,
+            turns: opts.turns,
           });
         }
         return forkChildManager;
@@ -1285,6 +1299,7 @@ async function openSession(
     workingDir,
     buildForkOpenParams,
     liveTurn,
+    turns: opts.turns,
     owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
@@ -1326,6 +1341,8 @@ interface ImplArgs {
   key: AgentSessionKey;
   /** The facts the session's own turns hand the ports behind its tools. */
   liveTurn: TurnFacts;
+  /** Where the session's turns are found by id. */
+  turns: TurnsById;
   /** What the opener stamps on every turn's spans. */
   spanAttributes?: Attributes;
   session: Session;
@@ -1559,6 +1576,7 @@ class AgentSessionImpl implements AgentSession {
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;
   private readonly liveTurn: TurnFacts;
+  private readonly turns: TurnsById;
   private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
@@ -1644,6 +1662,7 @@ class AgentSessionImpl implements AgentSession {
     this.workingDir = args.workingDir;
     this.buildForkOpenParams = args.buildForkOpenParams;
     this.liveTurn = args.liveTurn;
+    this.turns = args.turns;
     this.attribution = { agentName: args.key.agentName, owningAppId: args.owningAppId };
     this.threadContext = args.threadContext;
     this.sharedContext = args.sharedContext;
@@ -1728,6 +1747,7 @@ class AgentSessionImpl implements AgentSession {
       this._childManager = createAgentSessionManager(this.deps, {
         keepAliveAcrossTurns: this.keepAlive,
         isSubagent: true,
+        turns: this.turns,
       });
     }
     return this._childManager;
@@ -2384,7 +2404,30 @@ class AgentSessionImpl implements AgentSession {
     });
   }
 
+  /**
+   * Runs a forked turn, which is found by id like any other turn but cannot be
+   * stopped: it runs until its stream ends or its reader stops reading.
+   */
   async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
+    let writer: TurnWriter | undefined;
+    let said: TurnResultEvent | TurnErrorEvent | undefined;
+    try {
+      for await (const event of this.forkedTurnEvents(input)) {
+        if (!writer && event.type === "turn_start") {
+          const forked = createTurn(event.turnId, null);
+          writer = forked.writer;
+          this.turns.add(forked.turn);
+        }
+        if (!said && (event.type === "result" || event.type === "error")) said = event;
+        writer?.record(event);
+        yield event;
+      }
+    } finally {
+      writer?.end({ terminal: said, stoppedByRome: false });
+    }
+  }
+
+  private async *forkedTurnEvents(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
@@ -2815,6 +2858,7 @@ class AgentSessionImpl implements AgentSession {
       )
       .finally(() => this.emitStatus());
 
+    this.turns.add(turn);
     return Object.assign(turn, { turnContext: turnCtx });
   }
 
