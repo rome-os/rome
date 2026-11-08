@@ -105,11 +105,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
    * chat the session runs in (its own, its parent's, a fork's or subagent's
    * row) must exist and be one its caller may open.
    */
-  private async callerMayResume(
-    session: AgentSession,
-    named: string | undefined,
-    ctx: IpcCallContext,
-  ): Promise<boolean> {
+  private async callerMayResume(session: AgentSession, ctx: IpcCallContext): Promise<boolean> {
     if (!this.webchatRepo) return true;
     const repo = this.webchatRepo;
     const caller = ctx.callerActionContext;
@@ -120,10 +116,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     });
     const required: string[] = [];
     const known = new Set<string>([session.sessionId]);
-    if (!named) {
-      const chat = await findSessionChat(repo, session.sessionId);
-      if (chat) known.add(chat.id);
-    }
+    const chat = await findSessionChat(repo, session.sessionId);
+    if (chat) known.add(chat.id);
     const root = walkToRoot(session.key.channelThreadKey);
     for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
     const rootKey = parseSessionKey(root);
@@ -189,10 +183,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             : await this.manager.acquire(req.key, init);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
-          if (
-            req.sessionId &&
-            !(await this.callerMayResume(session, req.init?.romeSessionId, ctx))
-          ) {
+          if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
             throw new Error(`Agent session "${req.sessionId}" was not found`);
           }
         } catch (err) {
