@@ -3,7 +3,7 @@ import { resolveCloudAuthEnabled, CLOUD_AUTH_GATE_NAME } from "./cloud-auth-gate
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "./guardian-auth-state.js";
 import { useFakeFeatureGates, resetFeatureGates } from "@rome-os/libs/feature-flags/testing";
 import { guardianAuth } from "../db/schema.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 
 /**
  * The resolver reads the instance slug (the gate's rollout unit) live from the

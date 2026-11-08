@@ -12,7 +12,7 @@ import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../kinds/whatsapp/whatsapp.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { SetupManager } from "../setup/manager.js";

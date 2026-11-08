@@ -12,7 +12,7 @@ import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { appConnectionAccess, appConnectionInvocations, connectionGrants } from "../db/schema.js";
-import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
+import { createActionEngineRepos, createTestDb } from "../test/db.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import type { ConnectionDescriptor, OperationCall, OperationDescriptor } from "./types.js";

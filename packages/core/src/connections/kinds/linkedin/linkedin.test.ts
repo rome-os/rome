@@ -7,7 +7,7 @@ import {
   type LinkedInPollerOptions,
 } from "./linkedin.js";
 import { OpencliAuthError, type OpencliResult } from "./linkedin-cli.js";
-import { createTestDb } from "../../../test/helpers.js";
+import { createTestDb } from "../../../test/db.js";
 import { LinkedInStoreRepository } from "../../../db/repositories/linkedin-store.js";
 import type {
   LinkedInMessageInput,

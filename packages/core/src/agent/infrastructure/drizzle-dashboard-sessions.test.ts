@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { romeSessions } from "../../db/schema.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { DrizzleDashboardSessions } from "./drizzle-dashboard-sessions.js";
 
 describe("DrizzleDashboardSessions", () => {

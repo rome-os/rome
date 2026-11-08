@@ -10,7 +10,7 @@
 // backoff flow settles before asserting.
 
 import { describe, expect, it } from "@rstest/core";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import type { DrizzleTx, SqliteExec } from "../db/index.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { DrizzleConnectionsRepository } from "./repository-db.js";

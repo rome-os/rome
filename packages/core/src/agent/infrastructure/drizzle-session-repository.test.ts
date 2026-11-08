@@ -6,7 +6,7 @@ import {
   formatArtifactId,
 } from "../../apps/artifact-id.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { ActiveSessionExistsError } from "../domain/session-repository.js";
 import { Session } from "../domain/session.js";
 import { DrizzleSessionRepository } from "./drizzle-session-repository.js";

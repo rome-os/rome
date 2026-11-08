@@ -9,7 +9,7 @@ import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { AgentLoader } from "../agent/index.js";
 import {

@@ -26,7 +26,7 @@ import type {
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../kinds/email/email-control.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";

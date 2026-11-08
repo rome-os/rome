@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { channelChatId } from "../db/session-kind.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { chatsWiring } from "../chats-wiring.js";
 import { ChannelWithoutAccount } from "./chat-adapter.js";
 import { ChatAddresses } from "./chat-addresses.js";

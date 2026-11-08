@@ -3,7 +3,7 @@ import { givenGrant } from "../../connections/connection.js";
 import { NO_GRANT } from "../../connections/grant.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import type { Credential } from "../../connections/types.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { accountProfiles, channels, connectedAccountsUnplaced } from "../schema.js";
 import { ConnectedAccountNotFound, ConnectedAccountsRepository } from "./connected-accounts.js";
 

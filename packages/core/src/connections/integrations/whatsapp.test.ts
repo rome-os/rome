@@ -12,7 +12,7 @@ import {
   type WhatsAppSocketFactory,
 } from "../kinds/whatsapp/whatsapp.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";

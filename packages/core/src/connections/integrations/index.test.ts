@@ -3,7 +3,7 @@ import {
   ACCOUNT_KINDS,
   GUARDIAN_OWN_KINDS,
 } from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
-import { BUILTIN_ACCOUNT_LINKS } from "../../test/helpers.js";
+import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";

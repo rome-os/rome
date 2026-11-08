@@ -4,7 +4,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import type { ChatReads, RecentChat } from "@rome-os/app-runtime/chats";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
+import { createTestDb, type TestDb } from "../../../../packages/core/src/test/db.js";
 import { createApiHandler } from "./index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

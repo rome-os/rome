@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import { AgentLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";

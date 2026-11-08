@@ -17,7 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { installTestClock } from "../../test/kit/index.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
