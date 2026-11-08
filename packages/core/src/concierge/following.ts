@@ -156,6 +156,9 @@ export interface WatchSource extends ProviderWatchSectionWithTriggers {
   provider: WatchProvider;
 }
 
+const kindLabelsOf = (sources: WatchSource[]) => (source: string, kind: string) =>
+  sources.find((s) => s.source === source)?.kinds.find((k) => k.kind === kind)?.label ?? kind;
+
 /** One follow, as stored. */
 /** Whose a follow is: the owner it records. One from before owners were kept is the guardian's. */
 const ownerOfFollow = (follow: FollowRecord): ConciergeOwner => follow.owner ?? GUARDIAN_OWNER;
@@ -580,9 +583,10 @@ export function startConciergeFollowing(
       // item also goes into the next digest.
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
       const at = guardianNow(now(), await timezoneOf(items[0]?.ownerKey ?? GUARDIAN_OWNER));
+      const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
       const ran =
         chatId !== null &&
-        (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at), {
+        (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at, kindLabel), {
           quiet: true,
           inputLabel: `Following · important (${items.length})`,
           pushLevel: "active",
@@ -637,11 +641,15 @@ export function startConciergeFollowing(
     const timezone = await timezoneOf(owner, stored);
     const decisions: TriageDecision[] = [];
     const sources = await readSources().catch(() => [] as WatchSource[]);
+    const kindLabel = kindLabelsOf(sources);
     for (const part of chunks(fresh, MAX_EVENTS_PER_TRIAGE)) {
       const inPart = new Set(part.map((e) => `${e.source}:${e.target}`));
       const input: TriageInput = {
         // Triage judges the event, never whose follow it came through.
-        events: part.map(({ owner: _owner, ...event }) => event),
+        events: part.map(({ owner: _owner, ...event }) => ({
+          ...event,
+          kind: kindLabel(event.source, event.kind),
+        })),
         accounts: [...new Map(part.map((e) => [e.source, e.account])).entries()].map(
           ([source, account]) => ({ source, account }),
         ),
@@ -650,7 +658,7 @@ export function startConciergeFollowing(
           .map(({ source, target, kinds, options, preference }) => ({
             source,
             target,
-            kinds,
+            kinds: kinds.map((kind) => kindLabel(source, kind)),
             // The guardian's wishes in words, from the catalog's declarations.
             options: renderOptions(
               sources.find((s) => s.source === source)?.options ?? [],
@@ -728,6 +736,7 @@ export function startConciergeFollowing(
     const owed = await deps.items.owedToDigest(owner);
     const chatId = await service.findChatId(owner);
     const at = guardianNow(now(), await timezoneOf(owner));
+    const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
     // The digest goes to the main chat and groups every chat's items under it.
     const chats = new Map<string, ConciergeChatRef>();
     for (const item of owed) {
@@ -739,7 +748,7 @@ export function startConciergeFollowing(
       (await outsideAction(() =>
         service.runSystemTurn(
           chatId,
-          renderDigestTurn(owed, at, (item) => chats.get(item.chatId ?? "")),
+          renderDigestTurn(owed, at, (item) => chats.get(item.chatId ?? ""), kindLabel),
           {
             quiet: true,
             inputLabel: `Following · digest (${owed.length})`,
