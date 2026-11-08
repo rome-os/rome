@@ -29,6 +29,7 @@ import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js"
 import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
 import { type SessionTools, forkSessionTools } from "../domain/session-tools.js";
+import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
 import { type TurnFacts, type PushLevel } from "../domain/turn-facts.js";
 import {
   NO_ROME_TOOLS,
@@ -83,8 +84,6 @@ import {
 } from "../domain/turn-ref.js";
 import type {
   AgentEvent,
-  ForkRunMode,
-  ForkSourceCheckpoint,
   ThreadContext,
   AgentTurnStatus,
   TurnErrorEvent,
@@ -183,21 +182,10 @@ export interface AgentTurnInput {
   injectedToolResult?: { toolUseId: string; content: unknown };
 }
 
-export interface ForkedAgentTurnInput extends AgentTurnInput {
+/** A forked turn: what it says, and what the fork asks of its source (see `openFork`). */
+export interface ForkedAgentTurnInput extends AgentTurnInput, ForkRequest {
   /** Optional capability tier override for the forked turn. */
   tier?: ModelTier;
-  /** Tool-surface mode for the fork. Defaults to `"isolated"`. */
-  mode?: ForkRunMode;
-  /** Exact provider-native history anchor for the source turn. */
-  sourceCheckpoint?: ForkSourceCheckpoint;
-  /**
-   * Thread metadata the fork's action executions should carry (an exact-mode
-   * fork inherits the source conversation's thread). Falls back to the source
-   * session's own thread context when absent.
-   */
-  threadContext?: ThreadContext;
-  /** See `ForkRunParams.persistThreadKey`. */
-  persistThreadKey?: (forkSessionId: string) => string;
 }
 
 export type AgentSessionStatus = "idle" | "running" | "closed";
@@ -650,25 +638,15 @@ interface TurnExecRefs {
 
 /** Per-fork identity handed to `buildForkOpenParams` by `runForkedTurn`. */
 interface ForkTurnContext {
-  mode: ForkRunMode;
+  opening: ForkOpening;
   forkSessionId: string;
   forkTurnId: string;
   /** Model id the fork opens with (caller-resolved tier override, else the source's live model). */
   model: string;
-  /** The position the fork branches from. */
-  thread: Extract<ThreadStart, { kind: "branch" }>;
-  /** Thread metadata for the fork's action executions (see ForkedAgentTurnInput). */
-  threadContext?: ThreadContext;
   /**
    * Interleave an out-of-band message into the forked turn's stream.
    */
   emit: (msg: StreamAgentEvent) => void;
-  /**
-   * Whether this fork will be left resumable. A continuable fork gets no
-   * `defer`: its wake-up would resume the fork session while delivering under
-   * the thread context this turn inherited, which is still the source's.
-   */
-  continuable: boolean;
 }
 
 /**
@@ -1098,7 +1076,14 @@ async function openSession(
    *   prompt-cache reuse keep the source's model.
    */
   const buildForkOpenParams: BuildForkOpenParams = async (fork) => {
-    if (fork.mode !== "exact") {
+    const { opening } = fork;
+    // A continuable fork's model thread is its own; a one-shot one is closed after its turn.
+    const thread: ThreadStart = {
+      kind: "branch",
+      at: opening.sourceTurn,
+      lifetime: opening.oneShot ? "ephemeral" : "kept",
+    };
+    if (opening.mode !== "exact") {
       return {
         params: {
           config: {
@@ -1111,7 +1096,7 @@ async function openSession(
             // A fork's tools run with its source's.
             env: { ...init.toolEnv },
           },
-          thread: fork.thread,
+          thread,
           tools: NO_ROME_TOOLS,
         },
         projectProviderMessage: async (msg) => [msg],
@@ -1160,7 +1145,7 @@ async function openSession(
       sessionId: fork.forkSessionId,
       getRomeSessionId: () => fork.forkSessionId,
       getTurnId: () => fork.forkTurnId,
-      getThreadContext: () => fork.threadContext ?? init.threadContext,
+      getThreadContext: () => opening.threadContext,
       getSharedContext: () => init.sharedContext,
       getChildManager: () => {
         if (!forkChildManager) {
@@ -1187,7 +1172,7 @@ async function openSession(
     return {
       params: {
         ...liveOpenParams,
-        thread: fork.thread,
+        thread,
         config: { ...liveOpenParams.config, model: fork.model },
         // The same catalog as the live session, run through fresh fork-bound
         // callbacks, never the source's per-turn closures.
@@ -1197,7 +1182,10 @@ async function openSession(
             sourceSessionTools,
             await deps.sessionTools.forTurn(turnFacts(refs), false),
           ),
-          defers: !fork.continuable,
+          // A continuable fork holds no scheduled wake-ups: its wake-up would
+          // resume the fork session while delivering under the thread context
+          // this turn inherited, which is still the source's.
+          defers: opening.oneShot,
         }),
       },
       projectProviderMessage: async (msg) => {
@@ -2402,7 +2390,6 @@ class AgentSessionImpl implements AgentSession {
     }
     this.activeForkedTurnCount++;
     this.lastActiveAt = Date.now();
-    const mode: ForkRunMode = input.mode ?? "isolated";
     // Forked turns bracket their stream like regular turns; the ids are
     // minted here because no sendTurn is involved. No per-turn session_init
     // is synthesized: that re-emission is an ordinary-turn compatibility
@@ -2419,6 +2406,7 @@ class AgentSessionImpl implements AgentSession {
     // a terminal. Mirror the failTurn handling of regular turns by
     // synthesizing the error terminal here.
     let forkSession: ModelSession | undefined;
+    let opening: ForkOpening | undefined;
     let sourceLoginKind: ModelLoginKind | undefined;
     let forkLoginKind: ModelLoginKind | undefined;
     let forkModelTurnId: string | undefined;
@@ -2457,24 +2445,17 @@ class AgentSessionImpl implements AgentSession {
             sourceLoginKind = sourceModelSession.loginKind;
             sourceModelThreadId = sourceModelSession.modelThreadId;
             if (!this.modelProvider) throw new Error("a code-backed agent session cannot fork");
-            const { sourceCheckpoint } = input;
-            if (sourceCheckpoint && sourceCheckpoint.providerId !== sourceModelSession.providerId) {
-              throw new Error(
-                `Fork checkpoint provider ${sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
-              );
-            }
-            const at: ModelPosition | undefined = sourceCheckpoint
-              ? {
-                  provider: sourceModelSession.providerId,
-                  modelThreadId: sourceCheckpoint.providerThreadId,
-                  checkpointId: sourceCheckpoint.checkpointId,
-                }
-              : this.lastPosition;
-            if (!at) throw new Error("Cannot fork before a turn has left a checkpoint");
-            const liveModelThreadId = sourceModelSession.modelThreadId;
-            if (liveModelThreadId && at.modelThreadId !== liveModelThreadId) {
-              throw new Error("Fork checkpoint belongs to a different model thread");
-            }
+            const forkOpening = openFork(
+              {
+                providerId: sourceModelSession.providerId,
+                modelThreadId: sourceModelSession.modelThreadId,
+                lastPosition: this.lastPosition,
+                threadContext: this.threadContext,
+              },
+              input,
+              forkSessionId,
+            );
+            opening = forkOpening;
             const forkModel = input.tier
               ? await this.deps.modelResolver.resolve({
                   kind: "tier",
@@ -2489,18 +2470,11 @@ class AgentSessionImpl implements AgentSession {
             // turn's terminal error block, preserving the bracketing invariant.
             const outbound = new ForkStreamQueue();
             const forkOpen = await this.buildForkOpenParams({
-              mode,
+              opening: forkOpening,
               forkSessionId,
               forkTurnId: turnId,
               model: forkModel?.model ?? sourceModelSession.model,
-              thread: {
-                kind: "branch",
-                at,
-                lifetime: input.persistThreadKey ? "kept" : "ephemeral",
-              },
-              threadContext: input.threadContext,
               emit: (msg) => outbound.push(msg),
-              continuable: !!input.persistThreadKey,
             });
             return { modelProvider: this.modelProvider, forkOpen, outbound };
           },
@@ -2605,25 +2579,21 @@ class AgentSessionImpl implements AgentSession {
         finishedAt: new Date(),
       });
       // Before close(): a closed ModelSession no longer reports the thread this
-      // needs. Each condition is load-bearing:
-      //   • terminalSeen — `status` is initialized to "completed", so a
-      //     consumer that abandons the iterator would otherwise leave a
-      //     resumable row for a branch that produced nothing.
-      //   • status === "completed" — an errored or interrupted branch is not
-      //     offered as resumable.
-      //   • a thread of its own — a fork reporting the SOURCE thread ran inside
-      //     the parent conversation (Codex's borrowed exact fork) and had its
-      //     turn rolled back out. Persisting that would append every follow-up
-      //     to the parent chat.
+      // needs. `terminalSeen` because `status` starts out "completed", so a
+      // consumer that abandons the iterator would otherwise leave a resumable
+      // row for a branch that produced nothing.
       if (
         forkSession &&
-        input.persistThreadKey &&
-        terminalSeen &&
-        status === "completed" &&
-        forkSession.modelThreadId !== sourceModelThreadId
+        opening &&
+        !opening.oneShot &&
+        keepsFork(opening, {
+          completed: terminalSeen && status === "completed",
+          modelThreadId: forkSession.modelThreadId,
+          sourceModelThreadId,
+        })
       ) {
         await this.persistForkThread(
-          input.persistThreadKey(forkSessionId),
+          opening.continuityKey,
           forkSessionId,
           forkSession,
           forkReasoningEffort,
