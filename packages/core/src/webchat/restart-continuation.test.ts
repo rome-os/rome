@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 import { continueInterruptedTurns, RESTART_CONTINUATION_PROMPT } from "./restart-continuation.js";
@@ -17,7 +17,10 @@ describe("startup restart continuation", () => {
     db = createTestDb();
     repo = new ChatsWebChatRepository(db.db);
   });
-  afterEach(() => db.close());
+  afterEach(() => {
+    rs.useRealTimers();
+    db.close();
+  });
 
   async function interrupted(
     id = "chat",
@@ -98,6 +101,97 @@ describe("startup restart continuation", () => {
     expect(agent.calls).toHaveLength(1);
     expect(RESTART_CONTINUATION_PROMPT).toContain("Do only what remains");
     expect(RESTART_CONTINUATION_PROMPT).toContain("ask the guardian rather than redo it");
+  });
+
+  async function withActivity(startedAt: number, lastActivityAt: number, now: number) {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(startedAt);
+    await interrupted();
+    rs.setSystemTime(lastActivityAt);
+    await repo.appendTraceBlocks({
+      messageId: "chat-trace",
+      sessionId: "chat",
+      turnId: "chat-turn",
+      startSeq: 1,
+      blocks: [
+        {
+          type: "tool_result",
+          tool: "execute_action",
+          output: "Still working",
+          endedAt: new Date(lastActivityAt).toISOString(),
+        },
+      ],
+    });
+    rs.setSystemTime(now);
+    return repo.endInterruptedTurns(DAY);
+  }
+
+  it("leaves the restart notice without continuing after a week of inactivity", async () => {
+    const now = Date.parse("2026-11-10T12:00:00Z");
+    const turns = await withActivity(now - 8 * DAY, now - 7 * DAY, now);
+    expect(turns).toHaveLength(1);
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(turns, repo, runner, now);
+    expect(agent.calls).toHaveLength(0);
+    expect((await repo.getTraceContents("chat"))[0]?.content).toContain(
+      "Rome restarted while this was running",
+    );
+  });
+
+  it("continues a turn started 30 hours ago with tool activity one minute before startup", async () => {
+    const now = Date.parse("2026-11-10T12:00:00Z");
+    const turns = await withActivity(now - 30 * 3600000, now - 60000, now);
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(turns, repo, runner, now);
+    expect(agent.calls).toHaveLength(1);
+  });
+
+  it("continues an old turn with recent runtime-session activity and no recent timestamped trace block", async () => {
+    const now = Date.parse("2026-11-10T12:00:00Z");
+    const turns = await withActivity(now - 30 * 3600000, now - 29 * 3600000, now);
+    await db.db.insert(sessions).values({
+      id: "chat-runtime",
+      agentName: "assistant:coder",
+      chatId: "chat",
+      createdAt: new Date(now - 30 * 3600000),
+      lastActiveAt: new Date(now - 60000),
+      status: "active",
+    });
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(turns, repo, runner, now);
+    expect(agent.calls).toHaveLength(1);
+  });
+
+  it.each([
+    [DAY - 1, 1],
+    [DAY, 0],
+    [DAY + 1, 0],
+  ])("with last activity %i ms ago, runs %i continuation(s)", async (inactivity, expected) => {
+    const now = Date.parse("2026-11-10T12:00:00Z");
+    const turns = await withActivity(now - 2 * DAY, now - inactivity, now);
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(turns, repo, runner, now);
+    expect(agent.calls).toHaveLength(expected);
+  });
+
+  it.each([
+    null,
+    Number.NaN,
+  ])("does not continue with missing or invalid last activity (%s)", async (lastActivityAt) => {
+    await interrupted();
+    const turns = await repo.endInterruptedTurns(DAY);
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(
+      turns,
+      {
+        canContinueAfterRestart: (turn) => repo.canContinueAfterRestart(turn),
+        getRestartGuardianPrompt: (turn) => repo.getRestartGuardianPrompt(turn),
+        getRestartLastActivityAt: () => lastActivityAt,
+      },
+      runner,
+      Date.now(),
+    );
+    expect(agent.calls).toHaveLength(0);
   });
 
   it.each([
@@ -204,6 +298,7 @@ describe("startup restart continuation", () => {
       {
         canContinueAfterRestart: (turn) => repo.canContinueAfterRestart(turn),
         getRestartGuardianPrompt: () => "",
+        getRestartLastActivityAt: (turn) => repo.getRestartLastActivityAt(turn),
       },
       runner,
     );

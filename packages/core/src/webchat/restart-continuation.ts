@@ -4,6 +4,7 @@ import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 const log = createLogger("restart-continuation");
+const MAX_RESTART_INACTIVITY_MS = 24 * 60 * 60 * 1000;
 const RESTART_MARKER = "<restart_recovery>";
 
 export const RESTART_CONTINUATION_PROMPT =
@@ -17,8 +18,12 @@ export const RESTART_CONTINUATION_PROMPT =
 /** Call once after startup, with only this boot's cleanup results. Runs sequentially, without retries. */
 export async function continueInterruptedTurns(
   turns: InterruptedTurn[],
-  repo: Pick<ChatsWebChatRepository, "canContinueAfterRestart" | "getRestartGuardianPrompt">,
+  repo: Pick<
+    ChatsWebChatRepository,
+    "canContinueAfterRestart" | "getRestartGuardianPrompt" | "getRestartLastActivityAt"
+  >,
   runner: Pick<MainBackendTurnRunner, "runAndReport">,
+  now = Date.now(),
 ): Promise<void> {
   for (const turn of turns) {
     // The marker lives in turn_start's prompt, not a later best-effort trace
@@ -26,6 +31,15 @@ export async function continueInterruptedTurns(
     if (!turn.runtimeSessionId || turn.prompt.includes(RESTART_MARKER)) continue;
     try {
       if (!repo.canContinueAfterRestart(turn)) continue;
+      const lastActivityAt = repo.getRestartLastActivityAt(turn);
+      if (
+        typeof lastActivityAt !== "number" ||
+        !Number.isFinite(lastActivityAt) ||
+        !Number.isFinite(now) ||
+        lastActivityAt > now ||
+        now - lastActivityAt >= MAX_RESTART_INACTIVITY_MS
+      )
+        continue;
       const excerpt = repo.getRestartGuardianPrompt(turn);
       await runner.runAndReport(
         {
