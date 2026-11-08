@@ -191,7 +191,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
         let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [.init(id: "s", text: "Which?", multi: false, freeTextOnly: false, options: ["A"])])
-        store.answer(part, values: ["s": "A"], sessionId: "topic-1")
+        store.answer(part, answers: QuestionAnswers.answers(part.questions, choices: ["s": ["A"]], typed: [:]), sessionId: "topic-1")
         for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(backend.answeredSessions == ["topic-1"])
     }

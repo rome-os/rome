@@ -1,3 +1,4 @@
+import UIKit
 import Foundation
 import Observation
 
@@ -41,6 +42,10 @@ final class TranscriptStore {
     /// Answers sent this session, before the server echoes them.
     private(set) var localAnswers: [String: JSONValue] = [:]
     private(set) var answering: Set<String> = []
+    /// Each connect card's state, by row, kept while the card scrolls away.
+    private(set) var connectPhases: [String: ConnectPhase] = [:]
+    @ObservationIgnored private var connectRuns: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private lazy var connectBrowser = WebSignInBrowser()
     /// Tool calls fetched for an expanded tool summary, by trace message id.
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
@@ -419,13 +424,8 @@ final class TranscriptStore {
     // MARK: Questions
 
     /// `sessionId`: the question's own chat, this one unless it says otherwise.
-    func answer(_ part: MessagePart.QuestionPart, values: [String: String], sessionId: String? = nil) {
-        guard !answering.contains(part.toolUseId) else { return }
-        let answers: [JSONValue] = part.questions.compactMap { question in
-            guard let value = values[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-            return .object(["questionId": .string(question.id), "value": .string(value)])
-        }
-        guard !answers.isEmpty else { return }
+    func answer(_ part: MessagePart.QuestionPart, answers: [JSONValue], sessionId: String? = nil) {
+        guard !answering.contains(part.toolUseId), !answers.isEmpty else { return }
         let output: JSONValue = .object(["answers": .array(answers)])
         answering.insert(part.toolUseId)
         localAnswers[part.toolUseId] = output
@@ -437,6 +437,49 @@ final class TranscriptStore {
                 localAnswers[part.toolUseId] = nil
             }
             answering.remove(part.toolUseId)
+        }
+    }
+
+    // MARK: Connect cards
+
+    #if DEBUG
+    /// Snapshot runs show each card state at once, by service.
+    nonisolated(unsafe) static var previewPhases: [String: ConnectPhase] = [:]
+    static func previewPhase(_ service: String) -> ConnectPhase? { previewPhases[service] }
+    #else
+    static func previewPhase(_ service: String) -> ConnectPhase? { nil }
+    #endif
+
+    /// A card for a service that already works shows Connected when it opens,
+    /// and tells nobody: an old card must not wake Chat again.
+    func checkConnected(_ part: MessagePart.ConnectCardPart, rowId: String) async {
+        guard connectPhases[rowId] == nil || connectPhases[rowId] == .idle else { return }
+        guard let list = try? await backend.connectors(),
+              let entry = list.first(where: { $0.service == part.service }), entry.working,
+              connectPhases[rowId] == nil || connectPhases[rowId] == .idle
+        else { return }
+        connectPhases[rowId] = .connected(account: entry.account)
+    }
+
+    /// The card's button: connects the service on this phone, then tells Chat.
+    func connect(_ part: MessagePart.ConnectCardPart, rowId: String, chatId: String) {
+        connectRuns[rowId]?.cancel()
+        connectPhases[rowId] = .connecting
+        let backend = backend
+        let runner = ConnectRunner(
+            backend: backend,
+            browser: connectBrowser,
+            openDashboard: { url in UIApplication.shared.open(url) },
+            origin: backend.origin
+        )
+        connectRuns[rowId] = Task { [weak self] in
+            // The main chat goes by its own id on the server.
+            var chat: String? = chatId
+            if chatId == conciergeChatID { chat = try? await backend.conciergeSession().id }
+            let phase = await runner.run(service: part.service, chatId: chat)
+            guard !Task.isCancelled else { return }
+            self?.connectPhases[rowId] = phase
+            self?.connectRuns[rowId] = nil
         }
     }
 

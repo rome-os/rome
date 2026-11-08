@@ -150,6 +150,38 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
+    /// A request to an `/api/…` path on this instance that answers any status
+    /// with its JSON body. The session cookie goes only here: the URL is built
+    /// on the instance's origin, never taken whole from a server's answer.
+    func exchange(method: String, apiPath: String, json: JSONValue?) async throws -> ConnectReply {
+        guard let url = Self.instanceURL(origin: origin, apiPath: apiPath) else { throw APIError.notFound }
+        var request = request(String(url.path(percentEncoded: true).dropFirst("/api".count)), method: method)
+        if let json {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(json)
+        }
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIError.network
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.network }
+        if http.statusCode == 401 {
+            onUnauthorized()
+            throw APIError.unauthorized
+        }
+        let body = (try? JSONDecoder().decode(JSONValue.self, from: data)) ?? .object([:])
+        return ConnectReply(ok: (200..<300).contains(http.statusCode), body: body)
+    }
+
+    /// `apiPath` on the instance, or nil for anything but a plain `/api/…` path.
+    static func instanceURL(origin: URL, apiPath: String) -> URL? {
+        guard apiPath.hasPrefix("/api/"), !apiPath.contains(".."), !apiPath.contains("//"), !apiPath.contains("?"), !apiPath.contains("#") else { return nil }
+        guard let url = URL(string: originString(origin) + apiPath), url.host() == origin.host() else { return nil }
+        return url
+    }
+
     /// The live-events socket's upgrade was refused with a 401.
     func reportUnauthorized() { onUnauthorized() }
 

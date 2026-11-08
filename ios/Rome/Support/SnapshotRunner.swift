@@ -97,6 +97,11 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(2))
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.search) }
             await capture("24-topic-chat", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-trip")) }
+            // Connect cards in each state, and a question with defaults and descriptions.
+            TranscriptStore.previewPhases = ["notion": .connecting, "linear": .failed(String(localized: "Sign-in timed out"))]
+            await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
+            TranscriptStore.previewPhases = [:]
+            await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)

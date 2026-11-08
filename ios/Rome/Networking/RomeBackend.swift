@@ -65,6 +65,14 @@ protocol RomeBackend: AnyObject, Sendable {
     func upgradeCheck() async throws -> UpgradeCheck
     func startUpgrade(target: String) async throws -> UpgradeStarted
     func buildInfo() async throws -> BuildInfo
+    /// A connect card's call on this Rome, with its session: `apiPath` is an
+    /// `/api/…` path on the instance. Any status answers; only a dropped
+    /// connection or a lost session throws.
+    func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply
+    /// `GET /api/concierge/connectors`: every service Chat can use, and its state.
+    func connectors() async throws -> [ConnectorState]
+    /// Tells Chat in `chatId` that `service` is connected, so it goes on.
+    func notifyServiceConnected(chatId: String, service: String) async
 }
 
 @MainActor
@@ -189,6 +197,19 @@ final class LiveBackend: RomeBackend {
         return AccountIdentity(json: body)
     }
 
+    func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply {
+        try await client.exchange(method: method, apiPath: apiPath, json: body)
+    }
+
+    func connectors() async throws -> [ConnectorState] {
+        let body: JSONValue = try await client.get("/concierge/connectors")
+        return (body["connectors"]?.array ?? []).compactMap(ConnectorState.init(json:))
+    }
+
+    func notifyServiceConnected(chatId: String, service: String) async {
+        _ = try? await client.post("/concierge/chats/\(escape(chatId))/service-connected", json: .object(["service": .string(service)]))
+    }
+
     func isGuardian() async -> Bool {
         let body: JSONValue? = try? await client.get("/auth/me")
         return body?["kind"]?.string == "guardian"
@@ -276,6 +297,9 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
+    func connectors() async throws -> [ConnectorState] { [] }
+    func notifyServiceConnected(chatId: String, service: String) async {}
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }
     func setGuardianLanguage(_ code: String) async throws {}

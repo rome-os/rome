@@ -294,6 +294,29 @@ final class DemoBackend: RomeBackend {
         "/apps/packing/icon": ##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#dfe8f5"/><g transform="translate(4.56 4.56) scale(0.62)" fill="none" stroke="#1f3f6e" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="4" y="7" width="16" height="13" rx="2.5"/><path d="M9 7V4.5h6V7M4 12h16"/></g></svg>"##,
     ]
 
+    // MARK: Connect cards
+
+    /// Services connected so far; GitHub is from the start.
+    private var connected: [String: String] = ["github": "lin-dev"]
+
+    func connectors() async throws -> [ConnectorState] {
+        try await pause(0.2)
+        return ["gmail", "github", "notion", "linear", "slack"].map { service in
+            ConnectorState(service: service, state: connected[service] == nil ? nil : "working", account: connected[service])
+        }
+    }
+
+    func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply {
+        try await pause(0.4)
+        // The demo's broker: the service is connected a few seconds after the link opens.
+        guard let provider = body?["provider"]?.string else { return ConnectReply(ok: false, body: .object(["message": .string("No provider")])) }
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            connected[provider] = "lin@example.com"
+        }
+        return ConnectReply(ok: true, body: .object(["redirectUrl": .string("https://example.com/connect/\(provider)")]))
+    }
+
     func sendFeedback(_ text: String) async throws {
         try await pause(0.8)
     }
@@ -424,6 +447,8 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
             ConciergeChat(id: "topic-home", name: "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排", main: false, unread: 0),
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
+            ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
+            ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
@@ -511,6 +536,39 @@ final class DemoBackend: RomeBackend {
             ])], at: at(9, 53), session: conciergeChatID),
         ]
         approvals["ap-cal"] = ApprovalRecord(id: "ap-cal", status: "pending")
+
+        // A topic chat that needs services connected, and a question with defaults.
+        let mail = "topic-mail"
+        func card(_ service: String, _ label: String, _ icon: String, _ connect: JSONValue) -> JSONValue {
+            .object(["type": .string("connect_card"), "service": .string(service), "label": .string(label), "icon": .string(icon), "connect": connect])
+        }
+        let composio: (String) -> JSONValue = { provider in
+            .object(["kind": .string("composio"), "method": .string("POST"), "path": .string("/api/apps/connector/connect"), "body": .object(["provider": .string(provider)]), "needsLogin": .bool(false), "login": .object(["method": .string("POST"), "path": .string("/api/apps/connector/login/start")])])
+        }
+        messages[mail] = [
+            user("m1", "每天早上把重要邮件整理给我，顺便看看 GitHub 上要我处理的事。", at: at(10, 2), session: mail),
+            agent("要先连上这几个服务。", at: at(10, 3), session: mail),
+            parts([
+                card("gmail", "Gmail", "glyph:gmail", composio("gmail")),
+                card("github", "GitHub", "brand:github", .object(["kind": .string("rome_oauth"), "url": .string("https://romeos.cc/connect/github"), "available": .bool(true), "unavailableReason": .null])),
+                card("notion", "Notion", "glyph:notion", composio("notion")),
+                card("linear", "Linear", "glyph:linear", composio("linear")),
+                card("slack", "Slack", "brand:slack", .object(["kind": .string("rome_oauth"), "url": .null, "available": .bool(false), "unavailableReason": .string("Rome Cloud 还不能连接 Slack")])),
+            ], at: at(10, 3).addingTimeInterval(5), session: mail),
+        ]
+        messages["topic-mail-setup"] = [
+            user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),
+            parts([.object([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-mail"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                    .object(["id": .string("what"), "question": .string("摘要里要包括哪些？"), "type": .string("multi"),
+                             "options": .array([.string("需要我回复的"), .string("账单和收据"), .string("新闻简报")]),
+                             "defaults": .array([.string("需要我回复的")]),
+                             "optionDescriptions": .object(["需要我回复的": .string("别人在等你答复的邮件"), "新闻简报": .string("订阅的周报和新闻")])]),
+                    .object(["id": .string("when"), "question": .string("几点发给你？"), "type": .string("text"), "defaultText": .string("每天早上 8 点")]),
+                ])])]),
+            ])], at: at(10, 4), session: "topic-mail-setup"),
+        ]
 
         // Task: price tracking, waiting on an approval.
         let price = "chat-price"

@@ -378,18 +378,27 @@ struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
     let sending: Bool
-    let onAnswer: ([String: String]) -> Void
+    /// The `answers` to send, shaped as the web's QuestionCard sends them.
+    let onAnswer: ([JSONValue]) -> Void
 
-    @State private var choices: [String: Set<String>] = [:]
-    @State private var typed: [String: String] = [:]
+    /// Chosen options per question, in the order they were picked.
+    @State private var choices: [String: [String]]
+    @State private var typed: [String: String]
     @FocusState private var focusedQuestion: String?
 
-    private var answers: [String: String] {
-        var result: [String: String] = [:]
-        for item in answered?["answers"]?.array ?? [] {
-            if let id = item["questionId"]?.string, let value = item["value"]?.string { result[id] = value }
-        }
-        return result
+    init(part: MessagePart.QuestionPart, answered: JSONValue?, sending: Bool, onAnswer: @escaping ([JSONValue]) -> Void) {
+        self.part = part
+        self.answered = answered
+        self.sending = sending
+        self.onAnswer = onAnswer
+        // Defaults are chosen before the guardian touches anything, and stay editable.
+        let initial = QuestionAnswers.initial(part.questions)
+        _choices = State(initialValue: initial.choices)
+        _typed = State(initialValue: initial.typed)
+    }
+
+    private func answer(for question: MessagePart.QuestionPart.Question) -> JSONValue? {
+        (answered?["answers"]?.array ?? []).first { $0["questionId"]?.string == question.id }
     }
 
     var body: some View {
@@ -424,9 +433,9 @@ struct QuestionCardView: View {
                                 .lineLimit(1...4)
                                 .focused($focusedQuestion, equals: question.id)
                                 .padding(.vertical, 12)
-                            if !(typed[question.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                            if single, !(typed[question.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                                 Button {
-                                    submit(override: [question.id: typed[question.id] ?? ""])
+                                    submit(typed: typed)
                                 } label: {
                                     Image(systemName: "arrow.up")
                                         .romeFont(14, .bold)
@@ -446,7 +455,7 @@ struct QuestionCardView: View {
                 }
             }
             if !single {
-                PrimaryButton(title: "Submit", loading: sending, disabled: !complete) { submit(override: [:]) }
+                PrimaryButton(title: "Submit", loading: sending, disabled: !complete) { submit() }
             }
         }
         .padding(16)
@@ -460,14 +469,17 @@ struct QuestionCardView: View {
 
     private func optionButton(_ question: MessagePart.QuestionPart.Question, _ option: String) -> some View {
         let selected = choices[question.id]?.contains(option) ?? false
+        let description = question.optionDescriptions[option]
         return Button {
             if question.multi {
-                var set = choices[question.id] ?? []
-                if set.contains(option) { set.remove(option) } else { set.insert(option) }
-                choices[question.id] = set
+                var list = choices[question.id] ?? []
+                if let index = list.firstIndex(of: option) { list.remove(at: index) } else { list.append(option) }
+                choices[question.id] = list
             } else {
                 choices[question.id] = [option]
-                if single { submit(override: [question.id: option]) }
+                // Choosing replaces what was typed: the choice is the answer.
+                typed[question.id] = nil
+                if single { submit(choices: [question.id: [option]], typed: [:]) }
             }
         } label: {
             HStack(spacing: 12) {
@@ -480,13 +492,24 @@ struct QuestionCardView: View {
                     }
                 }
                 .frame(width: 18, height: 18)
-                Text(option)
-                    .romeFont(16, .medium)
-                    .foregroundStyle(Palette.fg)
-                    .multilineTextAlignment(.leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option)
+                        .romeFont(16, .medium)
+                        .foregroundStyle(Palette.fg)
+                        .multilineTextAlignment(.leading)
+                    if let description {
+                        // Shown only: an answer carries the label.
+                        Text(description)
+                            .romeFont(13)
+                            .foregroundStyle(Palette.sub)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14)
+            .padding(.vertical, description == nil ? 0 : 10)
             .frame(minHeight: 46)
             .background(selected ? Palette.primarySoft : Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
@@ -500,25 +523,20 @@ struct QuestionCardView: View {
         .sensoryFeedback(.selection, trigger: selected)
     }
 
+    /// Optional questions never block Submit; a required one with a default is answered.
     private var complete: Bool {
-        part.questions.allSatisfy { question in
-            !(choices[question.id]?.isEmpty ?? true) || !(typed[question.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-        }
+        QuestionAnswers.complete(part.questions, choices: choices, typed: typed)
     }
 
     private func binding(_ id: String) -> Binding<String> {
         Binding(get: { typed[id] ?? "" }, set: { typed[id] = $0 })
     }
 
-    private func submit(override: [String: String]) {
-        var values: [String: String] = [:]
-        for question in part.questions {
-            let picked = (choices[question.id] ?? []).sorted()
-            let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            values[question.id] = override[question.id] ?? (picked + (text.isEmpty ? [] : [text])).joined(separator: ", ")
-        }
+    private func submit(choices: [String: [String]]? = nil, typed: [String: String]? = nil) {
+        let answers = QuestionAnswers.answers(part.questions, choices: choices ?? self.choices, typed: typed ?? self.typed)
+        guard !answers.isEmpty else { return }
         focusedQuestion = nil
-        onAnswer(values)
+        onAnswer(answers)
     }
 
     private var answeredCard: some View {
@@ -532,8 +550,8 @@ struct QuestionCardView: View {
                         .romeFont(16, .semibold)
                         .foregroundStyle(Palette.sub)
                         .lineSpacing(3)
-                    let answer = answers[question.id] ?? ""
-                    let picked = Set(answer.components(separatedBy: ", "))
+                    let stored = QuestionAnswers.picked(answer(for: question), question: question)
+                    let picked = stored.options
                     ForEach(question.options, id: \.self) { option in
                         if picked.contains(option) {
                             HStack(spacing: 12) {
@@ -556,9 +574,9 @@ struct QuestionCardView: View {
                                 .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                         }
                     }
-                    let extra = picked.subtracting(question.options).filter { !$0.isEmpty }
+                    let extra = stored.extra
                     if !extra.isEmpty {
-                        Text(extra.sorted().joined(separator: ", "))
+                        Text(extra.joined(separator: QuestionAnswers.separator))
                             .romeFont(16, .semibold)
                             .padding(.horizontal, 14)
                             .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)

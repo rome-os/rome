@@ -5,6 +5,7 @@ import SwiftUI
 enum InteractionCard: Equatable {
     case approval
     case question(sessionId: String)
+    case connect
     case tools
     /// Drawn only on the web dashboard; "Open" goes to this chat there.
     case webOnly
@@ -13,6 +14,7 @@ enum InteractionCard: Equatable {
         switch row {
         case .approval: self = .approval
         case .question(_, _, let sessionId, _): self = .question(sessionId: sessionId)
+        case .connect: self = .connect
         case .tools: self = .tools
         case .webOnly: self = .webOnly
         default: return nil
@@ -42,9 +44,14 @@ struct InteractionRow: View {
             }
             .onAppear { store.watchApproval(part.approvalId) }
         case .question(_, let part, let sessionId, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { values in
-                store.answer(part, values: values, sessionId: sessionId)
+            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
+                store.answer(part, answers: answers, sessionId: sessionId)
             }
+        case .connect(let id, let part, let sessionId):
+            ConnectCardView(part: part, phase: store.connectPhases[id] ?? TranscriptStore.previewPhase(part.service) ?? .idle) {
+                store.connect(part, rowId: id, chatId: sessionId)
+            }
+            .task(id: id) { await store.checkConnected(part, rowId: id) }
         case .webOnly:
             WebOnlyCard(sessionId: store.sessionId)
         default:

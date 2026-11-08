@@ -164,7 +164,7 @@ struct TaskChatScreen: View {
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
-        case .tools, .approval, .question, .webOnly:
+        case .tools, .approval, .question, .webOnly, .connect:
             InteractionRow(row: row, store: store)
         case .error(_, let text):
             ErrorLine(text: text)

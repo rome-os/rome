@@ -113,6 +113,36 @@ final class FakeBackend: RomeBackend {
     func me() async throws -> AccountIdentity? { nil }
     func sendFeedback(_ text: String) async throws {}
 
+    // MARK: Connect cards
+
+    /// The connector list each read answers, in turn; the last one repeats. Nil fails the read.
+    var connectorReads: [[ConnectorState]?] = []
+    var connectorReadCount = 0
+    /// Replies per API path, in turn; the last one repeats.
+    var replies: [String: [ConnectReply]] = [:]
+    var connectCalls: [(method: String, path: String, body: JSONValue?)] = []
+    var notified: [(chatId: String, service: String)] = []
+
+    func connectors() async throws -> [ConnectorState] {
+        guard !connectorReads.isEmpty else { return [] }
+        let index = min(connectorReadCount, connectorReads.count - 1)
+        connectorReadCount += 1
+        guard let list = connectorReads[index] else { throw APIError.network }
+        return list
+    }
+
+    func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply {
+        connectCalls.append((method, apiPath, body))
+        guard var queue = replies[apiPath], !queue.isEmpty else { return ConnectReply(ok: false, body: .object([:])) }
+        let reply = queue.count > 1 ? queue.removeFirst() : queue[0]
+        replies[apiPath] = queue
+        return reply
+    }
+
+    func notifyServiceConnected(chatId: String, service: String) async {
+        notified.append((chatId, service))
+    }
+
     var check: Result<UpgradeCheck, Error> = .success(UpgradeCheck(current: .init(version: "1.0.0"), latest: .init(version: "1.0.0"), upgradeAvailable: false))
     var startResults: [Result<UpgradeStarted, Error>] = []
     var started: [String] = []

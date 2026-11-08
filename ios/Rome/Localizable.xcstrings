@@ -317,6 +317,16 @@
         }
       }
     },
+    "Cannot be connected here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在此连接"
+          }
+        }
+      }
+    },
     "Channel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -387,6 +397,46 @@
         }
       }
     },
+    "Connect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接"
+          }
+        }
+      }
+    },
+    "Connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接"
+          }
+        }
+      }
+    },
+    "Connecting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接中…"
+          }
+        }
+      }
+    },
+    "Connection did not start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接没有开始"
+          }
+        }
+      }
+    },
     "Copy" : {
       "localizations" : {
         "zh-Hans" : {
@@ -403,6 +453,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "复制链接"
+          }
+        }
+      }
+    },
+    "Could not check the connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查连接状态"
           }
         }
       }
@@ -1001,6 +1061,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂无用量数据"
+          }
+        }
+      }
+    },
+    "Not connected yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未连接"
           }
         }
       }
@@ -1707,6 +1777,36 @@
         }
       }
     },
+    "Sign-in did not start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录没有开始"
+          }
+        }
+      }
+    },
+    "Sign-in failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录失败"
+          }
+        }
+      }
+    },
+    "Sign-in timed out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录超时"
+          }
+        }
+      }
+    },
     "Signing in" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1923,6 +2023,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这可能需要几分钟。你可以先离开 App，回来后会接着等待。"
+          }
+        }
+      }
+    },
+    "This connection cannot start here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在这里开始连接"
+          }
+        }
+      }
+    },
+    "This sign-in cannot start here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法在这里开始登录"
           }
         }
       }

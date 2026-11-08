@@ -34,6 +34,7 @@ enum TranscriptRow: Identifiable, Hashable {
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     case webOnly(id: String)
+    case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case error(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
     case typing
@@ -42,7 +43,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id), .error(let id, _), .tools(let id, _, _):
+             .webOnly(let id), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -121,6 +122,8 @@ enum TranscriptBuilder {
                     rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[question.toolUseId]))
                 case .webOnly:
                     rows.append(.webOnly(id: id))
+                case .connectCard(let card):
+                    rows.append(.connect(id: id, part: card, sessionId: message.sessionId))
                 case .error(let text):
                     rows.append(.error(id: id, text: text.isEmpty ? String(localized: "This turn did not finish") : text))
                 case .interactionResult, .other:
