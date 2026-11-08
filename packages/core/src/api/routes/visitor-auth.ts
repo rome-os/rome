@@ -235,6 +235,10 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
         error: err instanceof Error ? err.message : String(err),
       });
     });
+    // An invited email that had no Rome Cloud account at the last sync may have
+    // just made one. The sync resends the list then, so Rome Cloud can list
+    // this instance to the new account.
+    deps.visitorAllowListSync.visitorSignedIn(email);
     return { ok: true, accountId, email, avatarUrl, favorViewerToken };
   }
 

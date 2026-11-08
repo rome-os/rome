@@ -446,3 +446,47 @@ describe("/api/auth/visitor/native", () => {
     ).toBe(403);
   });
 });
+
+describe("/api/auth/visitor — telling the allow-list sync about sign-ins", () => {
+  function signInSpy(deps: TestDeps): string[] {
+    const seen: string[] = [];
+    deps.visitorAllowListSync.visitorSignedIn = (email: string) => void seen.push(email);
+    return seen;
+  }
+
+  async function routeWith(email: string): Promise<{ app: Hono; seen: string[] }> {
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const deps = { ...(await buildTestDeps(testDb.db)), dashboardAccessState: state };
+    const seen = signInSpy(deps);
+    const app = new Hono();
+    app.route("/api", visitorAuthRoutes(deps, { fetchImpl: mockAccountSession(email) }));
+    return { app, seen };
+  }
+
+  it("reports a browser and a native visitor sign-in", async () => {
+    const browser = await routeWith("Ada@Example.com");
+    const nonce = await startDashboardLogin(browser.app);
+    await browser.app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+    expect(browser.seen).toEqual(["ada@example.com"]);
+
+    const native = await routeWith("ada@example.com");
+    const start = await native.app.request("/api/auth/visitor/native/start", { method: "POST" });
+    const { visitor_authorization_request: request } = (await start.json()) as {
+      visitor_authorization_request: { state: string };
+    };
+    await native.app.request("/api/auth/visitor/native/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state: request.state, code: "abc" }),
+    });
+    expect(native.seen).toEqual(["ada@example.com"]);
+  });
+
+  it("reports nothing for a sign-in the allow-list refuses", async () => {
+    const { app, seen } = await routeWith("lin@example.com");
+    const nonce = await startDashboardLogin(app);
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+    expect(seen).toEqual([]);
+  });
+});
