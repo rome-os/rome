@@ -16,6 +16,7 @@ import {
 } from "../domain/agent-definition.js";
 import { storeForkParent } from "../domain/session-parent.js";
 import { turnStatus, type TurnEnding } from "../domain/turn-end.js";
+import { createTurn, type Turn, type TurnWriter } from "../domain/turn.js";
 import { endedTurn, type TurnLifecycle } from "../domain/turn-lifecycle.js";
 import type { TurnMiddleware } from "../domain/turn-middleware.js";
 import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/answer-shape.js";
@@ -201,11 +202,8 @@ export interface ForkedAgentTurnInput extends AgentTurnInput {
 
 export type AgentSessionStatus = "idle" | "running" | "closed";
 
-export interface AgentTurnHandle {
-  turnId: string;
-  events: AsyncIterable<StreamAgentEvent>;
-  /** Cancel only this turn, including before provider dispatch. */
-  interrupt?(reason?: string): Promise<void>;
+/** A turn the session started, with the trace context its spans run in. */
+export interface AgentTurnHandle extends Turn {
   /**
    * OTel context carrying the per-turn `agent:*` span. Callers doing
    * post-turn work outside `runOneTurn` can wrap it in
@@ -1391,8 +1389,8 @@ interface TurnSink {
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
   turnStartEmitted: boolean;
-  values: StreamAgentEvent[];
-  resolvers: Array<(item: IteratorResult<StreamAgentEvent>) => void>;
+  /** The turn's own record of what it said and how it ended. */
+  writer: TurnWriter;
   done: boolean;
   /**
    * Captured block stream for this turn — every AgentEvent yielded by
@@ -2125,7 +2123,7 @@ class AgentSessionImpl implements AgentSession {
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
     this.recordTurnUsage(sink, terminal);
-    this.closeSink(sink);
+    this.closeSink(sink, terminal);
   }
 
   private recordTurnUsage(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
@@ -2266,12 +2264,7 @@ class AgentSessionImpl implements AgentSession {
 
   private publishToSink(sink: TurnSink, msg: StreamAgentEvent): void {
     if (sink.done) return;
-    if (sink.resolvers.length > 0) {
-      const r = sink.resolvers.shift()!;
-      r({ value: msg, done: false });
-    } else {
-      sink.values.push(msg);
-    }
+    sink.writer.record(msg);
     for (const sub of this.subscribers.values()) {
       try {
         sub(msg, sink.turnId);
@@ -2294,13 +2287,10 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  private closeSink(sink: TurnSink): void {
+  private closeSink(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
     if (sink.done) return;
     sink.done = true;
-    while (sink.resolvers.length > 0) {
-      const r = sink.resolvers.shift()!;
-      r({ value: undefined as never, done: true });
-    }
+    sink.writer.end({ terminal, stoppedByRome: sink.lifecycleInterrupted });
     if (this.currentSink === sink) {
       this.currentSink = null;
     }
@@ -2400,26 +2390,10 @@ class AgentSessionImpl implements AgentSession {
     });
   }
 
-  private buildTurnEvents(sink: TurnSink): AsyncIterable<StreamAgentEvent> {
-    const clearSubagentLinks = () => this.clearSubagentLinks(sink);
-    return {
-      [Symbol.asyncIterator]() {
-        return {
-          async next(): Promise<IteratorResult<StreamAgentEvent>> {
-            if (sink.values.length > 0) {
-              return { value: sink.values.shift()!, done: false };
-            }
-            if (sink.done) {
-              clearSubagentLinks();
-              return { value: undefined as never, done: true };
-            }
-            return await new Promise<IteratorResult<StreamAgentEvent>>((resolve) => {
-              sink.resolvers.push(resolve);
-            });
-          },
-        };
-      },
-    };
+  /** The turn's events, clearing its subagent links once a reader has read to the end. */
+  private async *readTurn(sink: TurnSink, turn: Turn): AsyncIterable<StreamAgentEvent> {
+    yield* turn.events();
+    this.clearSubagentLinks(sink);
   }
 
   async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
@@ -2765,12 +2739,16 @@ class AgentSessionImpl implements AgentSession {
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
     const turnId = uuidv7();
+    const { turn, writer } = createTurn(turnId, async (reason) => {
+      if (sink.done) return;
+      sink.lifecycleInterrupted = true;
+      if (this.currentSink === sink) await this.interrupt(reason);
+    });
     const sink: TurnSink = {
       turnId,
       userPrompt: input.prompt,
       turnStartEmitted: false,
-      values: [],
-      resolvers: [],
+      writer,
       done: false,
       blocks: [],
       modelTurnStartMs: 0,
@@ -2801,7 +2779,6 @@ class AgentSessionImpl implements AgentSession {
       outputSchemaSuspended: false,
       usageRecorded: false,
     };
-    const events = this.buildTurnEvents(sink);
 
     // Open the per-turn `agent:*` root span here (not inside runOneTurn) so
     // it spans the turnMutex async seam — external callers can then wrap
@@ -2869,13 +2846,13 @@ class AgentSessionImpl implements AgentSession {
       .finally(() => this.emitStatus());
 
     return {
-      turnId,
-      events,
-      interrupt: async (reason) => {
-        if (sink.done) return;
-        sink.lifecycleInterrupted = true;
-        if (this.currentSink === sink) await this.interrupt(reason);
+      id: turn.id,
+      get hasEnded() {
+        return turn.hasEnded;
       },
+      events: () => this.readTurn(sink, turn),
+      ended: () => turn.ended(),
+      stop: (reason) => turn.stop(reason),
       turnContext: turnCtx,
     };
   }

@@ -202,11 +202,11 @@ describe("AgentSession turn usage", () => {
     };
     const session = await manager.acquire(key);
     const handle = session.sendTurn({ prompt: "hello" });
-    await drain(handle.events);
+    await drain(handle.events());
 
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
-      turnId: handle.turnId,
+      turnId: handle.id,
       agentName: `core:${AGENT}`,
       status: "completed",
       provider: "openai",
@@ -234,8 +234,8 @@ describe("AgentSession turn usage", () => {
       yield { type: "error", error: "rejected before the provider" };
     };
     const session = await manager.acquire(key);
-    await drain(session.sendTurn({ prompt: "first" }).events);
-    await drain(session.sendTurn({ prompt: "second" }).events);
+    await drain(session.sendTurn({ prompt: "first" }).events());
+    await drain(session.sendTurn({ prompt: "second" }).events());
 
     expect(recorded.map((facts) => [facts.status, facts.providerTurnId])).toEqual([
       ["completed", "provider-turn-1"],
@@ -257,7 +257,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const first = session.sendTurn({ prompt: "first" });
     const second = session.sendTurn({ prompt: "second" });
-    await Promise.all([drain(first.events), drain(second.events)]);
+    await Promise.all([drain(first.events()), drain(second.events())]);
 
     expect(recorded.map((facts) => [facts.status, facts.providerTurnId])).toEqual([
       ["completed", "provider-turn-1"],
@@ -287,7 +287,7 @@ describe("AgentSession turn usage", () => {
     loginKind = "rome_credits";
     resolverUsesRomeCredits = true;
     releaseFirst();
-    await drain(first.events);
+    await drain(first.events());
 
     let releaseSecond!: () => void;
     const secondRelease = new Promise<void>((resolve) => {
@@ -308,7 +308,7 @@ describe("AgentSession turn usage", () => {
     await turnUnderway();
     loginKind = "subscription";
     releaseSecond();
-    await drain(second.events);
+    await drain(second.events());
 
     expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential", "rome_credits"]);
   });
@@ -322,7 +322,7 @@ describe("AgentSession turn usage", () => {
       loginKind = "api_credential";
     };
     const session = await manager.acquire(key);
-    await drain(session.sendTurn({ prompt: "after a reopen" }).events);
+    await drain(session.sendTurn({ prompt: "after a reopen" }).events());
 
     expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential"]);
   });
@@ -337,7 +337,7 @@ describe("AgentSession turn usage", () => {
     };
     // A web chat shows cards and faces the guardian.
     const session = await manager.acquire(key, { drawsCards: true, guardianFacing: true });
-    await drain(session.sendTurn({ prompt: "first" }).events);
+    await drain(session.sendTurn({ prompt: "first" }).events());
     await drain(session.runForkedTurn!({ prompt: "side question", mode: "exact" }));
 
     const [source, fork] = opened;
@@ -371,9 +371,9 @@ describe("AgentSession turn usage", () => {
       };
     };
     const session = await manager.acquire(key);
-    await drain(session.sendTurn({ prompt: "first" }).events);
+    await drain(session.sendTurn({ prompt: "first" }).events());
     shortCircuit = true;
-    await drain(session.sendTurn({ prompt: "parked on a card" }).events);
+    await drain(session.sendTurn({ prompt: "parked on a card" }).events());
 
     const events: unknown[] = [];
     for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
@@ -411,7 +411,7 @@ describe("AgentSession turn usage", () => {
     // The first status probe lands; Codex's login is still ChatGPT.
     loginKind = "subscription";
     releasePreparation();
-    await drain(turn.events);
+    await drain(turn.events());
 
     expect(providerCalls).toBe(1);
     expect(recorded.map((facts) => facts.loginKind)).toEqual(["subscription"]);

@@ -86,7 +86,7 @@ export class AgentInputQueue {
       this.start(entry);
       return { inputId: input.inputId, turnId: entry.turnId, disposition: "started" };
     }
-    entry.turnId = this.active.handle.turnId;
+    entry.turnId = this.active.handle.id;
     this.queued.push(entry);
     void this.update(entry, "queued").catch(this.reportError);
     if (options.priority === "now") {
@@ -100,7 +100,7 @@ export class AgentInputQueue {
 
   /** Whether `turnId` is a turn this queue started. */
   owns(turnId: string): boolean {
-    return this.active?.handle.turnId === turnId;
+    return this.active?.handle.id === turnId;
   }
 
   // Sealing first keeps the new input from steering into the turn it ends.
@@ -108,7 +108,7 @@ export class AgentInputQueue {
     if (active.superseded) return;
     active.superseded = true;
     active.sealed = true;
-    void active.handle.interrupt?.(SUPERSEDED_INTERRUPT_REASON).catch(this.reportError);
+    void active.handle.stop(SUPERSEDED_INTERRUPT_REASON).catch(this.reportError);
   }
 
   // A turn that starts after a superseded one also takes that turn's
@@ -149,7 +149,7 @@ export class AgentInputQueue {
       superseded: false,
     };
     for (const part of parts) {
-      part.turnId = handle.turnId;
+      part.turnId = handle.id;
       void this.update(part, "queued").catch(this.reportError);
     }
     entry.options.onTurn(handle);
@@ -157,14 +157,14 @@ export class AgentInputQueue {
 
   async beforeSend(turnId: string): Promise<void> {
     const active = this.active;
-    if (active?.handle.turnId !== turnId) return;
+    if (active?.handle.id !== turnId) return;
     await Promise.all(
       [active.first, ...active.bound].map((entry) => this.update(entry, "submitted")),
     );
   }
 
   ready(turnId: string): void {
-    if (this.active?.handle.turnId !== turnId) return;
+    if (this.active?.handle.id !== turnId) return;
     this.active.ready = true;
     this.flush();
   }
@@ -175,7 +175,7 @@ export class AgentInputQueue {
     entry.turnId = turnId;
     await this.update(entry, event.state);
     const active = this.active;
-    if (active?.handle.turnId !== turnId) return;
+    if (active?.handle.id !== turnId) return;
     if (event.state === "queued") {
       // The provider retained this input across its native turn boundary.
       // sendUserInput(inputId) will adopt it, never enqueue a second copy.
@@ -200,7 +200,7 @@ export class AgentInputQueue {
     if (!entry) return;
     active.pending = entry;
     active.steered.push(entry);
-    entry.turnId = active.handle.turnId;
+    entry.turnId = active.handle.id;
     active.dispatch = (async () => {
       try {
         // Persist the dispatch boundary before a provider can observe input.
@@ -241,14 +241,14 @@ export class AgentInputQueue {
 
   async seal(turnId: string): Promise<void> {
     const active = this.active;
-    if (active?.handle.turnId !== turnId) return;
+    if (active?.handle.id !== turnId) return;
     active.sealed = true;
     await active.dispatch;
   }
 
   finish(turnId: string): void {
     const active = this.active;
-    if (active?.handle.turnId !== turnId) return;
+    if (active?.handle.id !== turnId) return;
     active.sealed = true;
     this.active = undefined;
     if (active.superseded) {
@@ -292,7 +292,7 @@ export class AgentInputQueue {
 
   cancel(turnId: string): void {
     const active = this.active;
-    if (active?.handle.turnId !== turnId) return;
+    if (active?.handle.id !== turnId) return;
     active.sealed = true;
     for (const entry of [active.pending, ...this.queued, ...this.carried]) {
       if (entry) void this.update(entry, "cancelled").catch(this.reportError);
@@ -303,7 +303,7 @@ export class AgentInputQueue {
 
   close(): void {
     this.closed = true;
-    if (this.active) this.cancel(this.active.handle.turnId);
+    if (this.active) this.cancel(this.active.handle.id);
   }
 
   private update(entry: Entry, state: AgentInputState): Promise<void> {
