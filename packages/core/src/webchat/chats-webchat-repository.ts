@@ -23,6 +23,7 @@ import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/pla
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   type EnsureRomeSessionInput,
+  type InterruptedTurn,
   type MessagePageCursor,
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
@@ -331,6 +332,43 @@ export class ChatsWebChatRepository extends WebChatRepository {
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
+  }
+
+  /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
+  canContinueAfterRestart(turn: InterruptedTurn): boolean {
+    return (
+      this.db.get<{ eligible: number }>(sql`
+      SELECT 1 AS eligible
+      FROM ${romeSessions} s
+      JOIN ${CHATS} c ON c.id = s.chat_id AND c.platform = 'webchat'
+      JOIN ${romeAgentMessages} t ON t.id = ${turn.messageId} AND t.session_id = s.id
+      WHERE s.id = ${turn.sessionId} AND s.type = 'channel' AND s.chat_platform = 'webchat'
+        AND (s.owner_key IS NULL OR s.owner_key = 'guardian')
+        AND s.parent_session_id IS NULL AND s.parent_turn_id IS NULL
+        AND s.archived_at IS NULL AND s.trigger_kind IS NULL AND t.trigger_kind IS NULL
+        AND EXISTS (
+          SELECT 1 FROM agent_turn_messages l
+          JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+          WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+            AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${CHAT_MESSAGES} m
+          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+            AND m.id > (
+              SELECT min(l.message_id) FROM agent_turn_messages l
+              WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+            )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${romeAgentMessages} n
+          WHERE n.session_id = s.id AND n.role = 'trace' AND n.id <> t.id
+            AND (n.created_at > t.created_at OR (n.created_at = t.created_at AND n.rowid > t.rowid))
+        )
+    `)?.eligible === 1
+    );
   }
 
   override async recoverInterruptedInputs(): Promise<void> {

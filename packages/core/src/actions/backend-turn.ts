@@ -45,6 +45,8 @@ export interface WebchatSessionStreamHost {
 }
 
 export interface BackendTurnOptions {
+  /** Rechecked inside the webchat queue, after preflight. False drops a stale wake-up. */
+  shouldRun?: () => boolean;
   /** The turn is housekeeping for the agent: a chat that draws a typing
    *  indicator for a running turn holds it back until the agent speaks. */
   quiet?: boolean;
@@ -305,6 +307,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         params.threadId,
         async ({ emit, stopRequested }) => {
           await deps.beforeTurn?.(params);
+          if (options?.shouldRun && !options.shouldRun()) return;
           let reply = "";
           let turnId: string | undefined;
           const trace = {
