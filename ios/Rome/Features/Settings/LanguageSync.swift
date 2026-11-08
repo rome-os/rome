@@ -24,9 +24,7 @@ final class LanguageSync {
 
     /// Sign-out, or another account: what was seen belongs to the last one.
     static func removeAll(defaults: UserDefaults = .standard) {
-        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("guardianLanguage.") {
-            defaults.removeObject(forKey: key)
-        }
+        defaults.removeKeys(prefix: "guardianLanguage.")
     }
 
     /// Compares the app's language with the last one seen on this instance,
@@ -48,6 +46,15 @@ final class LanguageSync {
             if account.isCurrent { defaults.set(current, forKey: key) }
         } catch {
             // Remembered as it was, so the next foreground tries again.
+        }
+    }
+}
+
+extension UserDefaults {
+    /// Removes every key that starts with `prefix`: one kind of per-instance setting.
+    func removeKeys(prefix: String) {
+        for key in dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            removeObject(forKey: key)
         }
     }
 }

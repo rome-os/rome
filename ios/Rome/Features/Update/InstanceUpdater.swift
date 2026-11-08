@@ -168,7 +168,13 @@ struct UpdateBannerStore {
 
     func dismissed(_ instanceID: String) -> String? { defaults.string(forKey: key(instanceID)) }
     func dismiss(_ version: String, for instanceID: String) { defaults.set(version, forKey: key(instanceID)) }
-    private func key(_ instanceID: String) -> String { "updateBannerDismissed.\(instanceID)" }
+    private func key(_ instanceID: String) -> String { Self.prefix + instanceID }
+    static let prefix = "updateBannerDismissed."
+
+    /// Sign-out, or another account: the banner was that guardian's to close.
+    static func removeAll(defaults: UserDefaults = .standard) {
+        defaults.removeKeys(prefix: prefix)
+    }
 }
 
 struct PendingUpgradeStore {

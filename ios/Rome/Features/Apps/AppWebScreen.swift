@@ -61,7 +61,7 @@ struct AppWebScreen: View {
         // Apps keeps the apps last opened from this phone at its top.
         .task(id: app.id) {
             guard pageURL == nil else { return }
-            RecentApps(host: workspace.host).record(app.id)
+            RecentApps(host: workspace.host, account: workspace.backend.account).record(app.id)
         }
     }
 

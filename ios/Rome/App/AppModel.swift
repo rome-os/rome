@@ -652,7 +652,8 @@ final class AppModel {
     }
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
-    /// pictures, the language last seen and the last instance. Gone on
+    /// pictures, recent apps, closed update banners, the language last seen
+    /// and the last instance. Gone on
     /// sign-out, and before a new Cloud sign-in, which may be another
     /// account's. The account has ended first, so no late write follows.
     private func forgetAccountData() {
@@ -660,6 +661,10 @@ final class AppModel {
         TranscriptCache.removeAll()
         ImageDiskCache.shared.removeAll()
         LanguageSync.removeAll()
+        RecentApps.removeAll()
+        UpdateBannerStore.removeAll()
+        // The account picture, fetched through the shared session.
+        URLCache.shared.removeAllCachedResponses()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
     }

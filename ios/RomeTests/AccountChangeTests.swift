@@ -217,4 +217,27 @@ final class HeldProtocol: URLProtocol, @unchecked Sendable {
         LanguageSync.removeAll(defaults: defaults)
         #expect(defaults.string(forKey: LanguageSync.key(host: "me.romeos.cc")) == nil)
     }
+
+    /// A's recent apps never show for B on the same instance: wiped with the
+    /// account, and an app opened as the account ends is not recorded.
+    @Test func recentAppsBelongToTheAccount() {
+        let defaults = UserDefaults(suiteName: "recent-\(UUID())")!
+        let account = AccountGeneration()
+        let recent = RecentApps(host: "me.romeos.cc", account: account.stamp(), defaults: defaults)
+        recent.record("habits")
+        #expect(recent.ids() == ["habits"])
+        account.end()
+        recent.record("reading")
+        #expect(recent.ids() == ["habits"])
+        RecentApps(host: "team.romeos.cc", defaults: defaults).record("packing")
+        UpdateBannerStore(defaults: defaults).dismiss("1.1.190", for: "i-me")
+        defaults.set("dark", forKey: "appearance")
+        RecentApps.removeAll(defaults: defaults)
+        UpdateBannerStore.removeAll(defaults: defaults)
+        #expect(RecentApps(host: "me.romeos.cc", defaults: defaults).ids().isEmpty)
+        #expect(RecentApps(host: "team.romeos.cc", defaults: defaults).ids().isEmpty)
+        #expect(UpdateBannerStore(defaults: defaults).dismissed("i-me") == nil)
+        // Not the account's: stays.
+        #expect(defaults.string(forKey: "appearance") == "dark")
+    }
 }

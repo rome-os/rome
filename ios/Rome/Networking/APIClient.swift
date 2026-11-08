@@ -45,6 +45,9 @@ final class APIClient: Sendable {
         self.onUnauthorized = onUnauthorized
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
+        // Answers are this account's: never in the shared disk cache, which
+        // no sign-out wipes. The app keeps what it needs in its own caches.
+        configuration.urlCache = nil
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 30
         session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)

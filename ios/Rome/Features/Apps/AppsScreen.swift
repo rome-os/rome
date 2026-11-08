@@ -158,21 +158,31 @@ private struct AppGrid: View {
     }
 }
 
-/// The apps last opened from this phone, newest first, per instance.
+/// The apps last opened from this phone, newest first, per instance, for
+/// the signed-in account only.
 struct RecentApps {
     static let shown = 4
     static let kept = 16
+    static let prefix = "recentApps."
 
     let host: String
+    /// Whose list it is; once that account has ended, nothing is recorded.
+    var account: AccountStamp = .unchecked
     var defaults: UserDefaults = .standard
 
-    private var key: String { "recentApps.\(host)" }
+    private var key: String { Self.prefix + host }
 
     func ids() -> [String] { defaults.stringArray(forKey: key) ?? [] }
 
     func record(_ appId: String) {
+        guard account.isCurrent else { return }
         let list = [appId] + ids().filter { $0 != appId }
         defaults.set(Array(list.prefix(Self.kept)), forKey: key)
+    }
+
+    /// Sign-out, or another account: every instance's list.
+    static func removeAll(defaults: UserDefaults = .standard) {
+        defaults.removeKeys(prefix: prefix)
     }
 
     /// The recent apps the list still has, newest first, at most `shown`.
