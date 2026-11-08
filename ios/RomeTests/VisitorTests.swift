@@ -28,6 +28,24 @@ import Testing
         #expect(!space.isMainChat("topic-1"))
     }
 
+    /// New app on a visitor's Apps screen asks the visitor's own main chat,
+    /// never the guardian's `concierge`.
+    @Test func aVisitorsNewAppGoesToTheirOwnChat() async {
+        let backend = FakeBackend()
+        backend.mainChat = ConciergeSessionInfo(id: Self.visitorChat, unread: 0)
+        backend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
+        let space = workspace(backend, drafts: draftStore())
+        await space.readRole()
+        await space.openConcierge()
+        #expect(space.isVisitor)
+        // What Apps' onStart does, then the composer's send.
+        space.composerPrefill = AppIdea.habitTracker.prompt
+        space.concierge.send(space.composerPrefill ?? "")
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(backend.calls.contains("send \(Self.visitorChat) \(AppIdea.habitTracker.prompt)"))
+        #expect(!backend.calls.contains { $0.hasPrefix("send \(conciergeChatID) ") })
+    }
+
     @Test func theGuardianKeepsConcierge() async {
         let backend = FakeBackend()
         backend.mainChat = ConciergeSessionInfo(id: conciergeChatID, unread: 0)

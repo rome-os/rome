@@ -293,7 +293,7 @@ struct AppIcon: View {
             image = app.iconUrl == nil ? nil : CachedImage.cached(instance: instance, key: key)
             guard let icon = app.iconUrl, icon.hasPrefix("/api/") else { return }
             // Checked again in the background; replaced only when it changed.
-            // Through the instance's client: the icon is the guardian's to see.
+            // Through the instance's client: the icon needs this person's session.
             let side = size
             if let fresh = await CachedImage.refresh(
                 instance: instance, key: key, version: app.version,

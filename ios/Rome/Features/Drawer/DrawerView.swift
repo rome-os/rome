@@ -29,11 +29,9 @@ struct DrawerView: View {
                 DrawerItem(title: "Chat", selected: section == .chat, action: { onSection(.chat) }) {
                     Image(systemName: "bubble.left")
                 }
-                // The apps are the guardian's: a visitor does not see them.
-                if workspace.isGuardian {
-                    DrawerItem(title: "Apps", selected: section == .apps, action: { onSection(.apps) }) {
-                        Image(systemName: "square.grid.2x2")
-                    }
+                // A dashboard visitor has the whole dashboard, Apps and New app included.
+                DrawerItem(title: "Apps", selected: section == .apps, action: { onSection(.apps) }) {
+                    Image(systemName: "square.grid.2x2")
                 }
             }
             .padding(.top, 22)
