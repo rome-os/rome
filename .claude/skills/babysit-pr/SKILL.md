@@ -7,6 +7,6 @@ disable-model-invocation: true
 
 # Babysit a PR
 
-Watch $ARGUMENTS — the PR for the current branch when the argument is empty — and keep it ready to merge: run [respond-to-review](../respond-to-review/SKILL.md) on every new round of review feedback, fix CI failures the diff caused, and resolve merge conflicts with the base branch. Merging the PR itself stays with the user.
+Watch $ARGUMENTS — the PR for the current branch when the argument is empty — and keep it ready to merge: run [respond-to-review](../respond-to-review/SKILL.md) on every new round of review feedback, fix CI failures the diff caused, and resolve merge conflicts with the base branch. Merging the PR itself stays with the user, unless [domain-refactor](../domain-refactor/SKILL.md) allows the agent to merge it.
 
 The environment decides the mechanism: a watcher that wakes the session when a review or check lands, or a poll every five minutes. Each tick, handle whatever is new, then end the turn with the next tick scheduled. Once the PR is approved or a round raises no new points, CI is green, and the branch merges cleanly, schedule nothing and report the outcome. When the PR is blocked by another PR, schedule nothing, report which PR blocks it, and tell the user to run `/babysit-pr` again once that PR merges. When something needs the user's decision, stop and ask.
