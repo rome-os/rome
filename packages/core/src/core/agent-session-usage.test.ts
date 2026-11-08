@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -149,8 +150,6 @@ describe("AgentSession turn usage", () => {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         systemPrompts,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
           accounts: fakeAccounts(() => state),
@@ -166,14 +165,18 @@ describe("AgentSession turn usage", () => {
         turnUsage: new TurnUsageReporter({
           usage: { recordTurn: (facts) => recorded.push(facts) },
         }),
-        sessionTools: async () => [
-          {
-            name: "say",
-            description: "Say something",
-            inputSchema: { type: "object" },
-            handler: async () => ({ content: [{ type: "text", text: "said" }] }),
-          },
-        ],
+        ...romeToolPorts({
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+          sessionTools: async () => [
+            {
+              name: "say",
+              description: "Say something",
+              inputSchema: { type: "object" },
+              handler: async () => ({ content: [{ type: "text", text: "said" }] }),
+            },
+          ],
+        }),
       },
       { keepAliveAcrossTurns: true },
     );

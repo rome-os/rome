@@ -3,6 +3,7 @@
 
 import type { ActionConfig, ActionResult } from "@rome-os/app-runtime";
 import { createSearchMatcher, normalizeSearchLimit } from "./catalog-search.js";
+import type { TurnFacts } from "./turn-facts.js";
 
 /** One action this agent may call, as the model reads it. */
 export interface AgentAction {
@@ -18,16 +19,19 @@ export interface AgentAction {
   inputSchema: Record<string, unknown>;
 }
 
-/** What this agent may call. */
+/** Port. What an agent may call, for the turn that calls it. */
 export interface AgentActions {
   /** Read on every call, so an action installed mid-session shows at once. */
-  list(): readonly AgentAction[];
+  list(turn: TurnFacts): readonly AgentAction[];
+  /** Whether the turn's agent may call action `name`, under any of its names. */
+  permits(turn: TurnFacts, name: string): boolean;
   /**
-   * Runs an action this agent may call. Resolves with the action's result,
-   * its domain rejections included. Throws `Unknown action: <name>` for any
-   * other name, and on an invocation failure; either becomes an error result.
+   * Runs an action the turn's agent may call, attributed to the turn. Resolves
+   * with the action's result, its domain rejections included. Throws
+   * `Unknown action: <name>` for any other name, and on an invocation failure;
+   * either becomes an error result.
    */
-  run(name: string, input: unknown): Promise<ActionResult>;
+  run(turn: TurnFacts, name: string, input: unknown): Promise<ActionResult>;
 }
 
 interface ActionArgumentSummary {

@@ -92,7 +92,8 @@ function build(args: BuildArgs = {}) {
     tools: testRomeTools({
       actions: {
         list: args.getActionCatalog ?? (() => actionSnapshot),
-        run: async (name, input) => ({
+        permits: () => true,
+        run: async (_turn, name, input) => ({
           status: "ok",
           data: await (args.executeAction ?? (async () => ({ ok: true })))(name, input),
         }),

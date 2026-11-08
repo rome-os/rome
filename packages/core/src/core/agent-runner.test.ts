@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
@@ -2280,10 +2281,7 @@ describe("AgentRunner", () => {
       agentLoader,
       sessionRepository,
       systemPrompts,
-      actionRegistry,
       modelResolver,
-      actionEngine,
-      webchatRepo: new ChatsWebChatRepository(testDb.db),
       sessionSettings: new ChatSessionSettings({
         webchatRepo: new ChatsWebChatRepository(testDb.db),
       }),
@@ -2298,6 +2296,11 @@ describe("AgentRunner", () => {
       subagentExecutionService: createSubagentExecutionService({
         calls: subagentCalls,
         webchatRepo,
+      }),
+      ...romeToolPorts({
+        actionRegistry,
+        actionEngine,
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
       }),
     };
   }

@@ -9,6 +9,7 @@ import {
   type AgentActions,
 } from "../domain/agent-action.js";
 import type { AgentLog } from "../domain/agent-log.js";
+import type { TurnFacts } from "../domain/turn-facts.js";
 import { MAX_SEARCH_LIMIT, SEARCH_LIMIT_DESCRIPTION } from "../domain/catalog-search.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
@@ -31,6 +32,7 @@ function assertJsonArgs(value: unknown): Record<string, unknown> {
 /** `list_actions`, `read_action`, `search_actions` and `execute_action`. */
 export function actionTools(
   actions: AgentActions,
+  turn: TurnFacts,
   widgetsShow: boolean,
   run: RomeToolRunner,
   log: AgentLog,
@@ -42,7 +44,7 @@ export function actionTools(
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       handler: (input) =>
         run("list_actions", input, async () =>
-          [...actions.list()]
+          [...actions.list(turn)]
             .sort((left, right) => left.name.localeCompare(right.name))
             .map(toActionSummary),
         ),
@@ -60,7 +62,7 @@ export function actionTools(
       },
       handler: (input) =>
         run("read_action", input, async (args) =>
-          describeAction(requireAction(actions.list(), String(args.action_name))),
+          describeAction(requireAction(actions.list(turn), String(args.action_name))),
         ),
     },
     {
@@ -87,7 +89,7 @@ export function actionTools(
       handler: (input) =>
         run("search_actions", input, async (args) =>
           searchActions(
-            actions.list(),
+            actions.list(turn),
             String(args.query ?? ""),
             typeof args.limit === "number" ? args.limit : undefined,
           ),
@@ -117,7 +119,7 @@ export function actionTools(
             tool: "execute_action",
             action: actionName,
           });
-          return actionToolOutput(await actions.run(actionName, parsedArgs), widgetsShow);
+          return actionToolOutput(await actions.run(turn, actionName, parsedArgs), widgetsShow);
         }),
     },
   ];

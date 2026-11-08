@@ -33,9 +33,10 @@ Know-how an agent reads and follows. An agent has the skills its installed apps 
 
 ## Rome tools
 
-The tools Rome serves the model during a turn, in four groups: actions, subagents, skills, and the group that asks the person. Each agent's are built from what it may call, and a provider mounts each group as one server.
+The tools Rome serves the model during a turn, in four groups: actions, subagents, skills, and the group that asks the person. The agent context builds the groups, and a provider mounts each group as one server. Three of their sources lie outside the agent context: the actions an agent may call, the scheduling of a deferred wake, and the session tools. Each is asked for the turn that calls it.
 
 - How an agent finds actions and skills, what a call on an action hands back, and what `ask_question` and `defer` accept are rules in [`packages/core/src/agent/domain/`](../../packages/core/src/agent/domain/).
+- In code, the three sources are the ports `AgentActions`, `DeferTool` and `SessionTools`, each taking the turn's `TurnFacts`. Rome's adapters for them are in [`packages/core/src/core/rome-tool-ports.ts`](../../packages/core/src/core/rome-tool-ports.ts).
 
 ## Session tools
 

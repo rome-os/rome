@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
@@ -1143,14 +1144,11 @@ async function main() {
       agentLoader,
       sessionRepository,
       systemPrompts,
-      actionRegistry,
       modelResolver,
-      actionEngine,
       capabilityDiscovery,
       skillCatalog,
       turnLifecycle: turnListeners,
       readAnswerShape,
-      webchatRepo,
       // Catch-up reads what was said where the session stands from Chats,
       // and nothing in a chat whose channel hands the agent every message.
       promptFacts: chatPromptFacts({
@@ -1165,8 +1163,13 @@ async function main() {
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
       log: createLogger("agent-session"),
-      eventSources,
-      sessionTools: (context) => buildConciergeTools(concierge, context),
+      ...romeToolPorts({
+        actionRegistry,
+        actionEngine,
+        webchatRepo,
+        eventSources,
+        sessionTools: (context) => buildConciergeTools(concierge, context),
+      }),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );

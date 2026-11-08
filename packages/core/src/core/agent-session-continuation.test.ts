@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
@@ -149,11 +150,8 @@ describe("continuation notice through AgentSessionManager", () => {
       {
         agentLoader: loader,
         sessionRepository,
-        webchatRepo,
         sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
         systemPrompts,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           accounts: fakeAccounts(() => state),
@@ -166,6 +164,11 @@ describe("continuation notice through AgentSessionManager", () => {
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
+        ...romeToolPorts({
+          webchatRepo,
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true },
     );

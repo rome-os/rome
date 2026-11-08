@@ -1,6 +1,6 @@
 import { recordModelTurnMetrics } from "../telemetry.js";
 import type { ModelSession } from "./agent-runner.js";
-import { createRomeTools, type ModelResolver } from "../agent/index.js";
+import { createRomeTools, type ModelResolver, type TurnFacts } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("conversation-title");
@@ -77,6 +77,21 @@ function structuredTitle(output: unknown): string {
   throw new Error("Conversation title generation returned no structured title");
 }
 
+/** A title is asked of the model alone, in no session. */
+const TITLE_TURN: TurnFacts = {
+  agentName: "conversation-title",
+  continuityKey: "",
+  sessionId: "",
+  isSubagent: false,
+  actions: [],
+  widgets: "plain_text",
+  turnId: () => undefined,
+  threadContext: () => undefined,
+  sharedContext: () => undefined,
+  pushLevel: () => undefined,
+  inTurn: (fn) => fn(),
+};
+
 export function createConversationTitleGenerator(
   modelResolver: ModelResolver,
   options: { timeoutMs?: number } = {},
@@ -101,8 +116,10 @@ export function createConversationTitleGenerator(
             maxTurns: 1,
           },
           tools: createRomeTools({
+            turn: TITLE_TURN,
             actions: {
               list: () => [],
+              permits: () => false,
               run: async () => {
                 throw new Error("Conversation title generation cannot execute actions");
               },

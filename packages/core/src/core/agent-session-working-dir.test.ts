@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -84,11 +85,8 @@ describe("AgentSessionManager working dirs", () => {
       {
         agentLoader: loader,
         sessionRepository,
-        webchatRepo,
         sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
         systemPrompts,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
           accounts: fakeAccounts(() => state),
@@ -100,6 +98,11 @@ describe("AgentSessionManager working dirs", () => {
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
+        ...romeToolPorts({
+          webchatRepo,
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true },
     );

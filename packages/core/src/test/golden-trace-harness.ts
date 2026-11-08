@@ -1,3 +1,4 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
@@ -108,9 +109,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     agentLoader,
     sessionRepository,
     systemPrompts,
-    actionRegistry,
     modelResolver,
-    actionEngine,
     capabilityDiscovery: new CapabilityDiscovery(),
     skillCatalog: new SkillLoader(artifactIdentity),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
@@ -118,6 +117,10 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
     log: createLogger("agent-session"),
+    ...romeToolPorts({
+      actionRegistry,
+      actionEngine,
+    }),
   });
   const runner = new AgentRunner(
     manager,
