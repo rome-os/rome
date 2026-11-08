@@ -74,17 +74,18 @@ describe("the Concierge agent", () => {
       expect(prompt).toContain(text);
   });
 
-  it("keeps secrets out of the first message of a turn the guardian did not start", () => {
+  it("keeps secrets out of a turn's first message, which can reach the lock screen", () => {
     const section = concierge.systemPromptPrefix.slice(
       concierge.systemPromptPrefix.indexOf("# How you speak"),
       concierge.systemPromptPrefix.indexOf("# What you do yourself"),
     );
     for (const text of [
-      "a turn the guardian did not start",
+      "in your reply to a message they sent",
       "lock screen",
       "before any `chat_forward` or card",
       "Never put a code, password, token or other secret in it",
-      "attention or approval is needed",
+      "even one they asked for",
+      "give the secret in a later message",
     ])
       expect(section).toContain(text);
   });

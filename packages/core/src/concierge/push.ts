@@ -1,5 +1,8 @@
-// A Concierge turn the guardian did not start sends the first message it says
-// to the guardian's phone (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
+// A Concierge turn with a push level, proactive or the reply to the guardian's
+// own message, sends one push to the guardian's phone, on the first message it
+// says while the phone app does not show the chat. Its words come only from
+// the turn's first message: a push on a later one says a fixed line
+// (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
 
 import { marked, type Token } from "marked";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
@@ -9,8 +12,8 @@ const log = createLogger("concierge-push");
 
 /** About this many characters of the message reach the phone. */
 export const PUSH_BODY_MAX_CHARS = 100;
-/** Turns remembered as pushed. A session runs one turn at a time, so a few suffice. */
-const PUSHED_TURNS_KEPT = 64;
+/** Turns remembered as pushed or spoken in. A session runs one turn at a time, so a few suffice. */
+const TURNS_KEPT = 64;
 
 // The lexer escapes these in text, as HTML would show them.
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
@@ -74,6 +77,8 @@ export interface ConciergePushDeps {
   quietUntil: (at: number) => Promise<number | null>;
   /** Whether a message in this chat may reach the guardian's phone: only one of their own chats. */
   pushesFor: (chatId: string) => Promise<boolean>;
+  /** Whether the guardian's phone app shows this chat now: then it is read there, not pushed. */
+  watching?: (chatId: string) => boolean;
   /** The guardian's dashboard language, as its setting holds it, or null. */
   language: () => Promise<string | null>;
   now?: () => number;
@@ -90,7 +95,7 @@ export interface SaidInTurn {
    * for a bare forward or a card: the push then says {@link FIXED_LINE}.
    */
   ownWords: string | null;
-  /** The turn's push level; undefined for a turn the guardian started. */
+  /** The turn's push level; undefined for a reminder, a recovery or a notice. */
   level: NotifyLevel | undefined;
 }
 
@@ -102,6 +107,8 @@ export const FIXED_LINE: Record<string, string> = {
 
 export class ConciergePush {
   private readonly pushed = new Set<string>();
+  /** Turns that have said a message: any later one is not the first. */
+  private readonly spoken = new Set<string>();
   private readonly now: () => number;
 
   constructor(private readonly deps: ConciergePushDeps) {
@@ -109,18 +116,25 @@ export class ConciergePush {
   }
 
   /**
-   * Pushes the first message of a turn that has a push level. Answers at once:
-   * the push never holds or fails the turn, and the message stays in the chat
-   * whatever happens to it.
+   * Pushes the first message of a turn that has a push level, skipping any the
+   * phone shows as it is said. Answers at once: the push never holds or fails
+   * the turn, and the message stays in the chat whatever happens to it.
    */
   said(said: SaidInTurn): void {
     const { turnId, chatId, level } = said;
     if (!level || this.pushed.has(turnId)) return;
-    this.pushed.add(turnId);
-    if (this.pushed.size > PUSHED_TURNS_KEPT) {
-      this.pushed.delete(this.pushed.values().next().value as string);
+    const first = remember(this.spoken, turnId);
+    // A message read on the phone leaves the turn's push to a later message,
+    // so an answer that comes after the guardian leaves the chat still pushes.
+    if (this.deps.watching?.(chatId)) {
+      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+      return;
     }
-    void this.send(said, level).catch((error: unknown) =>
+    remember(this.pushed, turnId);
+    // Only the first message is held to keeping secrets off the lock screen;
+    // the Concierge gives them in a later one, so a later push never shows it.
+    const preview = first ? said : { ...said, ownWords: null };
+    void this.send(preview, level).catch((error: unknown) =>
       log.warn("concierge push failed", {
         turnId,
         chatId,
@@ -145,4 +159,12 @@ export class ConciergePush {
     const language = await this.deps.language().catch(() => null);
     return language && Object.hasOwn(FIXED_LINE, language) ? FIXED_LINE[language] : FIXED_LINE.en;
   }
+}
+
+/** Adds a turn, forgetting the oldest past the cap; true when it was new. */
+function remember(turns: Set<string>, turnId: string): boolean {
+  if (turns.has(turnId)) return false;
+  turns.add(turnId);
+  if (turns.size > TURNS_KEPT) turns.delete(turns.values().next().value as string);
+  return true;
 }
