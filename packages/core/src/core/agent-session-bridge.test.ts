@@ -80,7 +80,7 @@ describe("AgentSessionBridge turn routing", () => {
       undefined,
       undefined,
       undefined,
-      chatTurns,
+      (chat, turn) => chatTurns.start(chat, turn),
     ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,

@@ -11,6 +11,7 @@ import { walkToRoot } from "../agent/index.js";
 import { parseSessionKey } from "./agent-session-key.js";
 import type {
   ChatId,
+  ChatRef,
   CurrentActionContext,
   MessageReplyReference,
   RomeSessionRef,
@@ -40,7 +41,6 @@ import {
   registerActionSubprocessHost,
 } from "../actions/action-subprocess.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import type { ChatTurns } from "./chat-turns.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 import {
@@ -88,6 +88,15 @@ export interface AgentSessionChildBridge {
 }
 
 /**
+ * Told that a turn started in a connected account's chat, with the platform
+ * user whose message started it. The returned call is told when it ends.
+ */
+export type TurnStartedInChat = (
+  chat: ChatRef,
+  turn: { turnId: string; initiatorId?: string },
+) => () => void;
+
+/**
  * Bridge wires `AgentSessionManager` into a worker child's IPC channel.
  * Constructed once in main; call `attach(rpc, child)` for each forked worker.
  *
@@ -118,8 +127,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private openingFor: SessionOpeningFor = sessionOpeningFor({
       channelSurface: () => null,
     }),
-    /** Which turn runs in a connected account's chat. Absent, chat stop finds none. */
-    private chatTurns?: ChatTurns,
+    /** Told when a turn starts in a connected account's chat. Absent, nobody is told. */
+    private turnStartedInChat?: TurnStartedInChat,
   ) {}
 
   /**
@@ -363,8 +372,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                     agentName: session.key.agentName,
                     interrupt,
                   });
-                  if (thread?.connectionId && this.chatTurns) {
-                    endChatTurn = this.chatTurns.start(
+                  if (thread?.connectionId && this.turnStartedInChat) {
+                    endChatTurn = this.turnStartedInChat(
                       { connectionId: thread.connectionId, chatId: thread.threadId as ChatId },
                       {
                         turnId: msg.turnId,

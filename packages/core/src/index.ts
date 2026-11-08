@@ -1189,7 +1189,7 @@ async function main() {
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
-    chatTurns,
+    (chat, turn) => chatTurns.start(chat, turn),
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
