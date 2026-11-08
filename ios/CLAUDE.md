@@ -5,6 +5,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 ## Playbook
 
 - Before building, testing or running the app, read [`README.md`](README.md); it covers the simulator, Mac Catalyst, demo data and a local Rome.
+- Before designing or changing a screen, read [`DESIGN.md`](DESIGN.md), the interface principles every screen follows.
 - When changing a screen, run the snapshot pass in [`README.md`](README.md#snapshots) and look at both the light and dark images.
 - When reading a new wire field, add it to `Rome/Networking/Models.swift` as optional, so an older server keeps decoding.
 - When adding text, use `romeFont(_:_:)` from `Rome/Design/Typography.swift`, never `.font(.system(size:))`, so it scales with Dynamic Type.
