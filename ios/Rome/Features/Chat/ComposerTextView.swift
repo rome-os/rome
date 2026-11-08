@@ -40,6 +40,14 @@ struct ComposerTextView: UIViewRepresentable {
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
             DispatchQueue.main.async { committedText.wrappedValue = text }
         }
+        // Disabled (a blank chat while it is being created): focus goes now,
+        // through UIKit. A disabled field loses focus silently otherwise and
+        // leaves its keyboard up with no owner, which nothing can put away.
+        guard context.environment.isEnabled else {
+            if view.isFirstResponder { view.resignFirstResponder() }
+            if focused { DispatchQueue.main.async { focused = false } }
+            return
+        }
         // Focus follows the binding both ways; the change waits a turn so it
         // never happens while SwiftUI is updating.
         if focused != view.isFirstResponder {
