@@ -433,6 +433,25 @@ describe("backend turn delivery", () => {
       prompt: "p",
     };
 
+    it("drops a messaging turn when shouldRun is false, without running or delivering", async () => {
+      const agentRunner = answered();
+      const send = rs.fn<Send>(async (chatId) => ({ chatId }));
+      const replies = { send: rs.fn<SpeakerReplies["send"]>(async () => null) };
+      const shouldRun = rs.fn(() => false);
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: () => wechatWith(send),
+        chats,
+        replies,
+      });
+
+      expect(await runner.runAndReport(params, { shouldRun })).toBe("failed");
+      expect(shouldRun).toHaveBeenCalledTimes(1);
+      expect(agentRunner.calls).toHaveLength(0);
+      expect(replies.send).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    });
+
     it("says the reply through the speaker, as the turn's answer", async () => {
       const send = rs.fn<Send>(async (chatId) => ({ chatId }));
       const wechat = wechatWith(send);

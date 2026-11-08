@@ -361,6 +361,11 @@ export class ChatsWebChatRepository extends WebChatRepository {
               SELECT min(l.message_id) FROM agent_turn_messages l
               WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
             )
+            AND NOT EXISTS (
+              SELECT 1 FROM agent_turn_messages l2
+              WHERE l2.message_id = m.id AND l2.session_id = s.id
+                AND l2.turn_id = ${turn.turnId} AND l2.role = 'prompt'
+            )
         )
         AND NOT EXISTS (
           SELECT 1 FROM ${romeAgentMessages} n
@@ -369,6 +374,24 @@ export class ChatsWebChatRepository extends WebChatRepository {
         )
     `)?.eligible === 1
     );
+  }
+
+  /** At most 1000 characters of this turn's guardian prompt lines, in chat order. Empty when none exist. */
+  getRestartGuardianPrompt(turn: InterruptedTurn): string {
+    return this.db
+      .all<{ text: string }>(sql`
+      SELECT m.text
+      FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+        AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+      ORDER BY m.id
+    `)
+      .map((row) => row.text)
+      .join("\n\n")
+      .slice(0, 1000);
   }
 
   override async recoverInterruptedInputs(): Promise<void> {

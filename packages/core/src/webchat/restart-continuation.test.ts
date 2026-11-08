@@ -19,9 +19,17 @@ describe("startup restart continuation", () => {
   });
   afterEach(() => db.close());
 
-  async function interrupted(id = "chat", prompt = "Finish the work") {
+  async function interrupted(
+    id = "chat",
+    prompt = "Finish the work",
+    guardianPrompt = "Finish the work",
+  ) {
     await repo.createSession(id, id, undefined, "default", null, "default", "assistant:coder");
-    await repo.recordUserInput(`${id}-input`, id, "[]");
+    await repo.recordUserInput(
+      `${id}-input`,
+      id,
+      JSON.stringify([{ type: "text", content: guardianPrompt }]),
+    );
     await repo.updateUserInput(id, {
       type: "input_status",
       inputId: `${id}-input`,
@@ -90,6 +98,118 @@ describe("startup restart continuation", () => {
     expect(agent.calls).toHaveLength(1);
     expect(RESTART_CONTINUATION_PROMPT).toContain("Do only what remains");
     expect(RESTART_CONTINUATION_PROMPT).toContain("ask the guardian rather than redo it");
+  });
+
+  it.each([
+    "queued",
+    "accepted",
+    "consumed",
+  ] as const)("continues with a %s steered prompt linked to the interrupted turn", async (state) => {
+    await interrupted();
+    await repo.recordUserInput(
+      "steered",
+      "chat",
+      JSON.stringify([{ type: "text", content: "Also run tests" }]),
+    );
+    await repo.updateUserInput("chat", {
+      type: "input_status",
+      inputId: "steered",
+      turnId: "chat-turn",
+      state,
+    });
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(await repo.endInterruptedTurns(DAY), repo, runner);
+    expect(agent.calls).toHaveLength(1);
+    expect(agent.calls[0]?.prompt).toContain("Finish the work\n\nAlso run tests");
+  });
+
+  it("quotes the guardian's chat line instead of the composed model prompt", async () => {
+    await interrupted(
+      "chat",
+      `<workspace_context>${"context ".repeat(200)}</workspace_context>\nFinish the work`,
+      "Fix the restart bug",
+    );
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(await repo.endInterruptedTurns(DAY), repo, runner);
+    expect(agent.calls[0]?.prompt).toContain("Fix the restart bug");
+    expect(agent.calls[0]?.prompt).not.toContain("<workspace_context>");
+  });
+
+  it("bounds the guardian excerpt to 1000 characters total", async () => {
+    await interrupted("chat", "composed prompt", "a".repeat(700));
+    await repo.recordUserInput(
+      "steered",
+      "chat",
+      JSON.stringify([{ type: "text", content: "b".repeat(700) }]),
+    );
+    await repo.updateUserInput("chat", {
+      type: "input_status",
+      inputId: "steered",
+      turnId: "chat-turn",
+      state: "consumed",
+    });
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(await repo.endInterruptedTurns(DAY), repo, runner);
+    expect(agent.calls[0]?.prompt).toBe(
+      RESTART_CONTINUATION_PROMPT +
+        "\n\nInterrupted request (may already be partly complete):\n" +
+        "a".repeat(700) +
+        "\n\n" +
+        "b".repeat(298),
+    );
+  });
+
+  it("reads only the turn's guardian prompt lines", async () => {
+    await interrupted();
+    await repo.recordUserInput(
+      "automated",
+      "chat",
+      JSON.stringify([{ type: "text", content: "Automated input" }]),
+      undefined,
+      { platform: "webchat", id: "automated::1::app:example" },
+    );
+    await repo.updateUserInput("chat", {
+      type: "input_status",
+      inputId: "automated",
+      turnId: "chat-turn",
+      state: "consumed",
+    });
+    await repo.addSentMessage(
+      "answer",
+      "chat",
+      [{ type: "text", content: "Agent answer" }],
+      "chat-turn",
+    );
+    await repo.recordUserInput(
+      "other-turn",
+      "chat",
+      JSON.stringify([{ type: "text", content: "Another request" }]),
+    );
+    await repo.updateUserInput("chat", {
+      type: "input_status",
+      inputId: "other-turn",
+      turnId: "other-turn",
+      state: "consumed",
+    });
+    const [turn] = await repo.endInterruptedTurns(DAY);
+    expect(repo.getRestartGuardianPrompt(turn!)).toBe("Finish the work");
+  });
+
+  it("omits a missing guardian excerpt without falling back to the composed prompt", async () => {
+    await interrupted("chat", "composed prompt must not be quoted");
+    const turns = await repo.endInterruptedTurns(DAY);
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(
+      turns,
+      {
+        canContinueAfterRestart: (turn) => repo.canContinueAfterRestart(turn),
+        getRestartGuardianPrompt: () => "",
+      },
+      runner,
+    );
+    expect(agent.calls[0]?.prompt).toBe(RESTART_CONTINUATION_PROMPT);
+    await db.db.run("DELETE FROM agent_turn_messages");
+    expect(repo.getRestartGuardianPrompt(turns[0]!)).toBe("");
   });
 
   it.each([

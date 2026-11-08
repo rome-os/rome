@@ -17,7 +17,7 @@ export const RESTART_CONTINUATION_PROMPT =
 /** Call once after startup, with only this boot's cleanup results. Runs sequentially, without retries. */
 export async function continueInterruptedTurns(
   turns: InterruptedTurn[],
-  repo: Pick<ChatsWebChatRepository, "canContinueAfterRestart">,
+  repo: Pick<ChatsWebChatRepository, "canContinueAfterRestart" | "getRestartGuardianPrompt">,
   runner: Pick<MainBackendTurnRunner, "runAndReport">,
 ): Promise<void> {
   for (const turn of turns) {
@@ -26,6 +26,7 @@ export async function continueInterruptedTurns(
     if (!turn.runtimeSessionId || turn.prompt.includes(RESTART_MARKER)) continue;
     try {
       if (!repo.canContinueAfterRestart(turn)) continue;
+      const excerpt = repo.getRestartGuardianPrompt(turn);
       await runner.runAndReport(
         {
           agentName: turn.agentName,
@@ -34,7 +35,9 @@ export async function continueInterruptedTurns(
           threadId: turn.sessionId,
           prompt:
             RESTART_CONTINUATION_PROMPT +
-            `\n\nInterrupted request (may already be partly complete):\n${turn.prompt.slice(0, 1000)}`,
+            (excerpt
+              ? `\n\nInterrupted request (may already be partly complete):\n${excerpt}`
+              : ""),
         },
         {
           inputLabel: "Restart recovery",
