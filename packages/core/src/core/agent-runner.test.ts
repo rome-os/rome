@@ -1144,6 +1144,53 @@ describe("AgentRunner", () => {
     }
   });
 
+  it("records the chat that has a stored fork when its consumer stops early", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Fork summary", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+
+      for await (const message of runner.runForked({
+        agentName: "main",
+        sourceSessionId: "source-session",
+        channelThreadKey: "webchat:stored-chat",
+        prompt: "summarize",
+      })) {
+        if (message.type === "turn_start") break;
+      }
+
+      expect(recordSessionInChat).toHaveBeenCalledWith("fork-session", "fork-session");
+    } finally {
+      testDb.close();
+    }
+  });
+
   it("publishes forked runs for live session inspection", async () => {
     const source = {
       key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },

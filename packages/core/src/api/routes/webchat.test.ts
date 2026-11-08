@@ -2859,7 +2859,7 @@ describe("Webchat API", () => {
     expect(await runtime.openSession("topic-1")).toBe("runtime-topic");
     const [key, init] = acquired[0]!;
     expect(key).toEqual({ agentName: "core:concierge", channelThreadKey: "webchat:topic-1" });
-    expect(recordSessionInChat).toHaveBeenCalledWith("runtime-topic", "topic-1");
+    expect(recordSessionInChat).toHaveBeenCalledWith("runtime-topic", "topic-1", { replace: true });
     expect(init).toMatchObject({
       selectionId: "claude-sonnet",
       threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
@@ -6047,7 +6047,9 @@ describe("Webchat API", () => {
         agentName: "main",
         channelThreadKey: `webchat:${PROMOTED_ID}`,
       });
-      expect(recordSessionInChat).toHaveBeenCalledWith("fork-agent-session", PROMOTED_ID);
+      expect(recordSessionInChat).toHaveBeenCalledWith("fork-agent-session", PROMOTED_ID, {
+        replace: true,
+      });
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {

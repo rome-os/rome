@@ -489,17 +489,18 @@ export class AgentRunner {
       }
     } finally {
       liveStream?.finish();
-    }
-    // A continuable fork's session is stored once its turn ends, and its chat
-    // is minted under the fork's own id. Nothing is stored for a one-shot fork.
-    if (forkSessionId && this.webchatRepo) {
-      try {
-        await this.webchatRepo.recordSessionInChat(forkSessionId, forkSessionId);
-      } catch (err) {
-        log.warn("failed to record the chat that has the fork's session", {
-          forkSessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      // A continuable fork's session is stored once its turn ends, also when
+      // the consumer stops early, and its chat is minted under the fork's own
+      // id. Nothing is stored for a one-shot fork.
+      if (forkSessionId && this.webchatRepo) {
+        try {
+          await this.webchatRepo.recordSessionInChat(forkSessionId, forkSessionId);
+        } catch (err) {
+          log.warn("failed to record the chat that has the fork's session", {
+            forkSessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
 

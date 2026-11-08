@@ -40,7 +40,12 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { findSessionChat, openedInChat, openerChat } from "./session-conversation.js";
+import {
+  findSessionChat,
+  noteOpenerChat,
+  openedInChat,
+  openerChat,
+} from "./session-conversation.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -189,12 +194,15 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           session = req.sessionId
             ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
             : await this.manager.acquire(req.key, init);
-          await openedInChat(this.webchatRepo, session, namedChat);
+          noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
           if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
             throw new Error(`Agent session "${req.sessionId}" was not found`);
           }
+          // An action's worker may only fill a link the session lacks, never
+          // move one, and only once the check above has passed.
+          await openedInChat(this.webchatRepo, session, namedChat, { replace: false });
         } catch (err) {
           log.warn("agent.session.manager.acquire failed", {
             ...baseLogFields,

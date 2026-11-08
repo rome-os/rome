@@ -314,7 +314,9 @@ describe("SubagentExecutionService", () => {
       "researcher",
       expect.anything(),
     );
-    expect(recordSessionInChat).toHaveBeenCalledWith("child-resume", "child-resume");
+    expect(recordSessionInChat).toHaveBeenCalledWith("child-resume", "child-resume", {
+      replace: true,
+    });
     resumed.releases[0].resolve();
     await execution.completion;
 

@@ -66,16 +66,20 @@ interface OpenedSession {
  * the chat it names has the session. Every caller that acquires a session
  * calls this, naming a chat or not. The link names the chat the last opener
  * named, and replacing another chat is logged, since one continuity key
- * belongs to one chat.
+ * belongs to one chat. An opener that is not trusted to move the link passes
+ * `replace: false`, and only fills a link the row lacks.
  */
 export async function openedInChat(
   webchatRepo: Pick<WebChatRepository, "recordSessionInChat"> | undefined,
   session: OpenedSession,
   chatId: string | undefined,
+  options: { replace?: boolean } = {},
 ): Promise<void> {
   noteOpenerChat(session, chatId);
   if (!chatId || !webchatRepo) return;
-  const replaced = await webchatRepo.recordSessionInChat(session.sessionId, chatId);
+  const replaced = await webchatRepo.recordSessionInChat(session.sessionId, chatId, {
+    replace: options.replace ?? true,
+  });
   if (replaced) {
     log.warn("agent session serves a different conversation than requested", {
       sessionId: session.sessionId,
@@ -94,7 +98,8 @@ export async function openedInChat(
 // The first caller to acquire an open session is the one that opened it.
 const openerChats = new WeakMap<object, string | undefined>();
 
-function noteOpenerChat(session: object, chatId: string | undefined): void {
+/** Note the chat the caller that opened `session` named, before anything is recorded. */
+export function noteOpenerChat(session: object, chatId: string | undefined): void {
   if (!openerChats.has(session)) openerChats.set(session, chatId);
 }
 

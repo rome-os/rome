@@ -1710,9 +1710,14 @@ export class WebChatRepository {
 
   /**
    * Record that a chat has an agent session, on the session's stored row.
-   * Answers the other chat it replaced, if any.
+   * Answers the other chat it replaced, if any. With `replace: false`, a row
+   * that already names a chat keeps it.
    */
-  async recordSessionInChat(sessionId: string, chatId: string): Promise<string | null> {
+  async recordSessionInChat(
+    sessionId: string,
+    chatId: string,
+    options: { replace?: boolean } = {},
+  ): Promise<string | null> {
     return this.db.transaction((tx) => {
       const row = tx
         .select({ chatId: sessions.chatId })
@@ -1720,6 +1725,7 @@ export class WebChatRepository {
         .where(eq(sessions.id, sessionId))
         .get();
       if (!row || row.chatId === chatId) return null;
+      if (row.chatId !== null && options.replace === false) return null;
       tx.update(sessions).set({ chatId }).where(eq(sessions.id, sessionId)).run();
       return row.chatId;
     });
