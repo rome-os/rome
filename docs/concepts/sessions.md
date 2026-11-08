@@ -188,7 +188,9 @@ A conversational input is one independently submitted user message. Its identity
 - A definitely unconsumed input can start the next turn. If the provider already holds it, the next turn adopts it without sending another copy.
 - An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery. They are not silently replayed.
 - Stop targets the specified running turn. It cannot stop another turn, and it does not cancel separately queued inputs.
-- Independent action, approval, and external-channel callers retain their serial, one-result-per-call turn contract. They do not implicitly opt into the WebChat input lane.
+- An input may instead set `priority: "after"`. It starts a turn of its own that waits behind the running turn. It is never steered into, and like any running turn a `now` input supersedes it.
+- Action, approval, app, subagent and connected-account callers submit `after`, so each keeps one turn and one result per call, in the order they submitted. A conversational input's turn goes ahead of `after` turns still waiting, so an input the provider retained continues before independent work. See [provider-native conversational steering](../adrs/provider-native-conversational-steering.md).
+- `submit` answers where the input landed, `started`, `queued` or `steered`, and the turn it lands in once that turn has started and holds it. A steer the provider queues, or one a `now` input supersedes first, lands in a later turn. WebChat answers the landing on the wire as `disposition`, with `steering` for `steered`.
 
 **Not to be confused with:**
 

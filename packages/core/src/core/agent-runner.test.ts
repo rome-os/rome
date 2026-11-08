@@ -1,7 +1,7 @@
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
-import { testTurnHandle } from "../test/turn-handle.js";
+import { startAfter, testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
@@ -450,7 +450,7 @@ describe("AgentRunner", () => {
       key: { agentName: "test-main", channelThreadKey: "webchat:sess-1" },
       sessionId: "source-session",
       status: "idle" as const,
-      sendTurn: rs.fn(),
+      submit: rs.fn(),
       async *fork(input: { prompt: string; tier?: string }) {
         inputs.push(input);
         yield { type: "result", content: "Fork summary", agent: "test-main" } as const;
@@ -491,7 +491,7 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
         sessionId: "source-session",
         status: "idle" as const,
-        sendTurn: rs.fn(),
+        submit: rs.fn(),
         async *fork(input: { prompt: string }) {
           yield {
             type: "turn_start",
@@ -620,7 +620,7 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
         sessionId: "source-session",
         status: "idle" as const,
-        sendTurn: rs.fn(),
+        submit: rs.fn(),
         async *fork() {
           yield {
             type: "turn_start",
@@ -687,7 +687,7 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
         sessionId: "source-session",
         status: "idle" as const,
-        sendTurn: rs.fn(),
+        submit: rs.fn(),
         async *fork(input: { prompt: string }) {
           yield {
             type: "turn_start",
@@ -763,25 +763,27 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "telegram:t1" },
         sessionId: "agent-session",
         status: "idle" as const,
-        sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
+        submit: rs.fn((input: { prompt: string }, options?: TurnRef) => {
           turns.push({
             romeSessionId: options?.romeSessionId,
             romeSessionType: options?.romeSessionType,
           });
-          return testTurnHandle({
-            turnId: "resumed-turn",
-            turnContext: context.active(),
-            events: (async function* () {
-              yield {
-                type: "turn_start",
-                turnId: "resumed-turn",
-                sessionId: "agent-session",
-                userPrompt: input.prompt,
-                agent: "main",
-              } as const;
-              yield { type: "result", content: "Done", agent: "main" } as const;
-            })(),
-          });
+          return testReceipt(
+            testTurnHandle({
+              turnId: "resumed-turn",
+              turnContext: context.active(),
+              events: (async function* () {
+                yield {
+                  type: "turn_start",
+                  turnId: "resumed-turn",
+                  sessionId: "agent-session",
+                  userPrompt: input.prompt,
+                  agent: "main",
+                } as const;
+                yield { type: "result", content: "Done", agent: "main" } as const;
+              })(),
+            }),
+          );
         }),
         subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
@@ -1067,7 +1069,7 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
         status: "idle" as const,
-        sendTurn: rs.fn(),
+        submit: rs.fn(),
         async *fork(input: { prompt: string }) {
           yield {
             type: "turn_start",
@@ -1119,7 +1121,7 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
         status: "idle" as const,
-        sendTurn: rs.fn(),
+        submit: rs.fn(),
         async *fork(input: { prompt: string }) {
           yield {
             type: "turn_start",
@@ -1162,7 +1164,7 @@ describe("AgentRunner", () => {
       key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
       sessionId: "source-session",
       status: "idle" as const,
-      sendTurn: rs.fn(),
+      submit: rs.fn(),
       async *fork(input: { prompt: string }) {
         yield {
           type: "turn_start",
@@ -2382,7 +2384,7 @@ describe("AgentRunner", () => {
         ctx.emit({ type: "error", error: "second" });
       });
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+      const events = await collectMessages((await startAfter(session, { prompt: "hi" })).events());
 
       expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "first" })]);
       expect(events.some((event) => event.type === "text")).toBe(false);
@@ -2395,7 +2397,7 @@ describe("AgentRunner", () => {
         ctx.emit({ type: "result", content: "first" });
       });
 
-      const turn = session.sendTurn({ prompt: "hi" });
+      const turn = await startAfter(session, { prompt: "hi" });
       const early = await collectMessages(turn.events());
       const late = await collectMessages(turn.events());
 
@@ -2415,7 +2417,7 @@ describe("AgentRunner", () => {
         await next();
       });
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+      const events = await collectMessages((await startAfter(session, { prompt: "hi" })).events());
 
       expect(mockProvider.calls).toHaveLength(0);
       expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
@@ -2429,7 +2431,7 @@ describe("AgentRunner", () => {
         ctx.emit({ type: "result", content: "scripted" });
       });
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+      const events = await collectMessages((await startAfter(session, { prompt: "hi" })).events());
 
       expect(mockProvider.calls).toHaveLength(1);
       expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "from the model" })]);
@@ -2443,7 +2445,7 @@ describe("AgentRunner", () => {
         throw new Error("post-processing failed");
       });
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+      const events = await collectMessages((await startAfter(session, { prompt: "hi" })).events());
 
       expect(mockProvider.calls).toHaveLength(1);
       expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "from the model" })]);
@@ -2490,7 +2492,9 @@ describe("AgentRunner", () => {
         expect(failures).toEqual([]);
         const session = await openMiddlewareSession(chain);
 
-        const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+        const events = await collectMessages(
+          (await startAfter(session, { prompt: "hi" })).events(),
+        );
 
         expect(mockProvider.calls).toHaveLength(0);
         expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
@@ -2508,7 +2512,9 @@ describe("AgentRunner", () => {
           throw new Error("post-processing failed");
         });
 
-        const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+        const events = await collectMessages(
+          (await startAfter(session, { prompt: "hi" })).events(),
+        );
 
         expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
         expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
@@ -2532,7 +2538,7 @@ describe("AgentRunner", () => {
         ctx.emit({ type: "text", content: "Pick one" });
       });
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+      const events = await collectMessages((await startAfter(session, { prompt: "hi" })).events());
 
       expect(terminalsOf(events)).toEqual([
         expect.objectContaining({ type: "result", content: "" }),
@@ -2546,7 +2552,7 @@ describe("AgentRunner", () => {
         ctx.emit({ type: "text", content: "Pick one" });
       }, "test-structured");
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events());
+      const events = await collectMessages((await startAfter(session, { prompt: "hi" })).events());
 
       expect(terminalsOf(events)).toEqual([
         expect.objectContaining({
@@ -2574,7 +2580,7 @@ describe("AgentRunner", () => {
         await middlewareGate;
       }, agentName);
 
-      const turn = session.sendTurn({ prompt: "hi" });
+      const turn = await startAfter(session, { prompt: "hi" });
       const messages = collectMessages(turn.events());
       await middlewareEntered;
       const stopping = turn.stop!("user-stop");
@@ -2621,7 +2627,7 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:stop-middleware",
       });
-      const turn = session.sendTurn({ prompt: "Do not dispatch" });
+      const turn = await startAfter(session, { prompt: "Do not dispatch" });
       let finished = false;
       const messages = collectMessages(turn.events()).then((value) => {
         finished = true;
@@ -2650,13 +2656,74 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:early-stop",
       });
-      const turn = session.sendTurn({ prompt: "Do not dispatch" });
+      const turn = await startAfter(session, { prompt: "Do not dispatch" });
       await turn.stop!("user-stop");
       const messages = await collectMessages(turn.events());
       expect(mockProvider.calls).toHaveLength(0);
       expect(messages).toContainEqual(
         expect.objectContaining({ type: "turn_end", status: "interrupted" }),
       );
+      await manager.shutdown();
+    });
+
+    it("starts each after input's turn of its own behind the running turn, which a now input supersedes", async () => {
+      const prompts: string[] = [];
+      const cancels = rs.fn();
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const provider: ModelProvider = {
+        id: "anthropic",
+        builtinTools: new Set(),
+        async openSession(params) {
+          const model = createSessionFromRun(
+            "anthropic",
+            async function* ({ prompt }) {
+              prompts.push(prompt);
+              if (prompts.length === 1) await firstGate;
+              yield { type: "result", content: `answer:${prompt}` };
+            },
+            params,
+          );
+          return {
+            ...model,
+            async interrupt() {
+              cancels();
+              releaseFirst();
+            },
+          };
+        },
+      };
+      const manager = createSessions(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.open({
+        agentName: "test-main",
+        channelThreadKey: "webchat:after-inputs",
+      });
+
+      const backend = session.submit({ prompt: "backend" }, { priority: "after" });
+      expect(backend.landed).toBe("started");
+      const backendMessages = collectMessages((await backend.turn).events());
+      await rs.waitFor(() => expect(prompts).toEqual(["backend"]));
+      const behind = session.submit({ prompt: "behind" }, { priority: "after" });
+      expect(behind.landed).toBe("queued");
+      expect(behind.turnId).not.toBe(backend.turnId);
+
+      const urgent = session.submit({ inputId: "urgent", prompt: "urgent" }, { priority: "now" });
+      expect(await backendMessages).toContainEqual(
+        expect.objectContaining({ type: "turn_end", status: "interrupted" }),
+      );
+      expect(cancels).toHaveBeenCalledOnce();
+      await collectMessages((await urgent.turn).events());
+      expect(await collectMessages((await behind.turn).events())).toContainEqual(
+        expect.objectContaining({ type: "result", content: "answer:behind" }),
+      );
+      // A conversational input's turn goes ahead of an `after` turn still waiting.
+      expect(prompts).toEqual(["backend", "urgent", "behind"]);
+      expect(cancels).toHaveBeenCalledOnce();
       await manager.shutdown();
     });
 
@@ -2723,20 +2790,8 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:abort-resume",
       });
-      const submit = (inputId: string, prompt: string) => {
-        let resolveTurn!: (handle: AgentTurnHandle) => void;
-        const turn = new Promise<AgentTurnHandle>((resolve) => {
-          resolveTurn = resolve;
-        });
-        const receipt = session.submitInput!(
-          { inputId, prompt },
-          { onTurn: (handle) => resolveTurn(handle) },
-        );
-        return { receipt, turn };
-      };
-
-      const firstInput = submit("input-first", "first");
-      expect(firstInput.receipt.disposition).toBe("started");
+      const firstInput = session.submit({ inputId: "input-first", prompt: "first" });
+      expect(firstInput.landed).toBe("started");
       const first = await firstInput.turn;
       const firstMessages = collectMessages(first.events());
       await rs.waitFor(() => expect(prompts).toEqual(["first"]));
@@ -2745,8 +2800,8 @@ describe("AgentRunner", () => {
         expect.objectContaining({ type: "turn_end", status: "interrupted" }),
       );
 
-      const secondInput = submit("input-second", "second");
-      expect(secondInput.receipt.disposition).toBe("started");
+      const secondInput = session.submit({ inputId: "input-second", prompt: "second" });
+      expect(secondInput.landed).toBe("started");
       const second = await secondInput.turn;
       const secondMessages = collectMessages(second.events());
       await rs.waitFor(() => expect(prompts).toEqual(["first", "second"]));
@@ -2820,7 +2875,7 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:abort-fork",
       });
-      const interrupted = session.sendTurn({ prompt: "first" });
+      const interrupted = await startAfter(session, { prompt: "first" });
       const interruptedMessages = collectMessages(interrupted.events());
       await interruptedBegun;
       await interrupted.stop!("user-stop");
@@ -2918,12 +2973,12 @@ describe("AgentRunner", () => {
         releaseAcquire = resolve;
       });
       let acquired!: AgentSession;
-      let sendTurn!: ReturnType<typeof rs.spyOn<AgentSession, "sendTurn">>;
+      let submit!: ReturnType<typeof rs.spyOn<AgentSession, "submit">>;
       rs.spyOn(manager, "open").mockImplementation((async (...args: unknown[]) => {
         notifyEntered();
         await release;
         acquired = await open(...args);
-        sendTurn = rs.spyOn(acquired, "sendTurn");
+        submit = rs.spyOn(acquired, "submit");
         return acquired;
       }) as Sessions["open"]);
       const agentRunner = new AgentRunner(manager, agentLoader, repo);
@@ -2957,7 +3012,7 @@ describe("AgentRunner", () => {
         releaseAcquire();
         const outcome = await running;
         if (newerInput) {
-          expect(sendTurn).not.toHaveBeenCalled();
+          expect(submit).not.toHaveBeenCalled();
           expect(outcome).toBe("failed");
           expect(emit).not.toHaveBeenCalled();
           expect(send).not.toHaveBeenCalled();
@@ -2966,11 +3021,11 @@ describe("AgentRunner", () => {
           expect(acquired.currentTurnId).toBeUndefined();
           expect(await manager.open(key)).toBe(acquired);
           const followUp = await collectMessages(
-            acquired.sendTurn({ prompt: "Guardian follow-up" }).events(),
+            (await startAfter(acquired, { prompt: "Guardian follow-up" })).events(),
           );
           expect(followUp.some((event) => event.type === "result")).toBe(true);
         } else {
-          expect(sendTurn).toHaveBeenCalledTimes(1);
+          expect(submit).toHaveBeenCalledTimes(1);
           expect(outcome).toBe("completed");
           expect(send).toHaveBeenCalledTimes(1);
         }
@@ -2981,22 +3036,23 @@ describe("AgentRunner", () => {
     });
 
     it("resumes an explicit sessionId without a caller-provided channelThreadKey", async () => {
-      const sendTurn: AgentSession["sendTurn"] = rs.fn(() =>
-        testTurnHandle({
-          turnId: "turn-1",
-          events: (async function* () {
-            yield { type: "result", content: "resumed", agent: "test-main" } as const;
-          })(),
-          turnContext: context.active(),
-        }),
+      const submit: AgentSession["submit"] = rs.fn(() =>
+        testReceipt(
+          testTurnHandle({
+            turnId: "turn-1",
+            events: (async function* () {
+              yield { type: "result", content: "resumed", agent: "test-main" } as const;
+            })(),
+            turnContext: context.active(),
+          }),
+        ),
       );
       const session: AgentSession = {
         selectModel: () => {},
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
         sessionId: "sess-1",
         status: "idle",
-        sendTurn,
-        submitInput: rs.fn(),
+        submit,
         fork: rs.fn(),
         subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
@@ -3028,29 +3084,30 @@ describe("AgentRunner", () => {
         { id: "sess-1", agent: "test-main" },
         expect.objectContaining({}),
       );
-      expect(sendTurn).toHaveBeenCalledWith(
+      expect(submit).toHaveBeenCalledWith(
         { prompt: "Continue approval" },
-        expect.objectContaining({ initiatedBy: "user" }),
+        expect.objectContaining({ priority: "after", initiatedBy: "user" }),
       );
     });
 
     it("hands a turn's push level to the session turn", async () => {
-      const sendTurn: AgentSession["sendTurn"] = rs.fn(() =>
-        testTurnHandle({
-          turnId: "turn-1",
-          events: (async function* () {
-            yield { type: "result", content: "resumed", agent: "test-main" } as const;
-          })(),
-          turnContext: context.active(),
-        }),
+      const submit: AgentSession["submit"] = rs.fn(() =>
+        testReceipt(
+          testTurnHandle({
+            turnId: "turn-1",
+            events: (async function* () {
+              yield { type: "result", content: "resumed", agent: "test-main" } as const;
+            })(),
+            turnContext: context.active(),
+          }),
+        ),
       );
       const session: AgentSession = {
         selectModel: () => {},
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
         sessionId: "sess-1",
         status: "idle",
-        sendTurn,
-        submitInput: rs.fn(),
+        submit,
         fork: rs.fn(),
         subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
@@ -3079,9 +3136,9 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(sendTurn).toHaveBeenCalledWith(
+      expect(submit).toHaveBeenCalledWith(
         { prompt: "<task_events/>" },
-        expect.objectContaining({ initiatedBy: "system", pushLevel: "active" }),
+        expect.objectContaining({ priority: "after", initiatedBy: "system", pushLevel: "active" }),
       );
     });
 
@@ -3507,13 +3564,17 @@ describe("AgentRunner", () => {
       });
 
       // No per-turn effort falls back to the agent's configured effort.
-      await collectMessages(session.sendTurn({ prompt: "One" }).events());
+      await collectMessages((await startAfter(session, { prompt: "One" })).events());
       expect((await sessionRepository.session(session.sessionId))?.reasoningEffort).toBe("high");
 
-      await collectMessages(session.sendTurn({ prompt: "Two", reasoningEffort: "xhigh" }).events());
+      await collectMessages(
+        (await startAfter(session, { prompt: "Two", reasoningEffort: "xhigh" })).events(),
+      );
       expect((await sessionRepository.session(session.sessionId))?.reasoningEffort).toBe("xhigh");
 
-      await collectMessages(session.sendTurn({ prompt: "Three", reasoningEffort: "low" }).events());
+      await collectMessages(
+        (await startAfter(session, { prompt: "Three", reasoningEffort: "low" })).events(),
+      );
       expect(await sessionRepository.current("webchat:effort-record", "test-main")).toMatchObject({
         model: "claude-opus-5-5[1m]",
         reasoningEffort: "low",
@@ -3548,7 +3609,7 @@ describe("AgentRunner", () => {
       });
 
       const messages = await collectMessages(
-        session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events(),
+        (await startAfter(session, { prompt: "Go", reasoningEffort: "xhigh" })).events(),
       );
 
       const row = await sessionRepository.session(session.sessionId);
@@ -3954,8 +4015,8 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:closed-before-start",
       });
-      const first = session.sendTurn({ prompt: "first" });
-      const second = session.sendTurn({ prompt: "second" });
+      const first = await startAfter(session, { prompt: "first" });
+      const second = await startAfter(session, { prompt: "second" });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(lifecycle.startedEvents).toHaveLength(1);
@@ -4497,10 +4558,14 @@ describe("AgentRunner", () => {
       );
 
       const first = await collectMessages(
-        session.sendTurn({ prompt: "First" }, { threadContext: webchatThreadContext }).events(),
+        (
+          await startAfter(session, { prompt: "First" }, { threadContext: webchatThreadContext })
+        ).events(),
       );
       const second = await collectMessages(
-        session.sendTurn({ prompt: "Second" }, { threadContext: webchatThreadContext }).events(),
+        (
+          await startAfter(session, { prompt: "Second" }, { threadContext: webchatThreadContext })
+        ).events(),
       );
 
       expect(initUserPrompt(first)).toContain("<thread_context>");
@@ -4565,7 +4630,9 @@ describe("AgentRunner", () => {
       );
 
       const messages = await collectMessages(
-        session.sendTurn({ prompt: "Subtask" }, { threadContext: webchatThreadContext }).events(),
+        (
+          await startAfter(session, { prompt: "Subtask" }, { threadContext: webchatThreadContext })
+        ).events(),
       );
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
@@ -4589,7 +4656,7 @@ describe("AgentRunner", () => {
         for (const prompt of ["First", "Second"]) {
           const userPrompt = initUserPrompt(
             await collectMessages(
-              session.sendTurn({ prompt }, { threadContext: withFolder }).events(),
+              (await startAfter(session, { prompt }, { threadContext: withFolder })).events(),
             ),
           );
           expect(userPrompt).toContain('Work in folder "/w" on Rome node device "macbook"');
@@ -4968,7 +5035,7 @@ describe("AgentRunner", () => {
         { agentName: "test-pinned", channelThreadKey: "webchat:pinned-1" },
         {},
       );
-      await collectMessages(session.sendTurn({ prompt: "Map model" }).events());
+      await collectMessages((await startAfter(session, { prompt: "Map model" })).events());
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
@@ -5042,7 +5109,7 @@ describe("AgentRunner", () => {
         },
         { selectionId: "gpt-5-6-terra" },
       );
-      const handle = session.sendTurn({ prompt: "Map model" });
+      const handle = await startAfter(session, { prompt: "Map model" });
       await collectMessages(handle.events());
 
       expect(anthropicSessions).toHaveLength(0);
@@ -5074,7 +5141,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:session-cold",
       };
       const firstSession = await firstManager.open(key, { selectionId: "gpt-5-6-terra" });
-      await collectMessages(firstSession.sendTurn({ prompt: "Start" }).events());
+      await collectMessages((await startAfter(firstSession, { prompt: "Start" })).events());
       await firstManager.shutdown();
 
       const resumedManager = createSessions(managerDeps(modelResolver));
@@ -5156,14 +5223,18 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:per-turn-fallback",
       });
 
-      const first = await collectMessages(session.sendTurn({ prompt: "first" }).events());
+      const first = await collectMessages(
+        (await startAfter(session, { prompt: "first" })).events(),
+      );
       expect(first.find((message) => message.type === "error")).toMatchObject({
         error: "Codex quota exhausted",
       });
       expect(codexTurns).toBe(1);
       expect(claudeTurns).toBe(0);
 
-      const second = await collectMessages(session.sendTurn({ prompt: "second" }).events());
+      const second = await collectMessages(
+        (await startAfter(session, { prompt: "second" })).events(),
+      );
       expect(second.find((message) => message.type === "result")).toMatchObject({
         content: "Claude handled the next turn",
       });
@@ -5216,7 +5287,9 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:auth-revoked-reopen",
       });
 
-      const first = await collectMessages(session.sendTurn({ prompt: "first" }).events());
+      const first = await collectMessages(
+        (await startAfter(session, { prompt: "first" })).events(),
+      );
       expect(first.find((message) => message.type === "error")).toMatchObject({
         code: "auth_revoked",
         provider: "openai",
@@ -5225,7 +5298,9 @@ describe("AgentRunner", () => {
       // Simulate a completed re-login. The next turn must not reuse the model
       // session that observed the revoked credential.
       state.openai = reportOf("available");
-      const second = await collectMessages(session.sendTurn({ prompt: "second" }).events());
+      const second = await collectMessages(
+        (await startAfter(session, { prompt: "second" })).events(),
+      );
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
         content: "Codex reconnected",
@@ -5277,10 +5352,10 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:per-turn-model",
       });
-      await collectMessages(session.sendTurn({ prompt: "Sol" }).events());
+      await collectMessages((await startAfter(session, { prompt: "Sol" })).events());
 
       state.openai = reportOf("available", RESTRICTED_PLAN);
-      await collectMessages(session.sendTurn({ prompt: "Terra" }).events());
+      await collectMessages((await startAfter(session, { prompt: "Terra" })).events());
 
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
@@ -5332,13 +5407,13 @@ describe("AgentRunner", () => {
       });
 
       // First turn fails on Codex → no pin recorded.
-      await collectMessages(session.sendTurn({ prompt: "Sol" }).events());
+      await collectMessages((await startAfter(session, { prompt: "Sol" })).events());
       expect((await sessionRepository.session(session.sessionId))!.model).toBeNull();
 
       // Codex quota exhausts; the unpinned session re-resolves to Claude and
       // the first successful turn pins the model that actually ran.
       state.openai = reportOf("usage_limit_reached");
-      await collectMessages(session.sendTurn({ prompt: "Terra" }).events());
+      await collectMessages((await startAfter(session, { prompt: "Terra" })).events());
       expect(await sessionRepository.session(session.sessionId)).toMatchObject({
         provider: "anthropic",
         model: "claude-opus-5-5[1m]",
@@ -5399,14 +5474,16 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:pin-sticks",
       });
 
-      await collectMessages(session.sendTurn({ prompt: "first" }).events());
+      await collectMessages((await startAfter(session, { prompt: "first" })).events());
       expect((await sessionRepository.session(session.sessionId))!.model).toBe("gpt-5.6-terra");
 
       // Sol access arrives mid-session. Tier resolution would now map large →
       // Sol, but the pinned session must keep running Terra on the same
       // backend — no close/reopen, no model switch.
       state.openai = reportOf("available");
-      const second = await collectMessages(session.sendTurn({ prompt: "second" }).events());
+      const second = await collectMessages(
+        (await startAfter(session, { prompt: "second" })).events(),
+      );
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
         content: "gpt-5.6-terra",
@@ -5452,13 +5529,15 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:mapping-pin",
       });
 
-      await collectMessages(session.sendTurn({ prompt: "first" }).events());
+      await collectMessages((await startAfter(session, { prompt: "first" })).events());
       expect(opens[0].config.model).toBe(FABLE_MODEL);
 
       // A mapping is a Rome-side preference, not an entitlement: it governs
       // new resolutions only. The pinned session stays on the mapped model.
       tierModelMappings = null;
-      const second = await collectMessages(session.sendTurn({ prompt: "second" }).events());
+      const second = await collectMessages(
+        (await startAfter(session, { prompt: "second" })).events(),
+      );
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
         content: FABLE_MODEL,
@@ -5500,13 +5579,15 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:pin-stranded",
       });
 
-      await collectMessages(session.sendTurn({ prompt: "first" }).events());
+      await collectMessages((await startAfter(session, { prompt: "first" })).events());
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol"]);
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
       state.openai = reportOf("available", RESTRICTED_PLAN);
-      const second = await collectMessages(session.sendTurn({ prompt: "second" }).events());
+      const second = await collectMessages(
+        (await startAfter(session, { prompt: "second" })).events(),
+      );
       expect(second.find((message) => message.type === "error")).toMatchObject({
         code: "model_unavailable",
         provider: "openai",
@@ -5516,7 +5597,9 @@ describe("AgentRunner", () => {
       // Provider-level outage (quota) fails the same way.
       state.openai = reportOf("available");
       state.openai = reportOf("usage_limit_reached");
-      const third = await collectMessages(session.sendTurn({ prompt: "third" }).events());
+      const third = await collectMessages(
+        (await startAfter(session, { prompt: "third" })).events(),
+      );
       expect(third.find((message) => message.type === "error")).toMatchObject({
         code: "model_provider_unavailable",
         provider: "openai",
@@ -5592,7 +5675,7 @@ describe("AgentRunner", () => {
         agentName: "test-explore",
         channelThreadKey: "webchat:shared-thread",
       });
-      await collectMessages(session.sendTurn({ prompt: "explore" }).events());
+      await collectMessages((await startAfter(session, { prompt: "explore" })).events());
 
       expect(session.sessionId).not.toBe(mainId);
       expect(opens).toHaveLength(1);
@@ -5618,7 +5701,7 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "telegram:pin-resume",
       });
-      await collectMessages(first.sendTurn({ prompt: "Start" }).events());
+      await collectMessages((await startAfter(first, { prompt: "Start" })).events());
       await firstManager.shutdown();
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-5.6-terra"]);
 
@@ -5671,7 +5754,9 @@ describe("AgentRunner", () => {
       );
       expect(session.sessionId).toBe(pinnedId);
 
-      const messages = await collectMessages(session.sendTurn({ prompt: "switch" }).events());
+      const messages = await collectMessages(
+        (await startAfter(session, { prompt: "switch" })).events(),
+      );
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
       });
@@ -5730,7 +5815,7 @@ describe("AgentRunner", () => {
       expect(rescueSession.sessionId).toBe(strandedId);
 
       const rescued = await collectMessages(
-        rescueSession.sendTurn({ prompt: "use terra" }).events(),
+        (await startAfter(rescueSession, { prompt: "use terra" })).events(),
       );
       expect(rescued.find((message) => message.type === "result")).toMatchObject({
         content: "gpt-5.6-terra",
@@ -6615,7 +6700,8 @@ describe("AgentRunner", () => {
       });
 
       const events: AgentEvent[] = [];
-      for await (const msg of session.sendTurn({ prompt: "Triage." }).events()) events.push(msg);
+      for await (const msg of (await startAfter(session, { prompt: "Triage." })).events())
+        events.push(msg);
 
       expect(provider.sessions[0].config.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
@@ -6648,7 +6734,8 @@ describe("AgentRunner", () => {
       });
 
       const events: AgentEvent[] = [];
-      for await (const msg of session.sendTurn({ prompt: "Triage." }).events()) events.push(msg);
+      for await (const msg of (await startAfter(session, { prompt: "Triage." })).events())
+        events.push(msg);
 
       expect(events.find((event) => event.type === "result")).toBeUndefined();
       expect(events.find((event) => event.type === "error")).toMatchObject({
@@ -6670,7 +6757,8 @@ describe("AgentRunner", () => {
       });
 
       const events: AgentEvent[] = [];
-      for await (const msg of session.sendTurn({ prompt: "Triage." }).events()) events.push(msg);
+      for await (const msg of (await startAfter(session, { prompt: "Triage." })).events())
+        events.push(msg);
 
       expect(events.find((event) => event.type === "error")).toMatchObject({
         error: expect.stringContaining("without structured output"),
@@ -6698,7 +6786,8 @@ describe("AgentRunner", () => {
       });
 
       const events: AgentEvent[] = [];
-      for await (const msg of session.sendTurn({ prompt: "Triage." }).events()) events.push(msg);
+      for await (const msg of (await startAfter(session, { prompt: "Triage." })).events())
+        events.push(msg);
 
       expect(events.find((event) => event.type === "result")).toBeUndefined();
       expect(events.find((event) => event.type === "error")).toMatchObject({

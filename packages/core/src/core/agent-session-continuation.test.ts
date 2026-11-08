@@ -43,6 +43,7 @@ import { SkillLoader } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
+import { startAfter } from "../test/turn-handle.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -195,7 +196,8 @@ describe("continuation notice through Sessions", () => {
       JSON.stringify([{ type: "text", content: text }]),
     );
     at((now - START) / 1000 + 1);
-    const handle = session.sendTurn(
+    const handle = await startAfter(
+      session,
       { prompt: text, inputId },
       { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
     );
@@ -446,9 +448,13 @@ describe("continuation notice through Sessions", () => {
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, selectionId: from },
     );
-    for await (const _ of session
-      .sendTurn({ prompt: "first" }, { threadContext: context, romeSessionId: chatId })
-      .events()) {
+    for await (const _ of (
+      await startAfter(
+        session,
+        { prompt: "first" },
+        { threadContext: context, romeSessionId: chatId },
+      )
+    ).events()) {
     }
     if (concierge) {
       const raw = healthyState();

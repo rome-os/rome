@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import type { AgentInputState } from "@rome-os/app-runtime";
 import {
+  afterLanding,
   arrive,
   canSteer,
   carryOver,
   endTurn,
+  isQueueInput,
   joinPrompts,
   markReady,
   nextInput,
@@ -27,23 +29,33 @@ const input = (name: string, priority: InputPriority = "next", state: AgentInput
   ({ name, priority, state }) as Input;
 const names = (inputs: readonly Input[]) => inputs.map((i) => i.name);
 
+describe("after inputs", () => {
+  it("start a turn of their own, queued behind a running one, outside the input queue", () => {
+    expect(afterLanding(false)).toBe("started");
+    expect(afterLanding(true)).toBe("queued");
+    expect(isQueueInput("after")).toBe(false);
+    expect(isQueueInput("next")).toBe(true);
+    expect(isQueueInput("now")).toBe(true);
+  });
+});
+
 describe("arrive", () => {
   it("starts a turn when none runs", () => {
-    expect(arrive(undefined, "now")).toEqual({ disposition: "started", supersede: false });
-    expect(arrive(undefined, "next")).toEqual({ disposition: "started", supersede: false });
+    expect(arrive(undefined, "now")).toEqual({ landing: "started", supersede: false });
+    expect(arrive(undefined, "next")).toEqual({ landing: "started", supersede: false });
   });
 
   it("steers a next input into a ready turn and queues it otherwise", () => {
     const { turn } = startTurn(input("a"), [], []);
-    expect(arrive(turn, "next").disposition).toBe("queued");
-    expect(arrive(markReady(turn), "next").disposition).toBe("steering");
-    expect(arrive(seal(markReady(turn)), "next").disposition).toBe("queued");
+    expect(arrive(turn, "next").landing).toBe("queued");
+    expect(arrive(markReady(turn), "next").landing).toBe("steered");
+    expect(arrive(seal(markReady(turn)), "next").landing).toBe("queued");
   });
 
   it("supersedes the running turn once for now inputs", () => {
     const { turn } = startTurn(input("a"), [], []);
-    expect(arrive(markReady(turn), "now")).toEqual({ disposition: "queued", supersede: true });
-    expect(arrive(supersede(turn), "now")).toEqual({ disposition: "queued", supersede: false });
+    expect(arrive(markReady(turn), "now")).toEqual({ landing: "queued", supersede: true });
+    expect(arrive(supersede(turn), "now")).toEqual({ landing: "queued", supersede: false });
   });
 });
 

@@ -34,6 +34,7 @@ import {
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
 import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
+import { startAfter } from "../test/turn-handle.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -168,8 +169,8 @@ describe("agent model pins through Sessions", () => {
     expect(loader.find(AGENT)?.definition).toMatchObject({ providerId: "openai", modelId: MODEL });
     expect(loader.find(AGENT)?.definition.tier).toBeUndefined();
     const session = await createManager().open(key, { workingDir: directory });
-    await collect(session.sendTurn({ prompt: "first" }).events());
-    await collect(session.sendTurn({ prompt: "second" }).events());
+    await collect((await startAfter(session, { prompt: "first" })).events());
+    await collect((await startAfter(session, { prompt: "second" })).events());
 
     expect(openai.openSession).toHaveBeenCalledTimes(1);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
@@ -190,7 +191,7 @@ describe("agent model pins through Sessions", () => {
     const session = await createManager(false, () => usingRomeCredits).open(key, {
       workingDir: directory,
     });
-    await collect(session.sendTurn({ prompt: "credits" }).events());
+    await collect((await startAfter(session, { prompt: "credits" })).events());
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: "gpt-6.1-sol",
@@ -199,7 +200,7 @@ describe("agent model pins through Sessions", () => {
     // Connecting ChatGPT changes only the login: the pinned model keeps running.
     state.openai = reportOf("available");
     usingRomeCredits = false;
-    await collect(session.sendTurn({ prompt: "guardian" }).events());
+    await collect((await startAfter(session, { prompt: "guardian" })).events());
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6.1-sol", "gpt-6.1-sol"]);
     expect(openai.openSession).toHaveBeenCalledTimes(1);
@@ -209,12 +210,12 @@ describe("agent model pins through Sessions", () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "small" });
     const firstManager = createManager();
     const first = await firstManager.open(key, { workingDir: directory });
-    await collect(first.sendTurn({ prompt: "guardian" }).events());
+    await collect((await startAfter(first, { prompt: "guardian" })).events());
     await firstManager.shutdown();
 
     state.openai = reportOf("unauthorized");
     const resumed = await createManager(false, true).open(key, { workingDir: directory });
-    await collect(resumed.sendTurn({ prompt: "credits" }).events());
+    await collect((await startAfter(resumed, { prompt: "credits" })).events());
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna", "gpt-6-luna"]);
   });
@@ -222,14 +223,14 @@ describe("agent model pins through Sessions", () => {
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {
     const firstManager = createManager();
     const first = await firstManager.open(key, { workingDir: directory });
-    await collect(first.sendTurn({ prompt: "establish pin" }).events());
+    await collect((await startAfter(first, { prompt: "establish pin" })).events());
     await firstManager.shutdown();
 
     await writeConfig({ provider: "anthropic", modelId: "future-model[1m]" });
     const secondManager = createManager();
     const resumed = await secondManager.open(key, { workingDir: directory });
     expect(resumed.sessionId).toBe(first.sessionId);
-    await collect(resumed.sendTurn({ prompt: "resume" }).events());
+    await collect((await startAfter(resumed, { prompt: "resume" })).events());
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
@@ -237,7 +238,7 @@ describe("agent model pins through Sessions", () => {
       { ...key, channelThreadKey: "webchat:new-model-pin-test" },
       { workingDir: directory },
     );
-    await collect(fresh.sendTurn({ prompt: "new conversation" }).events());
+    await collect((await startAfter(fresh, { prompt: "new conversation" })).events());
     expect(anthropic.calls.map((call) => call.model)).toEqual(["future-model[1m]"]);
   });
 
@@ -247,14 +248,14 @@ describe("agent model pins through Sessions", () => {
       workingDir: directory,
       selectionId: "claude-sonnet",
     });
-    await collect(first.sendTurn({ prompt: "use selected model" }).events());
+    await collect((await startAfter(first, { prompt: "use selected model" })).events());
     await firstManager.shutdown();
 
     const resumed = await createManager().open(key, {
       workingDir: directory,
       resumeSessionId: first.sessionId,
     });
-    await collect(resumed.sendTurn({ prompt: "continue" }).events());
+    await collect((await startAfter(resumed, { prompt: "continue" })).events());
     expect(anthropic.calls.map((call) => call.model)).toEqual([
       "claude-sonnet-5-5",
       "claude-sonnet-5-5",
@@ -275,9 +276,9 @@ describe("agent model pins through Sessions", () => {
 
   it("fails a later turn on quota exhaustion and recovers on the same model", async () => {
     const session = await createManager().open(key, { workingDir: directory });
-    await collect(session.sendTurn({ prompt: "first" }).events());
+    await collect((await startAfter(session, { prompt: "first" })).events());
     state.openai = reportOf("usage_limit_reached");
-    const failed = await collect(session.sendTurn({ prompt: "blocked" }).events());
+    const failed = await collect((await startAfter(session, { prompt: "blocked" })).events());
     expect(failed).toContainEqual(
       expect.objectContaining({
         type: "error",
@@ -290,7 +291,7 @@ describe("agent model pins through Sessions", () => {
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
     state.openai = reportOf("available");
-    await collect(session.sendTurn({ prompt: "retry" }).events());
+    await collect((await startAfter(session, { prompt: "retry" })).events());
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
   });
 
@@ -305,10 +306,10 @@ describe("agent model pins through Sessions", () => {
     const session = await createManager(false, false, lifecycle).open(key, {
       workingDir: directory,
     });
-    const first = session.sendTurn({ prompt: "first" });
+    const first = await startAfter(session, { prompt: "first" });
     await collect(first.events());
     state.openai = reportOf("usage_limit_reached");
-    const blocked = session.sendTurn({ prompt: "blocked" });
+    const blocked = await startAfter(session, { prompt: "blocked" });
     await collect(blocked.events());
 
     expect(finished).toEqual([first.id]);
@@ -334,13 +335,13 @@ describe("agent model pins through Sessions", () => {
 
   it("keeps a child's tier selection independent of a parent's pin on a shared thread", async () => {
     const parent = await createManager().open(key, { workingDir: directory });
-    await collect(parent.sendTurn({ prompt: "parent" }).events());
+    await collect((await startAfter(parent, { prompt: "parent" })).events());
     await writeConfig({ name: "worker", modelId: undefined, tier: "medium" });
     const child = await createManager(true).open(
       { ...key, agentName: "worker" },
       { workingDir: directory },
     );
-    await collect(child.sendTurn({ prompt: "child" }).events());
+    await collect((await startAfter(child, { prompt: "child" })).events());
     expect(child.sessionId).not.toBe(parent.sessionId);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, "gpt-6.1-sol"]);
   });

@@ -667,7 +667,7 @@ interface ActiveWebchatStream {
   sessionId: string;
   /**
    * The turnId the stream was opened under: the one allocated by
-   * `AgentSession.sendTurn` for a user turn, or a synthetic `backend:` id for
+   * `AgentSession.submit` for a user turn, or a synthetic `backend:` id for
    * a backend task. Used in the URL for `/turns/:turnId/stream` and
    * `/turns/:turnId/interrupt`.
    */
@@ -804,11 +804,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
-   * stream is enqueued (turnId is known by then because sendTurn is sync),
+   * stream is enqueued (turnId is known by then because submit answers it at once),
    * and again under `agentTurnId` once a backend stream learns it.
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
+  /** Input turns given a stream, until they end, so a turn gets one stream however many inputs land in it. */
+  const attachedTurns = new Set<string>();
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
@@ -4188,7 +4190,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return stream;
     };
 
-    let started: ReturnType<typeof attachTurn> | undefined;
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
       links: turnLinks,
@@ -4196,15 +4197,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       threadContext,
       romeSessionId: sessionId,
       romeSessionType: session.type as RomeSessionType,
-      onTurn: (handle: AgentTurnHandle) => {
-        started = attachTurn(handle);
-        void started.catch((error) =>
-          log.error("failed to attach input turn", {
-            turnId: handle.id,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      },
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
@@ -4212,10 +4204,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     };
     const input = { inputId, prompt: promptText, reasoningEffort };
-    const receipt = agentSess.submitInput(input, options);
-    const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
+    const receipt = agentSess.submit(input, options);
+    // The turn this input started gets its stream here, and so does one a
+    // queued input starts later. A turn it was folded or steered into has one.
+    const attached = receipt.turn.then((handle) => {
+      if (attachedTurns.has(handle.id)) return undefined;
+      attachedTurns.add(handle.id);
+      void handle.ended().then(() => attachedTurns.delete(handle.id));
+      return attachTurn(handle);
+    });
+    void attached.catch((error) =>
+      log.error("failed to attach input turn", {
+        turnId: receipt.turnId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    const stream =
+      (receipt.landed === "started" ? await attached : undefined) ??
+      streamsByTurnId.get(receipt.turnId);
     return answer({
-      ...receipt,
+      inputId,
+      turnId: receipt.turnId,
+      // The wire word for a steered input stays `steering`.
+      disposition: receipt.landed === "steered" ? "steering" : receipt.landed,
       sessionId,
       startedAt: stream?.startedAt ?? new Date().toISOString(),
     });

@@ -23,31 +23,51 @@ import {
   SUPERSEDED_INTERRUPT_REASON,
   type InputPriority,
   type InputTurn,
+  type Landing,
+  type SubmitPriority,
 } from "../domain/input-queue.js";
 
-export { SUPERSEDED_INTERRUPT_REASON, type InputPriority } from "../domain/input-queue.js";
+export {
+  SUPERSEDED_INTERRUPT_REASON,
+  type InputPriority,
+  type Landing,
+  type SubmitPriority,
+} from "../domain/input-queue.js";
 
-export interface SubmitInputOptions extends SendTurnOptions {
-  /** Called once per actual run, including a late input's follow-up run. */
-  onTurn(handle: AgentTurnHandle): void;
+export interface SubmitOptions extends SendTurnOptions {
   onInputStatus?(status: InputStatusEvent): Promise<void> | void;
   /** Defaults to `next`. */
-  priority?: InputPriority;
+  priority?: SubmitPriority;
 }
 
+/** Where a submitted input landed, and the turn it lands in. */
 export interface AgentInputReceipt {
-  inputId: string;
+  inputId?: string;
   turnId: string;
-  disposition: "started" | "queued" | "steering";
+  landed: Landing;
+  /**
+   * Resolves with the turn the input lands in, once that turn has started and
+   * holds it: the turn it starts or is prompted in, or the running turn once
+   * the model has taken the steer or the turn ends with it sent. A steer the
+   * model queues, or one superseded first, lands in a later turn. An input
+   * cancelled before any turn takes it never lands, so this never settles.
+   */
+  turn: Promise<AgentTurnHandle>;
 }
+
+/** The options of an input the queue holds, whose priority is the queue's own. */
+type QueueOptions = Omit<SubmitOptions, "priority"> & { priority?: InputPriority };
 
 interface Entry {
   input: AgentTurnInput & { inputId: string };
-  options: SubmitInputOptions;
+  options: QueueOptions;
   priority: InputPriority;
   state: AgentInputState;
   turnId: string;
   writes: Promise<void>;
+  /** The turn the input lands in, resolved once. */
+  turn: Promise<AgentTurnHandle>;
+  land(handle: AgentTurnHandle): void;
 }
 
 /** The running turn: its handle, its inputs under the domain rules, and its steer in flight. */
@@ -84,13 +104,21 @@ export class AgentInputQueue {
     return !!this.active || this.queued.length > 0 || this.carried.length > 0;
   }
 
-  submit(
-    input: AgentTurnInput & { inputId: string },
-    options: SubmitInputOptions,
-  ): AgentInputReceipt {
+  submit(input: AgentTurnInput & { inputId: string }, options: QueueOptions): AgentInputReceipt {
     if (this.closed) throw new Error("Input queue is closed");
     const existing = this.entries.get(input.inputId);
-    if (existing) return { inputId: input.inputId, turnId: existing.turnId, disposition: "queued" };
+    if (existing) {
+      return {
+        inputId: input.inputId,
+        turnId: existing.turnId,
+        landed: "queued",
+        turn: existing.turn,
+      };
+    }
+    let land!: (handle: AgentTurnHandle) => void;
+    const turn = new Promise<AgentTurnHandle>((resolve) => {
+      land = resolve;
+    });
     const entry: Entry = {
       input,
       options,
@@ -98,13 +126,15 @@ export class AgentInputQueue {
       state: "queued",
       turnId: "",
       writes: Promise.resolve(),
+      turn,
+      land,
     };
     this.entries.set(input.inputId, entry);
     const active = this.active;
     const arrival = arrive(active?.turn, entry.priority);
     if (!active) {
       this.start(entry);
-      return { inputId: input.inputId, turnId: entry.turnId, disposition: arrival.disposition };
+      return { inputId: input.inputId, turnId: entry.turnId, landed: arrival.landing, turn };
     }
     entry.turnId = active.handle.id;
     this.queued.push(entry);
@@ -117,7 +147,7 @@ export class AgentInputQueue {
     } else {
       this.flush();
     }
-    return { inputId: input.inputId, turnId: entry.turnId, disposition: arrival.disposition };
+    return { inputId: input.inputId, turnId: entry.turnId, landed: arrival.landing, turn };
   }
 
   /** Whether `turnId` is a turn this queue started. */
@@ -137,11 +167,12 @@ export class AgentInputQueue {
       first.options,
     );
     this.active = { handle, turn };
-    for (const part of turn.prompted) {
+    // The first input lands before the rest, so its reader sees the turn first.
+    for (const part of [first, ...turn.prompted.filter((part) => part !== first)]) {
       part.turnId = handle.id;
-      void this.update(part, "queued").catch(this.reportError);
+      part.land(handle);
     }
-    first.options.onTurn(handle);
+    for (const part of turn.prompted) void this.update(part, "queued").catch(this.reportError);
   }
 
   async beforeSend(turnId: string): Promise<void> {
@@ -166,6 +197,7 @@ export class AgentInputQueue {
     await this.update(entry, event.state);
     const active = this.active;
     if (active?.handle.id !== turnId) return;
+    if (event.state === "consumed") entry.land(active.handle);
     if (event.state === "queued") {
       // sendUserInput(inputId) will adopt the retained input, never enqueue a second copy.
       const retained = retain(active.turn, entry, this.queued);
@@ -239,6 +271,8 @@ export class AgentInputQueue {
       this.carried = carryOver(active.turn, this.queued);
     } else {
       for (const [entry, state] of endTurn(active.turn, this.queued)) {
+        // An input sent but never confirmed is never replayed, so it stays in this turn.
+        if (state === "unknown") entry.land(active.handle);
         void this.update(entry, state).catch(this.reportError);
       }
     }

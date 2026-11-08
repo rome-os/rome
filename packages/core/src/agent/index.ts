@@ -193,7 +193,7 @@ export {
 export {
   AgentInputQueue,
   type AgentInputReceipt,
-  type SubmitInputOptions,
+  type SubmitOptions,
 } from "./application/agent-input-queue.js";
 export type { PushLevel, TurnFacts } from "./domain/turn-facts.js";
 export type { DeferTool } from "./application/ask-user-tools.js";

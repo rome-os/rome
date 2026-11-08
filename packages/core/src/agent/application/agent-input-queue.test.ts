@@ -28,7 +28,8 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted")) {
   const started: AgentTurnInput[] = [];
   const statuses: InputStatusEvent[] = [];
-  const handles: AgentTurnHandle[] = [];
+  /** The turn each input landed in, by input id. */
+  const landedIn: Record<string, string> = {};
   const errors = rs.fn();
   const queue = new AgentInputQueue(
     (input) => {
@@ -38,17 +39,21 @@ function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolved
     () => ({ steerUserInput: steer }),
     errors,
   );
-  const submit = (inputId: string) =>
-    queue.submit(
+  const submit = (inputId: string) => {
+    const receipt = queue.submit(
       { inputId, prompt: inputId },
       {
-        onTurn: (handle) => handles.push(handle),
         onInputStatus: (status) => {
           statuses.push(status);
         },
       },
     );
-  return { queue, submit, started, statuses, handles, steer, errors };
+    void receipt.turn.then((turn) => {
+      landedIn[inputId] = turn.id;
+    });
+    return receipt;
+  };
+  return { queue, submit, started, statuses, landedIn, steer, errors };
 }
 
 describe("conversational input lane", () => {
@@ -67,7 +72,11 @@ describe("conversational input lane", () => {
     await s.queue.observe({ type: "input_status", inputId: "b", state: "consumed" }, a.turnId);
     await tick();
     expect(s.steer.mock.calls.map(([input]) => input.inputId)).toEqual(["b", "c"]);
-    expect(s.handles).toHaveLength(1);
+    // `c` is sent but not yet taken, so it has not landed until the turn ends with it.
+    expect(s.landedIn).toEqual({ a: "turn-1", b: "turn-1" });
+    s.queue.finish(a.turnId);
+    await tick();
+    expect(s.landedIn).toEqual({ a: "turn-1", b: "turn-1", c: "turn-1" });
   });
 
   it("adopts a provider-retained late input under a new turn and the same input id", async () => {
@@ -80,8 +89,8 @@ describe("conversational input lane", () => {
     await s.queue.seal("turn-1");
     s.queue.finish("turn-1");
     expect(s.started.map((input) => input.inputId)).toEqual(["a", "b"]);
-    expect(s.handles.map((handle) => handle.id)).toEqual(["turn-1", "turn-2"]);
     await tick();
+    expect(s.landedIn).toEqual({ a: "turn-1", b: "turn-2" });
     expect(s.statuses.at(-1)).toMatchObject({ inputId: "b", turnId: "turn-2", state: "queued" });
   });
 
@@ -171,7 +180,6 @@ function prioritySetup() {
       { inputId, prompt: inputId },
       {
         priority,
-        onTurn: () => {},
         onInputStatus: (status) => {
           statuses.push(status);
         },
@@ -191,7 +199,7 @@ describe("input priority", () => {
     await s.queue.observe({ type: "input_status", inputId: "a", state: "consumed" }, "turn-1");
     const b = s.submit("b", "now");
     await tick();
-    expect(b.disposition).toBe("queued");
+    expect(b.landed).toBe("queued");
     expect(s.steer).not.toHaveBeenCalled();
     expect(s.interrupts).toEqual([{ turnId: "turn-1", reason: "superseded" }]);
     s.queue.finish("turn-1");
