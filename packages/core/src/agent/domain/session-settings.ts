@@ -1,13 +1,13 @@
-import type { ChatRef, ProviderSessionResetPolicy } from "@rome-os/app-runtime";
 import type { AgentDefinition } from "./agent-definition.js";
 import type { ModelSelection } from "./model-selection.js";
 
-/** Port. What a chat set for the sessions it opens. */
+/** Port. What a chat set for its sessions. */
 export interface SessionSettings {
-  /** When chat `chat` starts its agent on a fresh session, or null when it sets nothing and no reset is checked. */
-  resetPolicy(chat: ChatRef): Promise<ProviderSessionResetPolicy | null>;
-  /** The model web chat `chatId` saved, or null when it leaves the choice to Rome or is not a web chat. */
-  savedModelSelection(chatId: string): Promise<ModelSelection | null>;
+  /**
+   * The model saved by the web chat whose own session this is, or null when
+   * that chat leaves the choice to Rome or the session is no web chat's own.
+   */
+  savedModelSelection(sessionId: string): Promise<ModelSelection | null>;
 }
 
 /**

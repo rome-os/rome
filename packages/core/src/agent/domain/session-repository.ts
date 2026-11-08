@@ -41,8 +41,7 @@ export interface SessionRepository {
    * Writes the facts the session changed since it was last saved, and the
    * checkpoints recorded since then. Only changed facts are written, so two
    * instances of one session that change different facts both keep their
-   * writes. A chat is recorded only on a session that still has none, and a
-   * completion is never undone. The session must have been added.
+   * writes. A completion is never undone. The session must have been added.
    */
   save(session: Session): Promise<void>;
 
@@ -51,8 +50,8 @@ export interface SessionRepository {
    * adds its successor from `retired.replace()`, with any turn the successor
    * recorded before the reset was written. Every other session still active
    * for the same continuity key and exact agent is completed too, so the
-   * successor is the only one. A successor that named no chat inherits the
-   * retired session's stored chat. Whoever resets serializes this per
+   * successor is the only one. The successor keeps the chat the chat side
+   * recorded for the retired session. Whoever resets serializes this per
    * continuity key.
    */
   replace(retired: Session, successor: Session): Promise<void>;

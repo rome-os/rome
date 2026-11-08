@@ -1708,6 +1708,15 @@ export class WebChatRepository {
     return rows[0] ? withSessionKind(rows[0].chat) : null;
   }
 
+  /** The continuity key an agent session's stored row holds, or null when no row has the id or it holds none. */
+  async continuityKeyOfSession(sessionId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ key: sessions.channelThreadKey })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId));
+    return rows[0]?.key ?? null;
+  }
+
   /**
    * Record that a chat has an agent session, on the session's stored row.
    * Answers the other chat it replaced, if any. With `replace: false`, a row

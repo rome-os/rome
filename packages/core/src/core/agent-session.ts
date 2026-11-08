@@ -82,8 +82,6 @@ import type {
   RomeSessionType,
   StreamAgentEvent,
   TurnMiddlewareContext,
-  ChatId,
-  ChatRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
@@ -138,7 +136,7 @@ import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
+import { sessionKeyChannel } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
@@ -173,10 +171,11 @@ export interface AgentSessionInit {
   selectionId?: ModelSelectionId | null;
   reasoningEffort?: ModelReasoningEffort;
   /**
-   * This acquire starts a turn for an inbound channel message, so the
-   * connection's provider-session reset policy applies before the session opens.
+   * The reset policy of the chat whose message this acquire answers, which
+   * the opener read from Chat settings. Given, a session that is due for a
+   * reset under it is replaced before it opens.
    */
-  applyProviderSessionReset?: boolean;
+  resetPolicy?: ProviderSessionResetPolicy;
 }
 
 export interface AgentTurnInput {
@@ -322,8 +321,7 @@ interface ManagerDeps {
   /** Turn-middleware onion. Optional — when absent, every turn runs the
    *  model terminal directly (behavior identical to a chain of size 0). */
   turnMiddleware?: TurnMiddlewareChain;
-  /** What each chat set for the sessions it opens. Absent, no reset is
-   *  checked and no saved model is restored. */
+  /** What each chat set for its sessions. Absent, no saved model is restored. */
   sessionSettings?: SessionSettings;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
@@ -460,56 +458,48 @@ export function createAgentSessionManager(
     resetChecked?: { prepared?: Session },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
-    const resetRef =
-      init?.applyProviderSessionReset && init.threadContext?.connectionId && deps.sessionSettings
-        ? {
-            connectionId: init.threadContext.connectionId,
-            chatId: init.threadContext.threadId as ChatId,
-          }
-        : undefined;
-    if (init && resetRef && !init.resumeSessionId && !resetChecked) {
+    const reset = init?.resetPolicy;
+    if (reset && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
-      const reset = await deps.sessionSettings!.resetPolicy(resetRef);
       const chatId = init.threadContext?.romeSessionId;
-      if (reset)
-        return await lifecycleMutex.runExclusive(k, async () => {
-          const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-          const decision = active
-            ? evaluateProviderSessionReset(reset, active, interactionAt)
-            : { due: false as const };
-          const cached = sessions.get(k);
-          if (decision.due) {
-            log.info("provider_session.reset_due", {
-              chatId,
-              agentName: key.agentName,
-              provider: active?.provider ?? undefined,
-              oldSessionId: active?.id,
-              resetReason: decision.reason,
-              policyMode: reset.mode,
-              elapsedMinutes: decision.elapsedMinutes,
-            });
-            if (cached && cached.status !== "closed") {
-              await waitUntilQuiescent(cached);
-              await cached.close("idle");
-            }
+      return await lifecycleMutex.runExclusive(k, async () => {
+        const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+        const decision = active
+          ? evaluateProviderSessionReset(reset, active, interactionAt)
+          : { due: false as const };
+        const cached = sessions.get(k);
+        if (decision.due) {
+          log.info("provider_session.reset_due", {
+            chatId,
+            agentName: key.agentName,
+            provider: active?.provider ?? undefined,
+            oldSessionId: active?.id,
+            resetReason: decision.reason,
+            policyMode: reset.mode,
+            elapsedMinutes: decision.elapsedMinutes,
+          });
+          if (cached && cached.status !== "closed") {
+            await waitUntilQuiescent(cached);
+            await cached.close("idle");
           }
-          let prepared: Session | undefined;
-          if (decision.due && active) {
-            prepared = active.replace();
-            await deps.sessionRepository.replace(active, prepared);
-            log.info("provider_session.rotated", {
-              chatId,
-              agentName: key.agentName,
-              provider: active.provider ?? undefined,
-              oldSessionId: active.id,
-              newSessionId: prepared.id,
-              resetReason: decision.reason,
-              policyMode: reset.mode,
-              result: "succeeded",
-            });
-          }
-          return await acquireInner(key, span, init, { prepared });
-        });
+        }
+        let prepared: Session | undefined;
+        if (decision.due && active) {
+          prepared = active.replace();
+          await deps.sessionRepository.replace(active, prepared);
+          log.info("provider_session.rotated", {
+            chatId,
+            agentName: key.agentName,
+            provider: active.provider ?? undefined,
+            oldSessionId: active.id,
+            newSessionId: prepared.id,
+            resetReason: decision.reason,
+            policyMode: reset.mode,
+            result: "succeeded",
+          });
+        }
+        return await acquireInner(key, span, init, { prepared });
+      });
     }
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
@@ -872,15 +862,12 @@ async function openSession(
     resumed?.provider && resumed.model
       ? { providerId: resumed.provider as ProviderId, model: resumed.model }
       : undefined;
-  // The conversation's stored selection restores a webchat chat's chosen model
-  // on cold resume. Only the chat's own session, keyed `webchat:<conversation id>`,
-  // reads it. Subagent keys carry a suffix, and app sessions use keys of their own.
-  const chatId = webchatConversationOfKey(key.channelThreadKey);
+  // A cold resume restores the model the session's web chat saved. Only a web
+  // chat's own session has one; the web chat side decides which that is.
   const persistedSelection =
     init.resumeSessionId &&
-    restoresSavedSelection(config, { pinned: !!sessionPin, selected: !!init.selectionId }) &&
-    chatId
-      ? await deps.sessionSettings?.savedModelSelection(chatId)
+    restoresSavedSelection(config, { pinned: !!sessionPin, selected: !!init.selectionId })
+      ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 

@@ -1,6 +1,7 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
+import { webchatConversationOfKey } from "./agent-session-key.js";
 
 const log = createLogger("session-conversation");
 
@@ -53,6 +54,21 @@ export async function findChat(
 ): Promise<SessionChat | undefined> {
   if (!webchatRepo) return undefined;
   return await readChat(() => webchatRepo.getSession(chatId), { chatId });
+}
+
+/**
+ * The web chat whose own session this is, asked by the session's id, while
+ * that chat still exists. The web chat side decides it from the key it minted
+ * for the chat's session, so a subagent's or a fork's session under a web
+ * chat is not that chat's own.
+ */
+export async function findOwnWebChat(
+  webchatRepo: Pick<WebChatRepository, "continuityKeyOfSession" | "getSession">,
+  sessionId: string,
+): Promise<Awaited<ReturnType<WebChatRepository["getSession"]>>> {
+  const key = await webchatRepo.continuityKeyOfSession(sessionId);
+  const chatId = key ? webchatConversationOfKey(key) : undefined;
+  return chatId ? await webchatRepo.getSession(chatId) : null;
 }
 
 /** A session as its opener holds it. */

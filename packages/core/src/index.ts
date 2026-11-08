@@ -173,6 +173,7 @@ import { endInterruptedRuns } from "./actions/restart-recovery.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
+import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
   AnthropicProvider,
   ClaudeAccount,
@@ -1133,10 +1134,7 @@ async function main() {
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
-      sessionSettings: new ChatSessionSettings({
-        resetPolicy: async (ref) => (await chatSettings.get(ref)).effective.session.reset,
-        webchatRepo,
-      }),
+      sessionSettings: new ChatSessionSettings({ webchatRepo }),
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
       channelSurface: (channel) => {
@@ -1153,6 +1151,8 @@ async function main() {
   );
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
+  const chatResetPolicy: ChatResetPolicy = async (chat) =>
+    (await chatSettings.get(chat)).effective.session.reset;
   const agentSessionBridge = new AgentSessionBridge(
     agentSessionManager,
     webchatRepo,
@@ -1160,6 +1160,7 @@ async function main() {
     agentTurnStreamRegistry,
     undefined,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    chatResetPolicy,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1170,6 +1171,7 @@ async function main() {
     agentTurnStreamRegistry,
     actionRegistry,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    chatResetPolicy,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

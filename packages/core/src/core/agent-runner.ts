@@ -16,6 +16,7 @@ import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.
 import type { AgentSession, AgentSessionManager } from "./agent-session.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
+import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -236,6 +237,8 @@ export class AgentRunner {
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
     private runLineDeps?: RunLineDeps,
+    /** The reset policy of a connected account's chat. Absent, no session is reset. */
+    private resetPolicyOf?: ChatResetPolicy,
   ) {}
 
   /**
@@ -282,7 +285,11 @@ export class AgentRunner {
       threadContext,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      applyProviderSessionReset: Boolean(params.platformMessageId),
+      resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+        platformMessageId: params.platformMessageId,
+        sessionId: explicitSessionId,
+        threadContext,
+      }),
     };
     const session = explicitSessionId
       ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)

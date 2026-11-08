@@ -1,8 +1,8 @@
-// Reads what a chat set for its sessions: the reset policy from chat settings,
-// and the model a web chat saved from the web chat repository.
+// Reads what a chat set for its sessions: the model a web chat saved, from
+// the web chat side.
 
-import type { ChatRef, ProviderSessionResetPolicy } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
+import { findOwnWebChat } from "../../core/session-conversation.js";
 import {
   isModelSelectionId,
   MODEL_SELECTIONS,
@@ -11,21 +11,16 @@ import {
 import type { SessionSettings } from "../domain/session-settings.js";
 
 export interface ChatSessionSettingsDeps {
-  /** The reset policy in effect for a chat. Absent, no chat sets one. */
-  resetPolicy?: (chat: ChatRef) => Promise<ProviderSessionResetPolicy>;
   /** Absent, no web chat has a saved model. */
-  webchatRepo?: Pick<WebChatRepository, "getSession">;
+  webchatRepo?: Pick<WebChatRepository, "continuityKeyOfSession" | "getSession">;
 }
 
 export class ChatSessionSettings implements SessionSettings {
   constructor(private readonly deps: ChatSessionSettingsDeps) {}
 
-  async resetPolicy(chat: ChatRef): Promise<ProviderSessionResetPolicy | null> {
-    return this.deps.resetPolicy ? await this.deps.resetPolicy(chat) : null;
-  }
-
-  async savedModelSelection(chatId: string): Promise<ModelSelection | null> {
-    const saved = (await this.deps.webchatRepo?.getSession(chatId))?.largeModelSelection;
+  async savedModelSelection(sessionId: string): Promise<ModelSelection | null> {
+    if (!this.deps.webchatRepo) return null;
+    const saved = (await findOwnWebChat(this.deps.webchatRepo, sessionId))?.largeModelSelection;
     // Anything else, "auto" included, leaves the choice to Rome.
     return isModelSelectionId(saved) ? MODEL_SELECTIONS[saved] : null;
   }
