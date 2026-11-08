@@ -80,7 +80,12 @@ import {
   conversationTitleLength,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
-import { currentChatOwner, currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import {
+  currentChatOwner,
+  currentSessionActor,
+  sessionOwnerKey,
+  type SessionActor,
+} from "../../lib/session-actor.js";
 import type { DashboardInbox } from "../../connections/send.js";
 import {
   resolveChatSenders,
@@ -4174,9 +4179,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     let started: ReturnType<typeof attachTurn> | undefined;
     const options = {
-      // The guardian's own message: the Concierge's reply may reach their phone
-      // (ConciergePush), unless the phone shows the chat. Automated senders don't.
-      ...(actor?.kind === "guardian" && !sourceId ? { pushLevel: "active" as const } : {}),
+      ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,
@@ -4532,4 +4535,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   return { routes: app, runtime };
+}
+
+/**
+ * Whether the Concierge's reply to a sent message may reach the guardian's
+ * phone (ConciergePush): only a message the guardian wrote, signed in. A
+ * message said as someone else (an agent account, an automated source) and a
+ * loopback caller acting as the guardian are not the guardian writing.
+ */
+export function replyPushes(actor: SessionActor | undefined, saidBy: Account | undefined): boolean {
+  return actor?.kind === "guardian" && actor.via === "cookie" && saidBy === undefined;
 }

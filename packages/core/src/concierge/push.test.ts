@@ -6,7 +6,7 @@ rs.mock("../logger.js", () => ({
   createLogger: () => ({ info: logged, warn: logged, error: logged, debug: logged }),
 }));
 
-const { ConciergePush, pushBody } = await import("./push.js");
+const { ConciergePush, FIXED_LINE, pushBody } = await import("./push.js");
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -124,7 +124,7 @@ describe("ConciergePush", () => {
     expect(sent.map((content) => content.body)).toEqual(["reply in B", "after leaving"]);
   });
 
-  it("leaves the turn's push to the answer after an acknowledgement the phone showed", async () => {
+  it("leaves the turn's push to the answer after an acknowledgement the phone showed, with the fixed line", async () => {
     const { PhoneWatching } = await import("../lib/phone-watching.js");
     const watching = new PhoneWatching();
     const { push, sent } = pushWith({ watching: (chatId) => watching.isWatching(chatId) });
@@ -135,7 +135,30 @@ describe("ConciergePush", () => {
     push.said({ turnId: "t1", chatId: "c", ownWords: "the answer", level: "active" });
     push.said({ turnId: "t1", chatId: "c", ownWords: "a follow-up", level: "active" });
     await settle();
-    expect(sent.map((content) => content.body)).toEqual(["the answer"]);
+    expect(sent).toEqual([{ body: FIXED_LINE.en, level: "active", chatId: "c" }]);
+  });
+
+  it("never shows a later message's words, where the Concierge puts a secret", async () => {
+    const { PhoneWatching } = await import("../lib/phone-watching.js");
+    const watching = new PhoneWatching();
+    const { push, sent } = pushWith({ watching: (chatId) => watching.isWatching(chatId) });
+    const unwatch = watching.watch("c");
+    push.said({
+      turnId: "t1",
+      chatId: "c",
+      ownWords: "Here is the code you asked for.",
+      level: "active",
+    });
+    await settle();
+    unwatch();
+    push.said({ turnId: "t1", chatId: "c", ownWords: "482913", level: "active" });
+    await settle();
+    expect(sent.map((content) => content.body)).toEqual([FIXED_LINE.en]);
+    expect(JSON.stringify(sent)).not.toContain("482913");
+    // A turn's first message, unwatched, still shows its own words.
+    push.said({ turnId: "t2", chatId: "c", ownWords: "Your report is ready", level: "active" });
+    await settle();
+    expect(sent.at(-1)?.body).toBe("Your report is ready");
   });
 
   it("spends the turn's push in quiet hours, so no later message pushes", async () => {

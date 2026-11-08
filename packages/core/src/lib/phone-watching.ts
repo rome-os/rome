@@ -1,6 +1,7 @@
 /**
- * The chats the guardian's phone app is showing now: each phone socket
- * subscribed to a chat's session topic counts once. The Concierge does not
+ * The chats the guardian's phone app is showing now: each guardian phone
+ * socket holding a chat's `chat.watch:<id>` topic counts once. Its
+ * `chat.session:` subscriptions never count. The Concierge does not
  * push what it says in a chat the phone is watching, since the guardian is
  * reading it there. A socket that drops without saying goodbye counts until
  * the live-events ping drops it.

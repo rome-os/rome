@@ -6972,6 +6972,53 @@ describe("Webchat API", () => {
       );
       expect(levels).toEqual(["active", undefined]);
     });
+
+    it("gives nothing said as an agent account, or by a loopback caller, under a guardian actor", async () => {
+      const levels: Array<string | undefined> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+          levels.push(options?.pushLevel);
+          return {
+            turnId: `turn-${levels.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+        name === "core:concierge" ? ({ name } as never) : undefined,
+      );
+      await deps.webchatRepo.createSession("push-chat", "Push");
+      const { routes, runtime } = createWebchatRuntime(deps);
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+      // An agent account posting into the chat (connections send), inside a guardian's request.
+      await runWithSessionActor(guardian, () =>
+        runtime.post(
+          "push-chat",
+          { text: "Status?" },
+          { platform: "webchat", id: "core:concierge" },
+        ),
+      );
+      // A loopback caller acting as the guardian, with no automated source named.
+      await runWithSessionActor(loopback, () =>
+        routes.request("/chat/sessions/push-chat/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "From a script" }),
+        }),
+      );
+      expect(levels).toEqual([undefined, undefined]);
+    });
   });
 
   describe("replying to a message", () => {
