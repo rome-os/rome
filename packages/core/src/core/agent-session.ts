@@ -31,6 +31,7 @@ import {
   type PromptFacts,
   type PromptMessage,
   type TurnUsageReporting,
+  type AgentLog,
 } from "../agent/index.js";
 import {
   NO_ROME_TOOLS,
@@ -71,8 +72,12 @@ import {
 } from "../routines/propose-routine-tool.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
-import type { AgentEvent, McpServerConfig } from "../types.js";
+import type { McpServerConfig } from "../agent/index.js";
 import type {
+  AgentEvent,
+  ForkRunMode,
+  ForkSourceCheckpoint,
+  ThreadContext,
   AgentTurnStatus,
   TurnErrorEvent,
   MessageReplyReference,
@@ -93,7 +98,7 @@ import type {
   ModelTier,
   ModelToolCallContext,
   ProviderId,
-} from "./agent-runner.js";
+} from "../agent/index.js";
 import {
   modelResolutionRequest,
   toModelResolutionErrorPayload,
@@ -103,8 +108,6 @@ import {
   type ModelResolver,
   type ModelSelectionId,
 } from "../agent/index.js";
-import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
-import { createLogger } from "../logger.js";
 import { enterSession } from "../telemetry-context.js";
 import { getTracer, startRomeSpan, withRomeSpan } from "../telemetry.js";
 import {
@@ -116,7 +119,7 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
-import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
+import { isTerminalEvent, isTransientDelta } from "../agent/index.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -128,14 +131,12 @@ import {
   buildRequiredTiming,
   createAgentTurnRef,
   type AgentTurnParentRef,
-} from "./agent-lifecycle.js";
+} from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-
-const log = createLogger("agent-session");
 
 export interface AgentSessionKey {
   agentName: string;
@@ -341,6 +342,8 @@ interface ManagerDeps {
   sessionSettings?: SessionSettings;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
+  /** Where the session logs. */
+  log: AgentLog;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** App-declared event sources: an event `defer` subscribes through them.
@@ -393,6 +396,7 @@ export function createAgentSessionManager(
   deps: ManagerDeps,
   options: ManagerOptions = {},
 ): AgentSessionManager {
+  const { log } = deps;
   const sessions = new Map<string, AgentSessionImpl>();
   const acquireLocks = new Map<string, Promise<AgentSessionImpl>>();
   const lifecycleMutex = new KeyedMutex();
@@ -766,6 +770,7 @@ async function openSession(
   init: AgentSessionInit,
   opts: OpenOptions,
 ): Promise<AgentSessionImpl> {
+  const { log } = deps;
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
   const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
@@ -1698,6 +1703,9 @@ class AgentSessionImpl implements AgentSession {
   /** Where the latest turn left the thread, if it did. A fork with no checkpoint branches here. */
   private lastPosition?: ModelPosition;
   private deps: ManagerDeps;
+  private get log(): AgentLog {
+    return this.deps.log;
+  }
   private config: AgentDefinition;
   private structuredOutputValidator?: AnswerShape;
   private systemPrompt: string;
@@ -1766,7 +1774,7 @@ class AgentSessionImpl implements AgentSession {
     (input, options) => this.sendTurn(input, options),
     () => this.modelSession,
     (error) =>
-      log.warn("conversational input dispatch failed", {
+      this.log.warn("conversational input dispatch failed", {
         sessionId: this.sessionId,
         error: error instanceof Error ? error.message : String(error),
       }),
@@ -1951,7 +1959,7 @@ class AgentSessionImpl implements AgentSession {
         if (!sink) {
           // No active turn — log and drop. Should not happen because
           // sendTurn allocates the sink before sendUserInput.
-          log.warn("agent session received event with no active turn", {
+          this.log.warn("agent session received event with no active turn", {
             type: event.type,
             sessionId: this.sessionId,
           });
@@ -2095,7 +2103,7 @@ class AgentSessionImpl implements AgentSession {
         }
       }
     } catch (err) {
-      log.warn("agent session events loop ended", {
+      this.log.warn("agent session events loop ended", {
         sessionId: this.sessionId,
         provider: session.providerId,
         error: err instanceof Error ? err.message : String(err),
@@ -2209,7 +2217,7 @@ class AgentSessionImpl implements AgentSession {
             romeAttrs: sink.romeAttrs,
           });
         } catch (err) {
-          log.warn("turn-span translator threw", {
+          this.log.warn("turn-span translator threw", {
             error: err instanceof Error ? err.message : String(err),
             sessionId: this.sessionId,
             turnId: sink.turnId,
@@ -2333,7 +2341,7 @@ class AgentSessionImpl implements AgentSession {
       // of the row would do.
       this.sessionPin = { providerId: session.providerId, model: session.model };
     } catch (err) {
-      log.warn("failed to persist session turn", {
+      this.log.warn("failed to persist session turn", {
         sessionId: this.sessionId,
         turnId,
         provider: session.providerId,
@@ -2360,7 +2368,7 @@ class AgentSessionImpl implements AgentSession {
   ): Promise<void> {
     const modelThreadId = forkSession.modelThreadId;
     if (!modelThreadId) {
-      log.info("fork thread not persisted: provider exposed no thread id", {
+      this.log.info("fork thread not persisted: provider exposed no thread id", {
         sessionId: this.sessionId,
         forkSessionId,
         provider: forkSession.providerId,
@@ -2383,7 +2391,7 @@ class AgentSessionImpl implements AgentSession {
       });
       await this.deps.sessionRepository.add(fork);
     } catch (err) {
-      log.warn("failed to persist fork thread; the branch stays one-shot", {
+      this.log.warn("failed to persist fork thread; the branch stays one-shot", {
         sessionId: this.sessionId,
         forkSessionId,
         channelThreadKey,
@@ -2410,7 +2418,7 @@ class AgentSessionImpl implements AgentSession {
       try {
         sub(msg, sink.turnId);
       } catch (err) {
-        log.warn("agent session subscriber threw", {
+        this.log.warn("agent session subscriber threw", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -2796,7 +2804,7 @@ class AgentSessionImpl implements AgentSession {
         try {
           await forkSession.close();
         } catch (err) {
-          log.warn("forked session close failed", {
+          this.log.warn("forked session close failed", {
             sessionId: this.sessionId,
             forkSessionId,
             error: err instanceof Error ? err.message : String(err),
@@ -2810,7 +2818,7 @@ class AgentSessionImpl implements AgentSession {
         try {
           await disposeForkResources();
         } catch (err) {
-          log.warn("forked session child cleanup failed", {
+          this.log.warn("forked session child cleanup failed", {
             sessionId: this.sessionId,
             forkSessionId,
             error: err instanceof Error ? err.message : String(err),
@@ -2824,7 +2832,7 @@ class AgentSessionImpl implements AgentSession {
       try {
         await this.touchSession();
       } catch (err) {
-        log.warn("failed to touch source session after fork", {
+        this.log.warn("failed to touch source session after fork", {
           sessionId: this.sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -2879,7 +2887,7 @@ class AgentSessionImpl implements AgentSession {
       !this.inputs.owns(sink.turnId)
     ) {
       void this.interrupt(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
-        log.warn("superseding the running turn failed", {
+        this.log.warn("superseding the running turn failed", {
           sessionId: this.sessionId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -3182,7 +3190,7 @@ class AgentSessionImpl implements AgentSession {
           if (emittedTerminal) {
             if (!droppedAfterTerminal) {
               droppedAfterTerminal = true;
-              log.warn("turn middleware emitted after its terminal event; dropping the rest", {
+              this.log.warn("turn middleware emitted after its terminal event; dropping the rest", {
                 sessionId: this.sessionId,
                 agentName: this.key.agentName,
                 turnId,
@@ -3197,7 +3205,7 @@ class AgentSessionImpl implements AgentSession {
           if (modelRan) {
             if (!droppedDuringModel) {
               droppedDuringModel = true;
-              log.warn("turn middleware emitted while the model was running; dropping it", {
+              this.log.warn("turn middleware emitted while the model was running; dropping it", {
                 sessionId: this.sessionId,
                 agentName: this.key.agentName,
                 turnId,
@@ -3245,11 +3253,14 @@ class AgentSessionImpl implements AgentSession {
           // Reached through next() after an emit, or through the chain's
           // fail-open next() after a throw. A model run would publish a second
           // terminal and pay for a second reply.
-          log.warn("turn middleware continued to the model after its terminal event; skipped", {
-            sessionId: this.sessionId,
-            agentName: this.key.agentName,
-            turnId,
-          });
+          this.log.warn(
+            "turn middleware continued to the model after its terminal event; skipped",
+            {
+              sessionId: this.sessionId,
+              agentName: this.key.agentName,
+              turnId,
+            },
+          );
           return;
         }
         if (sink.lifecycleInterrupted) {
@@ -3278,7 +3289,7 @@ class AgentSessionImpl implements AgentSession {
                 this.deps.promptFacts.seen(unseenMessageIds, sink.romeSessionId, sink.turnId);
               } catch (err) {
                 // As below: the turn goes on, and a later turn retries.
-                log.warn("failed to mark conversation context seen", {
+                this.log.warn("failed to mark conversation context seen", {
                   romeSessionId: sink.romeSessionId,
                   turnId: sink.turnId,
                   error: err instanceof Error ? err.message : String(err),
@@ -3306,12 +3317,15 @@ class AgentSessionImpl implements AgentSession {
           // terminal already emitted or on the model's.
           if (!emittedTerminal && !modelRan) throw err;
           if (err instanceof Error && this.currentAgentSpan === span) span.recordException(err);
-          log.warn("turn middleware threw after its terminal event or after starting the model", {
-            sessionId: this.sessionId,
-            agentName: this.key.agentName,
-            turnId,
-            error: err instanceof Error ? err.message : String(err),
-          });
+          this.log.warn(
+            "turn middleware threw after its terminal event or after starting the model",
+            {
+              sessionId: this.sessionId,
+              agentName: this.key.agentName,
+              turnId,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          );
         }
       } else {
         await runModelTerminal();
@@ -3459,7 +3473,7 @@ class AgentSessionImpl implements AgentSession {
     if (this.status === "closed") return;
     this.inputs.close();
     this.closingPromise = (async () => {
-      log.info("agent session closing", {
+      this.log.info("agent session closing", {
         sessionId: this.sessionId,
         agentName: this.key.agentName,
         reason,
@@ -3475,7 +3489,7 @@ class AgentSessionImpl implements AgentSession {
       try {
         await this.modelSession.close();
       } catch (err) {
-        log.warn("modelSession close threw", {
+        this.log.warn("modelSession close threw", {
           error: err instanceof Error ? err.message : String(err),
         });
       }

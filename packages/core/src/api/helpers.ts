@@ -6,7 +6,7 @@ import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
 import { isValidAppId } from "../apps/packaging/app-id.js";
-import type { TransientDeltaType } from "../core/agent-message.js";
+import type { TransientDeltaType } from "../agent/index.js";
 
 /** Connections and channels are owned by the ConnectionRegistry. The
  *  daemon always injects `connectionRegistry`; a missing one is a wiring bug,

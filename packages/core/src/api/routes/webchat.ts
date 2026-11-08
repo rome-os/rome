@@ -53,7 +53,7 @@ import {
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
-import { createAgentTurnRef } from "../../core/agent-lifecycle.js";
+import { createAgentTurnRef } from "../../agent/index.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import { openedInChat } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
@@ -96,7 +96,7 @@ import {
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
-import { isTransientDelta } from "../../core/agent-message.js";
+import { isTransientDelta } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import type {
   BackendEmitOptions,

@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -99,6 +100,7 @@ describe("AgentSession turn push level", () => {
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
+        log: createLogger("agent-session"),
         sessionTools: async (context) => {
           tools = context;
           return [];

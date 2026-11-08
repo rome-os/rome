@@ -11,7 +11,7 @@ import type {
   TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { toTraceEvent } from "./helpers.js";
-import { isTerminalEvent } from "../core/agent-message.js";
+import { isTerminalEvent } from "../agent/index.js";
 
 export type {
   AppRefDto,

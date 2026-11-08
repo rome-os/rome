@@ -1,3 +1,4 @@
+import { createLogger } from "../../logger.js";
 import { sessionOpeningFor } from "../../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../../agent/index.js";
@@ -291,6 +292,7 @@ async function buildHarness(
       readAnswerShape,
       turnUsage: new TurnUsageReporter(),
       folders: agentFolders(),
+      log: createLogger("agent-session"),
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );

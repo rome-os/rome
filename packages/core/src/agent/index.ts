@@ -72,6 +72,16 @@ export {
   type TurnLifecycleListener,
 } from "./domain/turn-lifecycle.js";
 export {
+  buildRequiredTiming,
+  createAgentTurnRef,
+  type AgentTurnParentRef,
+} from "./domain/turn-ref.js";
+export {
+  isTerminalEvent,
+  isTransientDelta,
+  type TransientDeltaType,
+} from "./domain/turn-events.js";
+export {
   requireAgent,
   type Agent,
   type AgentCatalog,
