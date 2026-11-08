@@ -29,6 +29,7 @@ A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`;
 - When adding a runtime dependency, declare it in `packages/core`.
 - When bumping `@playwright/test`, re-pin the `layout-invariants` container image in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to the matching release's digest (`docker buildx imagetools inspect mcr.microsoft.com/playwright:v<version>-noble` prints it). The image ships the browsers, the pin decides the client, and they are separate edits. Check the guard step's parse of `playwright install --dry-run` in the same pass, since it reads a CLI label that upstream can reword. The guard fails readably when the image and the client disagree.
 - When accessing the database, go through a repository. Core schema is `packages/core/src/db/schema.ts`, app schemas are `rome_apps/*/db/schema.ts`.
+- When changing an API route or event that the iOS app reads (calls in `ios/Rome/Networking`), keep it backward compatible: add fields, never rename or remove them, and never change a field's type. Older app builds stay installed on phones, and the app runs against older instances.
 - When adding config, validate it with Zod in `packages/core/src/config.ts` and add it to `packages/core/.env.example`.
 - When logging, use `createLogger(component)` from `packages/core/src/logger.ts`.
 
