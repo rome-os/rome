@@ -2311,20 +2311,21 @@ describe("AgentRunner", () => {
     const manager = createAgentSessionManager(
       {
         ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
-        ...(options.resetPolicy
-          ? {
-              sessionSettings: new ChatSessionSettings({
-                resetPolicy: async () => options.resetPolicy!,
-                webchatRepo: new ChatsWebChatRepository(testDb.db),
-              }),
-            }
-          : {}),
         ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
+    const resetPolicy = options.resetPolicy;
     // A recorded run has its conversation's row, which its subagents need.
-    return new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
+    return new AgentRunner(
+      manager,
+      agentLoader,
+      new ChatsWebChatRepository(testDb.db),
+      undefined,
+      undefined,
+      undefined,
+      resetPolicy ? async () => resetPolicy : undefined,
+    );
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {

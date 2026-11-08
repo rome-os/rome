@@ -25,6 +25,7 @@ import type {
   AgentTurnInput,
 } from "./agent-session.js";
 import { createLogger } from "../logger.js";
+import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import {
@@ -56,7 +57,7 @@ const SUMMON_ACTION = "system:summon";
 
 export interface RunTurnRequest {
   key: AgentSessionKey;
-  init?: AgentSessionInit & {
+  init?: Omit<AgentSessionInit, "resetPolicy"> & {
     /** The chat the caller names, which the bridge records as having the session. */
     romeSessionId?: string;
   };
@@ -106,6 +107,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
     private runLineDeps?: RunLineDeps,
+    /** The reset policy of a connected account's chat. Absent, no session is reset. */
+    private resetPolicyOf?: ChatResetPolicy,
   ) {}
 
   /**
@@ -180,17 +183,22 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // construction. Mark it so `rome.session.acquire` labels these opens
         // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
         const { romeSessionId: namedChat, ...sessionInit } = req.init ?? {};
-        const init = {
-          ...sessionInit,
-          workingDir,
-          isSubagent: true,
-          applyProviderSessionReset: Boolean(req.platformMessageId),
-        };
         const acquireStartedAt = Date.now();
         log.info("agent.session.manager.acquire started", baseLogFields);
 
         let session: AgentSession;
         try {
+          const init = {
+            ...sessionInit,
+            workingDir,
+            isSubagent: true,
+            // Read here, never taken from the worker's request.
+            resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+              platformMessageId: req.platformMessageId,
+              sessionId: req.sessionId,
+              threadContext: sessionInit.threadContext,
+            }),
+          };
           session = req.sessionId
             ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
             : await this.manager.acquire(req.key, init);

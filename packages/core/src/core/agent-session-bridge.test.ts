@@ -13,6 +13,7 @@ import type {
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
+import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { canOpen } from "../concierge/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
@@ -438,7 +439,7 @@ describe("AgentSessionBridge working dir", () => {
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function setup(callerWorkingDirs: Record<string, string> = {}) {
+  function setup(callerWorkingDirs: Record<string, string> = {}, resetPolicyOf?: ChatResetPolicy) {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
@@ -466,7 +467,15 @@ describe("AgentSessionBridge working dir", () => {
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, undefined, projectsRoot).attach(
+    new AgentSessionBridge(
+      manager,
+      undefined,
+      undefined,
+      undefined,
+      projectsRoot,
+      undefined,
+      resetPolicyOf,
+    ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -517,6 +526,18 @@ describe("AgentSessionBridge working dir", () => {
     expect(outside.error).toContain("is not inside the projects root");
     expect(traversal.error).toBeDefined();
     expect(acquired).toEqual([]);
+  });
+
+  it("opens with the reset policy of the message's chat, never one the worker sends", async () => {
+    const policy = { mode: "idle", idleMinutes: 60 } as const;
+    const { acquired, runTurn } = setup({}, async () => policy);
+    const threadContext = { channel: "telegram", connectionId: "telegram-1", threadId: "t-1" };
+    const forged = { mode: "idle", idleMinutes: 1 };
+
+    await runTurn({ platformMessageId: "m-1", init: { threadContext, resetPolicy: forged } });
+    await runTurn({ init: { threadContext, resetPolicy: forged } });
+
+    expect(acquired.map((init) => init.resetPolicy)).toEqual([policy, undefined]);
   });
 
   it("inherits the calling session's working dir for a summon run with none requested", async () => {
