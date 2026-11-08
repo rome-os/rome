@@ -28,7 +28,9 @@ Rome Cloud holds a copy of every instance's visitor emails. The copy can lag the
 
 Delivery runs in the background and never fails or slows the save. A failed send retries with backoff, and only the newest list is ever sent. A newer revision that reaches Rome Cloud first wins over an older one that arrives late. A list counts as delivered only when Rome Cloud says it applied it. When Rome Cloud holds a higher revision than the instance, as after a database reset or a restore from an older backup, it does not apply the list. The instance then stores a revision past Rome Cloud's and sends the list again. An unlinked instance sends nothing and sends its list once it links.
 
-Rome Cloud keeps nothing for a listed email that has no account yet, and reports those emails back. When one of them signs in as a visitor, the instance sends its list again so Rome Cloud can match the new account. Other sign-ins send nothing.
+Rome Cloud keeps nothing for a listed email that has no account yet, and does not say which listed emails have one, so an instance credential cannot test emails for accounts. The instance remembers which listed emails have signed in as a visitor, and forgets an email when it leaves the list. A listed email's first sign-in, from a browser or the phone, sends the list again so Rome Cloud can match an account made since the last sync. Later sign-ins send nothing.
+
+An invited person who makes a Rome Cloud account only on the phone is not listed there until the instance next sends its list: a save, a boot, a link, or that person's first sign-in through a browser. Without an account, Rome Cloud has nothing to match, and the instance never learns about the new account, so nothing sends the list on its own. No poll closes this gap.
 
 Rome Cloud deploys the endpoint before instances start calling it. A Rome Cloud without it answers 404, which the instance does not retry until its next save, boot, or link.
 
