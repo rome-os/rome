@@ -84,9 +84,10 @@ describe("subagent calls through the run's ports", () => {
   let db: TestDb;
   let repo: WebChatRepository;
   let calls: SubagentCalls;
-  // Calls the service the way the run does, from what the run knows of its turn.
+  // Starts a call from a calling turn whose subagent sessions open through
+  // the core adapter, with the parent's session manager.
   const createService = () => ({
-    async startSubagent(
+    startSubagent(
       name: string,
       input: unknown,
       context: {
@@ -100,7 +101,7 @@ describe("subagent calls through the run's ports", () => {
         workingDir: string;
       },
     ) {
-      const call = await calls.call(name, subagentRequest(input), {
+      return calls.call(name, subagentRequest(input), {
         key: {
           dashboardSessionId: context.parentSessionId,
           turnId: context.parentTurnId,
@@ -111,17 +112,6 @@ describe("subagent calls through the run's ports", () => {
         sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo),
         at: { workingDir: context.workingDir },
       });
-      return {
-        sessionId: call.sessionId,
-        turnId: call.turnId,
-        agentName: call.subagent,
-        completion: call.outcome.then((outcome) => ({
-          ...outcome,
-          sessionId: call.sessionId,
-          turnId: call.turnId,
-        })),
-        interrupt: (reason?: string) => call.cancel(reason),
-      };
     },
   });
 
@@ -185,7 +175,7 @@ describe("subagent calls through the run's ports", () => {
     expect(execution1).toMatchObject({
       sessionId: "child-1",
       turnId: "child-turn-1",
-      agentName: "researcher",
+      subagent: "researcher",
     });
     expect(first.calls[0].options?.lifecycleParent).toEqual({
       sessionId: "parent-runtime-1",
@@ -193,23 +183,21 @@ describe("subagent calls through the run's ports", () => {
       agentName: "main",
     });
     let completed = false;
-    void execution1.completion.then(() => {
+    void execution1.outcome.then(() => {
       completed = true;
     });
     await Promise.resolve();
     expect(completed).toBe(false);
 
     first.releases[0].resolve();
-    await expect(execution1.completion).resolves.toEqual({
+    await expect(execution1.outcome).resolves.toEqual({
       status: "completed",
-      sessionId: "child-1",
-      turnId: "child-turn-1",
       output: "answer:one",
     });
     // Completion alone does not forget the call. The Parent forgets it only
     // after its ordinary tool_result has been persisted.
     expect(calls.forget(callKey)).toBe(true);
-    await execution1.interrupt("late Parent interrupt");
+    await execution1.cancel("late Parent interrupt");
     expect(first.interrupt).not.toHaveBeenCalled();
 
     const execution2 = await service.startSubagent(
@@ -220,7 +208,7 @@ describe("subagent calls through the run's ports", () => {
     expect(execution2.sessionId).toBe("child-2");
     expect(execution2.sessionId).not.toBe(execution1.sessionId);
     second.releases[0].resolve();
-    await execution2.completion;
+    await execution2.outcome;
 
     const childMessages = await repo.getMessages("child-1");
     expect(childMessages.filter((message) => message.role === "user")).toHaveLength(1);
@@ -266,9 +254,9 @@ describe("subagent calls through the run's ports", () => {
     );
     child.releases[0].resolve();
 
-    await expect(execution.completion).resolves.toMatchObject({
+    expect(execution.sessionId).toBe("child-unrecorded");
+    await expect(execution.outcome).resolves.toMatchObject({
       status: "completed",
-      sessionId: "child-unrecorded",
       output: "answer:one",
     });
   });
@@ -352,7 +340,7 @@ describe("subagent calls through the run's ports", () => {
       replace: true,
     });
     resumed.releases[0].resolve();
-    await execution.completion;
+    await execution.outcome;
 
     await expect(
       service.startSubagent(
