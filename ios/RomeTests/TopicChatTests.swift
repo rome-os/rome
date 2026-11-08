@@ -9,7 +9,7 @@ import Testing
     }
 
     private func workspace(_ backend: FakeBackend) -> Workspace {
-        Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test")
+        Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-tests-\(UUID().uuidString)/Drafts"), instance: "test"))
     }
 
     @Test func aBlankChatCreatesNothingUntilTheFirstSend() async {

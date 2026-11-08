@@ -44,7 +44,7 @@ import Testing
 
     @Test func aStarterInABlankTopicChatStartsItThenSends() async {
         let backend = FakeBackend()
-        let workspace = Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test")
+        let workspace = Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-tests-\(UUID().uuidString)/Drafts"), instance: "test"))
         _ = await workspace.startTopicChat(firstMessage: Suggestion.all[0].text)
         await settle()
         #expect(backend.calls == ["start", "send topic-1 Summarize this week's AI news"])

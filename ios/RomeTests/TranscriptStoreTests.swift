@@ -328,7 +328,7 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
     /// A blank topic chat hands its message to the new chat's store, shown at once.
     @Test func aNewTopicChatShowsItsFirstMessageWithoutLoading() async {
         let backend = FakeBackend()
-        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "first-send-\(UUID().uuidString)"), instance: "t"))
+        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "first-send-\(UUID().uuidString)/Drafts"), instance: "t"))
         var loadedDuringFetch: Bool?
         backend.duringNewestFetch = { loadedDuringFetch = workspace.topicStore("topic-1").loaded }
         let id = await workspace.startTopicChat(firstMessage: "Trip ideas")

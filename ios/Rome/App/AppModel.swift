@@ -122,6 +122,8 @@ final class Workspace {
 
     /// What the guardian left in each chat's composer, on this phone.
     let drafts: DraftStore
+    /// The newest messages of the main Chat and topic chats, on this phone.
+    let transcripts: TranscriptCache
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
@@ -129,10 +131,17 @@ final class Workspace {
         self.host = host
         self.accountLabel = accountLabel
         self.drafts = drafts ?? DraftStore(instance: host)
+        // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
+        transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance)
         tasks = TasksStore(backend: backend)
-        // The guardian's main chat until the server names this person's.
-        let main = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
-        main.drafts = ChatDrafts(store: self.drafts, chat: conciergeChatID)
+        // The main chat's id from last time, else the guardian's until the
+        // server names this person's. Its kept rows show before any fetch.
+        let mainId = transcripts.mainChat() ?? conciergeChatID
+        let main = TranscriptStore(sessionId: mainId, kind: .concierge, backend: backend)
+        main.drafts = ChatDrafts(store: self.drafts, chat: mainId)
+        main.cache = transcripts
+        main.showCached()
+        if main.loaded { conciergeState = .ready }
         concierge = main
         topics = TopicChatsStore(backend: backend)
     }
@@ -141,6 +150,8 @@ final class Workspace {
         if let store = topicStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: chatId)
+        store.cache = transcripts
+        store.showCached()
         topicStores[chatId] = store
         return store
     }
@@ -224,19 +235,27 @@ final class Workspace {
         await openConcierge()
     }
 
+    /// Kept rows from last time stay on screen while this runs, and when the
+    /// instance cannot be reached: the store fetches again when it is back.
     func openConcierge() async {
-        conciergeState = .loading
+        if !concierge.loaded { conciergeState = .loading }
         do {
             let info = try await backend.conciergeSession()
             unreadAtOpen = info.unread
             mainChatServerID = info.id
             useMainChat(info.id)
+            transcripts.setMainChat(info.id)
             conciergeState = .ready
             concierge.start()
         } catch APIError.conciergeOff {
             conciergeState = .off
         } catch {
-            conciergeState = .failed
+            if concierge.loaded {
+                conciergeState = .ready
+                concierge.start()
+            } else {
+                conciergeState = .failed
+            }
         }
     }
 
@@ -250,6 +269,8 @@ final class Workspace {
         drafts.move(chat: concierge.sessionId, to: id)
         let store = TranscriptStore(sessionId: id, kind: .concierge, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: id)
+        store.cache = transcripts
+        store.showCached()
         concierge = store
     }
 
@@ -286,6 +307,7 @@ final class Workspace {
         for store in topicStores.values { store.stop() }
         for store in taskStores.values { store.stop() }
         backend.events.pause()
+        transcripts.flush()
     }
 }
 
@@ -312,6 +334,9 @@ final class AppModel {
 
     private enum Defaults {
         static let lastInstance = "lastInstanceID"
+        /// The instance last opened, as Rome Cloud listed it: opened again
+        /// when Rome Cloud cannot be reached at launch.
+        static let lastInstanceRecord = "lastInstanceRecord"
         static let hintShown = "autoOpenHintShown"
     }
 
@@ -443,11 +468,25 @@ final class AppModel {
         } catch AuthError.cloudUnauthorized {
             phase = .signedOut
         } catch {
-            if workspace == nil {
-                signInError = (error as? LocalizedError)?.errorDescription
-                phase = .signedOut
+            guard workspace == nil else { return }
+            // Offline: the last instance opens with its stored session, so its
+            // kept chats show. Without one, sign-in says what went wrong.
+            if error as? AuthError == .network, let last = Self.rememberedInstance() {
+                instances = [last]
+                await connect(to: last)
+                return
             }
+            signInError = (error as? LocalizedError)?.errorDescription
+            phase = .signedOut
         }
+    }
+
+    private static func rememberedInstance() -> CloudInstance? {
+        guard let data = UserDefaults.standard.data(forKey: Defaults.lastInstanceRecord),
+              let instance = try? JSONDecoder().decode(CloudInstance.self, from: data),
+              instance.id == UserDefaults.standard.string(forKey: Defaults.lastInstance)
+        else { return nil }
+        return instance
     }
 
     /// `keepUpdate`: reaching the instance an upgrade waits on, which keeps the
@@ -460,6 +499,7 @@ final class AppModel {
             let session = try await cloud.session(for: instance)
             token.use(session)
             UserDefaults.standard.set(instance.id, forKey: Defaults.lastInstance)
+            UserDefaults.standard.set(try? JSONEncoder().encode(instance), forKey: Defaults.lastInstanceRecord)
             currentInstanceID = instance.id
             // Signed in to Rome Cloud: this launch's token, if it has one yet.
             Task { await push.upload() }
@@ -532,6 +572,7 @@ final class AppModel {
     private func take(_ list: [CloudInstance]) {
         instances = list
         DraftStore.removeInstances(keeping: Set(list.map(\.host)))
+        TranscriptCache.removeInstances(keeping: Set(list.map(\.host)))
     }
 
     func retry() async {
@@ -550,8 +591,10 @@ final class AppModel {
         pendingPush = nil
         await push.signOut { await cloud.signOut() }
         DraftStore.removeAll()
+        TranscriptCache.removeAll()
         ImageDiskCache.shared.removeAll()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
+        UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
         instances = []
         currentInstanceID = nil
         sessionExpired = false
@@ -621,6 +664,7 @@ final class AppModel {
         foreground.enteredBackground(at: .now)
         // Drafts are written before the app may be killed.
         if let drafts = workspace?.drafts { Task { await drafts.flush() } }
+        workspace?.transcripts.flush()
         sayGoodbye()
     }
 
@@ -806,21 +850,25 @@ final class AppModel {
         request.httpBody = try? JSONEncoder().encode(["userId": user, "password": password])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
-        guard let (_, response) = try? await URLSession(configuration: configuration).data(for: request),
-              let http = response as? HTTPURLResponse,
-              let cookie = http.value(forHTTPHeaderField: "Set-Cookie"),
-              let value = cookie.components(separatedBy: ";").first?.components(separatedBy: "rome_session=").last
-        else {
+        let reply = try? await URLSession(configuration: configuration).data(for: request)
+        let drafts = DraftStore(instance: DraftStore.localInstance(url.host() ?? origin))
+        if let http = reply?.1 as? HTTPURLResponse,
+           let cookie = http.value(forHTTPHeaderField: "Set-Cookie"),
+           let value = cookie.components(separatedBy: ";").first?.components(separatedBy: "rome_session=").last {
+            token.token = value
+        } else if reply == nil, TranscriptCache(instance: drafts.instance).mainChat() != nil {
+            // Unreachable, as the cloud path is offline: open on the kept chats.
+            token.token = nil
+        } else {
             signInError = String(localized: "Could not reach the local Rome")
             phase = .signedOut
             return
         }
-        token.token = value
         let local = CloudInstance(id: "local", name: String(localized: "Local Rome"), slug: "local", origin: origin, status: "running")
         instances = [local]
         currentInstanceID = local.id
         let client = APIClient(origin: url, token: { [token] in token.token })
-        await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user, drafts: DraftStore(instance: DraftStore.localInstance(url.host() ?? origin))))
+        await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user, drafts: drafts))
     }
     #endif
 }

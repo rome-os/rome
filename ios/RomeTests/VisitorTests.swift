@@ -12,7 +12,7 @@ import Testing
     }
 
     private func draftStore() -> DraftStore {
-        DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-visitor-\(UUID().uuidString)", directoryHint: .isDirectory), instance: "team.romeos.cc")
+        DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-visitor-\(UUID().uuidString)/Drafts", directoryHint: .isDirectory), instance: "team.romeos.cc")
     }
 
     @Test func aVisitorsTranscriptGoesByTheirOwnChatId() async {

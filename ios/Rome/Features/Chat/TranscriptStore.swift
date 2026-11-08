@@ -56,6 +56,12 @@ final class TranscriptStore {
     private var approvalPolls: [String: Task<Void, Never>] = [:]
     /// Where a send is kept until the server takes it.
     var drafts: ChatDrafts?
+    /// Where the newest messages are kept across launches: the main Chat and
+    /// topic chats only.
+    var cache: TranscriptCache?
+    /// The rows came from `cache`: the first fetch sets the paging and
+    /// replaces what it covers.
+    private var fromCache = false
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
 
@@ -105,6 +111,16 @@ final class TranscriptStore {
         hasOlder = false
     }
 
+    /// Shows the rows kept from last time, before anything is fetched. The
+    /// first fetch merges into them by id, so nothing moves that is still there.
+    func showCached() {
+        guard !loaded, messages.isEmpty, let kept = cache?.messages(chat: sessionId) else { return }
+        merge(kept, persist: false)
+        loaded = true
+        hasOlder = false
+        fromCache = true
+    }
+
     func stop() {
         for token in tokens { backend.events.unsubscribe(token) }
         tokens = []
@@ -125,6 +141,8 @@ final class TranscriptStore {
                 messages = []
                 seen = [:]
                 olderPage = nil
+            } else if fromCache {
+                pruneCached(against: page)
             }
             merge(page.messages)
             // Replies a refetch brings count like live ones: the list marks
@@ -132,9 +150,10 @@ final class TranscriptStore {
             if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
                 arrivals += 1
             }
-            if !loaded || gap {
+            if !loaded || gap || fromCache {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil
+                fromCache = false
             }
             loaded = true
             loadError = nil
@@ -143,6 +162,19 @@ final class TranscriptStore {
             loadError = error
             loaded = true
         } catch {}
+    }
+
+    /// The server wins: a kept row the page should hold but does not was
+    /// deleted. Kept rows older than the page stay until the older page,
+    /// fetched from the page's cursor, brings them again.
+    private func pruneCached(against page: MessagePage) {
+        let fresh = Set(page.messages.map(\.id))
+        let oldest = page.messages.map(\.date).min()
+        messages.removeAll { message in
+            guard !fresh.contains(message.id) else { return false }
+            guard page.nextCursor != nil, let oldest else { return true }
+            return message.date >= oldest
+        }
     }
 
     /// Fetches the newest page without touching paging state.
@@ -189,7 +221,7 @@ final class TranscriptStore {
     /// when they started, rows in a turn by time. Times are whole seconds, so
     /// rows and turns that tie within a second keep the order they first
     /// arrived in; the order never changes when the same rows arrive again.
-    private func merge(_ incoming: [ChatMessage]) {
+    private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for message in incoming {
             byID[message.id] = message
@@ -216,6 +248,7 @@ final class TranscriptStore {
         }
         let stored = Set(messages.map(\.id))
         pending.removeAll { stored.contains($0.id) }
+        if persist { cache?.save(chat: sessionId, messages: messages) }
     }
 
     // MARK: Live events
