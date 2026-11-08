@@ -18,7 +18,6 @@ import { AgentLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
@@ -155,7 +154,7 @@ describe("AgentSession turn usage", () => {
           accounts: fakeAccounts(() => state),
           codexLogins: { login: () => loginsOn(resolverUsesRomeCredits).login() },
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
+        networkMcpServers: () => ({}),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,

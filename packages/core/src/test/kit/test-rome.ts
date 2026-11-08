@@ -50,7 +50,6 @@ import { createModelResolver } from "../../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
 import { AppTurnHooks, TurnListeners } from "../../agent/index.js";
-import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
@@ -283,9 +282,8 @@ async function buildHarness(
       sessionRepository: repos.sessions,
       systemPrompts,
       modelResolver,
-      // Real but inert collaborators: CapabilityDiscovery is never start()ed
-      // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
-      capabilityDiscovery: new CapabilityDiscovery(),
+      // No network MCP servers, and the dispatcher has no hooks loaded.
+      networkMcpServers: () => ({}),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: new TurnListeners(new AppTurnHooks()),
       readAnswerShape,

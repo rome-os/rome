@@ -14,7 +14,6 @@ import { ActionEngine } from "../actions/engine.js";
 import { AgentLoader } from "../agent/index.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import type { RomeToolGroup, RomeTools } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
@@ -499,7 +498,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     systemPrompts,
     modelResolver,
     skillCatalog: harness.skillCatalog,
-    capabilityDiscovery: new CapabilityDiscovery(),
+    networkMcpServers: () => ({}),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),

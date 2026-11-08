@@ -91,7 +91,6 @@ import {
   type AgentTurnHandle,
 } from "./agent-session.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
 import { SkillLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners, type TurnLifecycle } from "../agent/index.js";
 import type {
@@ -2263,9 +2262,8 @@ describe("AgentRunner", () => {
     };
   }
 
-  // Full ManagerDeps over the suite's shared collaborators. CapabilityDiscovery
-  // is never start()ed and the default dispatcher has no hooks loaded, so both
-  // are real-but-inert.
+  // Full ManagerDeps over the suite's shared collaborators. No network MCP
+  // servers are found, and the default dispatcher has no hooks loaded.
   function managerDeps(
     modelResolver: ModelResolver,
     turnLifecycle?: TurnLifecycle,
@@ -2285,7 +2283,7 @@ describe("AgentRunner", () => {
       sessionSettings: new ChatSessionSettings({
         webchatRepo: new ChatsWebChatRepository(testDb.db),
       }),
-      capabilityDiscovery: new CapabilityDiscovery(),
+      networkMcpServers: () => ({}),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
       readAnswerShape,
