@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ has an update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 有新版本可以更新"
+          }
+        }
+      }
+    },
     "%@ usage" : {
       "localizations" : {
         "zh-Hans" : {
@@ -93,16 +103,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
-          }
-        }
-      }
-    },
-    "A new version of Rome is available" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 有新版本，建议更新"
           }
         }
       }
@@ -1041,16 +1041,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新的话题聊天"
-          }
-        }
-      }
-    },
-    "New version available" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新版本可用"
           }
         }
       }
@@ -2337,22 +2327,22 @@
         }
       }
     },
+    "Update %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新 %@"
+          }
+        }
+      }
+    },
     "Update now" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "立即更新"
-          }
-        }
-      }
-    },
-    "Update your Rome" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新你的 Rome"
           }
         }
       }

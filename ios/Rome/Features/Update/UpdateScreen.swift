@@ -167,8 +167,10 @@ struct UpdateScreen: View {
             .transition(.opacity)
         default:
             VStack(spacing: 8) {
-                Text("Update your Rome")
+                // The Rome by name, never read as an update to this app.
+                Text(verbatim: UpdateCopy.action(instanceName))
                     .romeFont(28, .bold)
+                    .lineLimit(1)
                     .tracking(-0.7)
                 if latestChanged {
                     Text("A newer release just came out.")

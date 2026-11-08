@@ -79,8 +79,9 @@ struct DrawerView: View {
 
             // A guardian's Rome behind its latest release; a visitor's is never checked.
             if model.update.offered != nil {
-                DrawerUpdateRow(action: onUpdate)
-                    .padding(.horizontal, 8)
+                DrawerUpdateRow(instanceName: workspace.instanceName, action: onUpdate)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
             }
 
             Button(action: onSettings) {

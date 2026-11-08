@@ -264,6 +264,16 @@ final class Counter: @unchecked Sendable {
         #expect(UpdateGate.isSupported("dev"))
     }
 
+    /// The prompts name the Rome, never this app, on one line.
+    @Test func thePromptsNameTheRome() {
+        #expect(UpdateCopy.banner("My Rome") == "My Rome has an update")
+        #expect(UpdateCopy.action("Team Rome") == "Update Team Rome")
+        #expect(UpdateCopy.shortName("  Short  ") == "Short")
+        let long = UpdateCopy.shortName("The Kyoto planning and family Rome")
+        #expect(long.count == UpdateCopy.nameLimit)
+        #expect(long.hasPrefix("The Kyoto") && long.hasSuffix("ly Rome") && long.contains("…"))
+    }
+
     @Test func behindButSupportedIsOnlyOffered() async {
         let backend = FakeBackend()
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))

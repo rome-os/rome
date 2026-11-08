@@ -213,7 +213,7 @@ struct MainShell: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else if model.update.showsBanner, !drawerOpen {
                 // The drawer has its own line for it.
-                UpdateBanner(onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
+                UpdateBanner(instanceName: workspace.instanceName, onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
                     .padding(.top, 58)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }

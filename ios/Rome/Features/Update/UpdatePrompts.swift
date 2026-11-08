@@ -1,8 +1,25 @@
 import SwiftUI
 
+/// Words that name the Rome being updated, so no one reads them as an update
+/// to this app. A long name is cut in the middle, keeping each line to one.
+enum UpdateCopy {
+    static let nameLimit = 18
+
+    static func shortName(_ name: String, limit: Int = nameLimit) -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name.count > limit else { return name }
+        let head = (limit - 1) / 2 + (limit - 1) % 2, tail = (limit - 1) / 2
+        return String(name.prefix(head)) + "…" + String(name.suffix(tail))
+    }
+
+    static func banner(_ name: String) -> String { String(localized: "\(shortName(name)) has an update") }
+    static func action(_ name: String) -> String { String(localized: "Update \(shortName(name))") }
+}
+
 /// Slides down when the open Rome has a release it can do without: Update
 /// opens the update page, the cross closes it for that release.
 struct UpdateBanner: View {
+    let instanceName: String
     let onUpdate: () -> Void
     let onClose: () -> Void
 
@@ -11,10 +28,10 @@ struct UpdateBanner: View {
             Image(systemName: "arrow.down.circle")
                 .romeFont(15, .semibold)
                 .foregroundStyle(Palette.primaryText)
-            Text("A new version of Rome is available")
+            Text(verbatim: UpdateCopy.banner(instanceName))
                 .romeFont(14, .medium)
                 .foregroundStyle(Palette.fg)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
             Spacer(minLength: 4)
             Button(action: onUpdate) {
                 Text("Update")
@@ -45,25 +62,31 @@ struct UpdateBanner: View {
     }
 }
 
-/// The drawer's quiet line above the account row while the open Rome is
-/// behind; it opens the update page.
+/// The drawer's one row that asks for action while the open Rome is behind:
+/// the accent on a light tint, shaped like the drawer's rows, never raised
+/// like the selected one. It opens the update page.
 struct DrawerUpdateRow: View {
+    let instanceName: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "arrow.down.circle")
-                    .romeFont(14, .medium)
-                Text("New version available")
-                    .romeFont(14)
+                    .romeFont(16, .medium)
+                    .frame(width: 22)
+                Text(verbatim: UpdateCopy.action(instanceName))
+                    .romeFont(15, .medium)
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .romeFont(12, .semibold)
             }
-            .foregroundStyle(Palette.sub)
+            .foregroundStyle(Palette.primaryText)
             .padding(.horizontal, 12)
-            .frame(height: 36)
-            .contentShape(Rectangle())
+            .frame(height: 42)
+            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
     }
