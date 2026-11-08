@@ -3,6 +3,7 @@
 
 import { createHash } from "node:crypto";
 import { isCoreMainAgentId, type StreamAgentEvent } from "@rome-os/app-runtime";
+import type { DashboardSession, NewSubagentSession } from "./dashboard-sessions.js";
 import type { ModelToolCallContext } from "./rome-tools.js";
 import type { AgentName, SessionId } from "./session.js";
 
@@ -52,14 +53,12 @@ export function subagentRequest(input: unknown): SubagentRequest {
   };
 }
 
-/** A stored session's dashboard record, as a resume reads it. */
-export interface StoredSubagentSession {
-  type: string;
-  /** Null for the core main agent, which reads as `main`. */
-  agentName: AgentName | null;
-  parentSessionId: SessionRecordId | null;
-  projectPath: string | null;
-}
+/** A stored session's dashboard record, as a resume reads it. A null agent
+ *  name is the core main agent's, which reads as `main`. */
+export type StoredSubagentSession = Pick<
+  DashboardSession,
+  "type" | "agentName" | "parentSessionId" | "projectPath"
+>;
 
 /**
  * Why a resume may not continue the stored session, or null when it may. A
@@ -102,6 +101,26 @@ export function subagentSessionName(
  *  agent. */
 export function storedAgentName(subagent: AgentName): AgentName | null {
   return isCoreMainAgentId(subagent) ? null : subagent;
+}
+
+/** A fresh subagent session as the dashboard adds it: named by
+ *  `subagentSessionName`, its agent by `storedAgentName`, in its parent's
+ *  project, under the calling turn. */
+export function newSubagentSession(
+  id: SessionId,
+  subagent: AgentName,
+  parent: Pick<DashboardSession, "name" | "projectName" | "projectPath"> | null,
+  from: { dashboardSessionId: SessionRecordId; turnId: string; agentName: AgentName },
+): NewSubagentSession {
+  return {
+    id,
+    name: subagentSessionName(subagent, parent?.name, from.agentName),
+    agentName: storedAgentName(subagent),
+    projectName: parent?.projectName ?? null,
+    projectPath: parent?.projectPath ?? null,
+    parentSessionId: from.dashboardSessionId,
+    parentTurnId: from.turnId,
+  };
 }
 
 /** Folds a subagent's turn events, one at a time, into how the call ended. */

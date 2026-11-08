@@ -36,7 +36,7 @@ import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.j
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { Agent, AgentCatalog, AgentLoader } from "../agent/index.js";
-import type { SkillCatalog } from "../agent/index.js";
+import type { SkillCatalog, SubagentCalls } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
@@ -45,7 +45,6 @@ import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SessionRepository } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
-import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
@@ -199,7 +198,7 @@ export interface ApiDeps {
   /** Live agent runner used by API-owned background turns such as explicit
    * turn-feedback processing. */
   agentRunner: AgentRunnerInterface;
-  activeSubagentRegistry: ActiveSubagentRegistry;
+  subagentCalls: SubagentCalls;
   agentTurnStreamRegistry: AgentTurnStreamRegistry;
   /** Whether a run can use each model provider now, from the accounts' own reports. */
   modelAccounts: ModelAccounts;

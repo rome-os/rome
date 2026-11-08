@@ -1,15 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeSessions } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import { DrizzleDashboardSessions } from "./drizzle-dashboard-sessions.js";
 
 describe("DrizzleDashboardSessions", () => {
   let testDb: TestDb;
   let sessions: DrizzleDashboardSessions;
+  let webchat: ChatsWebChatRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    sessions = new DrizzleDashboardSessions(testDb.db);
+    webchat = new ChatsWebChatRepository(testDb.db);
+    sessions = new DrizzleDashboardSessions(testDb.db, webchat);
   });
 
   afterEach(() => testDb.close());
@@ -46,5 +49,42 @@ describe("DrizzleDashboardSessions", () => {
 
   it("knows no session the dashboard does not have", async () => {
     expect(await sessions.parentSession("missing")).toBeUndefined();
+  });
+
+  const subagent = {
+    id: "sub",
+    name: "core:helper: Trip",
+    agentName: "core:helper",
+    projectName: "trip",
+    projectPath: "/p/trip",
+    parentSessionId: "chat",
+    parentTurnId: "turn-1",
+  };
+
+  it("adds a fresh subagent session under its parent's, and reads it back", async () => {
+    add("chat", "webchat");
+    await sessions.addSubagentSession(subagent);
+    expect(await sessions.get("sub")).toEqual({
+      type: "subagent",
+      name: "core:helper: Trip",
+      agentName: "core:helper",
+      parentSessionId: "chat",
+      projectName: "trip",
+      projectPath: "/p/trip",
+    });
+    expect(await sessions.parentSession("sub")).toBe("chat");
+    expect(await sessions.get("missing")).toBeNull();
+  });
+
+  it("adds no subagent session when its parent's is missing", async () => {
+    await expect(sessions.addSubagentSession(subagent)).rejects.toThrow("was not found");
+    expect(await sessions.get("sub")).toBeNull();
+  });
+
+  it("still adds the subagent session when naming its chat fails", async () => {
+    add("chat", "webchat");
+    rs.spyOn(webchat, "recordSessionInChat").mockRejectedValue(new Error("database is locked"));
+    await sessions.addSubagentSession(subagent);
+    expect(await sessions.get("sub")).toMatchObject({ type: "subagent" });
   });
 });

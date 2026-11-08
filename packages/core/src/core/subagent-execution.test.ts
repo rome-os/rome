@@ -9,7 +9,12 @@ import type {
   AgentTurnInput,
   SendTurnOptions,
 } from "./agent-session.js";
-import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
+import {
+  createSubagentCalls,
+  DrizzleDashboardSessions,
+  type SubagentCalls,
+} from "../agent/index.js";
+import { subagentLiveTurns, subagentTurnLog } from "./subagent-call-ports.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -78,10 +83,17 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
 describe("SubagentExecutionService", () => {
   let db: TestDb;
   let repo: WebChatRepository;
+  let calls: SubagentCalls;
+  const createService = () => createSubagentExecutionService({ calls, webchatRepo: repo });
 
   beforeEach(async () => {
     db = createTestDb();
     repo = new ChatsWebChatRepository(db.db);
+    calls = createSubagentCalls({
+      dashboard: new DrizzleDashboardSessions(db.db, repo),
+      turnLog: subagentTurnLog(repo),
+      liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
+    });
     await repo.ensureRomeSession({
       id: "parent-1",
       type: "webchat",
@@ -113,12 +125,7 @@ describe("SubagentExecutionService", () => {
       peek: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
-    const registry = createActiveSubagentRegistry();
-    const service = createSubagentExecutionService({
-      webchatRepo: repo,
-      activeRegistry: registry,
-      turnStreams: createAgentTurnStreamRegistry(),
-    });
+    const service = createService();
     const parent = {
       parentSessionId: "parent-1",
       parentAgentSessionId: "parent-runtime-1",
@@ -129,7 +136,11 @@ describe("SubagentExecutionService", () => {
       childManager,
       workingDir: "/tmp/project-a",
     };
-    const parentRef = { sessionId: "parent-1", turnId: "parent-turn-1", toolUseId: "tool-1" };
+    const callKey = {
+      dashboardSessionId: "parent-1",
+      turnId: "parent-turn-1",
+      toolUseId: "tool-1",
+    };
 
     const execution1 = await service.startSubagent("researcher", { prompt: "one" }, parent);
     expect(execution1).toMatchObject({
@@ -141,10 +152,6 @@ describe("SubagentExecutionService", () => {
       sessionId: "parent-runtime-1",
       turnId: "parent-turn-1",
       agentName: "main",
-    });
-    expect(registry.getLinkByParent(parentRef)?.child).toEqual({
-      sessionId: "child-1",
-      turnId: "child-turn-1",
     });
     let completed = false;
     void execution1.completion.then(() => {
@@ -160,9 +167,9 @@ describe("SubagentExecutionService", () => {
       turnId: "child-turn-1",
       output: "answer:one",
     });
-    // Completion alone does not clear the active mapping. The Parent clears it
-    // only after its ordinary tool_result has been persisted.
-    expect(registry.getLinkByParent(parentRef)).toBeDefined();
+    // Completion alone does not forget the call. The Parent forgets it only
+    // after its ordinary tool_result has been persisted.
+    expect(calls.forget(callKey)).toBe(true);
     await execution1.interrupt("late Parent interrupt");
     expect(first.interrupt).not.toHaveBeenCalled();
 
@@ -202,11 +209,7 @@ describe("SubagentExecutionService", () => {
       peek: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
-    const service = createSubagentExecutionService({
-      webchatRepo: repo,
-      activeRegistry: createActiveSubagentRegistry(),
-      turnStreams: createAgentTurnStreamRegistry(),
-    });
+    const service = createService();
 
     const execution = await service.startSubagent(
       "researcher",
@@ -243,11 +246,7 @@ describe("SubagentExecutionService", () => {
       peek: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
-    const service = createSubagentExecutionService({
-      webchatRepo: repo,
-      activeRegistry: createActiveSubagentRegistry(),
-      turnStreams: createAgentTurnStreamRegistry(),
-    });
+    const service = createService();
     await expect(
       service.startSubagent(
         "researcher",
@@ -287,11 +286,7 @@ describe("SubagentExecutionService", () => {
       peek: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
-    const service = createSubagentExecutionService({
-      webchatRepo: repo,
-      activeRegistry: createActiveSubagentRegistry(),
-      turnStreams: createAgentTurnStreamRegistry(),
-    });
+    const service = createService();
     const context = {
       parentSessionId: "parent-1",
       parentAgentSessionId: "parent-runtime-1",
