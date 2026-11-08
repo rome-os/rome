@@ -98,7 +98,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.
 - A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
-- Funding is `rome_credits`, `byok`, `subscription`, or `unknown`. It follows from the kind of login the turn ran on: `byok` is an API credential, and `unknown` means Rome could not tell.
+- A turn event carries the kind of [login](../domains/agents.md#model-provider-login) the turn ran on: `subscription`, `api_credential`, or `rome_credits`. It is left out when Rome cannot tell. Instances older than the field sent `funding` instead, which Rome Cloud still reads.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
 - Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.
 - Events queue in the instance database and are delivered at least once. Rome Cloud stores each at most once. A turn, action run, or login that happens while the instance is signed out of Rome Cloud is not recorded, and neither is an action run that ends in the first minute after signing in. Signing in again makes the instance a new one in Rome Cloud, so events still queued from the earlier sign-in are dropped rather than reported under the new one. A queued event older than 30 days is dropped.
@@ -109,4 +109,4 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 **Not to be confused with:**
 
 - **Telemetry** — the OTEL traces and metrics in [observability](../architecture/observability.md) are aggregated operational signals with no delivery guarantee. Usage events are per-turn records that are delivered and deduplicated.
-- **Rome credits usage** — the credits balance and recent gateway requests an instance reads from Rome Cloud. That ledger covers only gateway traffic, and usage events cover every funding source.
+- **Rome credits usage** — the credits balance and recent gateway requests an instance reads from Rome Cloud. That ledger covers only gateway traffic, and usage events cover every login kind.

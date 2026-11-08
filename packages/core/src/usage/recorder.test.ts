@@ -45,15 +45,7 @@ function setup(credential: string | null = "cred-a") {
 }
 
 describe("UsageRecorder", () => {
-  it("sends a turn's login kind in Rome Cloud's word for it", async () => {
-    const { recorder, queued } = setup();
-    recorder.recordTurn(facts({ loginKind: "api_credential" }));
-    recorder.recordTurn(facts({ turnId: "turn-2", loginKind: "subscription" }));
-    await recorder.flush();
-    expect(queued).toMatchObject([{ funding: "byok" }, { funding: "subscription" }]);
-  });
-
-  it("queues one turn event carrying the accounting, funding, and provider turn id", async () => {
+  it("queues one turn event carrying the accounting, login kind, and provider turn id", async () => {
     const { recorder, queued } = setup();
     recorder.recordTurn(facts());
     await recorder.flush();
@@ -67,7 +59,7 @@ describe("UsageRecorder", () => {
         status: "completed",
         provider: "openai",
         model: "gpt-6-sol",
-        funding: "rome_credits",
+        loginKind: "rome_credits",
         providerTurnId: "codex-turn-1",
         inputTokens: 1200,
         outputTokens: 300,
@@ -95,11 +87,11 @@ describe("UsageRecorder", () => {
       status: "error",
       provider: "openai",
       model: "gpt-6-sol",
-      funding: "unknown",
       providerTurnId: null,
       inputTokens: 0,
       estimatedCostMicros: null,
     });
+    expect(JSON.parse(JSON.stringify(queued[0]))).not.toHaveProperty("loginKind");
   });
 
   it("queues the turn under the credential current when it ended", async () => {
