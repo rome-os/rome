@@ -29,13 +29,13 @@ export const LINEAR_WATCHABLE: Watchable = {
     },
     {
       kind: "comment_or_mention",
-      label: "Comments on my issues, and mentions",
+      label: "Comments on issues, and mentions",
       default: true,
       triggers: [fromComposio(LINEAR_COMMENT_CREATED)],
     },
     {
       kind: "status_changed",
-      label: "Status changes on my issues",
+      label: "Issue status changes",
       default: true,
       triggers: [fromComposio(LINEAR_ISSUE_UPDATED)],
     },
