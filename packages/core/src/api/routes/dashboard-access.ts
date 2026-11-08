@@ -1,3 +1,8 @@
+import {
+  DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
+  DASHBOARD_ACCESS_MAX_EMAILS,
+  checkDashboardAccessLimits,
+} from "@rome/api-types/dashboard-access";
 import { Hono } from "hono";
 import {
   DASHBOARD_ACCESS_SETTING_KEY,
@@ -20,10 +25,27 @@ export function dashboardAccessRoutes(deps: ApiDeps): Hono {
 
   app.put("/dashboard-access", async (c) => {
     const body = await c.req.json().catch(() => null);
+    const raw = (body as { cloudEmailAccess?: unknown } | null)?.cloudEmailAccess;
+    const limitError = Array.isArray(raw) ? checkDashboardAccessLimits(raw) : null;
+    if (limitError) {
+      return c.json(
+        {
+          error: limitError,
+          limit:
+            limitError === "too_many_emails"
+              ? DASHBOARD_ACCESS_MAX_EMAILS
+              : DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
+        },
+        400,
+      );
+    }
     const config: DashboardAccessConfig = normalizeDashboardAccessConfig(body);
 
-    await deps.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, config);
+    const saved = await deps.dashboardAccessStore.save(config);
     deps.dashboardAccessState.setConfig(config);
+    // The sync drops a revision older than one it already holds, so two saves
+    // that finish out of order still send the newer list.
+    deps.visitorAllowListSync.push(saved);
 
     return c.json({ ok: true });
   });

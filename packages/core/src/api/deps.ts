@@ -51,6 +51,8 @@ import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
 import type { PublicAccessState } from "../lib/public-access-state.js";
 import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import type { DashboardAccessStore } from "../lib/dashboard-access-store.js";
+import type { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { RelayDrainer } from "../relay/drainer.js";
 import type { BootVersionReport } from "../lib/boot-version-report.js";
@@ -222,6 +224,10 @@ export interface ApiDeps {
    * `/api/dashboard-access`.
    */
   dashboardAccessState: DashboardAccessState;
+  /** The stored dashboard allow-list and the revision Rome Cloud orders it by. */
+  dashboardAccessStore: DashboardAccessStore;
+  /** Sends each saved dashboard allow-list to Rome Cloud in the background. */
+  visitorAllowListSync: VisitorAllowListSync;
   /** The chats the guardian's phone app holds open on the live-events socket. */
   phoneWatching?: PhoneWatching;
   /** Webhook relay drainer — present so the Integrations settings route can

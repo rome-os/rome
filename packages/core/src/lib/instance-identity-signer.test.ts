@@ -179,10 +179,16 @@ describe("signer mode", () => {
   it("1: links on a 200 whoami and deletes a stored instance token", async () => {
     const store = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: TOKEN });
     await hydrateInstanceToken(store);
-    const { fetchImpl, calls } = cloud({ "/api/instance/whoami": whoami(200, IDENTITY) });
+    const { fetchImpl, calls } = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": whoami(200, { instanceId: "inst-1" }),
+    });
     const result = await syncInstanceIdentity(store, { fetch: fetchImpl });
     expect(result.status).toBe("ok");
-    expect(calls).toHaveLength(1);
+    expect(calls.map((call) => call.path)).toEqual([
+      "/api/instance/whoami",
+      "/api/instance/key/hosted-link",
+    ]);
     expect(calls[0].authorization).toMatch(/^Bearer eyJ/);
     expect(store.data.get(INSTANCE_KEY_SETTING_KEY)).toBe("jkt-1");
     expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
@@ -348,6 +354,129 @@ describe("signer mode", () => {
   });
 });
 
+describe("signer mode: a hosted enrollment while the signer already authenticates", () => {
+  beforeEach(() => startSigner());
+
+  async function linked(token = TOKEN) {
+    const store = memoryStore({
+      [INSTANCE_KEY_SETTING_KEY]: "jkt-1",
+      [INSTANCE_TOKEN_SETTING_KEY]: token,
+    });
+    await hydrateInstanceToken(store);
+    return store;
+  }
+
+  it("moves the hosted link onto the credential in use and drops the enrollment", async () => {
+    const store = await linked();
+    const { fetchImpl, calls } = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": whoami(200, { instanceId: "inst-1" }),
+    });
+    expect((await syncInstanceIdentity(store, { fetch: fetchImpl })).status).toBe("ok");
+    const handshake = calls.find((call) => call.path === "/api/instance/key/hosted-link")!;
+    expect(handshake.authorization).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(handshake.body!).assertion).toMatch(/^eyJ/);
+    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+    expect(store.data.get(INSTANCE_KEY_SETTING_KEY)).toBe("jkt-1");
+
+    // Offered once: the next check does not call again.
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(calls.filter((call) => call.path.endsWith("/hosted-link"))).toHaveLength(1);
+  });
+
+  it("keeps the enrollment against a Rome Cloud without the endpoint, and offers it again after a restart", async () => {
+    const store = await linked();
+    const { fetchImpl, calls } = cloud({ "/api/instance/whoami": whoami(200, IDENTITY) });
+    expect((await syncInstanceIdentity(store, { fetch: fetchImpl })).status).toBe("ok");
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+    expect(isInstanceLinked()).toBe(true);
+    expect(calls.filter((call) => call.path.endsWith("/hosted-link"))).toHaveLength(1);
+
+    // Rome Cloud deploys the endpoint; the next boot links.
+    await hydrateInstanceToken(store);
+    const deployed = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": whoami(200, { instanceId: "inst-1" }),
+    });
+    await syncInstanceIdentity(store, { fetch: deployed.fetchImpl });
+    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+  });
+
+  it("keeps the enrollment after a 5xx or a network error and offers it at the next check", async () => {
+    const store = await linked();
+    let failures = 0;
+    const { fetchImpl, calls } = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": () => {
+        failures += 1;
+        if (failures === 1) return Response.json({}, { status: 503 });
+        if (failures === 2) throw new Error("network down");
+        return Response.json({ instanceId: "inst-1" });
+      },
+    });
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+    expect(calls.filter((call) => call.path.endsWith("/hosted-link"))).toHaveLength(3);
+  });
+
+  it.each([
+    "already_bound",
+    "key_not_registered",
+  ])("falls back to the usual key registration on a 409 %s", async (error) => {
+    const store = await linked();
+    const { fetchImpl, calls } = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": whoami(409, { error }),
+      "/api/instance/key": whoami(200, { instanceId: "inst-1" }),
+    });
+    expect((await syncInstanceIdentity(store, { fetch: fetchImpl })).status).toBe("ok");
+    const registration = calls.find((call) => call.path === "/api/instance/key")!;
+    expect(registration.authorization).toBe(`Bearer ${TOKEN}`);
+    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+  });
+
+  it.each([
+    [409, "not_hosted_enrollment"],
+    [409, "account_mismatch"],
+    [401, "invalid_instance_token"],
+    [403, "instance_revoked"],
+    [400, "invalid_assertion"],
+  ])("drops the enrollment on a %s %s and keeps the credential in use", async (status, error) => {
+    const store = await linked();
+    const { fetchImpl, calls } = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": whoami(status, { error }),
+    });
+    expect((await syncInstanceIdentity(store, { fetch: fetchImpl })).status).toBe("ok");
+    expect(calls.some((call) => call.path === "/api/instance/key")).toBe(false);
+    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+    expect(isInstanceLinked()).toBe(true);
+  });
+
+  it("keeps the enrollment on clock skew", async () => {
+    const store = await linked();
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": whoami(200, IDENTITY),
+      "/api/instance/key/hosted-link": whoami(401, { error: "clock_skew" }),
+    });
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe(TOKEN);
+  });
+
+  it("calls nothing extra when no instance token is on hand", async () => {
+    const store = memoryStore({ [INSTANCE_KEY_SETTING_KEY]: "jkt-1" });
+    await hydrateInstanceToken(store);
+    const { fetchImpl, calls } = cloud({ "/api/instance/whoami": whoami(200, IDENTITY) });
+    await syncInstanceIdentity(store, { fetch: fetchImpl });
+    expect(calls.map((call) => call.path)).toEqual(["/api/instance/whoami"]);
+  });
+});
+
 describe("signer mode before the key is registered", () => {
   beforeEach(() => startSigner());
 
@@ -401,6 +530,7 @@ describe("signer mode before the key is registered", () => {
         if (!reachable) throw new Error("network down");
         return Response.json({ instanceId: "inst-1" });
       },
+      "/api/instance/key/hosted-link": whoami(409, { error: "already_bound" }),
     });
     expect(await syncInstanceIdentity(store, { fetch: fetchImpl })).toEqual({
       status: "unreachable",

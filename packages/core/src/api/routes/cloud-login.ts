@@ -52,7 +52,9 @@ const log = createLogger("api:cloud-login");
 //
 // Ownership is enforced *server-side at `/authorize`* — Rome Cloud only ever
 // issues a code to the account that owns this instance — so a verified
-// `id_token`'s `sub` IS the confirmed owner. A token that fails verification
+// `id_token`'s `sub` IS the confirmed owner. The native leg still checks it
+// against an existing guardian seat. Visitors never use these endpoints: the
+// phone signs them in through the visitor grant. A token that fails verification
 // (bad signature, wrong `iss`/`aud`, nonce mismatch, expiry) fails the
 // sign-in closed; the local password fallback covers a Rome Cloud outage, so
 // the owner is never locked out of their own box.
@@ -301,8 +303,21 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         return c.json({ error: "unverified_identity" }, 401);
       }
 
+      // Rome Cloud issues this code only to the owner, but the instance checks
+      // the account itself: an existing seat signs in only the account it is
+      // bound to, and a refusal never rebinds it.
       const guardian = await getGuardianAuthState(deps.db);
       if (guardian.exists) {
+        if (guardian.accountId !== null && guardian.accountId !== identity.accountId) {
+          // The seat's account beside the refused one lets support tell a stale
+          // binding (the owner signs in once from a browser to repair it) from a
+          // real non-owner.
+          log.warn("native cloud login refused: account does not own this instance", {
+            accountId: identity.accountId,
+            recordedAccountId: guardian.accountId,
+          });
+          return c.json({ error: "not_owner" }, 403);
+        }
         await setGuardianAccount(deps.db, identity.accountId, identity.email, identity.avatarUrl);
       } else {
         await createGuardianSeat(identity);
@@ -315,6 +330,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         session_token: session.token,
         expires_at: session.expiresAt,
         origin: getInstanceOrigin(),
+        role: "owner",
       });
     } catch (err) {
       log.warn("native cloud login errored", {

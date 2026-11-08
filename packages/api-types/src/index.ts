@@ -2,6 +2,7 @@ export * from "./apps.js";
 export * from "./auth.js";
 export * from "./bootstrap.js";
 export * from "./chat-settings.js";
+export * from "./dashboard-access.js";
 export * from "./favors.js";
 export * from "./rome-credits.js";
 export * from "./persons.js";

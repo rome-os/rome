@@ -545,7 +545,9 @@
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
       "savedFlash": "Allowed emails saved",
-      "saveFailedFallback": "Failed to save allowed emails."
+      "saveFailedFallback": "Failed to save allowed emails.",
+      "tooMany": "Up to {{limit}} emails allowed",
+      "emailTooLong": "Email longer than {{limit}} characters"
     }
   },
   "aiTools": {
