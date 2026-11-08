@@ -3,7 +3,12 @@ import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts } from "../agent/index.js";
-import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -2246,6 +2251,7 @@ describe("AgentRunner", () => {
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
       readAnswerShape,
+      sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ apps: appCatalog }),
       folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
       log: createLogger("agent-session"),
@@ -2359,6 +2365,7 @@ describe("AgentRunner", () => {
         {
           ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
           turnMiddleware,
+          sessionTracing: romeSessionTracing,
           turnUsage: new TurnUsageReporter({
             usage: { recordTurn: (facts) => recorded.push(facts) },
           }),

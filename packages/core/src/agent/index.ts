@@ -227,6 +227,8 @@ export {
 } from "./application/subagent-calls.js";
 export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
+export type { SessionTracing } from "./application/session-tracing.js";
+export { translateTurnSpans, type CapturedEvent } from "./application/turn-spans.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { SkillLoader } from "./infrastructure/skill-loader.js";
 export { AgentLoader } from "./infrastructure/agent-loader.js";
@@ -239,6 +241,7 @@ export {
   TurnUsageReporter,
   type TurnUsageReporterDeps,
 } from "./infrastructure/turn-usage-reporter.js";
+export { romeSessionTracing } from "./infrastructure/session-tracing.js";
 export {
   AppTurnHooks,
   type TurnLifecycleHookLoadFailure,

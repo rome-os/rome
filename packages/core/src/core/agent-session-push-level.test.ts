@@ -1,6 +1,6 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -95,6 +95,7 @@ describe("AgentSession turn push level", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
+        sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
