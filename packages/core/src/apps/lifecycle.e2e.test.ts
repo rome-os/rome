@@ -1,3 +1,4 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -496,9 +497,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     agentLoader,
     sessionRepository,
     systemPrompts,
-    actionRegistry: harness.actionRegistry,
     modelResolver,
-    actionEngine,
     skillCatalog: harness.skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
@@ -506,6 +505,10 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
     log: createLogger("agent-session"),
+    ...romeToolPorts({
+      actionRegistry: harness.actionRegistry,
+      actionEngine,
+    }),
   });
 
   return { manager, provider, agentName };

@@ -11,6 +11,7 @@ import {
   type RomeTools,
   type Subagent,
   type Subagents,
+  type TurnFacts,
 } from "../agent/index.js";
 
 type RomeToolsOptions = Parameters<typeof createRomeTools>[0];
@@ -20,11 +21,31 @@ export interface TestRomeToolsOptions extends Partial<Omit<RomeToolsOptions, "su
   executeSubagent?: Subagents["run"];
 }
 
+/** The turn the tools of a test serve: a session with no running turn. */
+export const TEST_TURN: TurnFacts = {
+  agentName: "core:test-main",
+  continuityKey: "test",
+  sessionId: "test-session",
+  isSubagent: false,
+  actions: ["*"],
+  widgets: "plain_text",
+  turnId: () => undefined,
+  threadContext: () => undefined,
+  sharedContext: () => undefined,
+  pushLevel: () => undefined,
+  inTurn: (fn) => fn(),
+};
+
 /** Rome tools for a test, serving no actions, skills or subagents unless given. */
 export function testRomeTools(options: TestRomeToolsOptions = {}): RomeTools {
   const { subagents = [], executeSubagent, ...rest } = options;
   return createRomeTools({
-    actions: { list: () => [], run: async () => ({ status: "ok", data: { ok: true } }) },
+    turn: TEST_TURN,
+    actions: {
+      list: () => [],
+      permits: () => true,
+      run: async () => ({ status: "ok", data: { ok: true } }),
+    },
     skills: { list: () => [] },
     subagents: { list: () => subagents, run: executeSubagent ?? (async () => "delegated") },
     widgetsShow: false,

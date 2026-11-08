@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -81,13 +82,10 @@ describe("AgentSessionManager textPrivate", () => {
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
-        webchatRepo: new ChatsWebChatRepository(testDb.db),
         sessionSettings: new ChatSessionSettings({
           webchatRepo: new ChatsWebChatRepository(testDb.db),
         }),
         systemPrompts,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
           accounts: fakeAccounts(() => state),
@@ -99,6 +97,11 @@ describe("AgentSessionManager textPrivate", () => {
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
+        ...romeToolPorts({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true },
     );

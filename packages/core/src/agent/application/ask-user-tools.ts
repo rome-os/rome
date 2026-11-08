@@ -5,11 +5,13 @@ import type { AgentPolicy } from "../domain/agent-policy.js";
 import { askQuestionToolOutput, parseAskQuestionInput } from "../domain/ask-question.js";
 import { parseDeferInput, type WakeUp } from "../domain/defer.js";
 import type { RomeTool } from "../domain/rome-tools.js";
+import type { TurnFacts } from "../domain/turn-facts.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
 
 /** What `defer` is served with, for a session with a live thread to wake. */
 export interface DeferTool {
-  schedule(wakeUp: WakeUp): Promise<unknown>;
+  /** Schedule a wake back into the thread `turn` runs in. */
+  schedule(turn: TurnFacts, wakeUp: WakeUp): Promise<unknown>;
   /** The agent's text never reaches the guardian, so `defer` asks for no confirmation in text. */
   finalText: AgentPolicy["finalText"];
 }
@@ -32,7 +34,7 @@ const DEFER_END_OF_TURN =
 const DEFER_END_OF_TURN_TEXT_PRIVATE =
   "After calling defer, end your turn. It needs no confirmation.";
 
-function deferTool(defer: DeferTool, run: RomeToolRunner): RomeTool {
+function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): RomeTool {
   return {
     name: "defer",
     description:
@@ -99,19 +101,20 @@ function deferTool(defer: DeferTool, run: RomeToolRunner): RomeTool {
       run("defer", input, () => {
         const parsed = parseDeferInput(input, Date.now());
         if (!parsed.ok) throw new Error(parsed.error);
-        return defer.schedule(parsed.wakeUp);
+        return defer.schedule(turn, parsed.wakeUp);
       }),
   };
 }
 
 /** `ask_question`, then `defer` where a thread can be woken, then the session tools. */
 export function askUserTools(input: {
+  turn: TurnFacts;
   widgetsShow: boolean;
   defer?: DeferTool;
   sessionTools?: readonly RomeTool[];
   run: RomeToolRunner;
 }): RomeTool[] {
-  const { widgetsShow, defer, sessionTools = [], run } = input;
+  const { turn, widgetsShow, defer, sessionTools = [], run } = input;
   // `ask_question` is served everywhere: where no widget shows, the handler
   // relays the questions as a plain message, so the model routes clarifying
   // questions through it wherever it runs.
@@ -195,7 +198,7 @@ export function askUserTools(input: {
   ];
   // `defer` injects an inbound message rather than drawing a widget, so it is
   // served wherever there is a live thread to wake.
-  if (defer) tools.push(deferTool(defer, run));
+  if (defer) tools.push(deferTool(defer, turn, run));
   tools.push(...sessionTools);
   return tools;
 }

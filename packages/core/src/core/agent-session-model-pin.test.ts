@@ -1,3 +1,4 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -116,8 +117,6 @@ describe("agent model pins through AgentSessionManager", () => {
         agentLoader: loader,
         sessionRepository,
         systemPrompts,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           accounts: fakeAccounts(() => state),
@@ -135,6 +134,10 @@ describe("agent model pins through AgentSessionManager", () => {
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
+        ...romeToolPorts({
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true, isSubagent },
     );

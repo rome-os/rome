@@ -32,6 +32,9 @@ import {
   type PromptMessage,
   type TurnUsageReporting,
   type AgentLog,
+  type DeferTool,
+  type SessionTools,
+  type TurnFacts,
 } from "../agent/index.js";
 import {
   NO_ROME_TOOLS,
@@ -63,14 +66,6 @@ import {
   type Subagent,
   type RomeTools,
 } from "../agent/index.js";
-import type { ActionRegistry, Action, ActionResult } from "../actions/types.js";
-import type { ActionEngine } from "../actions/engine.js";
-import { validateActionArgs } from "../actions/validate-action-args.js";
-import {
-  proposeRoutineTools,
-  type RoutineActivationGate,
-} from "../routines/propose-routine-tool.js";
-import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { McpServerConfig } from "../agent/index.js";
 import type {
@@ -89,8 +84,6 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
-import { runDefer } from "../routines/defer.js";
-import type { EventSources } from "../events/event-sources.js";
 import type {
   ModelSession,
   ModelSessionParams,
@@ -133,8 +126,6 @@ import {
   type AgentTurnParentRef,
 } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import type { SessionToolsProvider } from "./session-tools.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 
@@ -319,16 +310,18 @@ interface ManagerDeps {
   agentLoader: AgentCatalog;
   sessionRepository: SessionRepository;
   systemPrompts: SystemPrompts;
-  actionRegistry: ActionRegistry;
   modelResolver: ModelResolver;
-  actionEngine: ActionEngine;
+  /** The actions each agent may call, run for the turn that calls them. */
+  actions: AgentActions;
+  /** Schedules a deferred wake back into a turn's thread. */
+  defer: Pick<DeferTool, "schedule">;
+  /** Where each session's own tools come from. */
+  sessionTools: SessionTools;
   capabilityDiscovery: CapabilityDiscovery;
   skillCatalog: SkillCatalog;
   turnLifecycle: TurnLifecycle;
   /** Reads the answer shape an agent declares in its `outputSchema`. */
   readAnswerShape: ReadAnswerShape;
-  /** Stable conversation transcript and notification context store. */
-  webchatRepo?: WebChatRepository;
   /** What was said where each session stands that it has not seen, which a
    *  wake's catch-up reads and marks. Absent, a channel session catches up on
    *  nothing. */
@@ -346,21 +339,6 @@ interface ManagerDeps {
   log: AgentLog;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
-  /** App-declared event sources: an event `defer` subscribes through them.
-   *  When absent, an event wait is created without any check. */
-  eventSources?: EventSources;
-  /** Extra tools per session. When absent, no session carries any. */
-  sessionTools?: SessionToolsProvider;
-}
-
-/** Whose a dashboard chat is, for work scheduled in it; undefined for any other thread. */
-async function dashboardChatOwner(
-  webchatRepo: WebChatRepository | undefined,
-  thread: ThreadContext | undefined,
-): Promise<string | undefined> {
-  if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
-  const chat = await webchatRepo.getSession(thread.threadId);
-  return chat ? (chat.ownerKey ?? "guardian") : undefined;
 }
 
 interface ManagerOptions {
@@ -713,7 +691,7 @@ interface ForkOpen {
   dispose: () => Promise<void>;
 }
 
-type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
+type BuildForkOpenParams = (fork: ForkTurnContext) => Promise<ForkOpen>;
 
 /** The default working directory, made when it is missing. */
 async function ensureDefaultWorkingDir(folders: AgentFolders): Promise<string> {
@@ -893,51 +871,8 @@ async function openSession(
     { contextSuffix: init.contextSuffix, widgets },
   );
 
-  // The registry's `getForAgent` is the single resolution point for what this
-  // agent may call — its allow-list, or everything for "*". Both the model-facing catalog and the execution gate
-  // derive from it, so they can't disagree. It's consulted per-request so an
-  // action installed mid-conversation by `app_management` is callable in the
-  // same session.
+  // What the agent's definition lets it call, for the ports behind its tools.
   const allowList = config.actions ?? [];
-  const findPermittedAction = (name: string): Action | undefined => {
-    const requestedAction = deps.actionRegistry.get(name);
-    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
-    return deps.actionRegistry
-      .getForAgent(allowList)
-      .find((action) => action.config.name === requestedAction.config.name);
-  };
-  // `propose_routine` auto-enables only a routine the agent could already
-  // create with `create_routine` itself (the same check, non-throwing), with
-  // args that fit the target action's schema.
-  const routineActivation: RoutineActivationGate = {
-    canCallAction: (name) => {
-      if (!deps.actionRegistry.get(name)) return "unknown";
-      return findPermittedAction(name) ? "permitted" : "denied";
-    },
-    validateArgs: (actionName, args) => {
-      const action = deps.actionRegistry.get(actionName);
-      return validateActionArgs(action?.config.name ?? actionName, args, action?.inputSchema);
-    },
-    // The live turn's id is the one the webchat drain sees on its handle.
-    routineKeyFor: (toolUseId) => {
-      const turnId = impl.currentTurnId;
-      return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
-    },
-  };
-  const toAgentAction = (a: Action): AgentAction => ({
-    name: a.config.name,
-    description: a.config.description,
-    type: a.config.type,
-    complexity: a.config.complexity,
-    speed: a.config.speed,
-    reliability: a.config.reliability,
-    sideEffects: a.config.sideEffects,
-    requiresApproval: !!a.config.requiresApproval,
-    cancellable: !!a.config.cancellable,
-    inputSchema: a.inputSchema!,
-  });
-  const getActionCatalog = (): AgentAction[] =>
-    deps.actionRegistry.getForAgent(allowList).map(toAgentAction);
   const subagents = subagentsOf(deps.agentLoader, config);
   const subagentToolNames = new Set(subagents.map((subagent) => subagentToolName(subagent.name)));
 
@@ -979,82 +914,36 @@ async function openSession(
     bindTurnCtx: inCurrentTurnCtx,
   };
 
-  const makeRunAction =
-    (refs: TurnExecRefs) =>
-    async (name: string, input: unknown): Promise<ActionResult> =>
-      refs.bindTurnCtx(async () => {
-        // Allow-list check is load-bearing for security: an agent yaml that
-        // scopes `actions: [foo]` must not reach anything else in the registry.
-        const action = findPermittedAction(name);
-        if (!action) throw new Error(`Unknown action: ${name}`);
-        return deps.actionEngine.run(action.config.name, input as Record<string, unknown>, {
-          initiator: `agent:${key.agentName}`,
-          channelContext: refs.getThreadContext(),
-          sharedContext: refs.getSharedContext(),
-          sessionId: refs.sessionId,
-          agentName: key.agentName,
-          channelThreadKey: key.channelThreadKey,
-          turnId: refs.getTurnId(),
-        });
-      });
-  const agentActions = (refs: TurnExecRefs): AgentActions => ({
-    list: getActionCatalog,
-    run: makeRunAction(refs),
+  // The facts the ports behind the Rome tools read, for the turns the refs run.
+  const turnFacts = (
+    refs: TurnExecRefs,
+    pushLevel: () => NotifyLevel | undefined = () => undefined,
+  ): TurnFacts => ({
+    agentName: key.agentName,
+    continuityKey: key.channelThreadKey,
+    sessionId: refs.sessionId,
+    isSubagent: opts.isSubagent === true,
+    actions: allowList,
+    widgets,
+    turnId: refs.getTurnId,
+    threadContext: refs.getThreadContext,
+    sharedContext: refs.getSharedContext,
+    pushLevel,
+    inTurn: refs.bindTurnCtx,
   });
+  const liveTurn = turnFacts(sessionExecRefs, () => impl.currentTurnPushLevelRef);
 
-  // `defer`: schedule a one-off wakeup back into this same thread. The
-  // tool relays here; we capture the live thread context off the session
-  // key + current turn and create the one-off via `create_routine` directly
-  // (not through the agent's action allow-list — `defer` is a built-in). Only
+  // `defer`: schedule a one-off wakeup back into this same thread, through
+  // the turn's facts (`deps.defer`). Only
   // wired for guardian-facing threads with a real `channelThreadKey` to wake;
   // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
   const deferEnabled = init.guardianFacing === true && !opts.isSubagent;
-  const eventSources = deps.eventSources;
-  // Actions `defer` runs on the agent's behalf are attributed to its turn.
-  const agentRunContext = (refs: TurnExecRefs) => ({
-    initiator: `agent:${key.agentName}`,
-    sessionId: refs.sessionId,
-    agentName: key.agentName,
-    channelThreadKey: key.channelThreadKey,
-    turnId: refs.getTurnId(),
-  });
-  const makeExecuteDefer =
-    (refs: TurnExecRefs) =>
-    async (wakeUp: WakeUp): Promise<unknown> =>
-      refs.bindTurnCtx(async () =>
-        runDefer(wakeUp, {
-          context: {
-            agentName: key.agentName,
-            sessionId: refs.sessionId,
-            channelContext: refs.getThreadContext(),
-            ownerKey: await dashboardChatOwner(deps.webchatRepo, refs.getThreadContext()),
-          },
-          createRoutine: async (createArgs) => {
-            const result = await deps.actionEngine.run(
-              "create_routine",
-              createArgs,
-              agentRunContext(refs),
-            );
-            if (result.status === "error") throw new Error(result.error);
-            if (result.status !== "ok") {
-              throw new Error(`create_routine returned ${result.status}`);
-            }
-            return result.data;
-          },
-          prepareEventWait: eventSources
-            ? (eventName, filter) =>
-                eventSources.prepareWait(eventName, filter, (name, args) =>
-                  deps.actionEngine.run(name, args, agentRunContext(refs)),
-                )
-            : undefined,
-        }),
-      );
-  const deferTool = (refs: TurnExecRefs) =>
+  const deferTool = (): DeferTool | undefined =>
     deferEnabled
       ? {
-          schedule: makeExecuteDefer(refs),
+          schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: resolveAgentPolicy({ name: agent.localName, policy: config.policy }).finalText,
         }
       : undefined;
@@ -1106,30 +995,17 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
-  // `propose_routine`, bound to the refs that run it. With no speaker the
-  // handler refuses, since nothing would mount its card.
-  const proposeRoutine = (refs: TurnExecRefs, session: { hasSpeaker: boolean }) =>
-    proposeRoutineTools({
-      widgets,
-      hasSpeaker: session.hasSpeaker,
-      gate: routineActivation,
-      runAction: makeRunAction(refs),
-    });
-  // The live session's session tools: the provider's answer, then `propose_routine`.
-  const liveSessionTools = (provided: readonly RomeTool[]): RomeTool[] => [
-    ...provided,
-    ...proposeRoutine(sessionExecRefs, { hasSpeaker: true }),
-  ];
-
   // The Rome tools a session serves, bound to the refs that run them. The live
   // session has a speaker; a fork has none and may have no `defer`, and its
   // session tools are its source's (`forkSessionTools`).
   const romeTools = (
     refs: TurnExecRefs,
     session: { hasSpeaker: boolean; sessionTools: readonly RomeTool[]; defers: boolean },
+    turn: TurnFacts = turnFacts(refs),
   ) =>
     createRomeTools({
-      actions: agentActions(refs),
+      turn,
+      actions: deps.actions,
       skills: deps.skillCatalog,
       subagents: { list: () => subagents, run: makeExecuteSubagent(refs) },
       // Without a speaker, action results that hand back a widget take their
@@ -1137,11 +1013,11 @@ async function openSession(
       // while nothing mounted and the fork dead-ends.
       widgetsShow: showsWidgets(widgets, session.hasSpeaker),
       log,
-      defer: session.defers ? deferTool(refs) : undefined,
+      defer: session.defers ? deferTool() : undefined,
       sessionTools: session.sessionTools,
     });
   const liveRomeTools = (sessionTools: readonly RomeTool[]) =>
-    romeTools(sessionExecRefs, { hasSpeaker: true, sessionTools, defers: true });
+    romeTools(sessionExecRefs, { hasSpeaker: true, sessionTools, defers: true }, liveTurn);
 
   const buildSessionParams = (
     resolution: ModelResolution,
@@ -1183,16 +1059,7 @@ async function openSession(
     resumeProviderId?: string | null,
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
-    const providedTools = await deps.sessionTools?.({
-      agentName: key.agentName,
-      channelThreadKey: key.channelThreadKey,
-      sessionId,
-      isSubagent: opts.isSubagent === true,
-      getTurnId: sessionExecRefs.getTurnId,
-      getThreadContext: sessionExecRefs.getThreadContext,
-      getTurnPushLevel: () => impl.currentTurnPushLevelRef,
-    });
-    const sessionTools = liveSessionTools(providedTools ?? []);
+    const sessionTools = await deps.sessionTools.forTurn(liveTurn, true);
     const params = buildSessionParams(
       resolution,
       liveRomeTools(sessionTools),
@@ -1236,7 +1103,7 @@ async function openSession(
    *   caller's choice (`tier` override allowed); callers who want provider
    *   prompt-cache reuse keep the source's model.
    */
-  const buildForkOpenParams: BuildForkOpenParams = (fork) => {
+  const buildForkOpenParams: BuildForkOpenParams = async (fork) => {
     if (fork.mode !== "exact") {
       return {
         params: {
@@ -1341,7 +1208,7 @@ async function openSession(
           hasSpeaker: false,
           sessionTools: forkSessionTools(
             sourceSessionTools,
-            proposeRoutine(refs, { hasSpeaker: false }),
+            await deps.sessionTools.forTurn(turnFacts(refs), false),
           ),
           defers: !fork.continuable,
         }),
@@ -1414,7 +1281,7 @@ async function openSession(
           },
           model: "code-backed",
         },
-        liveRomeTools(liveSessionTools([])),
+        liveRomeTools(await deps.sessionTools.forTurn(liveTurn, true)),
       ),
     });
   } else {
@@ -1442,6 +1309,7 @@ async function openSession(
     systemPrompt,
     workingDir,
     buildForkOpenParams,
+    liveTurn,
     owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
@@ -1481,6 +1349,8 @@ async function openSession(
 
 interface ImplArgs {
   key: AgentSessionKey;
+  /** The facts the session's own turns hand the ports behind its tools. */
+  liveTurn: TurnFacts;
   /** What the opener stamps on every turn's spans. */
   spanAttributes?: Attributes;
   session: Session;
@@ -1711,6 +1581,7 @@ class AgentSessionImpl implements AgentSession {
   private systemPrompt: string;
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;
+  private readonly liveTurn: TurnFacts;
   private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
@@ -1795,6 +1666,7 @@ class AgentSessionImpl implements AgentSession {
     this.systemPrompt = args.systemPrompt;
     this.workingDir = args.workingDir;
     this.buildForkOpenParams = args.buildForkOpenParams;
+    this.liveTurn = args.liveTurn;
     this.attribution = { agentName: args.key.agentName, owningAppId: args.owningAppId };
     this.threadContext = args.threadContext;
     this.sharedContext = args.sharedContext;
@@ -2303,10 +2175,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private mayCall(actionName: string): boolean {
-    const canonical = this.deps.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
-    return this.deps.actionRegistry
-      .getForAgent(this.config.actions ?? [])
-      .some((action) => action.config.name === canonical);
+    return this.deps.actions.permits(this.liveTurn, actionName);
   }
 
   private async touchSession(): Promise<void> {
@@ -2656,7 +2525,7 @@ class AgentSessionImpl implements AgentSession {
             // loop yields in arrival order. A provider stream failure becomes the
             // turn's terminal error block, preserving the bracketing invariant.
             const outbound = new ForkStreamQueue();
-            const forkOpen = this.buildForkOpenParams({
+            const forkOpen = await this.buildForkOpenParams({
               mode,
               forkSessionId,
               forkTurnId: turnId,

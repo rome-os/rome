@@ -181,7 +181,9 @@ export {
   type Subagents,
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
-export { forkSessionTools } from "./domain/session-tools.js";
+export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
+export type { PushLevel, TurnFacts } from "./domain/turn-facts.js";
+export type { DeferTool } from "./application/ask-user-tools.js";
 export {
   parentTurnSession,
   rootSession,

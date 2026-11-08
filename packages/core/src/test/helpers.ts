@@ -1,3 +1,4 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
@@ -672,9 +673,7 @@ export async function buildTestDeps(
     agentLoader,
     sessionRepository,
     systemPrompts,
-    actionRegistry,
     modelResolver,
-    actionEngine,
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
@@ -684,6 +683,10 @@ export async function buildTestDeps(
     log: createLogger("agent-session"),
     subagentExecutionService,
     activeSubagentRegistry,
+    ...romeToolPorts({
+      actionRegistry,
+      actionEngine,
+    }),
   });
   const agentRunner = new AgentRunner(
     agentSessionManager,

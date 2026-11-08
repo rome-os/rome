@@ -1,3 +1,4 @@
+import { romeToolPorts } from "../../core/rome-tool-ports.js";
 import { createLogger } from "../../logger.js";
 import { sessionOpeningFor } from "../../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
@@ -281,9 +282,7 @@ async function buildHarness(
       agentLoader,
       sessionRepository: repos.sessions,
       systemPrompts,
-      actionRegistry,
       modelResolver,
-      actionEngine,
       // Real but inert collaborators: CapabilityDiscovery is never start()ed
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
       capabilityDiscovery: new CapabilityDiscovery(),
@@ -293,6 +292,10 @@ async function buildHarness(
       turnUsage: new TurnUsageReporter(),
       folders: agentFolders(),
       log: createLogger("agent-session"),
+      ...romeToolPorts({
+        actionRegistry,
+        actionEngine,
+      }),
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );

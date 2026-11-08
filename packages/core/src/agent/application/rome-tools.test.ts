@@ -1,11 +1,27 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import type { RomeTool } from "../domain/rome-tools.js";
+import type { TurnFacts } from "../domain/turn-facts.js";
 import { createRomeTools, type RomeToolsOptions } from "./rome-tools.js";
+
+const TURN: TurnFacts = {
+  agentName: "core:main",
+  continuityKey: "test",
+  sessionId: "session-1",
+  isSubagent: false,
+  actions: ["*"],
+  widgets: "plain_text",
+  turnId: () => "turn-1",
+  threadContext: () => undefined,
+  sharedContext: () => undefined,
+  pushLevel: () => undefined,
+  inTurn: (fn) => fn(),
+};
 
 function tools(overrides: Partial<RomeToolsOptions> = {}) {
   return createRomeTools({
-    actions: { list: () => [], run: async () => ({ status: "ok" }) },
+    turn: TURN,
+    actions: { list: () => [], permits: () => true, run: async () => ({ status: "ok" }) },
     skills: { list: () => [] },
     subagents: { list: () => [], run: async () => ({}) },
     widgetsShow: false,
@@ -209,7 +225,7 @@ describe("defer", () => {
       "defer",
       { name: "check CI", afterMinutes: 5 },
     );
-    expect(schedule).toHaveBeenCalledWith({
+    expect(schedule).toHaveBeenCalledWith(TURN, {
       kind: "time",
       name: "check CI",
       fireAtMs: expect.any(Number),
@@ -283,6 +299,7 @@ describe("execute_action", () => {
       widgetsShow,
       actions: {
         list: () => [],
+        permits: () => true,
         run: async () => ({
           status: "place_widget",
           placement: { appId: "maps" },
@@ -299,7 +316,8 @@ describe("execute_action", () => {
     const result = await tools({
       actions: {
         list: () => [],
-        run: async (name) => {
+        permits: () => false,
+        run: async (_turn, name) => {
           throw new Error(`Unknown action: ${name}`);
         },
       },
