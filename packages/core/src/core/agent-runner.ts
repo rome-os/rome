@@ -401,9 +401,9 @@ export class AgentRunner {
         prompt: params.prompt,
         tier: params.tier,
         mode: params.mode,
-        sourceCheckpoint: params.sourceCheckpoint,
+        checkpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
-        persistThreadKey: params.persistThreadKey,
+        continuityKey: params.persistThreadKey,
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;

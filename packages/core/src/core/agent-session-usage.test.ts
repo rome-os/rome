@@ -456,7 +456,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     for await (const event of session.runForkedTurn!({
       prompt: "side question",
-      sourceCheckpoint: SOURCE_CHECKPOINT,
+      checkpoint: SOURCE_CHECKPOINT,
     })) {
       if (event.type === "result") break;
     }
@@ -483,7 +483,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const events = session.runForkedTurn!({
       prompt: "side question",
-      sourceCheckpoint: SOURCE_CHECKPOINT,
+      checkpoint: SOURCE_CHECKPOINT,
     });
     forkLoginKind = undefined;
     for await (const _event of events) {
@@ -501,7 +501,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const events = session.runForkedTurn!({
       prompt: "side question",
-      sourceCheckpoint: SOURCE_CHECKPOINT,
+      checkpoint: SOURCE_CHECKPOINT,
     });
     let forkSessionId: string | undefined;
     for await (const event of events) {
