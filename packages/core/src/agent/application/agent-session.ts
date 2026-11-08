@@ -1081,7 +1081,7 @@ async function openSession(
     const thread: ThreadStart = {
       kind: "branch",
       at: opening.sourceTurn,
-      lifetime: opening.continuityKey === undefined ? "ephemeral" : "kept",
+      lifetime: opening.oneShot ? "ephemeral" : "kept",
     };
     if (opening.mode !== "exact") {
       return {
@@ -1185,7 +1185,7 @@ async function openSession(
           // A continuable fork holds no scheduled wake-ups: its wake-up would
           // resume the fork session while delivering under the thread context
           // this turn inherited, which is still the source's.
-          defers: opening.continuityKey === undefined,
+          defers: opening.oneShot,
         }),
       },
       projectProviderMessage: async (msg) => {

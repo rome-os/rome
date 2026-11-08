@@ -15,6 +15,7 @@ describe("openFork", () => {
       mode: "isolated",
       sourceTurn: position,
       threadContext: source.threadContext,
+      oneShot: true,
     });
   });
 
@@ -36,7 +37,7 @@ describe("openFork", () => {
   it("keeps a continuable fork under the continuity key built from its session id", () => {
     expect(
       openFork(source, { mode: "exact", continuityKey: (id) => `fork:${id}` }, "fork-1"),
-    ).toMatchObject({ mode: "exact", continuityKey: "fork:fork-1" });
+    ).toMatchObject({ mode: "exact", oneShot: false, continuityKey: "fork:fork-1" });
   });
 
   it("carries the thread context the caller gives over the source's", () => {

@@ -33,6 +33,8 @@ export interface ForkOpening {
   /** Where the turn the fork branches from left the source's model thread. */
   sourceTurn: ModelPosition;
   threadContext?: ThreadContext;
+  /** A one-shot fork's model thread is closed after its turn, and nothing can resume it. */
+  oneShot: boolean;
   /** Set only for a continuable fork. */
   continuityKey?: string;
 }
@@ -69,6 +71,7 @@ export function openFork(
     mode: request.mode ?? "isolated",
     sourceTurn: at,
     threadContext: request.threadContext ?? source.threadContext,
+    oneShot: continuityKey === undefined,
     ...(continuityKey === undefined ? {} : { continuityKey }),
   };
 }
