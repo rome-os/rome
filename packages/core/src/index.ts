@@ -200,6 +200,7 @@ import {
   sessionOpeningFor,
   talkerChannelSurface,
 } from "./core/session-opening.js";
+import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -1150,15 +1151,19 @@ async function main() {
       turnLifecycle: turnListeners,
       readAnswerShape,
       webchatRepo,
-      // Catch-up reads what was said where the session stands from Chats.
-      promptFacts: chatsWired.links,
+      // Catch-up reads what was said where the session stands from Chats,
+      // and nothing in a chat whose channel hands the agent every message.
+      promptFacts: chatPromptFacts({
+        facts: chatsWired.links,
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface,
+      }),
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
-      channelSurface,
       eventSources,
       sessionTools: (context) => buildConciergeTools(concierge, context),
     },

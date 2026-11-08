@@ -116,7 +116,6 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
-    channelSurface: testChannelSurface,
   });
   const runner = new AgentRunner(
     manager,

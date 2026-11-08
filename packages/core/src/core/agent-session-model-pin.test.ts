@@ -32,7 +32,6 @@ import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
 import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
 
 const AGENT = "pinned_agent";
@@ -134,7 +133,6 @@ describe("agent model pins through AgentSessionManager", () => {
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
-        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },
     );

@@ -1,4 +1,6 @@
 import { sessionOpeningFor } from "./session-opening.js";
+import { chatPromptFacts } from "./chat-prompt-facts.js";
+import type { PromptFacts } from "../agent/index.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
@@ -2290,7 +2292,6 @@ describe("AgentRunner", () => {
       readAnswerShape,
       turnUsage: new TurnUsageReporter({ apps: appCatalog }),
       folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
-      channelSurface: testChannelSurface,
       activeSubagentRegistry: createActiveSubagentRegistry(subagentCalls),
       subagentExecutionService: createSubagentExecutionService({
         calls: subagentCalls,
@@ -2306,7 +2307,7 @@ describe("AgentRunner", () => {
       keepAliveAcrossTurns?: boolean;
       appCatalog?: Pick<AppCatalog, "get">;
       resetPolicy?: ProviderSessionResetPolicy;
-      turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+      turnLinks?: PromptFacts;
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -4493,20 +4494,30 @@ describe("AgentRunner", () => {
       }
     });
 
-    it("skips stored-message context for a channel whose surface needs none", async () => {
+    it("catches up on nothing in a chat whose channel hands the agent every message", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "quiet-context",
         agentName: "main",
       });
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "notification",
-        content: JSON.stringify([{ type: "text", content: "ambient update" }]),
-        platformMessageId: "ambient-message",
+      const ambient: UnseenLine = {
+        id: 7,
         senderName: "Bob",
-        createdAt: new Date("2026-08-03T08:01:00.000Z"),
+        text: "ambient update",
+        at: new Date("2026-08-03T08:01:00.000Z"),
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      };
+      const seen: (readonly number[])[] = [];
+      // The same channel chat as above, but its surface says every message
+      // already reaches the agent, as webchat's does.
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [ambient], seen: (ids) => void seen.push(ids) },
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: (channel) =>
+          channel === "discord" ? { interactiveCards: false, promptContext: false } : null,
       });
 
       const providerPrompts: string[] = [];
@@ -4518,14 +4529,8 @@ describe("AgentRunner", () => {
           yield { type: "result", content: "ok" };
         }),
       };
-      // The same channel conversation as above, but its surface says every
-      // message already reaches the agent, as webchat's does.
-      const manager = createAgentSessionManager({
-        ...managerDeps(createTestModelResolver({ providers: [provider] })),
-        channelSurface: () => ({ interactiveCards: false, promptContext: false }),
-      });
       await collectMessages(
-        new AgentRunner(manager, agentLoader).run({
+        createRunner(provider, undefined, { turnLinks: promptFacts }).run({
           agentName: "test-main",
           prompt: "current message",
           channelThreadKey: "discord:quiet-context",
@@ -4537,7 +4542,7 @@ describe("AgentRunner", () => {
       expect(providerPrompts).toHaveLength(1);
       expect(providerPrompts[0]).not.toContain("<conversation_context>");
       expect(providerPrompts[0]).not.toContain("ambient update");
-      await manager.shutdown();
+      expect(seen).toEqual([]);
     });
 
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {

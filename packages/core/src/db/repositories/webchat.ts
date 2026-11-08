@@ -1708,6 +1708,17 @@ export class WebChatRepository {
     return rows[0] ? withSessionKind(rows[0].chat) : null;
   }
 
+  /** The channel that opened chat `chatId`, or null for a chat no channel opened. */
+  channelOfChat(chatId: string): string | null {
+    return (
+      this.db
+        .select({ channel: romeSessions.sourceChannel })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, chatId))
+        .get()?.channel ?? null
+    );
+  }
+
   /** The continuity key an agent session's stored row holds, or null when no row has the id or it holds none. */
   async continuityKeyOfSession(sessionId: string): Promise<string | null> {
     const rows = await this.db
