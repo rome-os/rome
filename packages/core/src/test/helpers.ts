@@ -41,7 +41,7 @@ import { createActiveSubagentRegistry } from "../core/active-subagent-registry.j
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { subagentLiveTurns, subagentTurnLog } from "../core/subagent-call-ports.js";
-import { createSubagentCalls, DrizzleDashboardSessions } from "../agent/index.js";
+import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
@@ -654,7 +654,7 @@ export async function buildTestDeps(
   });
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const subagentCalls = createSubagentCalls({
-    dashboard: new DrizzleDashboardSessions(db, webchatRepo),
+    dashboard: new WebChatDashboardSessions(webchatRepo),
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });

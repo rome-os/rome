@@ -156,7 +156,7 @@ import {
   TurnUsageReporter,
   ChatSessionSettings,
   createSubagentCalls,
-  DrizzleDashboardSessions,
+  WebChatDashboardSessions,
   requireAgent,
   rootSession,
   TurnListeners,
@@ -1031,7 +1031,7 @@ async function main() {
   }
 
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
-  const dashboardSessions = new DrizzleDashboardSessions(db, webchatRepo);
+  const dashboardSessions = new WebChatDashboardSessions(webchatRepo);
   const subagentCalls = createSubagentCalls({
     dashboard: dashboardSessions,
     turnLog: subagentTurnLog(webchatRepo),

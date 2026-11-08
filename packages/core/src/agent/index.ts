@@ -185,7 +185,7 @@ export type {
   DashboardSessions,
   NewSubagentSession,
 } from "./domain/dashboard-sessions.js";
-export { DrizzleDashboardSessions } from "./infrastructure/drizzle-dashboard-sessions.js";
+export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
 export {
   createSubagentCalls,
   type CallingTurn,

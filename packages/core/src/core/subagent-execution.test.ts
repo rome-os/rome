@@ -11,7 +11,7 @@ import type {
 } from "./agent-session.js";
 import {
   createSubagentCalls,
-  DrizzleDashboardSessions,
+  WebChatDashboardSessions,
   type SubagentCalls,
 } from "../agent/index.js";
 import { subagentLiveTurns, subagentTurnLog } from "./subagent-call-ports.js";
@@ -90,7 +90,7 @@ describe("SubagentExecutionService", () => {
     db = createTestDb();
     repo = new ChatsWebChatRepository(db.db);
     calls = createSubagentCalls({
-      dashboard: new DrizzleDashboardSessions(db.db, repo),
+      dashboard: new WebChatDashboardSessions(repo),
       turnLog: subagentTurnLog(repo),
       liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
     });

@@ -1,10 +1,8 @@
-// The dashboard's sessions (`rome_sessions`), behind the DashboardSessions
-// port in ../domain/dashboard-sessions.ts.
+// The dashboard's sessions (`rome_sessions`), read and written through the
+// web chat repository, behind the DashboardSessions port in
+// ../domain/dashboard-sessions.ts.
 
-import { eq } from "drizzle-orm";
-import type { DrizzleDb } from "../../db/index.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
-import { romeSessions } from "../../db/schema.js";
 import { createLogger } from "../../logger.js";
 import type {
   DashboardSession,
@@ -16,9 +14,8 @@ import type { SessionRecordId } from "../domain/subagent.js";
 
 const log = createLogger("dashboard-sessions");
 
-export class DrizzleDashboardSessions implements DashboardSessions {
+export class WebChatDashboardSessions implements DashboardSessions {
   constructor(
-    private readonly db: DrizzleDb,
     private readonly webchat: Pick<
       WebChatRepository,
       "getSession" | "ensureRomeSession" | "recordSessionInChat"
@@ -26,13 +23,9 @@ export class DrizzleDashboardSessions implements DashboardSessions {
   ) {}
 
   async parentSession(id: SessionRecordId): Promise<SessionRecordId | null | undefined> {
-    const [row] = await this.db
-      .select({ type: romeSessions.type, parentSessionId: romeSessions.parentSessionId })
-      .from(romeSessions)
-      .where(eq(romeSessions.id, id))
-      .limit(1);
-    if (!row) return undefined;
-    return parentTurnSession(row.type, row.parentSessionId ?? null);
+    const session = await this.get(id);
+    if (!session) return undefined;
+    return parentTurnSession(session.type, session.parentSessionId);
   }
 
   async get(id: SessionRecordId): Promise<DashboardSession | null> {

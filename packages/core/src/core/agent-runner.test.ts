@@ -4,7 +4,7 @@ import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
-import { AgentLoader, createSubagentCalls, DrizzleDashboardSessions } from "../agent/index.js";
+import { AgentLoader, createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
@@ -2268,7 +2268,7 @@ describe("AgentRunner", () => {
   ) {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     const subagentCalls = createSubagentCalls({
-      dashboard: new DrizzleDashboardSessions(testDb.db, webchatRepo),
+      dashboard: new WebChatDashboardSessions(webchatRepo),
       turnLog: subagentTurnLog(webchatRepo),
       liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
     });

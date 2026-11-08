@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeSessions } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { DrizzleDashboardSessions } from "./drizzle-dashboard-sessions.js";
+import { WebChatDashboardSessions } from "./webchat-dashboard-sessions.js";
 
-describe("DrizzleDashboardSessions", () => {
+describe("WebChatDashboardSessions", () => {
   let testDb: TestDb;
-  let sessions: DrizzleDashboardSessions;
+  let sessions: WebChatDashboardSessions;
   let webchat: ChatsWebChatRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
     webchat = new ChatsWebChatRepository(testDb.db);
-    sessions = new DrizzleDashboardSessions(testDb.db, webchat);
+    sessions = new WebChatDashboardSessions(webchat);
   });
 
   afterEach(() => testDb.close());
