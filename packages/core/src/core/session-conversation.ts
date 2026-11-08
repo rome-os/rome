@@ -61,9 +61,9 @@ export async function findChat(
 // Kept per open session in this process, so a reopened session forgets it.
 const openerChats = new WeakMap<object, string | undefined>();
 
-/** Note the chat the caller that opened `session` named, if any. Only the first note counts. */
+/** Note the chat the caller that opened `session` named, if any. */
 export function noteOpenerChat(session: object, chatId: string | undefined): void {
-  if (!openerChats.has(session)) openerChats.set(session, chatId);
+  openerChats.set(session, chatId);
 }
 
 /** The chat the caller that opened `session` named, while it stays open. */
