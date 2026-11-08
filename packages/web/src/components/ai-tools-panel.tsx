@@ -1,11 +1,4 @@
-import {
-  Measure,
-  Section,
-  SectionHeader,
-  SectionHeading,
-  SectionTitle,
-  SectionActions,
-} from "@rome-os/ui/page";
+import { Measure, Section } from "@rome-os/ui/page";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -818,44 +811,12 @@ export function AiToolsPanel({
   return (
     <PanelMeasure>
       <PanelSection>
-        {showHeader && (
-          <>
-            <SectionHeader>
-              <SectionHeading>
-                <SectionTitle>{t("aiTools.title")}</SectionTitle>
-              </SectionHeading>
-              <SectionActions>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleRefresh()}
-                  disabled={refreshPending}
-                  className={`shrink-0 ${AI_TOOL_ACTION_BUTTON_CLASS}`}
-                >
-                  {refreshPending ? (
-                    <Spinner data-icon="inline-start" size="sm" aria-hidden />
-                  ) : (
-                    <RefreshCw data-icon="inline-start" className="size-4" aria-hidden />
-                  )}
-                  {refreshPending ? t("aiTools.refreshing") : t("aiTools.refresh")}
-                </Button>
-              </SectionActions>
-            </SectionHeader>
-            {refreshError && (
-              <p role="alert" className="mb-4 text-ui text-destructive">
-                {refreshError}
-              </p>
-            )}
-          </>
-        )}
-
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
           {showRomeCredits && romeCredits && statusLoaded && (
             <RomeCreditsRow
               credits={romeCredits}
-              // The payer counts an unknown ChatGPT login as connected, so only
-              // an explicit false lets credits pay.
+              // Rome counts an unknown ChatGPT login as connected, so only
+              // an explicit false puts Codex on credits.
               chatgptConnected={toolStatus.codex?.loggedIn !== false}
               claudeConnected={toolStatus.claude?.loggedIn === true}
             />
@@ -1111,6 +1072,33 @@ export function AiToolsPanel({
             );
           })}
         </div>
+
+        {/* Below the list rather than in a header row of its own, so the list
+          starts right under the tabs like the other settings tabs. */}
+        {showHeader && (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {refreshError && (
+              <p role="alert" className="text-ui text-destructive">
+                {refreshError}
+              </p>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void handleRefresh()}
+              disabled={refreshPending}
+              className="text-muted-foreground"
+            >
+              {refreshPending ? (
+                <Spinner data-icon="inline-start" size="sm" aria-hidden />
+              ) : (
+                <RefreshCw data-icon="inline-start" className="size-4" aria-hidden />
+              )}
+              {refreshPending ? t("aiTools.refreshing") : t("aiTools.refresh")}
+            </Button>
+          </div>
+        )}
 
         <Dialog
           open={anthropicProviderDialogOpen}

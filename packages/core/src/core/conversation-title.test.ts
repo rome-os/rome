@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { validatePortableOutputSchema } from "../apps/packaging/output-schema-validator.js";
 import type { ModelProvider, ModelSession, ModelSessionParams } from "./agent-runner.js";
+import { executeActionTool } from "../test/tool-calls.js";
 import {
   CONVERSATION_TITLE_INPUT_MAX_LENGTH,
   CONVERSATION_TITLE_OUTPUT_SCHEMA,
@@ -8,7 +9,7 @@ import {
   createConversationTitleGenerator,
   normalizeConversationTitle,
 } from "./conversation-title.js";
-import type { ModelResolver } from "./model-resolver.js";
+import type { ModelResolver } from "../agent/index.js";
 
 function resultSession(title: string): ModelSession {
   return rawResultSession(JSON.stringify({ title }), { title });
@@ -19,12 +20,9 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
     providerId: "mock",
     model: "small-model",
     events: (async function* () {
-      yield { type: "result" as const, content, structuredOutput };
+      yield { type: "result" as const, content, structuredOutput, reasoningEffort: "low" };
     })(),
     sendUserInput: rs.fn(async () => undefined),
-    fork: rs.fn(async () => {
-      throw new Error("not supported");
-    }),
     interrupt: rs.fn(async () => undefined),
     close: rs.fn(async () => undefined),
   };
@@ -33,12 +31,11 @@ function rawResultSession(content: string, structuredOutput?: unknown): ModelSes
 function generatorFor(session: ModelSession) {
   const provider: ModelProvider = {
     id: "mock",
-    displayName: "Mock",
     builtinTools: new Set(),
     openSession: rs.fn(async () => session),
   };
   const modelResolver: ModelResolver = {
-    getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+    resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
   };
   return createConversationTitleGenerator(modelResolver);
 }
@@ -49,7 +46,6 @@ describe("conversation title generation", () => {
     let openParams: ModelSessionParams | undefined;
     const provider: ModelProvider = {
       id: "mock",
-      displayName: "Mock",
       builtinTools: new Set(),
       openSession: rs.fn(async (params) => {
         openParams = params;
@@ -57,7 +53,7 @@ describe("conversation title generation", () => {
       }),
     };
     const modelResolver: ModelResolver = {
-      getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+      resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
     };
 
     const title = await createConversationTitleGenerator(modelResolver).generate(
@@ -65,21 +61,22 @@ describe("conversation title generation", () => {
     );
 
     expect(title).toBe("Q4 launch planning");
-    expect(modelResolver.getModelProvider).toHaveBeenCalledWith({ tier: "small" });
+    expect(modelResolver.resolve).toHaveBeenCalledWith({ kind: "tier", tier: "small" });
     expect(openParams).toMatchObject({
-      model: "small-model",
-      agentName: "conversation-title",
-      builtinTools: [],
-      maxTurns: 1,
-      reasoningEffort: "low",
-      outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
-      sessionId: expect.stringMatching(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      ),
-      isNewSession: true,
+      config: {
+        model: "small-model",
+        builtinTools: [],
+        maxTurns: 1,
+        reasoningEffort: "low",
+        outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
+      },
+      thread: { kind: "new" },
     });
-    expect(openParams?.getActionCatalog()).toEqual([]);
-    expect(openParams?.getSkillCatalog()).toEqual([]);
+    // The title session serves the model no actions, skills or subagents.
+    expect(openParams?.tools.listTools("subagents")).toEqual([]);
+    await expect(executeActionTool(openParams!.tools, "any_action")).rejects.toThrow(
+      "cannot execute actions",
+    );
     expect(session.sendUserInput).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
@@ -132,12 +129,11 @@ describe("conversation title generation", () => {
     const session = resultSession("Bounded title");
     const provider: ModelProvider = {
       id: "mock",
-      displayName: "Mock",
       builtinTools: new Set(),
       openSession: rs.fn(async () => session),
     };
     const modelResolver: ModelResolver = {
-      getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+      resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
     };
     const firstMessage = `${"a".repeat(CONVERSATION_TITLE_INPUT_MAX_LENGTH)}SHOULD_NOT_APPEAR`;
 
@@ -168,12 +164,11 @@ describe("conversation title generation", () => {
       );
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "Mock",
         builtinTools: new Set(),
         openSession,
       };
       const modelResolver: ModelResolver = {
-        getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+        resolve: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
       };
       const pending = createConversationTitleGenerator(modelResolver, { timeoutMs: 10 }).generate(
         "Name this chat",

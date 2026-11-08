@@ -99,11 +99,29 @@ export function dockerBundleOptions(format = "esm") {
   };
 }
 
+/** Options for an ESM entry whose dynamic imports load their packages only when called. */
+export function splitBundleOptions(entry, outdir) {
+  return {
+    ...dockerBundleOptions("esm"),
+    entryPoints: [entry],
+    outdir,
+    splitting: true,
+    entryNames: "index",
+    chunkNames: "chunks/[name]-[hash]",
+  };
+}
+
 const entrypoints = [
   ["packages/core/src/index.ts", "packages/core/dist/index.js", "esm"],
-  ["packages/core/src/daemon/index.ts", "packages/core/dist/daemon/index.js", "esm"],
   ["packages/core/src/actions/worker.ts", "packages/core/dist/actions/worker.js", "esm"],
   ["scripts/generate-caddyfile.ts", "dist/scripts/generate-caddyfile.js", "cjs"],
+];
+
+// Without splitting, esbuild hoists every external import to the top of the
+// bundle, including those of dynamically imported modules. The daemon loads
+// telemetry after it spawns Rome, so its bundle splits that import into a chunk.
+export const splitEntrypoints = [
+  ["packages/core/src/daemon/index.ts", "packages/core/dist/daemon"],
 ];
 
 async function main() {
@@ -114,15 +132,18 @@ async function main() {
 
   const { build } = await loadEsbuild();
 
-  await Promise.all(
-    entrypoints.map(([entry, outfile, format]) =>
+  await Promise.all([
+    ...entrypoints.map(([entry, outfile, format]) =>
       build({
         ...dockerBundleOptions(format),
         entryPoints: [resolve(projectRoot, entry)],
         outfile: resolve(projectRoot, outfile),
       }),
     ),
-  );
+    ...splitEntrypoints.map(([entry, outdir]) =>
+      build(splitBundleOptions(resolve(projectRoot, entry), resolve(projectRoot, outdir))),
+    ),
+  ]);
 
   for (const [srcRel, destRel, label] of bundledAssets) {
     const src = resolve(projectRoot, srcRel);

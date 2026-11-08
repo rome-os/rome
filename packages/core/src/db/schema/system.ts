@@ -37,7 +37,7 @@ export const sessions = sqliteTable(
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
     provider: text("provider"),
-    providerThreadId: text("provider_thread_id"),
+    modelThreadId: text("provider_thread_id"),
     /** The concrete model that produced the session's last successful turn,
      *  written by the same after-turn provider-info write. Null for legacy
      *  rows and sessions that never completed a turn. Nothing reads it yet. */
@@ -64,7 +64,7 @@ export const sessions = sqliteTable(
 // The checkpoint id is intentionally opaque to core persistence: Codex stores
 // its app-server turn id, while Claude stores the final top-level assistant
 // message UUID. Fork callers use it to branch at the selected turn instead of
-// implicitly branching from the provider thread's current head.
+// implicitly branching from the model thread's current head.
 export const sessionTurnCheckpoints = sqliteTable(
   "session_turn_checkpoints",
   {
@@ -73,7 +73,7 @@ export const sessionTurnCheckpoints = sqliteTable(
       .references(() => sessions.id, { onDelete: "cascade" }),
     turnId: text("turn_id").notNull(),
     provider: text("provider").notNull(),
-    providerThreadId: text("provider_thread_id").notNull(),
+    modelThreadId: text("provider_thread_id").notNull(),
     checkpointId: text("checkpoint_id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
@@ -702,6 +702,12 @@ export const conciergeTasks = sqliteTable(
      */
     chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
     /**
+     * Whose Concierge the row is: "guardian" or "visitor:<account>". Set when
+     * the row is made, from the chat it is made in, and never changed, so it
+     * outlives that chat.
+     */
+    ownerKey: text("owner_key").notNull().default("guardian"),
+    /**
      * The Concierge chat message the row points back to, in Chats. Cleared when
      * the message goes, and the panel then offers no jump. The text is never
      * copied.
@@ -740,8 +746,13 @@ export const conciergeFollowItems = sqliteTable(
   "concierge_follow_items",
   {
     id: text("id").primaryKey(),
-    /** The event's stable id from its connection, so a repeat is kept once. */
+    /** The event's stable id from its connection, so a repeat is kept once per owner. */
     eventId: text("event_id").notNull(),
+    /**
+     * Whose follow kept it: "guardian" or "visitor:<account>". The same event
+     * followed by two people is kept, and told, once for each.
+     */
+    ownerKey: text("owner_key").notNull().default("guardian"),
     source: text("source").notNull(),
     kind: text("kind").notNull(),
     target: text("target").notNull(),
@@ -753,7 +764,8 @@ export const conciergeFollowItems = sqliteTable(
     url: text("url"),
     /**
      * The Concierge chat its follow reported to when triage kept it. Null is
-     * the main chat. No reference: a chat that is gone reports to the main chat.
+     * the guardian's main chat. No reference: a chat that is gone reports to
+     * its owner's main chat.
      */
     chatId: text("chat_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -763,7 +775,7 @@ export const conciergeFollowItems = sqliteTable(
     digestedAt: integer("digested_at", { mode: "timestamp_ms" }),
   },
   (table) => [
-    uniqueIndex("idx_concierge_follow_items_event").on(table.eventId),
+    uniqueIndex("idx_concierge_follow_items_owner_event").on(table.ownerKey, table.eventId),
     index("idx_concierge_follow_items_digest").on(table.digestedAt),
   ],
 );

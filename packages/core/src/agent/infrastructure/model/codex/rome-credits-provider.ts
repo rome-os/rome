@@ -1,0 +1,80 @@
+import { ROME_CREDITS_PROXY_PATH } from "./rome-credits-proxy.js";
+import { getInternalApiBaseUrl } from "../../../../internal-api-url.js";
+
+// The Rome credits model provider on the shared `codex app-server`.
+//
+// Rome credits are an account-wide allowance Rome Cloud serves through its
+// Responses-compatible inference gateway at `<Rome Cloud origin>/v1`. Codex
+// never talks to it directly: it calls core's loopback proxy, which adds the
+// Rome Cloud credential (rome-credits-proxy-route.ts). The one
+// shared app-server knows two providers: its default (the guardian's own
+// OpenAI login) and `rome_credits`. Rome restarts the app-server immediately
+// when the login changes, so each Codex process has one login.
+
+/** The Codex model provider that bills the account's Rome credits. */
+export const ROME_CREDITS_MODEL_PROVIDER_ID = "rome_credits";
+
+/** Env var the app-server reads the proxy secret from on each request. */
+export const ROME_CREDITS_TOKEN_ENV = "ROME_CREDITS_TOKEN";
+
+/**
+ * The variables every Codex agent shell hides, server-wide. A thread that
+ * clears a variable of its own appends to this list rather than replacing it
+ * (app-server-provider.ts).
+ */
+export const CODEX_SHELL_ENV_EXCLUDE: readonly string[] = [ROME_CREDITS_TOKEN_ENV];
+
+function tomlString(value: string): string {
+  // JSON string escapes are valid TOML basic-string escapes.
+  return JSON.stringify(value);
+}
+
+/**
+ * Root `-c` overrides for `codex app-server`.
+ *
+ * The credits provider is defined only when this instance has a Rome Cloud
+ * origin. `defaultProvider` selects this Codex process's login; null retains
+ * Codex's normal OpenAI-login default.
+ *
+ * Codex keeps `*TOKEN*` variables in agent shell commands by default, so the
+ * proxy secret is excluded from the shell env explicitly. This is not a security
+ * boundary: a full-access agent command runs as the same user and can still
+ * read the app-server's environ, as it can read Rome's settings DB. The secret
+ * only reaches the loopback proxy, never a Rome Cloud credential.
+ *
+ * Codex's bundled skills (skill-creator, openai-docs, ...) are off so agents
+ * see only Rome's skill catalog; agents with the image tool get `imagegen`
+ * back per thread (app-server-provider.ts).
+ */
+export function codexAppServerConfigArgs(
+  romeCloudOrigin: string | null,
+  defaultProvider: string | null = null,
+): string[] {
+  const args = [
+    "-c",
+    `shell_environment_policy.exclude=[${CODEX_SHELL_ENV_EXCLUDE.map(tomlString).join(", ")}]`,
+    "-c",
+    "skills.bundled.enabled=false",
+  ];
+  if (!romeCloudOrigin) {
+    if (defaultProvider) throw new Error("Rome credits cannot be the default without Rome Cloud");
+    return args;
+  }
+  if (defaultProvider) args.push("-c", `model_provider=${tomlString(defaultProvider)}`);
+  const provider = [
+    `name=${tomlString("Rome credits")}`,
+    `base_url=${tomlString(`${getInternalApiBaseUrl()}${ROME_CREDITS_PROXY_PATH}`)}`,
+    `env_key=${tomlString(ROME_CREDITS_TOKEN_ENV)}`,
+    `wire_api="responses"`,
+    // The proxy authenticates its own secret, not an OpenAI login.
+    "requires_openai_auth=false",
+    "supports_websockets=false",
+    // The gateway answers 429 with `retry-after: 60`; one retry keeps a turn
+    // from stalling for minutes. A replayed stream would reserve credits twice
+    // while the first attempt's hold is still unresolved, so never replay it.
+    "request_max_retries=1",
+    "stream_max_retries=0",
+  ].join(",");
+  args.push("-c", `model_providers.${ROME_CREDITS_MODEL_PROVIDER_ID}={${provider}}`);
+  return args;
+}

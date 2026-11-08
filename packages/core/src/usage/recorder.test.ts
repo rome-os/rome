@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { UsageEvent } from "./events.js";
-import { UsageRecorder, type TurnUsageFacts } from "./recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
+import { UsageRecorder } from "./recorder.js";
 
 const finishedAt = new Date("2026-10-06T12:00:00.000Z");
 
@@ -13,7 +14,7 @@ function facts(overrides: Partial<TurnUsageFacts> = {}): TurnUsageFacts {
     status: "completed",
     provider: "openai",
     model: "gpt-6-sol",
-    funding: "rome_credits",
+    loginKind: "rome_credits",
     providerTurnId: "codex-turn-1",
     accounting: {
       provider: "openai",
@@ -44,6 +45,14 @@ function setup(credential: string | null = "cred-a") {
 }
 
 describe("UsageRecorder", () => {
+  it("sends a turn's login kind in Rome Cloud's word for it", async () => {
+    const { recorder, queued } = setup();
+    recorder.recordTurn(facts({ loginKind: "api_credential" }));
+    recorder.recordTurn(facts({ turnId: "turn-2", loginKind: "subscription" }));
+    await recorder.flush();
+    expect(queued).toMatchObject([{ funding: "byok" }, { funding: "subscription" }]);
+  });
+
   it("queues one turn event carrying the accounting, funding, and provider turn id", async () => {
     const { recorder, queued } = setup();
     recorder.recordTurn(facts());
@@ -77,7 +86,7 @@ describe("UsageRecorder", () => {
       facts({
         status: "error",
         accounting: undefined,
-        funding: undefined,
+        loginKind: undefined,
         providerTurnId: undefined,
       }),
     );

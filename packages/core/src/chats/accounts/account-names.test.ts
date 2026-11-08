@@ -1,6 +1,6 @@
 import { platformOf } from "@rome/api-types/platform";
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { LinkedInStoreRepository } from "../../db/repositories/linkedin-store.js";
 import { SentinelLogRepository } from "../../db/repositories/sentinel-log.js";
 import { WhatsAppStoreRepository } from "../../db/repositories/whatsapp-store.js";

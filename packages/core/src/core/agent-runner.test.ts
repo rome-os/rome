@@ -1,9 +1,11 @@
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
+import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
-import { AgentLoader } from "./agent-loader.js";
-import { Session } from "../sessions/session.js";
-import { SessionRepository } from "../sessions/session-repository.js";
+import { AgentLoader } from "../agent/index.js";
+import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
 import {
@@ -17,11 +19,26 @@ import {
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
-import type { RecordedConversation } from "./session-conversation.js";
+import type { DrizzleDb } from "../db/index.js";
+import { noteOpenerChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
+import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
+
+const recordMetrics = rs.hoisted(() => rs.fn());
+rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
+
+import type { ModelSessionEvent, RomeTools } from "../agent/index.js";
+import {
+  executeActionTool,
+  executeSubagentTool,
+  listActionNames,
+  noRomeTools,
+  parseToolText,
+  toolNames,
+} from "../test/tool-calls.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -40,59 +57,58 @@ rs.mock("../paths.js", () => ({
   ...pathsModule,
   getProjectRoot: rs.fn(() => "/tmp/agent-runner-test"),
   getDefaultAgentWorkingDir: rs.fn(() => "/tmp/default-project"),
-  ensureDefaultAgentWorkingDir: rs.fn(async () => "/tmp/default-project"),
   getProfileDir: rs.fn(() => "/tmp/agent-runner-test/profile"),
   getProfileMemoryDir: rs.fn(() => "/tmp/agent-runner-test/memory"),
   getProfileInstalledAppsDir: rs.fn(() => "/tmp/agent-runner-test/installed-apps"),
 }));
 
-import { PromptBuilder } from "./prompt-builder.js";
+import type { SystemPrompts } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
   ModelProvider,
   ModelSession,
-  ModelSessionForkParams,
-  ModelSessionForkOpenParams,
   ModelSessionParams,
   ProviderId,
+  ThreadStart,
 } from "./agent-runner.js";
-import { createModelResolver, type ModelResolver } from "./model-resolver.js";
+import {
+  createModelResolver,
+  createTierModelsSetting,
+  type ModelResolver,
+  subagentToolName,
+} from "../agent/index.js";
 import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
-  subagentToolName,
 } from "./agent-session.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import { SkillCatalog } from "./skill-catalog.js";
-import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { SkillLoader } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners, type TurnLifecycle } from "../agent/index.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
   TurnMiddlewareContext,
 } from "@rome-os/app-runtime";
-import type { TurnUsageFacts } from "../usage/recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import {
+  reportOf,
+  bothAvailable,
+  fakeAccounts,
+  RESTRICTED_PLAN,
+} from "../test/kit/model-accounts.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
     providers,
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    accounts: fakeAccounts(bothAvailable()),
   });
 }
 
@@ -115,12 +131,18 @@ async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<Age
   return messages;
 }
 
+const MOCK_ACCOUNTING = {
+  provider: "mock",
+  model: "mock-model",
+  usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+} as const;
+
 describe("AgentRunner", () => {
   let testDb: TestDb;
   let agentLoader: AgentLoader;
   let artifactIdentity: ArtifactIdentityContext;
   let sessionRepository: SessionRepository;
-  let promptBuilder: PromptBuilder;
+  let systemPrompts: SystemPrompts;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
   let mockProvider: MockModelProvider;
@@ -135,8 +157,8 @@ describe("AgentRunner", () => {
     agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionRepository = new SessionRepository(testDb.db, artifactIdentity);
-    promptBuilder = new PromptBuilder();
+    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+    systemPrompts = createTestSystemPrompts();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
     mockProvider = new MockModelProvider();
@@ -146,39 +168,28 @@ describe("AgentRunner", () => {
     testDb.close();
   });
 
-  it("mock sessions reject fork with a clear unsupported error", async () => {
-    const session = createSessionFromRun("mock", async function* () {}, {
-      model: "mock-model",
-      systemPrompt: "system",
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      sessionId: "mock-session",
-      isNewSession: true,
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
-    });
-
-    await expect(session.fork({ sessionId: "fork-session" })).rejects.toThrow(
-      "ModelSession fork is not supported by this provider",
-    );
-    await session.close();
+  it("mock sessions reject a branch with a clear unsupported error", () => {
+    expect(() =>
+      createSessionFromRun("mock", async function* () {}, {
+        config: { model: "mock-model", systemPrompt: "system", builtinTools: [] },
+        tools: noRomeTools(),
+        thread: {
+          kind: "branch",
+          at: { provider: "mock", modelThreadId: "thread", checkpointId: "turn" },
+          lifetime: "ephemeral",
+        },
+      }),
+    ).toThrow("Branching a thread is not supported by this provider");
   });
 
   it("code-backed null session parks until close and never resumes a provider", async () => {
     const session = createNullModelSession({
-      model: "code-backed",
-      systemPrompt: "unused",
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      sessionId: "null-session",
-      isNewSession: false, // the reuse case that broke a real provider resume
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
+      config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
+      tools: noRomeTools(),
+      thread: { kind: "new" },
     });
     expect(session.providerId).toBe("mock");
-    expect(session.providerThreadId).toBeUndefined();
+    expect(session.modelThreadId).toBeUndefined();
 
     // The events stream parks (no provider query, nothing to resume/error) until
     // close() ends it — proven by racing the iterator against a timer.
@@ -196,26 +207,20 @@ describe("AgentRunner", () => {
   it("code-backed null session terminates gracefully if sendUserInput is ever reached", async () => {
     // A correctly-configured code-backed agent short-circuits via middleware, so
     // sendUserInput is never called. If it is (no middleware matched), the turn
-    // must terminate rather than hang: a fallback text + result land on events.
+    // must terminate rather than hang: a fallback text + error land on events.
     const session = createNullModelSession({
-      model: "code-backed",
-      systemPrompt: "unused",
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      sessionId: "null-session-2",
-      isNewSession: true,
-      executeAction: async () => ({ ok: true }),
-      executeSubagent: async () => "delegated",
+      config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
+      tools: noRomeTools(),
+      thread: { kind: "new" },
     });
-    const drained: AgentEvent[] = [];
+    const drained: ModelSessionEvent[] = [];
     const collector = (async () => {
       for await (const msg of session.events) drained.push(msg);
     })();
     await session.sendUserInput({ text: "anything" });
     await session.close();
     await collector;
-    expect(drained.map((m) => m.type)).toEqual(["text", "result"]);
+    expect(drained.map((m) => m.type)).toEqual(["text", "error"]);
   });
 
   it("reuses a code-backed session across acquires without resolving a provider", async () => {
@@ -227,7 +232,6 @@ describe("AgentRunner", () => {
     // code-backed short-circuit.
     const anthropic: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       // A code-backed agent never opens a provider query; if reuse breaks and the
       // session is reopened, this would still not run (null session), so the only
@@ -265,7 +269,7 @@ describe("AgentRunner", () => {
     const manager = createAgentSessionManager({
       ...managerDeps(modelResolver),
       agentLoader: namespacedLoader,
-      sessionRepository: new SessionRepository(testDb.db, { legacyBindings }),
+      sessionRepository: new DrizzleSessionRepository(testDb.db, { legacyBindings }),
     });
 
     const session = await manager.acquire({
@@ -318,7 +322,6 @@ describe("AgentRunner", () => {
     await webchatRepo.createSession("chat-trace", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "Deferred check done." };
@@ -353,7 +356,6 @@ describe("AgentRunner", () => {
     await webchatRepo.createSession("chat-answer", "Webchat chat");
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "Deferred check done." };
@@ -393,13 +395,12 @@ describe("AgentRunner", () => {
       name: "Shared record",
       agentName: "test-main",
     });
-    const opened: { sessionId: string; isNewSession: boolean }[] = [];
+    const opened: ModelSessionParams["thread"][] = [];
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
-        opened.push({ sessionId: params.sessionId, isNewSession: params.isNewSession === true });
+        opened.push(params.thread);
         return createSessionFromRun(
           "anthropic",
           async function* () {
@@ -420,8 +421,7 @@ describe("AgentRunner", () => {
     }
     // No history carried: each run opened a session of its own, new to the provider.
     expect(opened).toHaveLength(2);
-    expect(opened.every((o) => o.isNewSession)).toBe(true);
-    expect(opened[0]?.sessionId).not.toBe(opened[1]?.sessionId);
+    expect(opened).toEqual([{ kind: "new" }, { kind: "new" }]);
     // Both runs are in the one session: a trace and an answer each.
     const roles = (await webchatRepo.getMessages("shared-record")).map((m) => m.role);
     expect(roles.filter((role) => role === "trace")).toHaveLength(2);
@@ -442,7 +442,6 @@ describe("AgentRunner", () => {
     });
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "Claude",
       builtinTools: new Set<string>(),
       openSession: makeOpenSessionFromRun("anthropic", async function* () {
         yield { type: "result", content: "" };
@@ -603,14 +602,199 @@ describe("AgentRunner", () => {
     }
   });
 
+  it("records an agent an action starts from a private chat as that chat's owner's, and none once the chat is gone", async () => {
+    const repo = new ChatsWebChatRepository(testDb.db);
+    await repo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.setSessionTrigger("visitor-task", { triggerKind: "concierge", triggerName: "T" });
+    const runner = createRunner(
+      new MockModelProvider([
+        [{ type: "result", content: "Found it" }],
+        [{ type: "result", content: "Found it" }],
+      ]),
+    );
+    const runFrom = (executionId: string, chatId: string) =>
+      actionExecutionContext.run(
+        {
+          executionId,
+          rootExecutionId: executionId,
+          initiator: "agent:main",
+          actionName: "some-app:research",
+          channelContext: { channel: "webchat", threadId: chatId },
+        },
+        () => collectMessages(runner.run({ agentName: "test-main", prompt: "Look it up" })),
+      );
+    await runFrom("exec-private", "visitor-task");
+    expect(await repo.getSession("action:exec-private:core:test-main")).toMatchObject({
+      ownerKey: "visitor:a",
+      triggerKind: "concierge_fork",
+    });
+    // Called from a chat that is gone: nothing is saved for the run.
+    await runFrom("exec-orphan", "deleted-chat");
+    expect(await repo.getSession("action:exec-orphan:core:test-main")).toBeNull();
+  });
+
+  it("does not run a fork of a chat that is gone, and publishes no stream for it", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const turnStreams = createAgentTurnStreamRegistry();
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn() {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: "x",
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Noted", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo, turnStreams);
+      // The task chat the fork is of was deleted before the fork was saved.
+      await expect(
+        collectMessages(
+          runner.runForked({
+            agentName: "main",
+            sourceSessionId: "source-session",
+            channelThreadKey: "webchat:task-chat",
+            prompt: "a note",
+            threadContext: {
+              channel: "webchat",
+              threadId: "task-chat",
+              romeSessionId: "task-chat",
+            },
+            label: "feedback",
+          }),
+        ),
+      ).rejects.toThrow("was not found");
+      expect(await repo.getSession("fork-session")).toBeNull();
+      expect(turnStreams.get("fork-turn")).toBeUndefined();
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("stamps a fork of a visitor's task chat private to them when it is made", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "task-chat",
+        "Task",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "visitor:a" },
+      );
+      await repo.setSessionTrigger("task-chat", { triggerKind: "concierge", triggerName: "Task" });
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:task-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Noted", agent: "main" } as const;
+          yield {
+            type: "turn_end",
+            turnId: "fork-turn",
+            status: "completed",
+            durationMs: 5,
+            agent: "main",
+          } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+      await collectMessages(
+        runner.runForked({
+          agentName: "main",
+          sourceSessionId: "source-session",
+          channelThreadKey: "webchat:task-chat",
+          prompt: "a note on this answer",
+          threadContext: { channel: "webchat", threadId: "task-chat", romeSessionId: "task-chat" },
+          label: "feedback",
+        }),
+      );
+      // Never promoted, it is private from the start, so deleting the task
+      // chat does not open it.
+      expect(await repo.getSession("fork-session")).toMatchObject({
+        type: "fork",
+        ownerKey: "visitor:a",
+        triggerKind: "concierge_fork",
+        triggerName: "feedback",
+      });
+      await repo.deleteSession("task-chat");
+      const canOpen = (owner: string) =>
+        canOpenChat((id) => repo.getSession(id), "fork-session", owner);
+      expect(await canOpen("visitor:a")).toBe(true);
+      expect(await canOpen("guardian")).toBe(false);
+    } finally {
+      testDb.close();
+    }
+  });
+
   describe("a resumed session whose caller names no conversation", () => {
-    function resumedSession(recorded?: RecordedConversation) {
+    async function resumedSession(db: DrizzleDb, chatId: string) {
+      // The chat that has the session is read from the session's stored row.
+      const now = new Date();
+      await db.insert(sessions).values({
+        id: "agent-session",
+        agentName: "main",
+        channelThreadKey: "telegram:t1",
+        chatId,
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const turns: TurnRef[] = [];
       const session = {
         key: { agentName: "main", channelThreadKey: "telegram:t1" },
         sessionId: "agent-session",
-        conversation: recorded && { origin: "recorded" as const, ...recorded },
         status: "idle" as const,
         sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
           turns.push({
@@ -643,7 +827,7 @@ describe("AgentRunner", () => {
         peek: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
-      return { manager, turns };
+      return { manager, turns, session };
     }
 
     it("leaves a recorded channel conversation to the inbox", async () => {
@@ -656,11 +840,7 @@ describe("AgentRunner", () => {
           name: "Telegram thread",
           agentName: null,
         });
-        const { manager, turns } = resumedSession({
-          id: "channel:telegram:t1",
-          name: "Telegram thread",
-          type: "channel",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "channel:telegram:t1");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -685,11 +865,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -714,11 +890,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -753,11 +925,7 @@ describe("AgentRunner", () => {
           name: "researcher: Telegram thread",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Telegram thread",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A backend turn delivers its reply to the thread and records it in the
@@ -790,11 +958,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A caller that keeps its own transcript keeps it for its channel,
@@ -827,11 +991,7 @@ describe("AgentRunner", () => {
           name: "Side chat",
           agentName: "main",
         });
-        const { manager, turns } = resumedSession({
-          id: "side-chat",
-          name: "Side chat",
-          type: "fork",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "side-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -865,11 +1025,7 @@ describe("AgentRunner", () => {
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
-        const { manager, turns } = resumedSession({
-          id: "user-chat",
-          name: "User chat",
-          type: "webchat",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -883,12 +1039,33 @@ describe("AgentRunner", () => {
       }
     });
 
+    it("records into the chat an open session's opener named, until it is reopened", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new ChatsWebChatRepository(testDb.db);
+        await repo.createSession("user-chat", "User chat");
+        const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
+        // The session is still open from a caller that named the chat. A
+        // reopened one is the case above, which leaves the chat alone.
+        noteOpenerChat(session, "user-chat");
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toBe("user-chat");
+      } finally {
+        testDb.close();
+      }
+    });
+
     it("does not recreate a recorded conversation that was deleted", async () => {
       const testDb = createTestDb();
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
-        // The lookup at open found no conversation, so none is recorded.
-        const { manager, turns } = resumedSession();
+        // The session's row still names the chat, which no longer exists.
+        const { manager, turns } = await resumedSession(testDb.db, "deleted-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -904,16 +1081,25 @@ describe("AgentRunner", () => {
     });
   });
 
-  it("links a fork to the conversation its source serves when no thread names one", async () => {
+  it("links a fork to the chat that has its source session when no thread names one", async () => {
     const testDb = createTestDb();
     try {
       const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("stored-chat", "Stored chat");
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "source-session",
+        agentName: "main",
+        channelThreadKey: "webchat:stored-chat",
+        chatId: "stored-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
 
       const source = {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
-        conversation: { origin: "named" as const, id: "stored-chat" },
         status: "idle" as const,
         sendTurn: rs.fn(),
         async *runForkedTurn(input: { prompt: string }) {
@@ -1029,35 +1215,27 @@ describe("AgentRunner", () => {
     expect(turnStreams.listBySession("fork-session")).toEqual([]);
   });
 
-  /** Provider whose live sessions support fork(); each fork opens the
-   *  session produced by `makeForkSession` (which receives the open params
-   *  so tests can inspect the fork's tool surface). */
+  type BranchStart = Extract<ThreadStart, { kind: "branch" }>;
+
+  /** Provider that opens a `branch` thread start on the session produced by
+   *  `makeForkSession`, which receives the open params so tests can inspect
+   *  the fork's tool surface. */
   function withForkSupport(
     provider: MockModelProvider,
-    makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
+    makeForkSession: (openParams: ModelSessionParams) => ModelSession,
     options: {
-      providerThreadId?: string;
-      onFork?: (params: ModelSessionForkParams) => void;
+      modelThreadId?: string;
+      onBranch?: (branch: BranchStart) => void;
     } = {},
   ): MockModelProvider {
     const baseOpen = provider.openSession.bind(provider);
     provider.openSession = async (params: ModelSessionParams) => {
+      if (params.thread.kind === "branch") {
+        options.onBranch?.(params.thread);
+        return makeForkSession(params);
+      }
       const session = await baseOpen(params);
-      return {
-        ...session,
-        providerThreadId: options.providerThreadId,
-        fork: async (forkParams: ModelSessionForkParams) => {
-          options.onFork?.(forkParams);
-          return {
-            providerId: "mock" as const,
-            sessionId: forkParams.sessionId,
-            sourceSessionId: params.sessionId,
-            sourceProviderThreadId: options.providerThreadId,
-            mode: "ephemeral" as const,
-            open: async (openParams: ModelSessionForkOpenParams) => makeForkSession(openParams),
-          };
-        },
-      };
+      return { ...session, modelThreadId: options.modelThreadId ?? "mock-source-thread" };
     };
     return provider;
   }
@@ -1066,11 +1244,8 @@ describe("AgentRunner", () => {
     return {
       providerId: "mock",
       model: "mock-model",
-      events: (async function* (): AsyncIterable<AgentEvent> {})(),
+      events: (async function* (): AsyncIterable<ModelSessionEvent> {})(),
       async sendUserInput() {},
-      async fork() {
-        throw new Error("nested fork unsupported");
-      },
       async interrupt() {},
       async close() {},
       ...overrides,
@@ -1079,13 +1254,13 @@ describe("AgentRunner", () => {
 
   /** Run one normal turn to make the source session live, then fork it. */
   async function runForkAgainstLiveSession(
-    makeForkSession: (openParams: ModelSessionForkOpenParams) => ModelSession,
+    makeForkSession: (openParams: ModelSessionParams) => ModelSession,
     opts: {
       provider?: MockModelProvider;
       agentName?: string;
       fork?: Partial<Omit<ForkRunParams, "agentName" | "sourceSessionId" | "channelThreadKey">>;
-      sourceProviderThreadId?: string;
-      onFork?: (params: ModelSessionForkParams) => void;
+      sourceModelThreadId?: string;
+      onBranch?: (branch: BranchStart) => void;
       appCatalog?: Pick<AppCatalog, "get">;
     } = {},
   ): Promise<AgentEvent[]> {
@@ -1093,7 +1268,7 @@ describe("AgentRunner", () => {
     const provider = withForkSupport(
       opts.provider ?? new MockModelProvider([[{ type: "result", content: "Done" }]]),
       makeForkSession,
-      { providerThreadId: opts.sourceProviderThreadId, onFork: opts.onFork },
+      { modelThreadId: opts.sourceModelThreadId, onBranch: opts.onBranch },
     );
     const runner = createRunner(provider, undefined, {
       keepAliveAcrossTurns: true,
@@ -1114,6 +1289,11 @@ describe("AgentRunner", () => {
         sourceSessionId: start.sessionId,
         channelThreadKey: "webchat:fork-1",
         prompt: "fork it",
+        sourceCheckpoint: {
+          providerId: "mock",
+          providerThreadId: opts.sourceModelThreadId ?? "mock-source-thread",
+          checkpointId: "source-turn",
+        },
         ...opts.fork,
       }),
     );
@@ -1125,7 +1305,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_input_delta",
                 toolUseId: "tu-explore-1",
@@ -1138,16 +1318,16 @@ describe("AgentRunner", () => {
                 tool: "lookup",
                 content: "{",
               };
-              yield { type: "result", content: "Fork complete" };
+              yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
             })(),
           }),
         {
-          sourceProviderThreadId: "provider-thread",
+          sourceModelThreadId: "model-thread",
           fork: {
             mode: "exact",
             sourceCheckpoint: {
               providerId: "mock",
-              providerThreadId: "provider-thread",
+              providerThreadId: "model-thread",
               checkpointId: "provider-turn-t2",
             },
           },
@@ -1160,24 +1340,24 @@ describe("AgentRunner", () => {
     });
 
     it("validates and forwards the selected provider checkpoint", async () => {
-      let providerFork: ModelSessionForkParams | undefined;
+      let branch: BranchStart | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork complete" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
             })(),
           }),
         {
-          sourceProviderThreadId: "provider-thread",
-          onFork: (params) => {
-            providerFork = params;
+          sourceModelThreadId: "model-thread",
+          onBranch: (start) => {
+            branch = start;
           },
           fork: {
             mode: "exact",
             sourceCheckpoint: {
               providerId: "mock",
-              providerThreadId: "provider-thread",
+              providerThreadId: "model-thread",
               checkpointId: "provider-turn-t2",
             },
           },
@@ -1185,21 +1365,22 @@ describe("AgentRunner", () => {
       );
 
       expect(messages.map((message) => message.type)).toEqual(["turn_start", "result", "turn_end"]);
-      expect(providerFork).toMatchObject({
-        configurationMode: "exact",
-        sourceCheckpoint: "provider-turn-t2",
+      expect(branch).toEqual({
+        kind: "branch",
+        at: { provider: "mock", modelThreadId: "model-thread", checkpointId: "provider-turn-t2" },
+        lifetime: "ephemeral",
       });
     });
 
-    it("rejects a checkpoint from a different provider thread", async () => {
-      const onFork = rs.fn();
+    it("rejects a checkpoint from a different model thread", async () => {
+      const onBranch = rs.fn();
       const messages = await runForkAgainstLiveSession(() => forkSessionStub({}), {
-        sourceProviderThreadId: "live-provider-thread",
-        onFork,
+        sourceModelThreadId: "live-model-thread",
+        onBranch,
         fork: {
           sourceCheckpoint: {
             providerId: "mock",
-            providerThreadId: "different-provider-thread",
+            providerThreadId: "different-model-thread",
             checkpointId: "provider-turn-t2",
           },
         },
@@ -1208,9 +1389,9 @@ describe("AgentRunner", () => {
       expect(messages.map((message) => message.type)).toEqual(["turn_start", "error", "turn_end"]);
       expect(messages[1]).toMatchObject({
         type: "error",
-        error: "Fork checkpoint belongs to a different provider thread",
+        error: "Fork checkpoint belongs to a different model thread",
       });
-      expect(onFork).not.toHaveBeenCalled();
+      expect(onBranch).not.toHaveBeenCalled();
     });
 
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
@@ -1219,8 +1400,8 @@ describe("AgentRunner", () => {
         new MockModelProvider([[{ type: "result", content: "Source ready" }]]),
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork complete" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
             })(),
           }),
       );
@@ -1306,13 +1487,13 @@ describe("AgentRunner", () => {
     });
 
     it("opens a fork with an explicitly requested model tier", async () => {
-      const openParams: ModelSessionForkOpenParams[] = [];
+      const openParams: ModelSessionParams[] = [];
       await runForkAgainstLiveSession(
         (params) => {
           openParams.push(params);
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork summary" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
             })(),
           });
         },
@@ -1320,44 +1501,43 @@ describe("AgentRunner", () => {
       );
 
       expect(openParams).toHaveLength(1);
-      expect(openParams[0].model).toBe("claude-haiku-5-5");
+      expect(openParams[0].config.model).toBe("claude-haiku-5-5");
       // Forks never write pins: the source session keeps the pin of
       // its own live model even after a tier-overridden forked turn ran.
       const row = await sessionRepository.current("webchat:fork-1", "test-main");
       expect(row).toMatchObject({ model: "claude-opus-5-5[1m]" });
     });
 
-    it("leaves a resumable thread behind for a fork that ran on its own provider thread", async () => {
-      let forkMode: string | undefined;
+    it("leaves a resumable thread behind for a fork that ran on its own model thread", async () => {
+      let forkLifetime: string | undefined;
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
-            appliedReasoningEffort: "max",
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            modelThreadId: "fork-model-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", content: "Fork answer", reasoningEffort: "max" };
             })(),
           }),
         {
-          sourceProviderThreadId: "source-provider-thread",
-          onFork: (params) => {
-            forkMode = params.mode;
+          sourceModelThreadId: "source-model-thread",
+          onBranch: (start) => {
+            forkLifetime = start.lifetime;
           },
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
 
       // A fork that wants to be continuable must ask for a thread of its own.
-      expect(forkMode).toBe("thread");
+      expect(forkLifetime).toBe("kept");
       const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
       await expect(
         sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
       ).resolves.toMatchObject({
         id: start.sessionId,
         provider: "mock",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "mock-model",
-        // The branch header shows the effort its provider reported, not the model alone.
+        // The branch header shows the effort its provider ran at, not the model alone.
         reasoningEffort: "max",
         status: "active",
       });
@@ -1374,27 +1554,27 @@ describe("AgentRunner", () => {
       // wake-up scheduled here would resume the fork session and deliver into
       // the parent transcript. A one-shot fork keeps defer: it cannot be
       // resumed at all, so nothing can answer into the wrong place.
-      const openParams: ModelSessionForkOpenParams[] = [];
+      const openParams: ModelSessionParams[] = [];
       const runFork = (fork: Partial<ForkRunParams>) =>
         runForkAgainstLiveSession(
           (params) => {
             openParams.push(params);
             return forkSessionStub({
-              providerThreadId: "fork-provider-thread",
-              events: (async function* (): AsyncIterable<AgentEvent> {
-                yield { type: "result", content: "Fork answer" };
+              modelThreadId: "fork-model-thread",
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
               })(),
             });
           },
-          { sourceProviderThreadId: "source-provider-thread", fork: { mode: "exact", ...fork } },
+          { sourceModelThreadId: "source-model-thread", fork: { mode: "exact", ...fork } },
         );
 
       await runFork({ persistThreadKey: (id: string) => `webchat:${id}` });
       await runFork({});
 
       expect(openParams).toHaveLength(2);
-      expect(openParams[0].executeDefer).toBeUndefined();
-      expect(openParams[1].executeDefer).toBeDefined();
+      expect(toolNames(openParams[0].tools, "ask_user")).not.toContain("defer");
+      expect(toolNames(openParams[1].tools, "ask_user")).toContain("defer");
     });
 
     it("stays one-shot when the fork borrowed the source's thread", async () => {
@@ -1404,13 +1584,13 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "shared-source-thread",
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            modelThreadId: "shared-source-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         {
-          sourceProviderThreadId: "shared-source-thread",
+          sourceModelThreadId: "shared-source-thread",
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
@@ -1422,27 +1602,27 @@ describe("AgentRunner", () => {
       ).resolves.toBeNull();
     });
 
-    it("stays one-shot and ephemeral with no thread key, no provider thread, or a failed fork", async () => {
-      let defaultMode: string | undefined;
+    it("stays one-shot and ephemeral with no thread key, no model thread, or a failed fork", async () => {
+      let defaultLifetime: string | undefined;
       const noKey = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            modelThreadId: "fork-model-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         {
-          onFork: (params) => {
-            defaultMode = params.mode;
+          onBranch: (start) => {
+            defaultLifetime = start.lifetime;
           },
         },
       );
       const noThread = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork answer" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork answer" };
             })(),
           }),
         { fork: { persistThreadKey: (id: string) => `webchat:${id}` } },
@@ -1450,19 +1630,19 @@ describe("AgentRunner", () => {
       const failed = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            modelThreadId: "fork-model-thread",
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield { type: "error", error: "the branch blew up" };
             })(),
           }),
         {
-          sourceProviderThreadId: "source-provider-thread",
+          sourceModelThreadId: "source-model-thread",
           fork: { persistThreadKey: (id: string) => `webchat:${id}` },
         },
       );
 
       // Every other fork in Rome (recap, feedback) keeps today's cheap path.
-      expect(defaultMode).toBe("ephemeral");
+      expect(defaultLifetime).toBe("ephemeral");
       for (const messages of [noKey, noThread, failed]) {
         const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
         await expect(
@@ -1474,7 +1654,7 @@ describe("AgentRunner", () => {
     it("synthesizes error + turn_end when the fork stream ends without a terminal", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
             yield { type: "text", content: "partial fork output" };
           })(),
         }),
@@ -1523,8 +1703,8 @@ describe("AgentRunner", () => {
     it("a close-time fork error does not escape after turn_end", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
-            yield { type: "result", content: "Fork summary" };
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
+            yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
           })(),
           async close() {
             throw new Error("close exploded");
@@ -1539,9 +1719,10 @@ describe("AgentRunner", () => {
     it("brackets a user-stopped forked turn with status=interrupted", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
             yield {
               type: "result",
+              reasoningEffort: "high",
               content: "",
               accounting: {
                 provider: "mock",
@@ -1566,9 +1747,9 @@ describe("AgentRunner", () => {
     it("brackets a successful forked turn with status=completed", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
             yield { type: "text", content: "fork output" };
-            yield { type: "result", content: "Fork summary" };
+            yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
           })(),
         }),
       );
@@ -1601,59 +1782,48 @@ describe("AgentRunner", () => {
 
     it("default forks open an isolated tool surface with execution disabled", async () => {
       registerDemoAction();
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
       const messages = await runForkAgainstLiveSession((openParams) => {
         forkOpen = openParams;
         return forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentEvent> {
-            yield { type: "result", content: "Fork summary" };
+          events: (async function* (): AsyncIterable<ModelSessionEvent> {
+            yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
           })(),
         });
       });
 
       expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
       expect(forkOpen).toBeDefined();
-      expect(forkOpen!.getActionCatalog()).toEqual([]);
-      expect(forkOpen!.getSkillCatalog()).toEqual([]);
-      expect(forkOpen!.subagentTools).toEqual([]);
-      expect(forkOpen!.builtinTools).toEqual([]);
-      expect(forkOpen!.reasoningEffort).toBe("high");
-      expect(forkOpen!.supportsInteractiveSurface).toBe(false);
-      await expect(forkOpen!.executeAction("demo_action", {})).rejects.toThrow(
-        "Actions are disabled in forked turns",
-      );
+      // An empty tool surface: nothing to list in any group, and no builtins.
+      for (const group of ["actions", "subagents", "skills", "ask_user"] as const) {
+        expect(toolNames(forkOpen!.tools, group)).toEqual([]);
+      }
+      expect(forkOpen!.config.builtinTools).toEqual([]);
+      expect(forkOpen!.config.reasoningEffort).toBe("high");
       await expect(
-        forkOpen!.executeSubagent(
-          EXPLORE_TOOL,
-          { prompt: "x" },
-          { toolUseId: "isolated-subagent" },
-        ),
-      ).rejects.toThrow("Subagents are disabled in forked turns");
+        executeActionTool(forkOpen!.tools, "demo_action", {}, { toolUseId: "isolated-action" }),
+      ).rejects.toThrow("Unknown tool: execute_action");
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
-      const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
-        const record = getRecord(name);
-        if (record.config.name !== "test-main") return record;
-        return {
-          ...record,
-          metadata: {
-            ...record.metadata,
-            ownerType: "app",
-            ownerId: "test-app",
-          },
-        };
+      const find = agentLoader.find.bind(agentLoader);
+      const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
+        const agent = find(name);
+        if (agent?.localName !== "test-main") return agent;
+        return { ...agent, ownerType: "app", ownerId: "test-app" };
       });
-      let forkOpen: ModelSessionForkOpenParams | undefined;
 
       try {
         await runForkAgainstLiveSession(
-          (openParams) => {
-            forkOpen = openParams;
+          () => {
             return forkSessionStub({
-              events: (async function* (): AsyncIterable<AgentEvent> {
-                yield { type: "result", content: "Fork summary" };
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield {
+                  type: "result",
+                  reasoningEffort: "high",
+                  content: "Fork summary",
+                  accounting: MOCK_ACCOUNTING,
+                };
               })(),
             });
           },
@@ -1674,7 +1844,10 @@ describe("AgentRunner", () => {
           },
         );
 
-        expect(forkOpen?.appStoreListingId).toBe("@publisher/test-app");
+        expect(recordMetrics).toHaveBeenCalledWith(MOCK_ACCOUNTING, {
+          agentName: "core:test-main",
+          appStoreListingId: "@publisher/test-app",
+        });
       } finally {
         recordSpy.mockRestore();
       }
@@ -1684,13 +1857,13 @@ describe("AgentRunner", () => {
       registerDemoAction();
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       provider.builtinTools = new Set(["Read", "Edit", "Bash"]);
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
       await runForkAgainstLiveSession(
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "Fork summary" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "Fork summary" };
             })(),
           });
         },
@@ -1699,31 +1872,37 @@ describe("AgentRunner", () => {
 
       const sourceOpen = provider.sessions[0];
       expect(forkOpen).toBeDefined();
-      expect(forkOpen!.systemPrompt).toBe(sourceOpen.systemPrompt);
-      // Same getter references, not equal copies: both sessions must
-      // serialize the same catalog snapshot for the tool block to match.
-      expect(forkOpen!.getActionCatalog).toBe(sourceOpen.getActionCatalog);
-      expect(forkOpen!.getSkillCatalog).toBe(sourceOpen.getSkillCatalog);
-      expect(forkOpen!.getActionCatalog().map((a) => a.name)).toEqual(["demo_action"]);
-      expect(forkOpen!.subagentTools).toBe(sourceOpen.subagentTools);
-      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain(EXPLORE_TOOL);
+      expect(forkOpen!.config.systemPrompt).toBe(sourceOpen.config.systemPrompt);
+      // The same catalog as the source: both sessions serialize the same tool
+      // block.
+      expect(await listActionNames(forkOpen!.tools)).toEqual(["demo_action"]);
+      expect(toolNames(forkOpen!.tools, "subagents")).toEqual(
+        toolNames(sourceOpen.tools, "subagents"),
+      );
+      expect(toolNames(forkOpen!.tools, "subagents")).toContain(EXPLORE_TOOL);
       // test-main declares Read + Edit; Bash stays provider-only in both.
-      expect(forkOpen!.builtinTools).toBe(sourceOpen.builtinTools);
-      expect(forkOpen!.builtinTools).toEqual(["Read", "Edit"]);
+      expect(forkOpen!.config.builtinTools).toBe(sourceOpen.config.builtinTools);
+      expect(forkOpen!.config.builtinTools).toEqual(["Read", "Edit"]);
       // The advertised surface stays identical (prefix identity with the
-      // source); only the interactive *runtime* is marked detached, since no
-      // webchat drain reads a fork stream.
-      expect(forkOpen!.supportsInteractiveSurface).toBe(true);
-      expect(forkOpen!.interactiveSurfaceDetached).toBe(true);
-      expect(forkOpen!.maxTurns).toBe(sourceOpen.maxTurns);
-      expect(forkOpen!.workingDir).toBe(sourceOpen.workingDir);
-      expect(forkOpen!.externalMcpServers).toBe(sourceOpen.externalMcpServers);
-      expect(forkOpen!.reasoningEffort).toBe(sourceOpen.reasoningEffort);
+      // source); only the interactive *runtime* is detached, since no webchat
+      // drain reads a fork stream: ask_question relays prose there instead of
+      // parking the turn on a card.
+      expect(toolNames(forkOpen!.tools, "ask_user")).toEqual(
+        toolNames(sourceOpen.tools, "ask_user"),
+      );
+      const askQuestion = (tools: RomeTools) =>
+        tools.listTools("ask_user").find((tool) => tool.name === "ask_question");
+      expect(askQuestion(sourceOpen.tools)?.endsTurn).toBe(true);
+      expect(askQuestion(forkOpen!.tools)?.endsTurn).toBe(false);
+      expect(forkOpen!.config.maxTurns).toBe(sourceOpen.config.maxTurns);
+      expect(forkOpen!.config.workingDir).toBe(sourceOpen.config.workingDir);
+      expect(forkOpen!.config.externalMcpServers).toBe(sourceOpen.config.externalMcpServers);
+      expect(forkOpen!.config.reasoningEffort).toBe(sourceOpen.config.reasoningEffort);
       // Model follows the source's live model when no tier override is given.
-      expect(forkOpen!.model).toBe(sourceOpen.model);
-      // Callbacks must be fresh fork-bound closures, never the source's.
-      expect(forkOpen!.executeAction).not.toBe(sourceOpen.executeAction);
-      expect(forkOpen!.executeSubagent).not.toBe(sourceOpen.executeSubagent);
+      expect(forkOpen!.config.model).toBe(sourceOpen.config.model);
+      // The fork's tools run through fresh fork-bound callbacks, never the
+      // source's.
+      expect(forkOpen!.tools).not.toBe(sourceOpen.tools);
     });
 
     it("exact forks execute actions attributed to the fork session, not the source", async () => {
@@ -1740,9 +1919,9 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              await openParams.executeAction("demo_action", {});
-              yield { type: "result", content: "acted" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              await executeActionTool(openParams.tools, "demo_action", {});
+              yield { type: "result", reasoningEffort: "high", content: "acted" };
             })(),
           }),
         {
@@ -1777,14 +1956,15 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-1",
                 tool: EXPLORE_TOOL,
                 input: { prompt: "dig" },
               };
-              const completion = (await openParams.executeSubagent(
+              const completion = (await executeSubagentTool(
+                openParams.tools,
                 EXPLORE_TOOL,
                 { prompt: "dig" },
                 { toolUseId: "fork-subagent-1" },
@@ -1795,7 +1975,7 @@ describe("AgentRunner", () => {
                 tool: EXPLORE_TOOL,
                 output: completion,
               };
-              yield { type: "result", content: completion.output };
+              yield { type: "result", reasoningEffort: "high", content: completion.output };
             })(),
           }),
         { provider, fork: { mode: "exact" } },
@@ -1827,15 +2007,16 @@ describe("AgentRunner", () => {
 
     it("exact forks preserve provider-native structured results without a side-channel event", async () => {
       const payload = { decision: "REPLY", reason: "all good" };
-      let forkOpen: ModelSessionForkOpenParams | undefined;
+      let forkOpen: ModelSessionParams | undefined;
 
       const messages = await runForkAgainstLiveSession(
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "result",
+                reasoningEffort: "high",
                 content: JSON.stringify(payload),
                 structuredOutput: payload,
               };
@@ -1845,7 +2026,7 @@ describe("AgentRunner", () => {
         { agentName: "test-structured", fork: { mode: "exact" } },
       );
 
-      expect(forkOpen!.outputSchema).toEqual(
+      expect(forkOpen!.config.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
       expect(messages.some((message) => message.type === "structured_output")).toBe(false);
@@ -1858,8 +2039,8 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              yield { type: "result", content: "forgot to submit" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              yield { type: "result", reasoningEffort: "high", content: "forgot to submit" };
             })(),
           }),
         { agentName: "test-structured", fork: { mode: "exact" } },
@@ -1878,7 +2059,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_result",
                 toolUseId: "tu-fork-park",
@@ -1887,6 +2068,7 @@ describe("AgentRunner", () => {
               };
               yield {
                 type: "result",
+                reasoningEffort: "high",
                 content: JSON.stringify({ decision: "REPLY", reason: "after approval" }),
                 structuredOutput: { decision: "REPLY", reason: "after approval" },
               };
@@ -1924,9 +2106,9 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              actionResult = await openParams.executeAction("demo_action", {});
-              yield { type: "result", content: "done" };
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
+              actionResult = await executeActionTool(openParams.tools, "demo_action", {});
+              yield { type: "result", reasoningEffort: "high", content: "done" };
             })(),
           }),
         { fork: { mode: "exact" } },
@@ -1942,49 +2124,6 @@ describe("AgentRunner", () => {
       expect((actionResult as { message: string }).message).toContain("Pick a time slot");
     });
 
-    it("takes the non-interactive fallback for action results when opened detached", async () => {
-      // A side chat's follow-up runs on a `webchat:` key, so the surface check
-      // would otherwise say it can mount UI — but it renders in the read-only
-      // Sessions detail view, where nobody can answer a card.
-      registerDemoAction(async () => ({
-        status: "pending_interaction",
-        interaction: {
-          appId: "demo-app",
-          promptText: "Pick a time slot",
-          render: { kind: "inline", componentId: "slot-picker" },
-        },
-      }));
-
-      let actionResult: unknown;
-      const runImpl = async function* (
-        params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentEvent> {
-        actionResult = await params.executeAction("demo_action", {});
-        yield { type: "result", content: "done" };
-      };
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-detached",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", runImpl),
-      };
-      const manager = createAgentSessionManager(
-        managerDeps(createTestModelResolver({ providers: [provider] })),
-      );
-      const session = await manager.acquire(
-        { agentName: "test-main", channelThreadKey: "webchat:detached-follow-up" },
-        { interactiveSurfaceDetached: true },
-      );
-      await collectMessages(session.sendTurn({ prompt: "continue" }).events);
-
-      expect(actionResult).toMatchObject({
-        message: expect.stringContaining("cannot render an interactive UI"),
-      });
-      expect((actionResult as { pendingInteraction?: boolean }).pendingInteraction).toBeUndefined();
-
-      await session.close("shutdown");
-    });
-
     it("exact fork subagents run in fresh fork-owned child sessions", async () => {
       const provider = withForkSupport(
         new MockModelProvider([
@@ -1993,14 +2132,15 @@ describe("AgentRunner", () => {
         ]),
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
+            events: (async function* (): AsyncIterable<ModelSessionEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-2",
                 tool: EXPLORE_TOOL,
                 input: { prompt: "fork dig" },
               };
-              const completion = (await openParams.executeSubagent(
+              const completion = (await executeSubagentTool(
+                openParams.tools,
                 EXPLORE_TOOL,
                 { prompt: "fork dig" },
                 { toolUseId: "fork-subagent-2" },
@@ -2011,7 +2151,7 @@ describe("AgentRunner", () => {
                 tool: EXPLORE_TOOL,
                 output: completion,
               };
-              yield { type: "result", content: completion.output };
+              yield { type: "result", reasoningEffort: "high", content: completion.output };
             })(),
           }),
       );
@@ -2019,7 +2159,9 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
-      const runner = new AgentRunner(manager, agentLoader);
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession("fork-iso", "Fork source");
+      const runner = new AgentRunner(manager, agentLoader, repo);
       const first = await collectMessages(
         runner.run({ agentName: "test-main", prompt: "Hi", channelThreadKey: "webchat:fork-iso" }),
       );
@@ -2032,46 +2174,39 @@ describe("AgentRunner", () => {
           channelThreadKey: "webchat:fork-iso",
           prompt: "fork it",
           mode: "exact",
+          sourceCheckpoint: {
+            providerId: "mock",
+            providerThreadId: "mock-source-thread",
+            checkpointId: "source-turn",
+          },
         }),
       );
 
       // The fork's subagent is always a fresh session owned by the fork.
-      const childOpens = provider.sessions.filter((s) => s.agentName === "core:test-explore");
+      const childOpens = provider.sessions.slice(1);
       expect(childOpens).toHaveLength(1);
-      expect(childOpens[0].sessionId).not.toBe(start.sessionId);
-      expect(childOpens[0].isNewSession).toBe(true);
+      expect(childOpens[0].thread).toEqual({ kind: "new" });
       const terminal = messages.find((m) => m.type === "result");
       expect(terminal).toMatchObject({ content: "fork child answer" });
     });
   });
 
-  function createLifecycleRecorder(): AgentLifecycleDispatcher & {
-    started: AgentTurnStartedEvent[];
-    finished: AgentTurnFinishedEvent[];
+  function createLifecycleRecorder(): TurnLifecycle & {
+    startedEvents: AgentTurnStartedEvent[];
+    finishedEvents: AgentTurnFinishedEvent[];
   } {
-    const started: AgentTurnStartedEvent[] = [];
-    const finished: AgentTurnFinishedEvent[] = [];
+    const startedEvents: AgentTurnStartedEvent[] = [];
+    const finishedEvents: AgentTurnFinishedEvent[] = [];
     return {
-      started,
-      finished,
-      async loadFromCatalog() {
-        return [];
+      startedEvents,
+      finishedEvents,
+      started(event) {
+        startedEvents.push(event);
       },
-      dispatchStarted(event) {
-        started.push(event);
-        return { invoked: 0, skipped: 0, skips: [] };
+      ended(event) {
+        finishedEvents.push(event);
       },
-      dispatchFinished(event) {
-        finished.push(event);
-        return { invoked: 0, skipped: 0, skips: [] };
-      },
-      onFinished() {
-        return () => {};
-      },
-      dispatchFailedBeforeStart() {},
-      onFailedBeforeStart() {
-        return () => {};
-      },
+      couldNotStart() {},
     };
   }
 
@@ -2080,23 +2215,28 @@ describe("AgentRunner", () => {
   // are real-but-inert.
   function managerDeps(
     modelResolver: ModelResolver,
-    lifecycleDispatcher?: AgentLifecycleDispatcher,
+    turnLifecycle?: TurnLifecycle,
     appCatalog?: Pick<AppCatalog, "get">,
   ) {
     const activeSubagentRegistry = createActiveSubagentRegistry();
     const turnStreams = createAgentTurnStreamRegistry();
     return {
       agentLoader,
-      appCatalog,
       sessionRepository,
-      promptBuilder,
+      systemPrompts,
       actionRegistry,
       modelResolver,
       actionEngine,
       webchatRepo: new ChatsWebChatRepository(testDb.db),
+      sessionSettings: new ChatSessionSettings({
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
+      }),
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(artifactIdentity),
-      lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
+      skillCatalog: new SkillLoader(artifactIdentity),
+      turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
+      readAnswerShape,
+      turnUsage: new TurnUsageReporter({ apps: appCatalog }),
+      folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
       channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
@@ -2109,7 +2249,7 @@ describe("AgentRunner", () => {
 
   function createRunner(
     provider?: ModelProvider,
-    lifecycleDispatcher?: AgentLifecycleDispatcher,
+    turnLifecycle?: TurnLifecycle,
     options: {
       keepAliveAcrossTurns?: boolean;
       appCatalog?: Pick<AppCatalog, "get">;
@@ -2123,29 +2263,38 @@ describe("AgentRunner", () => {
     });
     const manager = createAgentSessionManager(
       {
-        ...managerDeps(modelResolver, lifecycleDispatcher, options.appCatalog),
+        ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.resetPolicy
-          ? { resolveProviderSessionReset: async () => options.resetPolicy! }
+          ? {
+              sessionSettings: new ChatSessionSettings({
+                resetPolicy: async () => options.resetPolicy!,
+                webchatRepo: new ChatsWebChatRepository(testDb.db),
+              }),
+            }
           : {}),
-        ...(options.turnLinks ? { turnLinks: options.turnLinks } : {}),
+        ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
-    return new AgentRunner(manager, agentLoader);
+    // A recorded run has its conversation's row, which its subagents need.
+    return new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
     let closed = false;
-    const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
-    const finish = (): IteratorResult<AgentEvent> => ({ value: undefined as never, done: true });
+    const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
+    const finish = (): IteratorResult<ModelSessionEvent> => ({
+      value: undefined as never,
+      done: true,
+    });
 
     return {
       providerId: "mock",
-      model: params.model,
+      model: params.config.model,
       events: {
         [Symbol.asyncIterator]() {
           return {
-            async next(): Promise<IteratorResult<AgentEvent>> {
+            async next(): Promise<IteratorResult<ModelSessionEvent>> {
               if (closed) return finish();
               return await new Promise((resolve) => {
                 resolvers.push(resolve);
@@ -2155,9 +2304,6 @@ describe("AgentRunner", () => {
         },
       },
       async sendUserInput(): Promise<void> {},
-      async fork() {
-        throw new Error("ModelSession fork is not supported by this provider");
-      },
       async interrupt(): Promise<void> {},
       async close(): Promise<void> {
         if (closed) return;
@@ -2196,7 +2342,9 @@ describe("AgentRunner", () => {
         {
           ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
           turnMiddleware,
-          usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+          turnUsage: new TurnUsageReporter({
+            usage: { recordTurn: (facts) => recorded.push(facts) },
+          }),
         },
         { keepAliveAcrossTurns: true },
       );
@@ -2343,7 +2491,7 @@ describe("AgentRunner", () => {
     });
 
     it("publishes an empty result for a middleware turn that emits no terminal", async () => {
-      // welcome-to-rome parks a turn on a question card this way.
+      // A scripted conversation parks a turn on a question card this way.
       const session = await openMiddlewareSession(async (ctx) => {
         ctx.emit({ type: "text", content: "Pick one" });
       });
@@ -2475,7 +2623,7 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider through the conversational input lane", async () => {
+    it("takes the next input on the same model session after an interrupt", async () => {
       const opens: ModelSessionParams[] = [];
       const prompts: string[] = [];
       const cancels = rs.fn();
@@ -2489,17 +2637,14 @@ describe("AgentRunner", () => {
       });
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
-          const first = opens.length === 1;
-          let disposed = false;
           const model = createSessionFromRun(
             "anthropic",
             async function* ({ prompt }) {
               prompts.push(prompt);
-              if (first) {
+              if (prompts.length === 1) {
                 yield {
                   type: "tool_use",
                   id: "edit-1",
@@ -2507,8 +2652,15 @@ describe("AgentRunner", () => {
                   input: { file_path: "test.txt" },
                 };
                 await firstGate;
-                yield { type: "result", content: "Work before cancellation" };
-                await model.close();
+                yield {
+                  type: "result",
+                  content: "Work before cancellation",
+                  position: {
+                    provider: "anthropic",
+                    modelThreadId: "persisted-claude-thread",
+                    checkpointId: "assistant-current",
+                  },
+                };
               } else {
                 await secondGate;
                 yield { type: "result", content: "Next turn" };
@@ -2518,13 +2670,9 @@ describe("AgentRunner", () => {
           );
           return {
             ...model,
-            providerThreadId: "persisted-claude-thread",
-            get isClosed() {
-              return disposed;
-            },
+            modelThreadId: "persisted-claude-thread",
             async interrupt() {
               cancels();
-              disposed = true;
               releaseFirst();
             },
           };
@@ -2571,16 +2719,12 @@ describe("AgentRunner", () => {
       expect(await secondMessages).toContainEqual(
         expect.objectContaining({ type: "result", content: "Next turn" }),
       );
-      expect(opens).toHaveLength(2);
-      expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "persisted-claude-thread",
-      });
+      expect(opens).toHaveLength(1);
       expect(session.status).toBe("idle");
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider before forking its current checkpoint", async () => {
+    it("branches an interrupted source at its current checkpoint", async () => {
       const opens: ModelSessionParams[] = [];
       let releaseInterrupted!: () => void;
       const interruptedGate = new Promise<void>((resolve) => {
@@ -2590,63 +2734,42 @@ describe("AgentRunner", () => {
       const interruptedBegun = new Promise<void>((resolve) => {
         beginInterrupted = resolve;
       });
-      let providerFork: ModelSessionForkParams | undefined;
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           opens.push(params);
-          const first = opens.length === 1;
-          let disposed = false;
+          if (params.thread.kind === "branch") {
+            return forkSessionStub({
+              providerId: "anthropic",
+              model: "claude-fork",
+              events: (async function* (): AsyncIterable<ModelSessionEvent> {
+                yield { type: "result", reasoningEffort: "high", content: "Fork complete" };
+              })(),
+            });
+          }
           const model = createSessionFromRun(
             "anthropic",
             async function* () {
-              if (!first) return;
               beginInterrupted();
               await interruptedGate;
-              yield { type: "result", content: "Work before cancellation" };
-              await model.close();
+              yield {
+                type: "result",
+                content: "Work before cancellation",
+                position: {
+                  provider: "anthropic",
+                  modelThreadId: "persisted-claude-thread",
+                  checkpointId: "assistant-current",
+                },
+              };
             },
             params,
           );
           return {
             ...model,
-            providerThreadId: "persisted-claude-thread",
-            get isClosed() {
-              return disposed;
-            },
-            get lastCompletedTurnCheckpoint() {
-              return first ? "assistant-current" : undefined;
-            },
+            modelThreadId: "persisted-claude-thread",
             async interrupt() {
-              if (!first || disposed) return;
-              disposed = true;
               releaseInterrupted();
-            },
-            async fork(forkParams) {
-              if (disposed) throw new Error("Cannot fork a closed ModelSession");
-              providerFork = forkParams;
-              return {
-                providerId: "anthropic" as const,
-                sessionId: forkParams.sessionId,
-                sourceSessionId: params.sessionId,
-                sourceProviderThreadId: "persisted-claude-thread",
-                mode: forkParams.mode ?? "ephemeral",
-                providerThreadId: forkParams.sessionId,
-                open: async () =>
-                  forkSessionStub({
-                    providerId: "anthropic",
-                    model: "claude-fork",
-                    events: (async function* (): AsyncIterable<AgentEvent> {
-                      yield { type: "result", content: "Fork complete" };
-                    })(),
-                  }),
-              };
-            },
-            async close() {
-              disposed = true;
-              await model.close();
             },
           };
         },
@@ -2690,13 +2813,14 @@ describe("AgentRunner", () => {
       ]);
       expect(forkMessages[1]).toMatchObject({ type: "result", content: "Fork complete" });
       expect(opens).toHaveLength(2);
-      expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "persisted-claude-thread",
-      });
-      expect(providerFork).toMatchObject({
-        configurationMode: "exact",
-        sourceCheckpoint: "assistant-current",
+      expect(opens[1]?.thread).toEqual({
+        kind: "branch",
+        at: {
+          provider: "anthropic",
+          modelThreadId: "persisted-claude-thread",
+          checkpointId: "assistant-current",
+        },
+        lifetime: "ephemeral",
       });
       await manager.shutdown();
     });
@@ -2729,7 +2853,6 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
-        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -2751,6 +2874,54 @@ describe("AgentRunner", () => {
       expect(sendTurn).toHaveBeenCalledWith(
         { prompt: "Continue approval" },
         expect.objectContaining({ initiatedBy: "user" }),
+      );
+    });
+
+    it("hands a turn's push level to the session turn", async () => {
+      const sendTurn: AgentSession["sendTurn"] = rs.fn(() => ({
+        turnId: "turn-1",
+        events: (async function* () {
+          yield { type: "result", content: "resumed", agent: "test-main" } as const;
+        })(),
+        turnContext: context.active(),
+      }));
+      const session: AgentSession = {
+        selectModel: () => {},
+        key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
+        sessionId: "sess-1",
+        status: "idle",
+        sendTurn,
+        submitInput: rs.fn(),
+        runForkedTurn: rs.fn(),
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager: AgentSessionManager = {
+        acquire: rs.fn(async () => {
+          throw new Error("implicit acquire should not be used");
+        }),
+        acquireBySessionId: rs.fn(async () => session),
+        peek: rs.fn(() => undefined),
+        findWorkingDirBySessionId: rs.fn(),
+        shutdown: rs.fn(async () => undefined),
+      };
+      const runner = new AgentRunner(manager, agentLoader);
+
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "<task_events/>",
+          sessionId: "sess-1",
+          initiatedBy: "system",
+          pushLevel: "active",
+        }),
+      );
+
+      expect(sendTurn).toHaveBeenCalledWith(
+        { prompt: "<task_events/>" },
+        expect.objectContaining({ initiatedBy: "system", pushLevel: "active" }),
       );
     });
 
@@ -2899,11 +3070,7 @@ describe("AgentRunner", () => {
       };
 
       expect(secondSession.sessionId).toBe(firstSession.sessionId);
-      expect(provider.calls[1]).toMatchObject({
-        prompt: "Follow up",
-        sessionId: firstSession.sessionId,
-        isNewSession: false,
-      });
+      expect(provider.calls[1]).toMatchObject({ prompt: "Follow up" });
     });
 
     it("reopens the exact requested session instead of reusing a different cached session", async () => {
@@ -2936,15 +3103,9 @@ describe("AgentRunner", () => {
       expect(resumed.sessionId).toBe("sess-old");
       expect(resumed).not.toBe(cached);
       expect(provider.sessions).toHaveLength(2);
-      expect(provider.sessions[1]).toMatchObject({
-        sessionId: "sess-old",
-        // The row has no stored provider identity, so its native thread is not
-        // resumed into whichever provider happens to resolve now. The id is not
-        // new either: a first turn cut off by a restart leaves a transcript
-        // under it with no provider recorded (#1045).
-        isNewSession: false,
-      });
-      expect(provider.sessions[1].providerThreadId).toBeUndefined();
+      // The row has no stored provider identity, so its native thread is not
+      // resumed into whichever provider happens to resolve now (#1045).
+      expect(provider.sessions[1].thread).toEqual({ kind: "new" });
 
       await manager.shutdown();
     });
@@ -3003,12 +3164,24 @@ describe("AgentRunner", () => {
     });
 
     it("persists the provider checkpoint for a completed Rome turn", async () => {
-      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
-      const openSession = provider.openSession.bind(provider);
+      const provider = new MockModelProvider();
       provider.openSession = rs.fn(async (params) => ({
-        ...(await openSession(params)),
-        providerThreadId: "provider-thread",
-        lastCompletedTurnCheckpoint: "provider-turn-2",
+        ...createSessionFromRun(
+          "mock",
+          async function* () {
+            yield {
+              type: "result",
+              content: "Done",
+              position: {
+                provider: "mock",
+                modelThreadId: "model-thread",
+                checkpointId: "provider-turn-2",
+              },
+            };
+          },
+          params,
+        ),
+        modelThreadId: "model-thread",
       }));
       const runner = createRunner(provider);
 
@@ -3025,7 +3198,7 @@ describe("AgentRunner", () => {
         sessionId: start.sessionId,
         turnId: start.turnId,
         provider: "mock",
-        providerThreadId: "provider-thread",
+        modelThreadId: "model-thread",
         checkpointId: "provider-turn-2",
       });
     });
@@ -3033,7 +3206,6 @@ describe("AgentRunner", () => {
     it("does not persist a provider checkpoint for an interrupted turn", async () => {
       const provider: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         async openSession(params) {
           const session = createSessionFromRun(
@@ -3045,7 +3217,7 @@ describe("AgentRunner", () => {
                 content: "partial output",
                 accounting: {
                   provider: "anthropic",
-                  model: params.model,
+                  model: params.config.model,
                   usage: {
                     cacheReadTokens: 0,
                     cacheWriteTokens: 0,
@@ -3054,15 +3226,16 @@ describe("AgentRunner", () => {
                   },
                   stopReason: "interrupted",
                 },
+                position: {
+                  provider: "anthropic",
+                  modelThreadId: "claude-thread",
+                  checkpointId: "streamed-but-not-resumable-assistant-uuid",
+                },
               };
             },
             params,
           );
-          return {
-            ...session,
-            providerThreadId: "claude-thread",
-            lastCompletedTurnCheckpoint: "streamed-but-not-resumable-assistant-uuid",
-          };
+          return { ...session, modelThreadId: "claude-thread" };
         },
       };
       const runner = createRunner(provider);
@@ -3088,7 +3261,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         async openSession(params) {
           const session = createSessionFromRun(
@@ -3099,7 +3271,7 @@ describe("AgentRunner", () => {
                 content: "partial answer",
                 accounting: {
                   provider: "openai",
-                  model: params.model,
+                  model: params.config.model,
                   usage: {
                     cacheReadTokens: 0,
                     cacheWriteTokens: 0,
@@ -3109,15 +3281,16 @@ describe("AgentRunner", () => {
                   stop: { reason: "interrupted", raw: "interrupted" },
                   stopReason: "end_turn",
                 },
+                position: {
+                  provider: "openai",
+                  modelThreadId: "codex-thread",
+                  checkpointId: "codex-turn-1",
+                },
               };
             },
             params,
           );
-          return {
-            ...session,
-            providerThreadId: "codex-thread",
-            lastCompletedTurnCheckpoint: "codex-turn-1",
-          };
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const runner = createRunner(provider, lifecycle);
@@ -3133,7 +3306,7 @@ describe("AgentRunner", () => {
       expect(
         await sessionRepository.deprecatedCheckpoint(start.sessionId, start.turnId),
       ).toBeNull();
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "interrupted",
         output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },
       });
@@ -3188,12 +3361,23 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("records the effort the provider reports it applied, in the provider's terms", async () => {
+    it("records the effort the turn ran at, and keeps the provider's facts off what it publishes", async () => {
       // Claude runs a warm session at its open-time effort and calls it `max`.
-      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
-      const open = provider.openSession.bind(provider);
+      const provider = new MockModelProvider();
       provider.openSession = async (params) =>
-        Object.defineProperty(await open(params), "appliedReasoningEffort", { value: "max" });
+        createSessionFromRun(
+          "mock",
+          async function* () {
+            yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
+            yield {
+              type: "result",
+              content: "Done",
+              reasoningEffort: "max",
+              position: { provider: "mock", modelThreadId: "t", checkpointId: "c" },
+            };
+          },
+          params,
+        );
       const manager = createAgentSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
@@ -3203,10 +3387,16 @@ describe("AgentRunner", () => {
         channelThreadKey: "webchat:effort-fixed",
       });
 
-      await collectMessages(session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events);
+      const messages = await collectMessages(
+        session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events,
+      );
 
       const row = await sessionRepository.session(session.sessionId);
       expect(row?.reasoningEffort).toBe("max");
+      const result = messages.find((m) => m.type === "result");
+      expect(messages.map((m) => m.type)).not.toContain("model_turn_started");
+      expect(result).not.toHaveProperty("reasoningEffort");
+      expect(result).not.toHaveProperty("position");
       await manager.shutdown();
     });
 
@@ -3444,8 +3634,8 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0]).toMatchObject({
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.startedEvents[0]).toMatchObject({
         type: "agent-turn-started",
         version: 1,
         turn: {
@@ -3464,15 +3654,15 @@ describe("AgentRunner", () => {
         },
         input: { promptLength: "Hello lifecycle".length },
       });
-      expect(lifecycle.started[0].input).not.toHaveProperty("prompt");
+      expect(lifecycle.startedEvents[0].input).not.toHaveProperty("prompt");
 
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         type: "agent-turn-finished",
         version: 1,
         turn: {
-          sessionId: lifecycle.started[0].turn.sessionId,
-          turnId: lifecycle.started[0].turn.turnId,
+          sessionId: lifecycle.startedEvents[0].turn.sessionId,
+          turnId: lifecycle.startedEvents[0].turn.turnId,
           agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
         },
@@ -3488,9 +3678,11 @@ describe("AgentRunner", () => {
           skillWritten: false,
         },
       });
-      expect(lifecycle.finished[0].timing.startedAt).toBe(lifecycle.started[0].timing.startedAt);
-      expect(lifecycle.finished[0].timing.finishedAt).toEqual(expect.any(String));
-      expect(lifecycle.finished[0].timing.durationMs).toEqual(expect.any(Number));
+      expect(lifecycle.finishedEvents[0].timing.startedAt).toBe(
+        lifecycle.startedEvents[0].timing.startedAt,
+      );
+      expect(lifecycle.finishedEvents[0].timing.finishedAt).toEqual(expect.any(String));
+      expect(lifecycle.finishedEvents[0].timing.durationMs).toEqual(expect.any(Number));
     });
 
     it("uses turn-scoped context when a session is reused", async () => {
@@ -3529,7 +3721,7 @@ describe("AgentRunner", () => {
           tool: "demo_action",
           input: {},
         };
-        await params.executeAction("demo_action", {});
+        await executeActionTool(params.tools, "demo_action", {});
         yield {
           type: "tool_result",
           toolUseId: `tu-${params.prompt}`,
@@ -3540,7 +3732,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-reused-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -3573,14 +3764,12 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(lifecycle.started.map((event) => event.turn.threadContext?.channelUserId)).toEqual([
-        "guardian-one",
-        "guardian-two",
-      ]);
-      expect(lifecycle.finished.map((event) => event.turn.threadContext?.channelUserId)).toEqual([
-        "guardian-one",
-        "guardian-two",
-      ]);
+      expect(
+        lifecycle.startedEvents.map((event) => event.turn.threadContext?.channelUserId),
+      ).toEqual(["guardian-one", "guardian-two"]);
+      expect(
+        lifecycle.finishedEvents.map((event) => event.turn.threadContext?.channelUserId),
+      ).toEqual(["guardian-one", "guardian-two"]);
       expect(observedContexts).toEqual([
         { channelUserId: "guardian-one", sharedRunId: "run-one" },
         { channelUserId: "guardian-two", sharedRunId: "run-two" },
@@ -3591,7 +3780,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-closable-session",
         builtinTools: new Set<string>(),
         openSession: async (params) => createClosableModelSession(params),
       };
@@ -3610,8 +3798,8 @@ describe("AgentRunner", () => {
       const second = session.sendTurn({ prompt: "second" });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.startedEvents[0].turn.turnId).toBe(first.turnId);
 
       await session.close("user");
       await collectMessages(first.events);
@@ -3622,9 +3810,9 @@ describe("AgentRunner", () => {
         expect.objectContaining({ type: "error", error: "AgentSession closed" }),
         expect.objectContaining({ type: "turn_end", turnId: second.turnId, status: "error" }),
       ]);
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0].turn.turnId).toBe(first.turnId);
       await manager.shutdown();
     });
 
@@ -3644,7 +3832,8 @@ describe("AgentRunner", () => {
             tool: EXPLORE_TOOL,
             input: { prompt: `Inspect ${nestedCalls.length}` },
           };
-          const output = await params.executeSubagent(
+          const output = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: `Inspect ${nestedCalls.length}` },
             { toolUseId: id },
@@ -3664,11 +3853,11 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-lifecycle-nested",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImplNested),
       };
       const runner = createRunner(provider, lifecycle, { keepAliveAcrossTurns: true });
+      await new ChatsWebChatRepository(testDb.db).createSession("session-subagents", "Chat");
 
       await collectMessages(
         runner.run({
@@ -3695,8 +3884,10 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "core:test-main");
-      const childFinished = lifecycle.finished.filter(
+      const rootFinished = lifecycle.finishedEvents.filter(
+        (e) => e.turn.agentName === "core:test-main",
+      );
+      const childFinished = lifecycle.finishedEvents.filter(
         (e) => e.turn.agentName === "core:test-explore",
       );
 
@@ -3739,7 +3930,6 @@ describe("AgentRunner", () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id,
-        displayName: id,
         builtinTools: new Set(),
         openSession: makeOpenSessionFromRun(id, async function* () {
           yield { type: "error", error: message, code, httpStatus, providerError };
@@ -3748,7 +3938,7 @@ describe("AgentRunner", () => {
       await collectMessages(
         createRunner(provider, lifecycle).run({ agentName: "test-main", prompt: "Continue" }),
       );
-      expect(lifecycle.finished[0].output).toMatchObject({
+      expect(lifecycle.finishedEvents[0].output).toMatchObject({
         error: message,
         failure: {
           message,
@@ -3767,7 +3957,7 @@ describe("AgentRunner", () => {
           { agentName: "test-main", prompt: "Continue" },
         ),
       );
-      expect(lifecycle.finished[0].output).not.toHaveProperty("failure");
+      expect(lifecycle.finishedEvents[0].output).not.toHaveProperty("failure");
     });
 
     it("classifies provider-interrupted terminal results separately from completions", async () => {
@@ -3795,8 +3985,8 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Stop soon" }));
 
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "interrupted",
         output: {
           text: "Partial answer",
@@ -3835,7 +4025,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Go long" }));
 
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "completed",
         output: {
           state: "final",
@@ -3867,7 +4057,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Hi" }));
 
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "completed",
         output: {
           state: "final",
@@ -3908,7 +4098,7 @@ describe("AgentRunner", () => {
           tool: "demo_action",
           input: { name: "standup" },
         };
-        await params.executeAction("demo_action", { name: "standup" });
+        await executeActionTool(params.tools, "demo_action", { name: "standup" });
         yield {
           type: "tool_result",
           toolUseId: "tu-shared-1",
@@ -3919,7 +4109,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-shared-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -3944,7 +4133,7 @@ describe("AgentRunner", () => {
   });
 
   describe("prompt building", () => {
-    it("calls promptBuilder.build() with correct config and contextSuffix", async () => {
+    it("calls systemPrompts.build() with correct config and contextSuffix", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
       const runner = createRunner(provider);
 
@@ -3960,29 +4149,19 @@ describe("AgentRunner", () => {
       const call = provider.calls[0];
       expect(call.systemPrompt).toContain("You are a test main agent.");
       expect(call.systemPrompt).toContain("Extra context");
-      expect(provider.sessions[0]).toMatchObject({
-        agentName: "core:test-main",
-      });
-      expect(provider.sessions[0].appStoreListingId).toBeUndefined();
     });
 
     it("attributes app-store agents by listing id and omits local app attribution", async () => {
-      const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
-        const record = getRecord(name);
-        if (record.config.name !== "test-main") return record;
-        return {
-          ...record,
-          metadata: {
-            ...record.metadata,
-            ownerType: "app",
-            ownerId: "test-app",
-          },
-        };
+      const find = agentLoader.find.bind(agentLoader);
+      const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
+        const agent = find(name);
+        if (agent?.localName !== "test-main") return agent;
+        return { ...agent, ownerType: "app", ownerId: "test-app" };
       });
 
       try {
-        const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
+        const built = { type: "result", content: "Built", accounting: MOCK_ACCOUNTING } as const;
+        const provider = new MockModelProvider([[built]]);
         const appCatalog = {
           get: rs.fn((appId: string) =>
             appId === "test-app"
@@ -4011,12 +4190,12 @@ describe("AgentRunner", () => {
           "You are a test main agent. Handle messages and delegate as needed.\n\n" +
             "App-supplied session context.",
         );
-        expect(provider.sessions[0]).toMatchObject({
+        expect(recordMetrics).toHaveBeenLastCalledWith(MOCK_ACCOUNTING, {
           agentName: "core:test-main",
           appStoreListingId: "@publisher/test-app",
         });
 
-        const localProvider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
+        const localProvider = new MockModelProvider([[built]]);
         const localAppCatalog = {
           get: rs.fn(() => ({
             source: {
@@ -4037,7 +4216,10 @@ describe("AgentRunner", () => {
           }),
         );
 
-        expect(localProvider.sessions[0].appStoreListingId).toBeUndefined();
+        expect(recordMetrics).toHaveBeenLastCalledWith(MOCK_ACCOUNTING, {
+          agentName: "core:test-main",
+          appStoreListingId: undefined,
+        });
       } finally {
         recordSpy.mockRestore();
       }
@@ -4102,7 +4284,6 @@ describe("AgentRunner", () => {
     function alwaysResultProvider(): ModelProvider {
       return {
         id: "mock",
-        displayName: "mock-thread-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* () {
           yield { type: "result", content: "ok" };
@@ -4168,11 +4349,11 @@ describe("AgentRunner", () => {
     });
 
     it("does not inject into a resumed session (the block is already in its history)", async () => {
-      // A row whose provider thread the provider resumes already holds the block.
+      // A row whose model thread the provider resumes already holds the block.
       const seeded = Session.create("test-main", { continuityKey: "webchat:tc-resumed" });
       seeded.recordTurn({
         provider: "mock",
-        providerThreadId: "mock-thread-1",
+        modelThreadId: "mock-thread-1",
         model: "mock-model",
       });
       await sessionRepository.add(seeded);
@@ -4191,7 +4372,7 @@ describe("AgentRunner", () => {
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
     });
 
-    it("injects into a session whose row never recorded a provider thread", async () => {
+    it("injects into a session whose row never recorded a model thread", async () => {
       // The provider resumes only a recorded thread, so this one starts new
       // and has not seen the block.
       const seeded = Session.create("test-main", { continuityKey: "webchat:tc-unthreaded" });
@@ -4277,7 +4458,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-no-conversation-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4353,7 +4533,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-linked-context",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4409,7 +4588,6 @@ describe("AgentRunner", () => {
       const prompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-linked-starter",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           prompts.push(input.prompt);
@@ -4509,7 +4687,6 @@ describe("AgentRunner", () => {
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-runtime-reply",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", async function* (input) {
           providerPrompts.push(input.prompt);
@@ -4553,7 +4730,7 @@ describe("AgentRunner", () => {
           prompt: "Use configured effort",
         }),
       );
-      expect(configuredProvider.sessions[0].reasoningEffort).toBe("low");
+      expect(configuredProvider.sessions[0].config.reasoningEffort).toBe("low");
 
       const defaultProvider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       await collectMessages(
@@ -4562,7 +4739,7 @@ describe("AgentRunner", () => {
           prompt: "Use default effort",
         }),
       );
-      expect(defaultProvider.sessions[0].reasoningEffort).toBe("high");
+      expect(defaultProvider.sessions[0].config.reasoningEffort).toBe("high");
     });
 
     it("maps tier names correctly (large, medium, small)", async () => {
@@ -4594,7 +4771,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const anthropic: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           anthropicSessions.push(params);
@@ -4609,7 +4785,6 @@ describe("AgentRunner", () => {
       };
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4633,16 +4808,16 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-6-luna");
+      expect(openAiSessions[0].config.model).toBe("gpt-6-luna");
       await manager.shutdown();
 
       const codexLoggedOut = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available"),
       };
       const loggedOutResolver = createModelResolver({
         providers: [anthropic, openai],
-        aiToolState: { get: () => codexLoggedOut, refresh: async () => codexLoggedOut },
+        accounts: fakeAccounts(() => codexLoggedOut),
       });
       const loggedOutManager = createAgentSessionManager(managerDeps(loggedOutResolver));
 
@@ -4665,7 +4840,6 @@ describe("AgentRunner", () => {
       const openAiSessions: ModelSessionParams[] = [];
       const anthropic: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           anthropicSessions.push(params);
@@ -4680,7 +4854,6 @@ describe("AgentRunner", () => {
       };
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4710,14 +4883,13 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-5.6-terra");
+      expect(openAiSessions[0].config.model).toBe("gpt-5.6-terra");
     });
 
     it("restores the selected model from the session pin on explicit cold resume", async () => {
       const openAiSessions: ModelSessionParams[] = [];
       const openai: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           openAiSessions.push(params);
@@ -4728,8 +4900,7 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          modelSession.providerThreadId = "codex-thread-1";
-          return modelSession;
+          return { ...modelSession, modelThreadId: "codex-thread-1" };
         },
       };
       const modelResolver = createTestModelResolver({ providers: [openai] });
@@ -4754,13 +4925,12 @@ describe("AgentRunner", () => {
 
       expect(openAiSessions).toHaveLength(2);
       expect(openAiSessions[0]).toMatchObject({
-        model: "gpt-5.6-terra",
-        isNewSession: true,
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "new" },
       });
       expect(openAiSessions[1]).toMatchObject({
-        model: "gpt-5.6-terra",
-        isNewSession: false,
-        providerThreadId: "codex-thread-1",
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "resume", modelThreadId: "codex-thread-1" },
       });
       expect(resumedMessages.find((message) => message.type === "session_init")).toMatchObject({
         sessionId: firstSession.sessionId,
@@ -4772,33 +4942,30 @@ describe("AgentRunner", () => {
   describe("per-turn model resolution", () => {
     it("does not replay a failed turn and selects the other provider on the next turn", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       let codexTurns = 0;
       let claudeTurns = 0;
       const claudeOpens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           const session = createSessionFromRun(
             "openai",
             async function* () {
               codexTurns += 1;
-              state.codex.quotaExhausted = true;
+              state.openai = reportOf("usage_limit_reached");
               yield { type: "error", error: "Codex quota exhausted", code: "usage_limit" };
             },
             params,
           );
-          session.providerThreadId = "codex-thread";
-          return session;
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           claudeOpens.push(params);
@@ -4810,13 +4977,12 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          session.providerThreadId = "claude-thread";
-          return session;
+          return { ...session, modelThreadId: "claude-thread" };
         },
       };
       const modelResolver = createModelResolver({
         providers: [codex, claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -4839,20 +5005,18 @@ describe("AgentRunner", () => {
       });
       expect(codexTurns).toBe(1);
       expect(claudeTurns).toBe(1);
-      expect(claudeOpens[0]).toMatchObject({ isNewSession: false });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
+      expect(claudeOpens[0].thread).toEqual({ kind: "new" });
       await manager.shutdown();
     });
 
     it("reopens a provider backend after an auth-revoked terminal", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -4861,7 +5025,7 @@ describe("AgentRunner", () => {
             "openai",
             async function* () {
               if (openNumber === 1) {
-                state.codex.loggedIn = false;
+                state.openai = reportOf("unauthorized");
                 yield {
                   type: "error",
                   error: "Codex credentials were revoked",
@@ -4873,13 +5037,12 @@ describe("AgentRunner", () => {
             },
             params,
           );
-          session.providerThreadId = "codex-thread";
-          return session;
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const modelResolver = createModelResolver({
         providers: [codex],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -4897,7 +5060,7 @@ describe("AgentRunner", () => {
 
       // Simulate a completed re-login. The next turn must not reuse the model
       // session that observed the revoked credential.
-      state.codex.loggedIn = true;
+      state.openai = reportOf("available");
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
@@ -4905,21 +5068,19 @@ describe("AgentRunner", () => {
       });
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
 
     it("reopens the same provider when an unpinned session's resolved model changes and keeps its native thread", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
@@ -4934,17 +5095,16 @@ describe("AgentRunner", () => {
                 yield { type: "error", error: "Model API failure" };
                 return;
               }
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
-          session.providerThreadId = "codex-thread";
-          return session;
+          return { ...session, modelThreadId: "codex-thread" };
         },
       };
       const modelResolver = createModelResolver({
         providers: [codex],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -4955,25 +5115,23 @@ describe("AgentRunner", () => {
       });
       await collectMessages(session.sendTurn({ prompt: "Sol" }).events);
 
-      state.codex.solAccess = false;
+      state.openai = reportOf("available", RESTRICTED_PLAN);
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
-      expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
+      expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await manager.shutdown();
     });
 
     it("records the pin of the model that actually ran after an unpinned backend swap", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codex: ModelProvider = {
         id: "openai",
-        displayName: "Codex",
         builtinTools: new Set(),
         openSession: async (params) =>
           createSessionFromRun(
@@ -4987,20 +5145,19 @@ describe("AgentRunner", () => {
       };
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) =>
           createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           ),
       };
       const modelResolver = createModelResolver({
         providers: [codex, claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5016,7 +5173,7 @@ describe("AgentRunner", () => {
 
       // Codex quota exhausts; the unpinned session re-resolves to Claude and
       // the first successful turn pins the model that actually ran.
-      state.codex.quotaExhausted = true;
+      state.openai = reportOf("usage_limit_reached");
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
       expect(await sessionRepository.session(session.sessionId)).toMatchObject({
         provider: "anthropic",
@@ -5034,44 +5191,41 @@ describe("AgentRunner", () => {
     // so a test can assert which concrete model actually ran.
     function recordingProvider(
       id: ProviderId,
-      displayName: string,
-      providerThreadId: string,
+      modelThreadId: string,
       opens: ModelSessionParams[],
     ): ModelProvider {
       return {
         id,
-        displayName,
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
           const session = createSessionFromRun(
             id,
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
-          session.providerThreadId = providerThreadId;
-          return session;
+          return { ...session, modelThreadId: modelThreadId };
         },
       };
     }
 
     const codexProvider = (opens: ModelSessionParams[]): ModelProvider =>
-      recordingProvider("openai", "Codex", "codex-thread", opens);
+      recordingProvider("openai", "codex-thread", opens);
 
     const claudeProvider = (opens: ModelSessionParams[]): ModelProvider =>
-      recordingProvider("anthropic", "Claude", "claude-thread", opens);
+      recordingProvider("anthropic", "claude-thread", opens);
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5087,7 +5241,7 @@ describe("AgentRunner", () => {
       // Sol access arrives mid-session. Tier resolution would now map large →
       // Sol, but the pinned session must keep running Terra on the same
       // backend — no close/reopen, no model switch.
-      state.codex.solAccess = true;
+      state.openai = reportOf("available");
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
@@ -5099,21 +5253,20 @@ describe("AgentRunner", () => {
 
     it("a pinned session keeps its model after the tier mapping changes", async () => {
       const state = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available"),
       };
       let tierModelMappings: unknown = { anthropic: { large: FABLE_MODEL } };
       const opens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           opens.push(params);
           return createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
@@ -5121,11 +5274,11 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [claude],
-        aiToolState: { get: () => state, refresh: async () => state },
-        settingsRepo: {
+        accounts: fakeAccounts(() => state),
+        tierModels: createTierModelsSetting({
           get: async <T = unknown>(key: string): Promise<T | null> =>
             key === "tierModelMappings" ? (tierModelMappings as T) : null,
-        },
+        }),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5136,7 +5289,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens[0].model).toBe(FABLE_MODEL);
+      expect(opens[0].config.model).toBe(FABLE_MODEL);
 
       // A mapping is a Rome-side preference, not an entitlement: it governs
       // new resolutions only. The pinned session stays on the mapped model.
@@ -5152,21 +5305,20 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session fails the turn with the structured resolution error", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const opens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
-        displayName: "Claude",
         builtinTools: new Set(),
         openSession: async (params) => {
           claudeOpens.push(params);
           return createSessionFromRun(
             "anthropic",
             async function* () {
-              yield { type: "result", content: params.model };
+              yield { type: "result", content: params.config.model };
             },
             params,
           );
@@ -5174,7 +5326,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens), claude],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5185,11 +5337,11 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens.map((params) => params.model)).toEqual(["gpt-6.1-sol"]);
+      expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol"]);
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
-      state.codex.solAccess = false;
+      state.openai = reportOf("available", RESTRICTED_PLAN);
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
       expect(second.find((message) => message.type === "error")).toMatchObject({
         code: "model_unavailable",
@@ -5198,8 +5350,8 @@ describe("AgentRunner", () => {
       });
 
       // Provider-level outage (quota) fails the same way.
-      state.codex.solAccess = true;
-      state.codex.quotaExhausted = true;
+      state.openai = reportOf("available");
+      state.openai = reportOf("usage_limit_reached");
       const third = await collectMessages(session.sendTurn({ prompt: "third" }).events);
       expect(third.find((message) => message.type === "error")).toMatchObject({
         code: "model_provider_unavailable",
@@ -5214,17 +5366,17 @@ describe("AgentRunner", () => {
 
     it("a legacy session (NULL pin) resolves by tier, then pins on its next successful turn", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const seeded = Session.create("test-main", { continuityKey: "telegram:legacy-row" });
       // A pre-cutover row: provider + thread persisted, model NULL.
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5235,12 +5387,11 @@ describe("AgentRunner", () => {
       );
 
       // Tier resolution as before the pin (large → Sol with access), carrying
-      // the stored provider thread; the successful turn then records the pin.
+      // the stored model thread; the successful turn then records the pin.
       expect(opens).toHaveLength(1);
       expect(opens[0]).toMatchObject({
-        model: "gpt-6.1-sol",
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        config: { model: "gpt-6.1-sol" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       expect(await sessionRepository.session(legacyId)).toMatchObject({
         provider: "openai",
@@ -5251,19 +5402,19 @@ describe("AgentRunner", () => {
 
     it("a new session of another agent on the same thread resolves its own tier (no pin inheritance)", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("available", RESTRICTED_PLAN),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       // The main agent's session on this thread is pinned to Sol.
       const seeded = Session.create("test-main", { continuityKey: "webchat:shared-thread" });
       seeded.recordTurn({
         provider: "openai",
-        providerThreadId: "codex-thread",
+        modelThreadId: "codex-thread",
         model: "gpt-5.6-sol",
       });
       await sessionRepository.add(seeded);
@@ -5281,20 +5432,22 @@ describe("AgentRunner", () => {
 
       expect(session.sessionId).not.toBe(mainId);
       expect(opens).toHaveLength(1);
-      expect(opens[0]).toMatchObject({ model: "gpt-5.6-terra", isNewSession: true });
-      expect(opens[0].providerThreadId).toBeUndefined();
+      expect(opens[0]).toMatchObject({
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "new" },
+      });
       await manager.shutdown();
     });
 
     it("a resumed session runs on its pin even when tier resolution would pick another model", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
       const firstManager = createAgentSessionManager(managerDeps(modelResolver));
       const first = await firstManager.acquire({
@@ -5303,11 +5456,11 @@ describe("AgentRunner", () => {
       });
       await collectMessages(first.sendTurn({ prompt: "Start" }).events);
       await firstManager.shutdown();
-      expect(opens.map((params) => params.model)).toEqual(["gpt-5.6-terra"]);
+      expect(opens.map((params) => params.config.model)).toEqual(["gpt-5.6-terra"]);
 
       // Entitlements improved while the session was cold. Tier resolution
       // would now pick Sol; the pin keeps the resume on Terra.
-      state.codex.solAccess = true;
+      state.openai = reportOf("available");
       const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(resumedManager, agentLoader);
       await collectMessages(
@@ -5316,30 +5469,29 @@ describe("AgentRunner", () => {
 
       expect(opens).toHaveLength(2);
       expect(opens[1]).toMatchObject({
-        model: "gpt-5.6-terra",
-        isNewSession: false,
-        providerThreadId: "codex-thread",
+        config: { model: "gpt-5.6-terra" },
+        thread: { kind: "resume", modelThreadId: "codex-thread" },
       });
       await resumedManager.shutdown();
     });
 
     it("an explicit selection overrides the pin and re-pins to the selected model", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
 
       // A session already pinned to Codex Terra.
       const seeded = Session.create("test-main", { continuityKey: "webchat:override-pin" });
       seeded.recordTurn({
         provider: "openai",
-        providerThreadId: "codex-thread",
+        modelThreadId: "codex-thread",
         model: "gpt-5.6-terra",
       });
       await sessionRepository.add(seeded);
@@ -5371,20 +5523,20 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session becomes usable again through an explicit selection", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
 
       // A session pinned to Sol, whose access is now lost: the pin strands it.
       const seeded = Session.create("test-main", { continuityKey: "webchat:rescue" });
       seeded.recordTurn({
         provider: "openai",
-        providerThreadId: "codex-thread",
+        modelThreadId: "codex-thread",
         model: "gpt-5.6-sol",
       });
       await sessionRepository.add(seeded);
@@ -5417,7 +5569,7 @@ describe("AgentRunner", () => {
       expect(rescued.find((message) => message.type === "result")).toMatchObject({
         content: "gpt-5.6-terra",
       });
-      expect(codexOpens.map((params) => params.model)).toEqual(["gpt-5.6-terra"]);
+      expect(codexOpens.map((params) => params.config.model)).toEqual(["gpt-5.6-terra"]);
       expect(await sessionRepository.session(strandedId)).toMatchObject({
         provider: "openai",
         model: "gpt-5.6-terra",
@@ -5427,18 +5579,18 @@ describe("AgentRunner", () => {
 
     it("a legacy resume honors a persisted selection whose provider differs from the stored provider", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
-      // while the stored provider thread is Codex. With the resume guard removed,
+      // while the stored model thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
       await new ChatsWebChatRepository(testDb.db).createSession(
@@ -5449,7 +5601,7 @@ describe("AgentRunner", () => {
         "claude-opus",
       );
       const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-mismatch" });
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5468,35 +5620,34 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // The resume opens Claude Opus on a fresh model thread (provider changed
       // from Codex), never the stored-provider tier resolution.
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
       });
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
-        model: "claude-opus-4-8[1m]",
-        isNewSession: false,
+        config: { model: "claude-opus-4-8[1m]" },
+        thread: { kind: "new" },
       });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
       await manager.shutdown();
     });
 
     it("a legacy resume without a thread context reads the selection through its key", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
-      // while the stored provider thread is Codex. With the resume guard removed,
+      // while the stored model thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
       await new ChatsWebChatRepository(testDb.db).createSession(
@@ -5507,7 +5658,7 @@ describe("AgentRunner", () => {
         "claude-opus",
       );
       const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-no-context" });
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5521,31 +5672,30 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // The resume opens Claude Opus on a fresh model thread (provider changed
       // from Codex), never the stored-provider tier resolution.
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: "claude-opus-4-8[1m]",
       });
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
-        model: "claude-opus-4-8[1m]",
-        isNewSession: false,
+        config: { model: "claude-opus-4-8[1m]" },
+        thread: { kind: "new" },
       });
-      expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
       await manager.shutdown();
     });
 
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
       const state = {
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        aiToolState: { get: () => state, refresh: async () => state },
+        accounts: fakeAccounts(() => state),
       });
 
       // The parent chat stores a Claude selection. Its subagent's legacy row
@@ -5561,7 +5711,7 @@ describe("AgentRunner", () => {
       const seeded = Session.create("test-main", {
         continuityKey: "webchat:legacy-parent:subagent:child-1",
       });
-      seeded.recordTurn({ provider: "openai", providerThreadId: "codex-thread" });
+      seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
 
@@ -5612,12 +5762,11 @@ describe("AgentRunner", () => {
         params: import("./agent-runner.js").ModelRunParams,
       ): AsyncIterable<AgentEvent> {
         yield { type: "tool_use", id: "tu-send-1", tool: "send_message", input: { text: "hello" } };
-        await params.executeAction("send_message", { text: "hello" });
+        await executeActionTool(params.tools, "send_message", { text: "hello" });
         yield { type: "result", content: "Done" };
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-action",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImplAction),
       };
@@ -5679,10 +5828,12 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Use tools" }));
 
       expect(provider.calls).toHaveLength(1);
-      const toolNames = provider.calls[0].actionCatalog.map((t) => t.name);
+      const listed = (await parseToolText(
+        await provider.calls[0].tools.callTool("actions", "list_actions", {}),
+      )) as Array<Record<string, unknown>>;
       // demo_action is in test-main's tools list and registered in registry
-      expect(toolNames).toContain("demo_action");
-      expect(provider.calls[0].actionCatalog[0]).toMatchObject({
+      expect(listed.map((action) => action.name)).toContain("demo_action");
+      expect(listed[0]).toMatchObject({
         description: "Schedule an event",
         sideEffects: "write",
         requiresApproval: false,
@@ -5744,53 +5895,67 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
-      let sessionParams: ModelSessionParams | undefined;
-      let keyDuringTurn: string | undefined;
+      const proposals: Record<string, string> = {};
+      const routineDraft = (actionName: string) => ({
+        sentence: "Every morning, run it",
+        name: "Morning run",
+        watchLabel: "Run now",
+        thenSummary: `Run ${actionName}`,
+        kind: "manual",
+        actionName,
+        args: {},
+        activate: true,
+      });
       const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
-        keyDuringTurn = sessionParams?.routineActivation?.routineKeyFor("tu-1");
-        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-          "demo_action",
-          "send_message",
-        ]);
-        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-          /Unknown action: internal_action/,
-        );
+        expect(await listActionNames(params.tools)).toEqual(["demo_action", "send_message"]);
+        await expect(
+          executeActionTool(params.tools, "internal_action", {}, { toolUseId: "tu-0" }),
+        ).rejects.toThrow(/Unknown action: internal_action/);
         executionWasRejected = true;
+        // propose_routine's auto-enable gate mirrors the same allow-list: a
+        // routine on an action the agent may not call stays a draft, one on
+        // an unregistered action is refused, and one on a permitted action
+        // gets past the target check under this turn's key.
+        for (const actionName of ["internal_action", "no_such_action", "demo_action"]) {
+          const result = await params.tools.callTool(
+            "ask_user",
+            "propose_routine",
+            routineDraft(actionName),
+            { toolUseId: "tu-1" },
+          );
+          proposals[actionName] = result.content.map((item) => item.text).join("\n");
+        }
         yield { type: "result", content: "Done" };
       });
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: async (params) => {
-          sessionParams = params;
-          return openFromRun(params);
-        },
+        openSession: openFromRun,
       };
       const runner = createRunner(provider);
 
       const messages = await collectMessages(
-        runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }),
+        runner.run({
+          agentName: "test-all-actions",
+          prompt: "Use all tools",
+          channelThreadKey: "webchat:routine-gate",
+        }),
       );
 
       expect(executionWasRejected).toBe(true);
-      // The activation key is scoped by the same turn id the stream reports,
-      // which is how the webchat drain derives the card's key.
-      const turnStart = messages.find((m) => m.type === "turn_start") as
-        | { turnId: string }
-        | undefined;
-      expect(turnStart).toBeDefined();
-      expect(keyDuringTurn).toBe(`chat-routine:${turnStart?.turnId}:tu-1`);
-      // propose_routine's auto-enable gate mirrors the same allow-list.
-      const gate = sessionParams?.routineActivation;
-      expect(gate?.canCallAction("demo_action")).toBe("permitted");
-      expect(gate?.canCallAction("internal_action")).toBe("denied");
-      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(proposals.internal_action).toContain(
+        '"internal_action" is not an action you are permitted to call',
+      );
+      expect(proposals.no_such_action).toContain('"no_such_action" is not a registered action');
+      // demo_action is permitted and the call carried its id, so the gate only
+      // stops at create_routine, which this agent may not call.
+      expect(proposals.demo_action).toContain("not permitted to create routines directly");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {
       // Repro of the in-session app_management install flow: the provider's
-      // facade tools (list_actions, execute_action) must observe registrations
+      // Rome tools (list_actions, execute_action) must observe registrations
       // that happen *after* openSession captured a snapshot. The session
       // exposes the live view via params.getActionCatalog and routes the
       // executeAction callback through the same allow-list-filtered lookup.
@@ -5811,7 +5976,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-live-catalog",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -5830,8 +5994,7 @@ describe("AgentRunner", () => {
 
       expect(captured).toHaveLength(1);
       const sessionParams = captured[0];
-      expect(sessionParams.getActionCatalog).toBeDefined();
-      expect(sessionParams.getActionCatalog!().map((a) => a.name)).toEqual(["demo_action"]);
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action"]);
 
       // Simulate `app_management` install finishing and the lifecycle manager
       // resync registering a new app action mid-session.
@@ -5854,18 +6017,14 @@ describe("AgentRunner", () => {
       });
 
       // The live getter now reports both actions to anything that reads it
-      // (the facade tools' list_actions / search_actions / read_action).
+      // (the Rome tools' list_actions / search_actions / read_action).
       // Order is registry-insertion-order; sort for stable comparison.
-      expect(
-        sessionParams.getActionCatalog!()
-          .map((a) => a.name)
-          .sort(),
-      ).toEqual(["demo_action", "repro_hello"]);
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action", "repro_hello"]);
 
       // executeAction looks up against the same live, allow-list-filtered set
       // — so the agent can call the freshly-installed action from inside the
       // same conversation without rebinding the MCP token.
-      const result = await sessionParams.executeAction("repro_hello", { name: "world" });
+      const result = await executeActionTool(sessionParams.tools, "repro_hello", { name: "world" });
       expect(result).toEqual({ ok: true });
       expect(newActionExecutes).toEqual([{ name: "world" }]);
     });
@@ -5891,7 +6050,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-allow-list",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -5924,10 +6082,10 @@ describe("AgentRunner", () => {
         execute: async () => ({ status: "ok", data: { ok: true } }),
       });
 
-      expect(sessionParams.getActionCatalog!().map((a) => a.name)).toEqual(["demo_action"]);
-      await expect(sessionParams.executeAction("send_message", { text: "x" })).rejects.toThrow(
-        /Unknown action: send_message/,
-      );
+      expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action"]);
+      await expect(
+        executeActionTool(sessionParams.tools, "send_message", { text: "x" }),
+      ).rejects.toThrow(/Unknown action: send_message/);
     });
 
     it("executeAction resolves a legacy name before checking the allow-list", async () => {
@@ -5969,7 +6127,6 @@ describe("AgentRunner", () => {
       const captured: ModelSessionParams[] = [];
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-legacy-action",
         builtinTools: new Set<string>(),
         openSession: async (params) => {
           captured.push(params);
@@ -5987,9 +6144,9 @@ describe("AgentRunner", () => {
         createRunner(provider).run({ agentName: "test-main", prompt: "Review" }),
       );
 
-      expect(captured[0].getActionCatalog!().map((action) => action.name)).toEqual([actionId]);
+      expect(await listActionNames(captured[0].tools)).toEqual([actionId]);
       await expect(
-        captured[0].executeAction("demo_action", { path: "src/index.ts" }),
+        executeActionTool(captured[0].tools, "demo_action", { path: "src/index.ts" }),
       ).resolves.toEqual({ reviewed: true });
       expect(executed).toEqual([{ path: "src/index.ts" }]);
     });
@@ -6035,11 +6192,12 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Delegate" }));
 
       expect(provider.calls).toHaveLength(1);
-      const toolNames = provider.calls[0].subagentTools.map((t) => t.name);
       // test-main has allowedSubagents: ["test-explore"]
-      expect(toolNames).toContain(EXPLORE_TOOL);
+      expect(toolNames(provider.calls[0].tools, "subagents")).toContain(EXPLORE_TOOL);
 
-      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === EXPLORE_TOOL);
+      const subagentTool = provider.calls[0].tools
+        .listTools("subagents")
+        .find((t) => t.name === EXPLORE_TOOL);
       expect(subagentTool).toBeDefined();
       expect(subagentTool!.description).toContain("test-explore");
       expect(subagentTool!.inputSchema).toHaveProperty("properties");
@@ -6075,7 +6233,8 @@ describe("AgentRunner", () => {
           tool: EXPLORE_TOOL,
           input: { prompt: "Inspect" },
         };
-        const output = await params.executeSubagent(
+        const output = await executeSubagentTool(
+          params.tools,
           EXPLORE_TOOL,
           { prompt: "Inspect" },
           { toolUseId: "tu-explore-1" },
@@ -6085,7 +6244,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider = {
         id: "mock",
-        displayName: "mock-subagent-preview",
         builtinTools: new Set<string>(),
         openSession: makeOpenSessionFromRun("mock", runImpl),
       };
@@ -6120,14 +6278,16 @@ describe("AgentRunner", () => {
             tool: EXPLORE_TOOL,
             input: { prompt: "Inspect" },
           };
-          const output = await params.executeSubagent(
+          const output = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: "Inspect" },
             { toolUseId: "tu-explore-1" },
           );
           delegatedOutput = output;
           yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
-          const earlyOutput = await params.executeSubagent(
+          const earlyOutput = await executeSubagentTool(
+            params.tools,
             EXPLORE_TOOL,
             { prompt: "Inspect before provider event" },
             { toolUseId: "tu-explore-2" },
@@ -6161,7 +6321,6 @@ describe("AgentRunner", () => {
       };
       const provider: ModelProvider & { calls: import("./agent-runner.js").ModelRunParams[] } = {
         id: "mock",
-        displayName: "mock-nested",
         builtinTools: new Set<string>(),
         calls: nestedCalls,
         openSession: makeOpenSessionFromRun("mock", runImplNested),
@@ -6264,7 +6423,6 @@ describe("AgentRunner", () => {
         sessions: import("./agent-runner.js").ModelSessionParams[];
       } = {
         id: "mock",
-        displayName: "mock-structured",
         builtinTools: new Set<string>(),
         sessions: [],
         openSession: async (params) => {
@@ -6293,10 +6451,10 @@ describe("AgentRunner", () => {
       const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
-      expect(provider.sessions[0].outputSchema).toEqual(
+      expect(provider.sessions[0].config.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
-      expect(calls[0].outputSchema).toEqual(provider.sessions[0].outputSchema);
+      expect(calls[0].outputSchema).toEqual(provider.sessions[0].config.outputSchema);
       expect(events.filter((event) => event.type === "result")).toEqual([
         expect.objectContaining({
           type: "result",
@@ -6389,7 +6547,7 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "hi" }));
 
       expect(provider.sessions).toHaveLength(1);
-      expect(provider.sessions[0].outputSchema).toBeUndefined();
+      expect(provider.sessions[0].config.outputSchema).toBeUndefined();
     });
   });
 });

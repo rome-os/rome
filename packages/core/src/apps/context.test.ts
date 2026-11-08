@@ -28,7 +28,7 @@ import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { FavorActionRequestView, FavorService } from "../favors/types.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import { createActionEngineRepos } from "../test/db.js";
 
 type RuntimeContextCapture = {
   surface: "action" | "api";

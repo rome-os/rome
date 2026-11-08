@@ -1,3 +1,4 @@
+import type { Agent, AgentCatalog } from "../agent/index.js";
 import { basename } from "node:path";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import type {
@@ -51,15 +52,9 @@ type DimensionMetadata = {
 
 export interface SessionQueryServiceOptions {
   repository: SessionQueryRepository;
-  agentLoader: {
-    getRecord(name: string): {
-      metadata: { ownerType: "core" | "app"; ownerId: string };
-    };
-    getAllResolvableRecords(): Map<
-      string,
-      { metadata: { ownerType: "core" | "app"; ownerId: string } }
-    >;
-  };
+  agentLoader: Pick<AgentCatalog, "find">;
+  /** The installed agents by canonical id and by the legacy names stored sessions can carry. */
+  agentsByName(): ReadonlyMap<string, Agent>;
   appCatalog: {
     listResolved(): readonly {
       appId: string;
@@ -308,25 +303,21 @@ export class SessionQueryService {
     if (normalized === "main") {
       return { type: "core", id: "core", label: "Rome", iconUrl: null };
     }
-    let record: ReturnType<SessionQueryServiceOptions["agentLoader"]["getRecord"]>;
-    try {
-      record = this.options.agentLoader.getRecord(normalized);
-    } catch {
+    const agent = this.options.agentLoader.find(normalized);
+    if (!agent) {
       return { type: "unknown", id: null, label: "Uninstalled App", iconUrl: null };
     }
-    if (record.metadata.ownerType === "core") {
+    if (agent.ownerType === "core") {
       return { type: "core", id: "core", label: "Rome", iconUrl: null };
     }
     const app = this.options.appCatalog
       .listResolved()
-      .find((candidate) => candidate.appId === record.metadata.ownerId);
+      .find((candidate) => candidate.appId === agent.ownerId);
     return {
       type: "app",
-      id: record.metadata.ownerId,
-      label: app?.displayName ?? record.metadata.ownerId,
-      iconUrl: app?.iconAbsolutePath
-        ? `/api/apps/${encodeURIComponent(record.metadata.ownerId)}/icon`
-        : null,
+      id: agent.ownerId,
+      label: app?.displayName ?? agent.ownerId,
+      iconUrl: app?.iconAbsolutePath ? `/api/apps/${encodeURIComponent(agent.ownerId)}/icon` : null,
     };
   }
 
@@ -374,8 +365,8 @@ export class SessionQueryService {
 
   private storageScope(scope: SessionQueryScope): SessionQueryStorageScope {
     const time = this.resolveTime(scope);
-    const records = this.options.agentLoader.getAllResolvableRecords();
-    const knownAgentNames = Array.from(new Set(["main", ...records.keys()]));
+    const agents = this.options.agentsByName();
+    const knownAgentNames = Array.from(new Set(["main", ...agents.keys()]));
     const ownerAgentNames = new Set<string>();
     let includeUninstalledOwners = false;
     if (scope.sessions?.owners) {
@@ -385,14 +376,9 @@ export class SessionQueryService {
           continue;
         }
         if (owner.kind === "core") ownerAgentNames.add("main");
-        for (const [name, record] of records) {
-          if (owner.kind === "core" && record.metadata.ownerType === "core")
-            ownerAgentNames.add(name);
-          if (
-            owner.kind === "app" &&
-            record.metadata.ownerType === "app" &&
-            record.metadata.ownerId === owner.appId
-          ) {
+        for (const [name, agent] of agents) {
+          if (owner.kind === "core" && agent.ownerType === "core") ownerAgentNames.add(name);
+          if (owner.kind === "app" && agent.ownerType === "app" && agent.ownerId === owner.appId) {
             ownerAgentNames.add(name);
           }
         }
@@ -435,7 +421,7 @@ export class SessionQueryService {
     const query = search?.trim().toLocaleLowerCase();
     if (!query) return [];
     const matches: string[] = [];
-    for (const name of ["main", ...this.options.agentLoader.getAllResolvableRecords().keys()]) {
+    for (const name of ["main", ...this.options.agentsByName().keys()]) {
       const owner = this.resolveOwner(name);
       if (owner.label.toLocaleLowerCase().includes(query)) matches.push(name);
     }

@@ -8,7 +8,7 @@ import { attachAppWebSocket, type AppWebSocketDeps } from "./websocket-server.js
 import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";
 import type { CatalogEvent, SubscriberHandler } from "./state.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__/ws-echo-api.mjs");
 

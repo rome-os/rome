@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
+import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { UserMessage } from "./UserMessage";
 import enChat from "@/i18n/locales/en/chat.json";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
@@ -233,6 +234,57 @@ describe("UserMessage sender", () => {
       withSender({ ...sender, onBehalfOf: { kind: "guardian", name: "Renamed", avatarUrl: null } }),
     );
     expect(screen.getByTitle("Renamed")).toBeTruthy();
+  });
+
+  it.each([
+    [message.content, "Concierge"],
+    ["ok", "Concierge"],
+    ["ok", "An automation with a very long name that must truncate"],
+  ])("keeps the own-message badge before the actions in one footer: %s / %s", (content, name) => {
+    render(
+      <ThemeProvider>
+        <UserMessage
+          msg={{
+            ...message,
+            content,
+            sender: {
+              kind: "automated",
+              sourceType: "agent",
+              name,
+              iconUrl: null,
+              onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+            },
+          }}
+        />
+      </ThemeProvider>,
+    );
+
+    const badge = screen.getByText(`Sent by ${name}`);
+    const timestamp = screen.getByText(formatMessageTimestamp(message.createdAt)!);
+    const actions = timestamp.parentElement!;
+    const footer = badge.parentElement!;
+    expect(badge.hasAttribute("data-automated-badge")).toBe(true);
+    expect(actions.parentElement).toBe(footer);
+    expect(footer.children[0]).toBe(badge);
+    expect(footer.children[1]).toBe(actions);
+    expect(actions.contains(screen.getByRole("button", { name: "message.copy" }))).toBe(true);
+    expect(
+      badge.closest('[class*="opacity-0"], [class~="hidden"], [class*=":hidden"], [hidden]'),
+    ).toBeNull();
+  });
+
+  it("keeps the bubble, status, and actions as siblings when there is no badge", () => {
+    const { container } = render(withSender({ kind: "guardian", name: "Ray", avatarUrl: null }));
+
+    const status = screen.getByRole("status");
+    const bubble = status.previousElementSibling!;
+    const timestamp = screen.getByText(formatMessageTimestamp(message.createdAt)!);
+    const actions = timestamp.parentElement!;
+    expect(container.querySelector("[data-automated-badge]")).toBeNull();
+    expect(bubble.contains(screen.getByText(message.content))).toBe(true);
+    expect(status.nextElementSibling).toBe(actions);
+    expect(actions.parentElement).toBe(bubble.parentElement);
+    expect(actions.contains(screen.getByRole("button", { name: "message.copy" }))).toBe(true);
   });
 
   it.each([

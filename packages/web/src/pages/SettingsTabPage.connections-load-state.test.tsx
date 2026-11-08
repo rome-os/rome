@@ -62,8 +62,7 @@ describe("Settings connections request states", () => {
 
     renderConnectionsSettings();
 
-    expect(await screen.findByRole("heading", { level: 2, name: "Connections" })).toBeTruthy();
-    expect(screen.getByLabelText("Loading connections")).toBeTruthy();
+    expect(await screen.findByLabelText("Loading connections")).toBeTruthy();
   });
 
   it("shows a failed registry request with a retry that reloads the connections", async () => {

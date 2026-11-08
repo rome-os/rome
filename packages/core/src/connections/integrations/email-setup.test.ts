@@ -21,7 +21,7 @@ import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import type { MailProvider, RomeMailEvent, RomeMailMessage } from "../../lib/rome-cloud-mail.js";
 import { ConnectionRegistry } from "../registry.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";

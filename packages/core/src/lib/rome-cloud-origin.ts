@@ -1,5 +1,6 @@
 import { isLoopbackHostname } from "@rome-os/libs/net";
 import { createLogger } from "../logger.js";
+import { readEnvInstanceOrigin } from "./instance-env.js";
 import { resolveInstanceSlug } from "./runtime.js";
 
 const log = createLogger("rome-cloud-origin");
@@ -48,7 +49,7 @@ export function getRomeCloudOrigin(): string | null {
  * an address.
  */
 export function getConfiguredInstanceOrigin(env: NodeJS.ProcessEnv = process.env): string | null {
-  const explicit = env.PANTHEON_INSTANCE_ORIGIN;
+  const explicit = readEnvInstanceOrigin(env);
   if (explicit) return normalizeOrigin(explicit);
 
   const slug = resolveInstanceSlug(env);

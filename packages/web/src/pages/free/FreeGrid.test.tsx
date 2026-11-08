@@ -32,7 +32,17 @@ const identity = rs.hoisted(() => ({
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: () => identity.current,
 }));
-rs.mock("@/components/chat/Chat", () => ({ Chat: () => null }));
+// The host's `onSessionLayout`, which the real Chat calls when a session's first
+// messages page arrives; tests call it to play that arrival.
+const chatHost = rs.hoisted(() => ({
+  onSessionLayout: undefined as ((id: string, layout: unknown[] | null) => void) | undefined,
+}));
+rs.mock("@/components/chat/Chat", () => ({
+  Chat: (props: { onSessionLayout?: (id: string, layout: unknown[] | null) => void }) => {
+    chatHost.onSessionLayout = props.onSessionLayout;
+    return null;
+  },
+}));
 rs.mock("./AppWidget", () => ({
   AppWidget: ({ placementId }: { placementId: string }) => {
     useEffect(() => {
@@ -113,6 +123,7 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+  chatHost.onSessionLayout = undefined;
   localStorage.clear();
   setActiveSession("reset");
   setActiveSession(null);
@@ -179,7 +190,12 @@ describe("FreeGrid navigation seeds", () => {
 });
 
 describe("FreeGrid mobile header", () => {
-  function renderAt(path: string) {
+  function renderAt(
+    path: string,
+    settings: Record<string, unknown> = {},
+    // `/message` names no chat, so its page hands the grid the main chat's id.
+    grid = <FreeGrid />,
+  ) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     rs.stubGlobal(
       "fetch",
@@ -188,7 +204,7 @@ describe("FreeGrid mobile header", () => {
         return Promise.resolve(
           Response.json(
             url === "/api/settings"
-              ? {}
+              ? settings
               : url.startsWith("/api/concierge/tasks")
                 ? {
                     tasks: [
@@ -222,6 +238,7 @@ describe("FreeGrid mobile header", () => {
             <SlotOutlet name="mobileHeader" className="header" />
             <Routes>
               <Route path="/chat/*" element={<FreeGrid />} />
+              <Route path="/message" element={grid} />
             </Routes>
           </SlotProvider>
         </QueryClientProvider>
@@ -239,6 +256,20 @@ describe("FreeGrid mobile header", () => {
     const pill = header(container).querySelector<HTMLElement>("[data-concierge-tasks-pill]")!;
     await waitFor(() => expect(pill.getAttribute("data-state")).toBe("needsYou"));
     expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
+  });
+
+  it("titles the main Concierge chat with the agent's chosen name, and any other chat with its own", async () => {
+    concierge.chatId = "concierge";
+    identity.current = { sessionName: "Concierge" };
+    const first = renderAt("/chat/concierge", { agentName: "Milo" });
+    await waitFor(() => expect(header(first.container).textContent).toContain("Milo"));
+    expect(header(first.container).textContent).not.toContain("Concierge");
+    first.unmount();
+
+    identity.current = { sessionName: "Plan the launch" };
+    const second = renderAt("/chat/some-other-chat", { agentName: "Milo" });
+    await waitFor(() => expect(header(second.container).textContent).toContain("Plan the launch"));
+    expect(header(second.container).textContent).not.toContain("Milo");
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
@@ -268,6 +299,20 @@ describe("FreeGrid mobile header", () => {
     await waitFor(() => expect(header(second.container).textContent).toContain("Workflow Studio"));
   });
 
+  it("opens the main chat at /message, under the agent's chosen name", async () => {
+    concierge.chatId = "concierge";
+    identity.current = { sessionName: "Concierge" };
+    const { container } = renderAt(
+      "/message",
+      { agentName: "Milo" },
+      <FreeGrid sessionId="concierge" />,
+    );
+    await waitFor(() =>
+      expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
+    );
+    await waitFor(() => expect(header(container).textContent).toContain("Milo"));
+  });
+
   it("leaves every other chat's header without it", async () => {
     concierge.chatId = "concierge";
     const { container } = renderAt("/chat/some-other-chat");
@@ -275,7 +320,7 @@ describe("FreeGrid mobile header", () => {
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
   });
 
-  it("leaves the header without it while Concierge is off", async () => {
+  it("leaves the header without it until the main chat is loaded", async () => {
     const { container } = renderAt("/chat/concierge");
     await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
@@ -314,18 +359,6 @@ describe("FreeGrid workspace re-entry", () => {
     viewportWidth = width;
     rs.stubGlobal("innerWidth", width);
     localStorage.setItem("rome:free-layout:a", JSON.stringify(layout));
-    let loads = 0;
-    let respond!: (response: Response) => void;
-    rs.mocked(fetch).mockImplementation((input) => {
-      if (String(input) === "/api/chat/sessions/a/layout") {
-        if (++loads === 2)
-          return new Promise<Response>((resolve) => {
-            respond = resolve;
-          });
-        return Promise.resolve(Response.json({ layout }));
-      }
-      return Promise.resolve(Response.json(String(input) === "/api/settings" ? {} : []));
-    });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <MemoryRouter initialEntries={["/chat/a"]}>
@@ -343,6 +376,8 @@ describe("FreeGrid workspace re-entry", () => {
       </MemoryRouter>,
     );
     await act(async () => {});
+    // The first messages page carries the saved layout.
+    act(() => chatHost.onSessionLayout?.("a", layout));
     const toggle = screen.queryByRole("button", { name: "Show apps" });
     if (toggle) fireEvent.click(toggle);
     expect(screen.getByTestId("workspace-chat").style.display).toBe(width < 721 ? "none" : "");
@@ -356,7 +391,8 @@ describe("FreeGrid workspace re-entry", () => {
     fireEvent.click(
       screen.getByRole("button", { name: handoff ? "Return with widgets" : "Return to chat" }),
     );
-    expect(loads).toBe(2);
+    // The remounted chat reports its first page again, as the re-entry load did.
+    const respond = () => chatHost.onSessionLayout?.("a", layout);
     return { saved, respond };
   }
 
@@ -368,7 +404,7 @@ describe("FreeGrid workspace re-entry", () => {
     expect(screen.getByTestId("workspace-chat").style.display).toBe("");
     expect(localStorage.getItem("rome:tool-view:a")).toBe(saved);
     await act(async () => {
-      respond(Response.json({ layout }));
+      respond();
     });
     expect(screen.getByTestId("workspace-chat").style.display).toBe("");
     expect(localStorage.getItem("rome:tool-view:a")).toBe(saved);
@@ -383,7 +419,7 @@ describe("FreeGrid workspace re-entry", () => {
     if (action === "toggle") fireEvent.click(screen.getByRole("button", { name: "Show apps" }));
     else act(() => selectTool("notes"));
     await act(async () => {
-      respond(Response.json({ layout }));
+      respond();
     });
     expect(screen.getByTestId("workspace-chat").style.display).toBe("none");
     expect(screen.getByRole("tab", { name: "notes" }).getAttribute("aria-selected")).toBe("true");
@@ -393,7 +429,7 @@ describe("FreeGrid workspace re-entry", () => {
     const { respond } = await reenter("apps", 390, true);
     expect(screen.getByTestId("workspace-chat").style.display).toBe("");
     await act(async () => {
-      respond(Response.json({ layout }));
+      respond();
     });
     await waitFor(() => expect(localStorage.getItem("rome:free-layout:a")).toContain("calendar"));
     expect(screen.getByTestId("workspace-chat").style.display).toBe("");
@@ -407,9 +443,52 @@ describe("FreeGrid workspace re-entry", () => {
     const { saved, respond } = await reenter("apps", width);
     expect(screen.getAllByRole("button", { name: "Hide apps" })[0]).toBeTruthy();
     await act(async () => {
-      respond(Response.json({ layout }));
+      respond();
     });
     expect(screen.getAllByRole("button", { name: "Hide apps" })[0]).toBeTruthy();
     expect(localStorage.getItem("rome:tool-view:a")).toBe(saved);
+  });
+});
+
+describe("FreeGrid layout from the first messages page", () => {
+  const cached = [{ id: "notes", type: "app", targetId: "notes", order: 0 }];
+  const fromServer = [{ id: "files", type: "projects", order: 0 }];
+
+  function renderSession(id: string, state?: unknown) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <MemoryRouter initialEntries={[{ pathname: `/chat/${id}`, state }]}>
+        <QueryClientProvider client={queryClient}>
+          <SlotProvider>
+            <Routes>
+              <Route path="/chat/*" element={<FreeGrid />} />
+            </Routes>
+          </SlotProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the cached layout on the first render and never fetches /layout", () => {
+    localStorage.setItem("rome:free-layout:cached-chat", JSON.stringify(cached));
+    renderSession("cached-chat");
+    expect(screen.getByRole("tab", { name: "notes" })).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/layout"), expect.anything());
+  });
+
+  it("applies the layout the first page carries", () => {
+    renderSession("server-chat");
+    expect(screen.queryByRole("tab")).toBeNull();
+    act(() => chatHost.onSessionLayout?.("server-chat", fromServer));
+    expect(screen.getByRole("tab", { name: "Projects" })).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem("rome:free-layout:server-chat")!)).toEqual(fromServer);
+  });
+
+  it("places a widget handoff on top of the layout once the first page applied it", () => {
+    renderSession("handoff-chat", { widgets: [{ type: "app", appId: "calendar" }] });
+    expect(screen.queryByRole("tab", { name: "calendar" })).toBeNull();
+    act(() => chatHost.onSessionLayout?.("handoff-chat", fromServer));
+    expect(screen.getByRole("tab", { name: "Projects" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "calendar" })).toBeTruthy();
   });
 });

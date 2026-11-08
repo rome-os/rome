@@ -77,6 +77,20 @@ describe("NotifyClient.send", () => {
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer romeinst_test");
   });
 
+  it("sends a system push's level and chatId beside its body", async () => {
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
+      jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),
+    );
+    await client({ fetchImpl }).send({ body: "PR merged", level: "passive", chatId: "chat-1" });
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      body: "PR merged",
+      level: "passive",
+      chatId: "chat-1",
+    });
+    expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
+  });
+
   it("forwards an empty-string body verbatim (Rome Cloud owns the fallback)", async () => {
     const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),

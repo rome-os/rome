@@ -5,13 +5,13 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   EmptyState,
   EmptyStateAction,
   EmptyStateIcon,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 
 const PROMPT_KEYS = [
   "concierge.empty.prompts.weather",
@@ -116,7 +116,7 @@ export function ConciergeTopicEmptyState({ onStart }: { onStart: (prompt: string
         <p className="mt-8 text-ui text-muted-foreground">
           {t("concierge.topicEmpty.justAsk")}{" "}
           <Link
-            to={`/chat/${CONCIERGE_CHAT_ID}`}
+            to={MAIN_CHAT_PATH}
             className="whitespace-nowrap text-foreground underline-offset-4 hover:underline"
           >
             {t("concierge.topicEmpty.backToMain")}

@@ -12,14 +12,21 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
-import { Session } from "../../sessions/session.js";
+import { Session } from "../../agent/index.js";
 import {
   AgentInputQueue,
   type AgentInputReceipt,
   type SubmitInputOptions,
 } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
-import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
+import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
+import {
+  buildAgent,
+  createTestDb,
+  buildTestDeps,
+  type TestDb,
+  type TestDeps,
+} from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import type {
   AgentSession,
@@ -31,12 +38,13 @@ import type {
   SendTurnOptions,
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
-import { ModelResolutionError } from "../../core/model-resolver.js";
-import { guardianAuth, webchatProjects } from "../../db/schema.js";
+import { ModelResolutionError } from "../../agent/index.js";
+import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import { reportOf } from "../../test/kit/model-accounts.js";
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -147,14 +155,338 @@ describe("Webchat API", () => {
     expect(await list(visitor, "all")).toEqual(all);
   });
 
+  it("keeps each person's Concierge and task chats from everyone else", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:a");
+    await deps.webchatRepo.createSession(
+      "guardian-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("guardian-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    // A branch of the guardian's task chat, promoted to an ordinary chat: it
+    // was made private to the guardian when it was forked.
+    await deps.webchatRepo.createSession(
+      "task-branch",
+      "Branch",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("task-branch", {
+      triggerKind: "concierge_fork",
+      triggerName: "branch",
+    });
+    await deps.webchatRepo.createSession(
+      "shared",
+      "Shared",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    const status = async (
+      actor: typeof guardian | typeof visitor,
+      path: string,
+      init?: RequestInit,
+    ) => (await runWithSessionActor(actor, () => app.request(path, init))).status;
+    const post = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    };
+
+    // The visitor can neither read nor post to the guardian's Concierge or task chat.
+    for (const id of ["concierge", "guardian-task"]) {
+      expect(await status(visitor, `/chat/sessions/${id}`)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/messages`)).toBe(404);
+      expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
+    }
+    // Nor the guardian the visitor's.
+    expect(await status(guardian, "/chat/sessions/visitor-main")).toBe(404);
+    expect(await status(guardian, "/chat/sessions/visitor-main/turns", post)).toBe(404);
+    // Each opens their own, and both open an ordinary chat.
+    expect(await status(visitor, "/chat/sessions/visitor-main")).toBe(200);
+    expect(await status(guardian, "/chat/sessions/concierge")).toBe(200);
+    expect(await status(visitor, "/chat/sessions/shared")).toBe(200);
+
+    const listed = async (actor: typeof guardian | typeof visitor) =>
+      (
+        (await (
+          await runWithSessionActor(actor, () => app.request("/chat/sessions?status=all"))
+        ).json()) as { id: string }[]
+      )
+        .map((chat) => chat.id)
+        .sort();
+    expect(await listed(visitor)).toEqual(["shared", "visitor-main"]);
+    expect(await listed(guardian)).toEqual(["concierge", "guardian-task", "shared", "task-branch"]);
+    expect(await status(visitor, "/chat/sessions/task-branch")).toBe(404);
+  });
+
+  it("finds no chat, turn or message it cannot place in a chat that exists", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const status = async (path: string) =>
+      (await runWithSessionActor(guardian, () => app.request(path))).status;
+    // A chat that does not exist, and a turn and a message that name none.
+    expect(await status("/chat/sessions/missing-chat/messages")).toBe(404);
+    expect(await status("/chat/turns/unknown-turn/stream")).toBe(404);
+    expect(await status("/chat/messages/unknown-message/content")).toBe(404);
+    // A registered turn whose chat is gone.
+    const turn = deps.agentTurnStreamRegistry.register({
+      sessionId: "runtime",
+      chatId: "deleted-chat",
+      turnId: "orphan-turn",
+      agentName: "main",
+    });
+    turn.finish();
+    const orphan = await runWithSessionActor(guardian, () =>
+      app.request("/chat/turns/orphan-turn/stream"),
+    );
+    expect(orphan.status).toBe(404);
+    expect(await orphan.json()).toEqual({ error: "Not found" });
+    // Search and message content share the gated patterns, and still answer.
+    expect(await status("/chat/sessions/search?q=x")).toBe(200);
+  });
+
+  it("refuses another person's live private turn before any of its messages is stored", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    await deps.webchatRepo.createSession(
+      "guardian-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("guardian-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    // A subagent of the guardian's task chat, running, with nothing stored yet.
+    await deps.webchatRepo.ensureRomeSession({
+      id: "helper",
+      type: "subagent",
+      name: "helper",
+      agentName: "researcher",
+      parentSessionId: "guardian-task",
+    });
+    const turn = deps.agentTurnStreamRegistry.register({
+      sessionId: "helper",
+      chatId: "helper",
+      turnId: "helper-turn",
+      agentName: "researcher",
+    });
+    try {
+      for (const [path, method] of [
+        ["/chat/turns/helper-turn/stream", "GET"],
+        ["/chat/turns/helper-turn/interrupt", "POST"],
+      ] as const) {
+        const res = await runWithSessionActor(visitor, () => app.request(path, { method }));
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "Not found" });
+      }
+    } finally {
+      turn.finish?.();
+    }
+  });
+
+  it("searches only chats the caller may open, before taking the 20 best", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const chat = async (id: string, agentName: string | null, ownerKey: string | null) => {
+      await deps.webchatRepo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        agentName,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+      await deps.webchatRepo.addBackendMessage(id, `turn-${id}`, [
+        { type: "text", content: "the launch plan" },
+      ]);
+    };
+    // Three older ordinary chats, then 25 newer ones only the guardian may open.
+    for (let index = 0; index < 3; index++) await chat(`shared-${index}`, null, "guardian");
+    for (let index = 0; index < 25; index++)
+      await chat(`concierge-${index}`, "core:concierge", "guardian");
+    const found = (await (
+      await runWithSessionActor(visitor, () => app.request("/chat/sessions/search?q=launch"))
+    ).json()) as { session: { id: string } }[];
+    expect(found.map((match) => match.session.id).sort()).toEqual([
+      "shared-0",
+      "shared-1",
+      "shared-2",
+    ]);
+  });
+
+  it("keeps a Concierge chat's turns, messages and history private when reached by their own ids", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:a");
+    // Each turn keeps a trace, which the message routes read by its id, and a line said.
+    const said = async (chatId: string, turnId: string) => {
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${chatId}-trace`,
+        sessionId: chatId,
+        turnId,
+        startSeq: 0,
+        blocks: [{ type: "result", content: `said in ${chatId}` }],
+      });
+      await deps.webchatRepo.addBackendMessage(chatId, turnId, [
+        { type: "text", content: `said in ${chatId}` },
+      ]);
+      return `${chatId}-trace`;
+    };
+    const guardianMessage = await said("concierge", "turn-g");
+    const visitorMessage = await said("visitor-main", "turn-v");
+    const status = async (actor: typeof guardian | typeof visitor, path: string, method = "GET") =>
+      (await runWithSessionActor(actor, () => app.request(path, { method }))).status;
+
+    for (const [actor, turn, message] of [
+      [visitor, "turn-g", guardianMessage],
+      [guardian, "turn-v", visitorMessage],
+    ] as const) {
+      const stream = await runWithSessionActor(actor, () =>
+        app.request(`/chat/turns/${turn}/stream`),
+      );
+      // Refused as another person's, not merely a turn with no stream.
+      expect(stream.status).toBe(404);
+      expect(await stream.json()).toEqual({ error: "Not found" });
+      expect(await status(actor, `/chat/turns/${turn}/interrupt`, "POST")).toBe(404);
+      expect(await status(actor, `/chat/messages/${message}/content`)).toBe(404);
+      expect(await status(actor, `/sessions/messages/${message}/content`)).toBe(404);
+    }
+    // The owner still reaches their own.
+    expect(await status(visitor, `/chat/messages/${visitorMessage}/content`)).toBe(200);
+    expect(await status(guardian, `/chat/messages/${guardianMessage}/content`)).toBe(200);
+
+    // A history read made from the visitor's chat leaves the guardian's out.
+    const channel = webchatChannel(deps.webchatRepo);
+    const read = (from: string) =>
+      webchatCaller.run({ chatId: from }, () => channel.messages!.query({ since: new Date(0) }));
+    const chatsOf = async (from: string) =>
+      [...new Set((await read(from)).map((m) => m.chatId))].sort();
+    expect(await chatsOf("visitor-main")).toEqual(["visitor-main"]);
+    expect(await chatsOf("concierge")).toEqual(["concierge"]);
+
+    // In an ordinary chat anyone may write in, a read is the sending person's,
+    // whoever owns the chat, and a turn no person sent sees no Concierge chat.
+    for (const [id, ownerKey] of [
+      ["guardian-plain", "guardian"],
+      ["visitor-plain", "visitor:a"],
+    ] as const) {
+      await deps.webchatRepo.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+      await deps.webchatRepo.addBackendMessage(id, `turn-${id}`, [
+        { type: "text", content: `said in ${id}` },
+      ]);
+    }
+    const readAs = async (actor: typeof guardian | typeof visitor | undefined, from: string) =>
+      [
+        ...new Set(
+          (
+            await webchatCaller.run({ actor, chatId: from }, () =>
+              channel.messages!.query({ since: new Date(0) }),
+            )
+          ).map((m) => m.chatId),
+        ),
+      ].sort();
+    const plain = ["guardian-plain", "visitor-plain"];
+    expect(await readAs(visitor, "guardian-plain")).toEqual([...plain, "visitor-main"].sort());
+    expect(await readAs(guardian, "visitor-plain")).toEqual(["concierge", ...plain].sort());
+    expect(await readAs(undefined, "guardian-plain")).toEqual(plain);
+    // A send goes only where its caller may write: a visitor's action cannot
+    // put a line into the guardian's Concierge chat, nor the guardian's into
+    // the visitor's, and Rome's own sends go through.
+    const send = (actor: typeof guardian | typeof visitor | undefined, from: string, to: string) =>
+      webchatCaller.run({ actor, chatId: from }, () =>
+        channel.send!.send(to as never, { text: "hi" }),
+      );
+    await expect(send(visitor, "guardian-plain", "concierge")).rejects.toThrow("No dashboard chat");
+    await expect(send(guardian, "visitor-plain", "visitor-main")).rejects.toThrow(
+      "No dashboard chat",
+    );
+    await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
+    await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
+  });
+
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
     const sessionId = "automation-senders";
     await deps.webchatRepo.createSession(sessionId, "Automation");
     const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
-    const records = new Map([
-      ["coding:coding", { config: { name: "coding" }, metadata: { ownerId: "coding" } }],
-    ]);
-    deps.agentLoader = { getAllRecords: () => records } as never;
+    const coding = { ...buildAgent("coding:coding"), ownerType: "app" as const, ownerId: "coding" };
+    deps.agentLoader = { list: () => [coding] } as never;
     deps.appCatalog = {
       get: (id: string) =>
         id === "coding" || id === "review"
@@ -333,7 +665,6 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
-      recordConversation: async () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -427,7 +758,6 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
-      recordConversation: async () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -488,13 +818,14 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
-      recordConversation: async () => {},
       shutdown: async () => {},
     };
-    rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
-    const id = await runtime.startChat({});
+    const id = await runtime.startChat({}, "guardian");
     try {
       const posted = await runtime.post(id, { text: "Find flights" }, concierge);
 
@@ -535,6 +866,21 @@ describe("Webchat API", () => {
       expect(
         (await deps.webchatRepo.getMessages(id)).filter((message) => message.role === "user"),
       ).toHaveLength(2);
+
+      // The guardian's own message, as their composer sends it: said by no agent.
+      await runtime.sendAsGuardian(id, "Help me follow Gmail.");
+      const inputs3 = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      expect(inputs3).toHaveLength(3);
+      const said = inputs3.find((m) => m.content.includes("Help me follow Gmail."));
+      expect(said).toBeDefined();
+      const [{ sender_account_id: sender }] = testDb.db.all<{ sender_account_id: string | null }>(
+        sql`SELECT sender_account_id FROM chat_messages WHERE key = ${said!.id}`,
+      );
+      // Recorded before the agent failed to wake, so it counts as said.
+      expect(sender ?? "").not.toMatch(/^agent:/);
+      await expect(runtime.sendAsGuardian("no-such-chat", "hi")).rejects.toThrow(
+        "Session not found",
+      );
     } finally {
       for (const finish of finishers) finish();
     }
@@ -542,28 +888,12 @@ describe("Webchat API", () => {
 
   it("encodes scoped owner ids in agent picker icon URLs", async () => {
     const ownerId = "@foo/bar";
-    deps.agentLoader = {
-      getAllRecords: () =>
-        new Map([
-          [
-            `${ownerId}:baz`,
-            {
-              config: {
-                name: "baz",
-                description: "Scoped agent",
-              },
-              metadata: {
-                kind: "agent",
-                ownerType: "app",
-                ownerId,
-                publicName: "baz",
-                aliases: [],
-                sourcePath: "/installed/%40foo%2Fbar/agents/baz.yaml",
-              },
-            },
-          ],
-        ]),
-    } as unknown as typeof deps.agentLoader;
+    const baz = {
+      ...buildAgent(`${ownerId}:baz`, { description: "Scoped agent" }),
+      ownerType: "app" as const,
+      ownerId,
+    };
+    deps.agentLoader = { list: () => [baz] } as unknown as typeof deps.agentLoader;
     deps.appCatalog = {
       listResolved: () => [
         {
@@ -1967,7 +2297,7 @@ describe("Webchat API", () => {
       const runtime = Session.create("main", { continuityKey: `webchat:${session.id}` });
       runtime.recordTurn({
         provider: "codex",
-        providerThreadId: "thread-1",
+        modelThreadId: "thread-1",
         model: "gpt-5.5",
         reasoningEffort: "xhigh",
       });
@@ -1975,7 +2305,7 @@ describe("Webchat API", () => {
       const otherAgent = Session.create("other-agent", { continuityKey: `webchat:${session.id}` });
       otherAgent.recordTurn({
         provider: "claude",
-        providerThreadId: "thread-2",
+        modelThreadId: "thread-2",
         model: "other-model",
       });
       await deps.sessionRepository.add(otherAgent);
@@ -2345,10 +2675,12 @@ describe("Webchat API", () => {
     } as unknown as typeof deps.agentSessionManager;
     const turnFailedBeforeStart = rs.fn();
     deps.concierge = { turnFailedBeforeStart } as never;
-    rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
-    const id = await runtime.startChat({});
+    const id = await runtime.startChat({}, "guardian");
 
     expect(await runtime.post(id, { text: "Find flights" }, concierge)).toMatchObject({ ok: true });
     const turnId = (await deps.webchatRepo.getMessages(id)).find((m) => m.role === "user")?.turnId;
@@ -2430,6 +2762,9 @@ describe("Webchat API", () => {
         expect.objectContaining({ type: "turn_end", status: "error", turnId: turn.turnId }),
       ]);
     });
+    // The chat reads as failed, as the sidebar and the Concierge's task tools show it.
+    const listed = await deps.webchatRepo.listSessions("all");
+    expect(listed.find((chat) => chat.id === session.id)?.lastTurnFailed).toBe(true);
 
     const streamRes = await app.request(`/chat/turns/${turn.turnId}/stream`);
     expect(streamRes.status).toBe(200);
@@ -2540,11 +2875,9 @@ describe("Webchat API", () => {
       peek: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
-    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-    rs.spyOn(deps.agentLoader, "get").mockReturnValue({
-      name: "concierge",
-      policy: { finalText: "private", autoTitle: false },
-    } as ReturnType<typeof deps.agentLoader.get>);
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      buildAgent(name, { name: "concierge", policy: { finalText: "private", autoTitle: false } }),
+    );
     deps.concierge = {
       switchIfExhausted: async () => null,
       conciergeChat: async () => null,
@@ -2898,11 +3231,9 @@ describe("Webchat API", () => {
     });
 
     it("keeps a private agent's text in the trace: no commentary message, no reply", async () => {
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      rs.spyOn(deps.agentLoader, "get").mockReturnValue({
-        name: "main",
-        policy: { finalText: "private", autoTitle: false },
-      } as ReturnType<typeof deps.agentLoader.get>);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+        buildAgent(name, { name: "main", policy: { finalText: "private", autoTitle: false } }),
+      );
       const { sendMessageRun, sessionId } = await runScriptedStream(
         () =>
           (async function* () {
@@ -3475,11 +3806,11 @@ describe("Webchat API", () => {
       } satisfies FakeSession;
     });
     deps.skillCatalog = {
-      get: (name) =>
+      find: (name) =>
         name === "app_creation" || name === "@ray/calendar:daily_brief"
           ? ({ name } as never)
           : undefined,
-      getAll: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
+      list: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
       getRegistryLoadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
@@ -3560,8 +3891,8 @@ describe("Webchat API", () => {
     // The structured field is the composer chip's explicit selection — it
     // resolves against the catalog independently of any typed text.
     deps.skillCatalog = {
-      get: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
-      getAll: () => [{ name: "research:deep-research" } as never],
+      find: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
+      list: () => [{ name: "research:deep-research" } as never],
       getRegistryLoadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
@@ -3615,6 +3946,130 @@ describe("Webchat API", () => {
       body: JSON.stringify({ skillName: "gone" }),
     });
     expect(emptyRes.status).toBe(400);
+  });
+
+  it.each([
+    "core:concierge",
+    "concierge",
+  ])("delegates structured and typed skills from %s without telling Concierge to read them", async (agentName) => {
+    const turns: AgentTurnInput[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName, channelThreadKey: "webchat:concierge-skills" },
+      sessionId: "agent-session",
+      status: "idle",
+      sendTurn(input: AgentTurnInput) {
+        turns.push(input);
+        return {
+          turnId: `turn-${turns.length}`,
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+        };
+      },
+      subscribe: () => () => undefined,
+      onStatusChange: () => () => undefined,
+      interrupt: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+    deps.skillCatalog = {
+      find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      list: () => [],
+      getRegistryLoadFailures: () => [],
+    };
+    await deps.webchatRepo.createSession(
+      "concierge-skills",
+      "Concierge",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      agentName,
+    );
+    const { routes } = createWebchatRuntime(deps);
+    for (const body of [
+      { skillName: "coding:app_creation", text: "Build a tracker" },
+      { text: "/coding:app_creation Build a tracker" },
+      { skillName: "coding:app_creation" },
+      { text: "/coding:app_creation" },
+    ]) {
+      const sent = await routes.request("/chat/sessions/concierge-skills/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(sent.status).toBe(200);
+      const prompt = turns.at(-1)?.prompt;
+      expect(prompt).toContain("Acknowledge with `say` first");
+      expect(prompt).toContain("`chat_start`");
+      expect(prompt).toContain('`agent: "main"`, `skill: "coding:app_creation"`');
+      // Concierge writes the brief itself, so it can add conversation context.
+      expect(prompt).toContain("plus any context from this conversation or a quoted message");
+      expect(prompt).not.toContain('"brief"');
+      expect(prompt).not.toContain("read_skill");
+      expect(prompt).toContain(
+        body.text?.includes("Build")
+          ? "Request: Build a tracker"
+          : "The guardian did not include any task text.",
+      );
+    }
+    const messages = await deps.webchatRepo.getMessages("concierge-skills");
+    expect(
+      messages.filter((message) => message.role === "user").map((message) => message.content),
+    ).toEqual([
+      expect.stringContaining("/app_creation Build a tracker"),
+      expect.stringContaining("/coding:app_creation Build a tracker"),
+      expect.stringContaining("/app_creation"),
+      expect.stringContaining("/coding:app_creation"),
+    ]);
+  });
+
+  it("expands the skill on a task chat's first dashboard send", async () => {
+    let turn: AgentTurnInput | undefined;
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:task-skills" },
+      sessionId: "agent-session",
+      status: "idle",
+      sendTurn(input: AgentTurnInput) {
+        turn = input;
+        return {
+          turnId: "task-skill-turn",
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+        };
+      },
+      subscribe: () => () => undefined,
+      onStatusChange: () => () => undefined,
+      interrupt: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+    deps.skillCatalog = {
+      find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      list: () => [],
+      getRegistryLoadFailures: () => [],
+    };
+    const { runtime } = createWebchatRuntime(deps);
+    const chatId = await runtime.startChat({}, "guardian");
+    const result = await runtime.post(
+      chatId,
+      {
+        text: "Build a tracker",
+        skillName: "coding:app_creation",
+      },
+      { platform: "webchat", id: "core:concierge" },
+    );
+    expect(result.ok).toBe(true);
+    expect(turn?.prompt).toContain("Read it now with the `read_skill` tool");
+    expect(turn?.prompt).toContain('"coding:app_creation"');
+    expect(turn?.prompt).toContain("Task: Build a tracker");
+    const messages = await deps.webchatRepo.getMessages(chatId);
+    expect(messages.find((message) => message.role === "user")?.content).toContain(
+      "/app_creation Build a tracker",
+    );
   });
 
   describe("suspensions (inline pending_interaction)", () => {
@@ -3719,13 +4174,115 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("keeps a deleted private chat's buffered turn from everyone but its owner", async () => {
+      mockScriptedManager();
+      await deps.webchatRepo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sent = await app.request("/chat/sessions/guardian-task/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(sent.status).toBe(200);
+      const { turnId } = (await sent.clone().json()) as { turnId: string };
+      await drainTurn(app, sent);
+      // The chat goes while its finished turn is still buffered for replay.
+      await deps.webchatRepo.deleteSession("guardian-task");
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      const asVisitor = await runWithSessionActor(visitor, () =>
+        app.request(`/chat/turns/${turnId}/stream`),
+      );
+      expect(asVisitor.status).toBe(404);
+      expect(await asVisitor.json()).toEqual({ error: "Not found" });
+      // A turn whose chat is gone is not found to anyone, its owner included.
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const asGuardian = await runWithSessionActor(guardian, () =>
+        app.request(`/chat/turns/${turnId}/stream`),
+      );
+      expect(asGuardian.status).toBe(404);
+    });
+
+    it("keeps a deleted private chat's registered fork turn from everyone, and an ordinary chat's turn open", async () => {
+      await deps.webchatRepo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("guardian-task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      await deps.webchatRepo.ensureRomeSession({
+        id: "branch",
+        type: "fork",
+        name: "Branch",
+        agentName: null,
+        parentSessionId: "guardian-task",
+        trigger: { triggerKind: "fork", triggerName: "branch" },
+      });
+      const fork = deps.agentTurnStreamRegistry.register({
+        sessionId: "branch",
+        chatId: "branch",
+        turnId: "fork-turn",
+        agentName: "main",
+      });
+      // A channel turn's stream names its runtime session and the ordinary
+      // chat it is recorded in, which everyone may open.
+      await deps.webchatRepo.createSession("channel-chat", "Channel chat");
+      const channelTurn = deps.agentTurnStreamRegistry.register({
+        sessionId: "runtime-session",
+        chatId: "channel-chat",
+        turnId: "channel-turn",
+        agentName: "main",
+      });
+      fork.finish();
+      channelTurn.finish();
+      const app = createWebchatRuntime(deps).routes;
+      const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const status = async (actor: typeof visitor | typeof guardian, turnId: string) =>
+        (await runWithSessionActor(actor, () => app.request(`/chat/turns/${turnId}/stream`)))
+          .status;
+      expect(await status(visitor, "fork-turn")).toBe(404);
+      expect(await status(guardian, "fork-turn")).toBe(200);
+      // The fork goes while its finished turn is still buffered for replay.
+      await deps.webchatRepo.deleteSession("branch");
+      expect(await status(visitor, "fork-turn")).toBe(404);
+      expect(await status(guardian, "fork-turn")).toBe(404);
+      expect(await status(visitor, "channel-turn")).toBe(200);
+    });
+
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         switchIfExhausted: async () => null,
         conciergeChat: async (id: string) =>
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
+        turnHeader: async (chat: { id: string; name: string; main: boolean }) =>
+          `<concierge_chat id="${chat.id}" name="${chat.name}" main="${chat.main}"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
       } as never;
       await deps.webchatRepo.createSession(
         "topic-1",
@@ -3748,14 +4305,14 @@ describe("Webchat API", () => {
         await drainTurn(app, sent);
       }
       expect(sentTurns[0]?.prompt).toBe(
-        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n\nhello',
+        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n\nhello',
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
       mockScriptedManager();
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         switchIfExhausted: async (chatId: string) => {
           await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
@@ -3789,12 +4346,15 @@ describe("Webchat API", () => {
 
     it("fails over only the Concierge pre-turn and leaves an ordinary quota failure unchanged", async () => {
       mockScriptedManager();
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      rs.spyOn(deps.aiToolState, "get").mockReturnValue({
-        claude: { loggedIn: true, quotaExhausted: true },
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      rs.spyOn(deps.modelAccounts, "read").mockReturnValue({
+        anthropic: reportOf("usage_limit_reached"),
+        openai: reportOf("available"),
       });
-      deps.concierge = new ConciergeService({ ...deps } as unknown as ConciergeDeps);
+      deps.concierge = new ConciergeService({
+        ...deps,
+        accounts: deps.modelAccounts,
+      } as unknown as ConciergeDeps);
       const acquire = deps.agentSessionManager.acquire;
       deps.agentSessionManager.acquire = rs.fn(
         async (key: AgentSessionKey, init?: AgentSessionInit) => {
@@ -3926,7 +4486,7 @@ describe("Webchat API", () => {
 
     const parkedEvents = (toolUseId: string) =>
       async function* () {
-        // Mirror the real MCP facade tool_result shape: the action's JSON is
+        // Mirror the real tool_result shape: the action's JSON is
         // wrapped in a `[{ type: "text", text }]` content block, not handed back
         // as a bare object — the drain loop must unwrap it.
         yield {
@@ -4667,7 +5227,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "rated-provider-turn",
       });
       const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -4706,7 +5266,7 @@ describe("Webchat API", () => {
         mode: "exact",
         sourceCheckpoint: {
           providerId: "openai",
-          providerThreadId: "source-provider-thread",
+          providerThreadId: "source-model-thread",
           checkpointId: "rated-provider-turn",
         },
       });
@@ -5006,7 +5566,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "provider-turn-t2",
       });
       const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -5037,7 +5597,7 @@ describe("Webchat API", () => {
         mode: "exact",
         sourceCheckpoint: {
           providerId: "openai",
-          providerThreadId: "source-provider-thread",
+          providerThreadId: "source-model-thread",
           checkpointId: "provider-turn-t2",
         },
       });
@@ -5097,7 +5657,7 @@ describe("Webchat API", () => {
           sessionId: "live-source-session",
           turnId: "turn-before-stop",
           provider: "anthropic",
-          providerThreadId: "claude-thread",
+          modelThreadId: "claude-thread",
           checkpointId: "durable-assistant-before-stop",
         });
       const app = createWebchatRuntime(deps).routes;
@@ -5220,7 +5780,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "provider-turn-t2",
       });
       rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -5298,7 +5858,7 @@ describe("Webchat API", () => {
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
-        providerThreadId: "source-provider-thread",
+        modelThreadId: "source-model-thread",
         checkpointId: "provider-turn-t2",
       });
       rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
@@ -5317,7 +5877,7 @@ describe("Webchat API", () => {
 
       // Visibility now precedes thread persistence, so the send guard is what
       // keeps "visible" from outrunning "continuable": a follow-up before
-      // persistForkThread's row exists would acquire a fresh provider thread
+      // persistForkThread's row exists would acquire a fresh model thread
       // and silently lose the branched context.
       const refused = await app.request(`/chat/sessions/branch-fork-session/turns`, {
         method: "POST",
@@ -5332,7 +5892,7 @@ describe("Webchat API", () => {
       findRow.mockResolvedValue({
         id: "branch-fork-session",
         provider: "anthropic",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "claude",
         reasoningEffort: null,
         createdAt: new Date(),
@@ -5378,7 +5938,7 @@ describe("Webchat API", () => {
       ({
         id,
         provider: "anthropic",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "claude",
         reasoningEffort: null,
         createdAt: new Date(),
@@ -5386,6 +5946,8 @@ describe("Webchat API", () => {
       }) as unknown as Session;
 
     beforeEach(async () => {
+      // A fork is a child of the chat it came from, which must exist.
+      await deps.webchatRepo.createSession("parent-chat", "Parent chat");
       for (const id of [FORK_ID, LEGACY_FORK_ID]) {
         await deps.webchatRepo.ensureRomeSession({
           id,
@@ -5488,7 +6050,7 @@ describe("Webchat API", () => {
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
       // `persistForkThread` stored the row without a model-selection suffix. If
       // a follow-up ever recomputed a suffixed key, `acquire` would open a
-      // fresh provider thread and lose the branch history with no error. The
+      // fresh model thread and lose the branch history with no error. The
       // selector setting must be ON or the selection is discarded before the
       // pin and this proves nothing.
       await deps.settingsRepo.set("enableModelSelector", true);
@@ -5541,7 +6103,10 @@ describe("Webchat API", () => {
       const gate = new Promise<void>((resolve) => {
         finish = resolve;
       });
-      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+      let stopRequested: (() => boolean) | undefined;
+      const task = runtime.enqueueSessionTask(sessionId, async (helpers) => {
+        const { emit } = helpers;
+        stopRequested = helpers.stopRequested;
         emit({
           type: "turn_start",
           turnId: "backend-provider-turn",
@@ -5564,7 +6129,25 @@ describe("Webchat API", () => {
         expect(turnId).toMatch(/^backend:/);
       });
       const stop = () => routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
+      // Another chat's background turn, which nobody stops.
+      await deps.webchatRepo.createSession("sess-other", "Other");
+      let otherStopRequested: (() => boolean) | undefined;
+      let finishOther!: () => void;
+      const otherGate = new Promise<void>((resolve) => {
+        finishOther = resolve;
+      });
+      const other = runtime.enqueueSessionTask("sess-other", async (helpers) => {
+        otherStopRequested = helpers.stopRequested;
+        await otherGate;
+      });
+      await rs.waitFor(() => expect(otherStopRequested).toBeDefined());
+      expect(stopRequested?.()).toBe(false);
       expect((await stop()).status).toBe(202);
+      // The Stop reached this turn only.
+      expect(stopRequested?.()).toBe(true);
+      expect(otherStopRequested?.()).toBe(false);
+      finishOther();
+      await other;
       expect((await stop()).status).toBe(202);
       expect(owner.interrupt).toHaveBeenCalledTimes(2);
       owner.currentTurnId = "later-turn";
@@ -5577,6 +6160,43 @@ describe("Webchat API", () => {
           m.content.includes("Already changed the file."),
         ),
       ).toBe(true);
+      await runtime.flushAll();
+    });
+
+    it("marks no Stop on a background turn whose provider turn has already moved on", async () => {
+      const sessionId = "sess-late-stop";
+      await deps.webchatRepo.createSession(sessionId, "Late stop");
+      const owner = { currentTurnId: "superseded-turn", interrupt: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const { routes, runtime } = createWebchatRuntime(deps);
+      let stopRequested: (() => boolean) | undefined;
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async (helpers) => {
+        stopRequested = helpers.stopRequested;
+        helpers.emit({
+          type: "turn_start",
+          turnId: "superseded-turn",
+          sessionId: "provider-session",
+          userPrompt: "<task_events/>",
+        });
+        await gate;
+      });
+      let turnId = "";
+      await rs.waitFor(async () => {
+        const turns = await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json();
+        turnId = turns[0]?.turnId;
+        expect(turnId).toMatch(/^backend:/);
+      });
+      // A newer input already ended the turn; the stream is still draining.
+      owner.currentTurnId = "newer-turn";
+      await routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
+      expect(owner.interrupt).not.toHaveBeenCalled();
+      expect(stopRequested?.()).toBe(false);
+      finish();
+      await task;
       await runtime.flushAll();
     });
 
@@ -5826,7 +6446,12 @@ describe("Webchat API", () => {
       const running = `event: session_running\ndata: {"sessionId":"${sessionId}","running":true}`;
       const stopped = `event: session_running\ndata: {"sessionId":"${sessionId}","running":false}`;
       const register = (turnId: string, id = sessionId) =>
-        deps.agentTurnStreamRegistry.register({ sessionId: id, turnId, agentName: "main" });
+        deps.agentTurnStreamRegistry.register({
+          sessionId: id,
+          chatId: id,
+          turnId,
+          agentName: "main",
+        });
 
       const first = register("turn-1");
       let streamed = await readSseUntil(reader, running);
@@ -5865,6 +6490,7 @@ describe("Webchat API", () => {
 
       const turn = deps.agentTurnStreamRegistry.register({
         sessionId,
+        chatId: sessionId,
         turnId: "branch-turn",
         agentName: "main",
       });
@@ -5889,6 +6515,7 @@ describe("Webchat API", () => {
       // session without the detached surface, so the refusal is deliberate and
       // keeps the failure loud.
       const forkId = "sess-fork-backend-continuation";
+      await deps.webchatRepo.createSession("parent-chat", "Parent chat");
       await deps.webchatRepo.ensureRomeSession({
         id: forkId,
         type: "fork",
@@ -5901,7 +6528,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.sessionRepository, "current").mockResolvedValue({
         id: forkId,
         provider: "anthropic",
-        providerThreadId: "fork-provider-thread",
+        modelThreadId: "fork-model-thread",
         model: "claude",
         reasoningEffort: null,
         createdAt: new Date(),
@@ -6043,6 +6670,101 @@ describe("Webchat API", () => {
         ["assistant", "turn-r"],
         ["assistant", "turn-r"],
       ]);
+    });
+
+    describe("commentary of a recorded continuation", () => {
+      const recorded = { recorded: true };
+      const askQuestion = {
+        type: "tool_result" as const,
+        tool: "ask_question",
+        toolUseId: "recorded-ask-commentary",
+        output: {
+          pendingInteraction: true,
+          appId: "core",
+          render: {
+            kind: "inline",
+            componentId: "question-card",
+            props: { questions: [] },
+            builtin: true,
+          },
+        },
+      };
+
+      // A defer wake-up that narrates, asks the guardian, then answers briefly.
+      const runWakeUp = async (sessionId: string) => {
+        const { runtime } = createWebchatRuntime(deps);
+        await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+          await emit(
+            { type: "turn_start", turnId: "turn-c", sessionId: "agent-1", userPrompt: "Wake" },
+            recorded,
+          );
+          await emit(
+            { type: "text", content: "  ", turnPhase: "commentary", blockId: "blk-blank" },
+            recorded,
+          );
+          await emit(
+            { type: "text", content: "Review summary.", turnPhase: "commentary", blockId: "blk-1" },
+            recorded,
+          );
+          await emit(askQuestion, recorded);
+          await emit({ type: "text", content: "Pick one.", turnPhase: "final" }, recorded);
+          await emit({ type: "result", content: "Pick one." }, recorded);
+          // The channel's send port, as the backend turn calls it.
+          await deps.webchatRepo.addSentMessage(
+            "reply-c",
+            sessionId,
+            [{ type: "text", content: "Pick one." }],
+            "turn-c",
+          );
+        });
+        const messages = await deps.webchatRepo.getMessages(sessionId);
+        return messages.map((message) => ({
+          turnId: message.turnId,
+          part: (JSON.parse(message.content) as Array<Record<string, unknown>>)[0],
+        }));
+      };
+
+      it("writes it to the chat ahead of the card and the reply", async () => {
+        const sessionId = "sess-recorded-commentary";
+        await deps.webchatRepo.createSession(sessionId, "Recorded Commentary");
+
+        const rows = await runWakeUp(sessionId);
+
+        expect(rows).toEqual([
+          {
+            turnId: "turn-c",
+            // The blank block takes index 0 but writes nothing.
+            part: {
+              type: "text",
+              content: "Review summary.",
+              turnPhase: "commentary",
+              blockId: "blk-1",
+              blockIx: 1,
+            },
+          },
+          {
+            turnId: "turn-c",
+            part: expect.objectContaining({
+              type: "pending_interaction",
+              toolUseId: "recorded-ask-commentary",
+            }),
+          },
+          { turnId: "turn-c", part: { type: "text", content: "Pick one." } },
+        ]);
+      });
+
+      it("keeps a private agent's commentary in the trace", async () => {
+        rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+          buildAgent(name, { name: "main", policy: { finalText: "private", autoTitle: false } }),
+        );
+        const sessionId = "sess-recorded-private-commentary";
+        await deps.webchatRepo.createSession(sessionId, "Recorded Private Commentary");
+
+        const rows = await runWakeUp(sessionId);
+
+        expect(rows.map((row) => row.part.type)).toEqual(["pending_interaction", "text"]);
+        expect(rows.some((row) => row.part.turnPhase === "commentary")).toBe(false);
+      });
     });
 
     it("addresses a recorded continuation by its own turn id while it runs", async () => {
@@ -6205,6 +6927,97 @@ describe("Webchat API", () => {
     });
   });
 
+  describe("the push level of a sent turn", () => {
+    it("gives the guardian's own message the active level, and an automated send none", async () => {
+      const levels: Array<string | undefined> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+          levels.push(options?.pushLevel);
+          return {
+            turnId: `turn-${levels.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      await deps.webchatRepo.createSession("push-chat", "Push");
+      const app = createWebchatRuntime(deps).routes;
+      const send = (fields: Record<string, unknown>) =>
+        app.request("/chat/sessions/push-chat/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields),
+        });
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+      await runWithSessionActor(guardian, () => send({ text: "Hello" }));
+      await runWithSessionActor(loopback, () =>
+        send({
+          text: "Status?",
+          automatedSource: "agent:core:main",
+          automatedActorKind: "guardian",
+        }),
+      );
+      expect(levels).toEqual(["active", undefined]);
+    });
+
+    it("gives nothing said as an agent account, or by a loopback caller, under a guardian actor", async () => {
+      const levels: Array<string | undefined> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+          levels.push(options?.pushLevel);
+          return {
+            turnId: `turn-${levels.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+        name === "core:concierge" ? ({ name } as never) : undefined,
+      );
+      await deps.webchatRepo.createSession("push-chat", "Push");
+      const { routes, runtime } = createWebchatRuntime(deps);
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+      // An agent account posting into the chat (connections send), inside a guardian's request.
+      await runWithSessionActor(guardian, () =>
+        runtime.post(
+          "push-chat",
+          { text: "Status?" },
+          { platform: "webchat", id: "core:concierge" },
+        ),
+      );
+      // A loopback caller acting as the guardian, with no automated source named.
+      await runWithSessionActor(loopback, () =>
+        routes.request("/chat/sessions/push-chat/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "From a script" }),
+        }),
+      );
+      expect(levels).toEqual([undefined, undefined]);
+    });
+  });
+
   describe("replying to a message", () => {
     const prompts: string[] = [];
 
@@ -6233,8 +7046,7 @@ describe("Webchat API", () => {
       }));
       if (options.agentName) {
         deps.agentLoader = {
-          get: (name: string) => ({ name, policy: { finalText: "private" } }),
-          has: () => true,
+          find: (name: string) => buildAgent(name, { name, policy: { finalText: "private" } }),
         } as never;
       }
       await deps.webchatRepo.createSession(
@@ -6456,8 +7268,8 @@ describe("Webchat API", () => {
     it("tells the agent on every automated turn, preserves slash expansion, and leaves a plain loopback turn unchanged", async () => {
       const { send, sessionId } = await setup();
       deps.skillCatalog = {
-        get: (name: string) => (name === "brief" ? { name } : undefined),
-        getAll: () => [],
+        find: (name: string) => (name === "brief" ? { name } : undefined),
+        list: () => [],
         getRegistryLoadFailures: () => [],
       } as never;
       const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
@@ -6546,8 +7358,8 @@ describe("Webchat API", () => {
     it("wraps the expanded skill prompt and keeps the workspace block outside the reply", async () => {
       const { text, seed, send } = await setup();
       deps.skillCatalog = {
-        get: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
-        getAll: () => [{ name: "app_creation" }] as never[],
+        find: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
+        list: () => [{ name: "app_creation" }] as never[],
         getRegistryLoadFailures: () => [],
       };
       await seed("a1", "assistant", text("Start in Lisbon."), "t1");
@@ -6775,7 +7587,6 @@ function fakeSessionManager(
     },
     peek: () => undefined,
     findWorkingDirBySessionId: () => undefined,
-    recordConversation: async () => undefined,
     shutdown: async () => undefined,
   };
 }

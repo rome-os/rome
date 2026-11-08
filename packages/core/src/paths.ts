@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { appIdToPathSegment } from "./apps/packaging/app-id.js";
@@ -60,10 +59,9 @@ export function getDefaultAgentWorkingDir(): string {
   return join(getProjectsRoot(), DEFAULT_AGENT_WORKING_DIR_NAME);
 }
 
-export async function ensureDefaultAgentWorkingDir(): Promise<string> {
-  const workingDir = getDefaultAgentWorkingDir();
-  await mkdir(workingDir, { recursive: true });
-  return workingDir;
+/** Where agents work on this instance, read from the environment now. */
+export function agentFolders(): { defaultWorkingDir: string; projectsFolder: string } {
+  return { defaultWorkingDir: getDefaultAgentWorkingDir(), projectsFolder: getProjectsRoot() };
 }
 
 export function getProjectsRoot(): string {
@@ -213,6 +211,10 @@ export function getProfileAppsLockfilePath(): string {
 
 export function getProfileAppsRuntimeStatusPath(): string {
   return join(getProfileAppsDir(), "runtime-status.json");
+}
+
+export function getProfileAppActionSchemaCachePath(): string {
+  return join(getProfileAppsDir(), "action-schemas.json");
 }
 
 export function getProfileMemoryDir(): string {

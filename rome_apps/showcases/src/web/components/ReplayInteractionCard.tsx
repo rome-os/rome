@@ -136,7 +136,7 @@ function summarizeResponse(result: Record<string, unknown> | undefined): string 
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-// Placeholder for an app-provided interaction component (e.g. welcome-to-rome's
+// Placeholder for an app-provided interaction component (e.g. a scripted conversation's
 // email-handshake): names the source and shows the guardian's response, since
 // the live component's own UI can't be re-mounted in a static replay.
 function ReplayAppCard({

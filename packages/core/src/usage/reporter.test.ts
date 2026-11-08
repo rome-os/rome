@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { UsageOutboxRepository } from "../db/repositories/usage-outbox.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import type { UsageAttributionResolver } from "./attribution.js";
 import type { UsageEvent } from "./events.js";
 import {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { createFetchRecorder, type FetchRecorder } from "../test/kit/index.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { RELAY_SETTING_KEY, type RelayDrainSetting } from "../relay/settings.js";

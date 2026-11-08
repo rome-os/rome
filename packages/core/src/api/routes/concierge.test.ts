@@ -7,33 +7,63 @@ import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { chatMessages } from "../../db/schema.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { COOKIE_NAME, createSession } from "../../lib/auth.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import {
+  COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+  VISITOR_COOKIE_NAME,
+} from "../../lib/auth.js";
+import { sessionActorMiddleware } from "../../lib/session-actor.js";
+import type { ApiDeps } from "../deps.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
+
+const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
+const visitorCookie = (accountId: string, email: string) => ({
+  headers: { Cookie: `${VISITOR_COOKIE_NAME}=${createVisitorSession(accountId, email)}` },
+});
+/** Ann is on the dashboard allow-list; an app user is not. */
+const ann = visitorCookie("acct-ann", "ann@example.com");
+const appUser = visitorCookie("acct-app", "app@example.com");
+const dashboardAccessState = {
+  isCloudEmailAllowed: (email: string) => email === "ann@example.com",
+} as unknown as ApiDeps["dashboardAccessState"];
+
+/** The routes behind the actor middleware, as /api mounts them. */
+function mount(
+  testDb: TestDb,
+  concierge: ConciergeService | undefined,
+  webchatRepo: ApiDeps["webchatRepo"],
+): Hono {
+  return new Hono()
+    .use("*", sessionActorMiddleware(testDb.db))
+    .route("/", conciergeRoutes({ concierge, dashboardAccessState, webchatRepo }));
+}
 
 describe("GET /concierge/session", () => {
   let testDb: TestDb;
   let webchatRepo: WebChatRepository;
-  let enabled: boolean;
+  // Signed under the fake clock, so the session has not expired by then.
+  const asGuardian = () => ({
+    headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` },
+  });
+  const asAnn = () => visitorCookie("acct-ann", "ann@example.com");
 
   const app = () => {
     const concierge = {
-      isEnabled: async () => enabled,
-      ensureChatId: async () => {
-        if (!(await webchatRepo.getSession("concierge"))) {
-          await webchatRepo.createSession("concierge", "Concierge");
-        }
-        return "concierge";
+      ensureChatId: async (owner: string) => {
+        const id = owner === "guardian" ? "concierge" : `concierge-${owner.replace(":", "-")}`;
+        if (!(await webchatRepo.getSession(id))) await webchatRepo.createSession(id, "Concierge");
+        return id;
       },
     } as unknown as ConciergeService;
-    return new Hono().route("/", conciergeRoutes({ concierge, db: testDb.db, webchatRepo }));
+    return mount(testDb, concierge, webchatRepo);
   };
 
   beforeEach(() => {
     testDb = createTestDb();
     // The repository production wires: what Rome says lands in Chats.
     webchatRepo = new ChatsWebChatRepository(testDb.db);
-    enabled = true;
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
   });
@@ -44,66 +74,68 @@ describe("GET /concierge/session", () => {
   });
 
   it("returns the chat with the agent messages it got since the last read", async () => {
-    await expect((await app().request("/concierge/session")).json()).resolves.toEqual({
-      id: "concierge",
-      unread: 0,
-    });
+    await expect((await app().request("/concierge/session", asGuardian())).json()).resolves.toEqual(
+      {
+        id: "concierge",
+        unread: 0,
+      },
+    );
 
     rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
     await webchatRepo.addBackendMessage("concierge", "turn-1", [{ type: "text", content: "Hi." }]);
     await webchatRepo.addBackendMessage("concierge", "turn-1", [
       { type: "text", content: "Done." },
     ]);
-    await expect((await app().request("/concierge/session")).json()).resolves.toEqual({
-      id: "concierge",
-      unread: 2,
-    });
+    await expect((await app().request("/concierge/session", asGuardian())).json()).resolves.toEqual(
+      {
+        id: "concierge",
+        unread: 2,
+      },
+    );
 
     await webchatRepo.markSessionRead("concierge");
-    await expect((await app().request("/concierge/session")).json()).resolves.toEqual({
-      id: "concierge",
-      unread: 0,
-    });
+    await expect((await app().request("/concierge/session", asGuardian())).json()).resolves.toEqual(
+      {
+        id: "concierge",
+        unread: 0,
+      },
+    );
   });
 
   it("caps the count", async () => {
-    await app().request("/concierge/session");
+    await app().request("/concierge/session", asGuardian());
     rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
     for (let index = 0; index <= CONCIERGE_UNREAD_CAP; index += 1) {
       await webchatRepo.addBackendMessage("concierge", "turn-1", [
         { type: "text", content: `${index}` },
       ]);
     }
-    const body = (await (await app().request("/concierge/session")).json()) as { unread: number };
+    const body = (await (await app().request("/concierge/session", asGuardian())).json()) as {
+      unread: number;
+    };
     expect(body.unread).toBe(CONCIERGE_UNREAD_CAP);
   });
 
-  it("404s while Concierge is off", async () => {
-    enabled = false;
-    expect((await app().request("/concierge/session")).status).toBe(404);
+  it("answers a dashboard visitor with their own main chat, and nobody else", async () => {
+    await expect((await app().request("/concierge/session", asAnn())).json()).resolves.toEqual({
+      id: "concierge-visitor-acct-ann",
+      unread: 0,
+    });
+    expect((await app().request("/concierge/session", appUser)).status).toBe(401);
+    expect((await app().request("/concierge/session")).status).toBe(401);
   });
 });
 
 describe("GET /concierge/tasks", () => {
   const DAY = 86_400_000;
-  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
   let testDb: TestDb;
   let repo: ConciergeTasksRepository;
-  let enabled: boolean;
 
   const app = () => {
     const concierge = {
-      isEnabled: async () => enabled,
       deps: { tasks: new ConciergeTasks(repo) },
     } as unknown as ConciergeService;
-    return new Hono().route(
-      "/",
-      conciergeRoutes({
-        concierge,
-        db: testDb.db,
-        webchatRepo: new ChatsWebChatRepository(testDb.db),
-      }),
-    );
+    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
   };
   const titles = async (query = "") =>
     (
@@ -117,7 +149,6 @@ describe("GET /concierge/tasks", () => {
   beforeEach(async () => {
     testDb = createTestDb();
     repo = new ConciergeTasksRepository(testDb.db);
-    enabled = true;
     const old = new Date(Date.now() - 30 * DAY);
     await repo.upsertMany([{ title: "Old needs you", state: "needs_user" }], old);
     await repo.upsertMany([{ title: "Old watching", state: "watching" }], old);
@@ -183,13 +214,32 @@ describe("GET /concierge/tasks", () => {
     expect(await sourceOf()).toBeNull();
   });
 
-  it("404s while Concierge is off", async () => {
-    enabled = false;
-    expect((await app().request("/concierge/tasks", guardian)).status).toBe(404);
-    expect((await app().request("/concierge/tasks/events", guardian)).status).toBe(404);
+  it("shows each person only the rows of their own Concierge", async () => {
+    const chats = new ChatsWebChatRepository(testDb.db);
+    await chats.createSession(
+      "ann-main",
+      "Concierge",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
+    );
+    await repo.upsertMany([{ title: "Ann's", state: "next", chatId: "ann-main" }]);
+    const annTitles = (
+      (await (await app().request("/concierge/tasks", ann)).json()) as {
+        tasks: Array<{ title: string }>;
+      }
+    ).tasks.map((task) => task.title);
+    expect(annTitles).toEqual(["Ann's"]);
+    expect(await titles()).not.toContain("Ann's");
+    expect((await app().request("/concierge/tasks", appUser)).status).toBe(401);
   });
 
-  it("answers 401 to a caller that is not the guardian, on the list and on its event stream", async () => {
+  it("answers 401 to a caller with no session, on the list and on its event stream", async () => {
     for (const path of ["/concierge/tasks", "/concierge/tasks/events"]) {
       const anonymous = await app().request(path);
       expect(anonymous.status).toBe(401);
@@ -210,9 +260,7 @@ describe("GET /concierge/tasks", () => {
 });
 
 describe("/concierge/connectors", () => {
-  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
   let testDb: TestDb;
-  let enabled: boolean;
   const listing = {
     connectors: [
       {
@@ -247,57 +295,47 @@ describe("/concierge/connectors", () => {
     const following = {
       list: async () => listing,
     };
-    const concierge = { isEnabled: async () => enabled, following } as unknown as ConciergeService;
-    return new Hono().route(
-      "/",
-      conciergeRoutes({ concierge, db: testDb.db, webchatRepo: new WebChatRepository(testDb.db) }),
-    );
+    const concierge = { following } as unknown as ConciergeService;
+    return mount(testDb, concierge, new WebChatRepository(testDb.db));
   };
   beforeEach(() => {
     testDb = createTestDb();
-    enabled = true;
   });
 
   afterEach(() => {
     testDb.close();
   });
 
-  it("answers the same structure the Concierge reads, for the guardian only, while the Concierge is on", async () => {
+  it("answers the same structure the Concierge reads, for the guardian only, ", async () => {
     expect((await app().request("/concierge/connectors")).status).toBe(401);
     await expect((await app().request("/concierge/connectors", guardian)).json()).resolves.toEqual(
       listing,
     );
-    enabled = false;
-    expect((await app().request("/concierge/connectors", guardian)).status).toBe(404);
   });
 });
 
 describe("/concierge/chats", () => {
-  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
   let testDb: TestDb;
   let webchatRepo: WebChatRepository;
-  let enabled: boolean;
   const started: Array<string | undefined> = [];
 
   const app = () => {
     const concierge = {
-      isEnabled: async () => enabled,
       listChats: async () => [
         { id: "concierge", name: "Concierge", main: true },
         { id: "topic-1", name: "Calendar", main: false },
       ],
-      startTopicChat: async (name?: string) => {
+      startTopicChat: async (_owner: string, name?: string) => {
         started.push(name);
         return { id: "topic-2", name: name?.trim() ?? "", main: false };
       },
     } as unknown as ConciergeService;
-    return new Hono().route("/", conciergeRoutes({ concierge, db: testDb.db, webchatRepo }));
+    return mount(testDb, concierge, webchatRepo);
   };
 
   beforeEach(() => {
     testDb = createTestDb();
     webchatRepo = new ChatsWebChatRepository(testDb.db);
-    enabled = true;
     started.length = 0;
   });
   afterEach(() => testDb.close());
@@ -339,12 +377,104 @@ describe("/concierge/chats", () => {
     expect(started).toEqual([" Trips ", undefined]);
   });
 
-  it("answers only the guardian, and 404s while Concierge is off", async () => {
+  it("answers only the guardian", async () => {
     expect((await app().request("/concierge/chats")).status).toBe(401);
     expect((await app().request("/concierge/chats", { method: "POST", body: "{}" })).status).toBe(
       401,
     );
-    enabled = false;
-    expect((await app().request("/concierge/chats", guardian)).status).toBe(404);
+  });
+});
+
+describe("without the Concierge service", () => {
+  let testDb: TestDb;
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+  afterEach(() => testDb.close());
+
+  it("404s every route", async () => {
+    const app = mount(testDb, undefined, new ChatsWebChatRepository(testDb.db));
+    for (const path of [
+      "/concierge/session",
+      "/concierge/chats",
+      "/concierge/tasks",
+      "/concierge/tasks/events",
+      "/concierge/connectors",
+    ]) {
+      expect((await app.request(path, guardian)).status, path).toBe(404);
+    }
+    const post = await app.request("/concierge/chats", { method: "POST", body: "{}", ...guardian });
+    expect(post.status).toBe(404);
+  });
+});
+
+describe("POST /concierge/chats/:chatId/service-connected", () => {
+  let testDb: TestDb;
+  const serviceConnected = rs.fn();
+  const chatOwners: Record<string, string> = { concierge: "guardian", "topic-1": "guardian" };
+
+  const app = () => {
+    const concierge = {
+      following: {
+        list: async () => ({
+          connectors: [
+            { service: "mail", state: "working" },
+            { service: "code", state: null },
+            { service: "chat", state: "broken" },
+          ],
+          rules: {},
+        }),
+      },
+      conciergeChat: async (id: string) =>
+        id in chatOwners ? { id, name: id, main: false } : null,
+      ownerOfChat: async (id: string) => chatOwners[id] ?? null,
+      serviceConnected,
+    } as unknown as ConciergeService;
+    return mount(testDb, concierge, {} as ApiDeps["webchatRepo"]);
+  };
+
+  const post = (chatId: string, body: unknown, who: object = guardian) =>
+    app().request(`/concierge/chats/${chatId}/service-connected`, {
+      method: "POST",
+      headers: { ...(who as { headers: object }).headers, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    serviceConnected.mockClear();
+  });
+
+  afterEach(() => testDb.close());
+
+  it("tells the Concierge in that chat of a service that works now", async () => {
+    const res = await post("topic-1", { service: "mail" });
+
+    expect(res.status).toBe(202);
+    expect(serviceConnected).toHaveBeenCalledWith("topic-1", "mail");
+  });
+
+  it.each(["code", "chat", "fax", ""])("refuses %j, which is not working", async (service) => {
+    const res = await post("concierge", { service });
+
+    expect(res.status).toBe(409);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("refuses a body that names no service", async () => {
+    expect((await post("concierge", {})).status).toBe(409);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("404s a chat that is not a Concierge chat of the caller", async () => {
+    expect((await post("gone", { service: "mail" })).status).toBe(404);
+    // Ann's own Concierge is not the guardian's chat.
+    expect((await post("concierge", { service: "mail" }, ann)).status).toBe(404);
+    expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("answers 401 to a caller with no Concierge", async () => {
+    expect((await post("concierge", { service: "mail" }, appUser)).status).toBe(401);
+    expect(serviceConnected).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,7 @@ import { result } from "../test/kit/fake-model.js";
 import { createTestRome, buildAction, recordingAction, type TestRome } from "../test/kit/index.js";
 import type { ActionResult } from "./types.js";
 import type { ThreadContext } from "../core/types.js";
-import { Session } from "../sessions/session.js";
+import { Session } from "../agent/index.js";
 
 // ApprovalHandler tests through the real wiring (testkit): real repos on an
 // in-memory DB, the real ActionEngine executing registered actions
@@ -29,8 +29,16 @@ describe("ApprovalHandler", () => {
     rome = await createTestRome({
       ...options,
       agents: options.agents ?? [
-        buildAgentConfig({ name: "main", actions: ["*"] }),
-        buildAgentConfig({ name: "assistant", actions: ["*"] }),
+        buildAgentConfig({
+          name: "main",
+          actions: ["*"],
+          systemPromptPrefix: "You are the main agent.",
+        }),
+        buildAgentConfig({
+          name: "assistant",
+          actions: ["*"],
+          systemPromptPrefix: "You are the assistant.",
+        }),
       ],
       actions: [sendMessage.action, ...(options.actions ?? [])],
     });
@@ -205,8 +213,9 @@ describe("ApprovalHandler", () => {
       expect(rome.model.prompts()).toHaveLength(1);
       expect(rome.model.lastPrompt()).toContain("approved and executed successfully");
       expect(rome.model.lastPrompt()).toContain('"sent": true');
-      expect(rome.model.lastSystemPrompt()).toContain("You are a test agent.");
-      expect(rome.model.sessions[0].sessionId).toBe("sess-1");
+      expect(rome.model.lastSystemPrompt()).toContain("You are the main agent.");
+      // The turn ran in the seeded session: its row now records the model.
+      expect(await rome.repos.sessions.session("sess-1")).toMatchObject({ provider: "mock" });
     });
 
     it("delivers the continuation reply on the messaging channel's send port (issue #1626)", async () => {
@@ -310,7 +319,7 @@ describe("ApprovalHandler", () => {
       await rome.approvalHandler.onApproved(approvalId);
 
       expect(rome.model.sessions).toHaveLength(1);
-      expect(rome.model.sessions[0].agentName).toBe("core:main");
+      expect(rome.model.sessions[0].config.systemPrompt).toContain("You are the main agent.");
     });
 
     it("skips session resumption when payload has no sessionId", async () => {
@@ -431,7 +440,7 @@ describe("ApprovalHandler", () => {
       expect(rome.model.lastPrompt()).toContain('"send_message"');
       expect(rome.model.lastPrompt()).toContain("rejected by the guardian");
       expect(rome.model.lastPrompt()).not.toContain("feedback");
-      expect(rome.model.sessions[0].agentName).toBe("core:assistant");
+      expect(rome.model.sessions[0].config.systemPrompt).toContain("You are the assistant.");
     });
 
     it("preserves the journal for the audit trail", async () => {

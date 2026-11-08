@@ -12,7 +12,9 @@
 // reads the rows from the database when it builds, so delivering a row twice
 // is harmless. The Concierge settles a row by writing it: a write clears the
 // row's mark unless a change came after the build. A row still unsettled after
-// a flush is flushed once more, then given up as not synced.
+// a flush is flushed once more, then given up as not synced. A row whose turn
+// did not run to its end, such as when the Concierge is out of quota, spends
+// none of that: it is tried again RETRY_MS later.
 
 import { createLogger } from "../logger.js";
 
@@ -21,6 +23,7 @@ const log = createLogger("concierge-task-events");
 export const URGENT_DELAY_MS = 2_000;
 export const QUIET_DELAY_MS = 60_000;
 export const MIN_FLUSH_SPACING_MS = 10_000;
+export const RETRY_MS = 5 * 60_000;
 /** A row is flushed this many times before it is given up as not synced. */
 const MAX_FLUSHES_PER_CHANGE = 2;
 
@@ -47,6 +50,10 @@ export interface DirtyTask {
 export interface TaskEventDelivery {
   /** The Concierge chat the rows came from. Null is the main chat. */
   chatId: string | null;
+  /** Whose rows they are, so a chat that is gone sends them to that owner's main chat. */
+  owner: string;
+  /** The rows the payload carries. */
+  taskIds: string[];
   prompt: string;
   /** No row in it has an urgent change. */
   quiet: boolean;
@@ -54,11 +61,10 @@ export interface TaskEventDelivery {
 
 export interface TaskEventDeps {
   now(): number;
-  isEnabled(): Promise<boolean>;
   /** The payloads for these rows, read from the database now, one per Concierge chat; empty when none of them exist any more. */
   render(tasks: DirtyTask[]): Promise<TaskEventDelivery[]>;
-  /** Runs one payload as a system turn in its chat and settles when the turn ends. */
-  deliver(delivery: TaskEventDelivery): Promise<void>;
+  /** Runs one payload as a system turn in its chat and answers how the turn ended. */
+  deliver(delivery: TaskEventDelivery): Promise<"completed" | "stopped" | "interrupted" | "failed">;
   /** The row was flushed and still not settled after its retry. */
   giveUp(taskId: string): void;
 }
@@ -74,6 +80,10 @@ interface Dirty {
   flushes: number;
   /** A flush took the row and the Concierge did not write it. */
   retry: boolean;
+  /** The turn that carried the row did not run to its end: its changes still wait. */
+  undelivered?: boolean;
+  /** Not flushed before this time, after a turn that did not run. */
+  notBefore?: number;
 }
 
 export class TaskEventCoalescer {
@@ -96,7 +106,7 @@ export class TaskEventCoalescer {
         flushes: 0,
         retry: false,
       });
-    } else if (entry.builtAt !== undefined && entry.since <= entry.builtAt) {
+    } else if (entry.builtAt !== undefined && entry.since <= entry.builtAt && !entry.undelivered) {
       // Everything the entry holds went into a payload already. This change
       // came after the build, so it is a new round, and a write that settles
       // the old round must not clear it.
@@ -108,6 +118,12 @@ export class TaskEventCoalescer {
     } else {
       entry.changes.push(change);
       entry.urgent ||= change.urgent;
+      // A write must not settle a change that no turn has carried yet, and
+      // the new change gets its own attempts.
+      if (entry.undelivered) {
+        entry.builtAt = undefined;
+        entry.flushes = 0;
+      }
     }
     this.arm();
   }
@@ -137,8 +153,10 @@ export class TaskEventCoalescer {
   }
 
   private dueAt(entry: Dirty): number {
-    if (entry.retry) return Number.NEGATIVE_INFINITY;
-    return entry.since + (entry.urgent ? URGENT_DELAY_MS : QUIET_DELAY_MS);
+    const due = entry.retry
+      ? Number.NEGATIVE_INFINITY
+      : entry.since + (entry.urgent ? URGENT_DELAY_MS : QUIET_DELAY_MS);
+    return Math.max(due, entry.notBefore ?? Number.NEGATIVE_INFINITY);
   }
 
   private arm(): void {
@@ -157,16 +175,27 @@ export class TaskEventCoalescer {
     this.flushing = true;
     const builtAt = this.deps.now();
     this.lastFlushStartedAt = builtAt;
-    const taken = [...this.dirty.entries()];
+    // A row waiting out a turn that did not run stays behind until its time.
+    const taken = [...this.dirty.entries()].filter(
+      ([, entry]) => (entry.notBefore ?? Number.NEGATIVE_INFINITY) <= builtAt,
+    );
+    // Rows whose turn did not run to its end; all of them until delivery starts.
+    const notRun = new Set(taken.map(([taskId]) => taskId));
+    // Rows whose turn the guardian stopped.
+    const stopped = new Set<string>();
+    // What each row's turn carries, kept in case the turn does not run.
+    const carried = new Map(
+      taken.map(([taskId, entry]) => [
+        taskId,
+        { entry, changes: entry.changes, urgent: entry.urgent },
+      ]),
+    );
     for (const [, entry] of taken) {
       entry.builtAt = builtAt;
+      entry.undelivered = false;
       entry.flushes += 1;
     }
     try {
-      if (!(await this.deps.isEnabled())) {
-        for (const [taskId] of taken) this.dirty.delete(taskId);
-        return;
-      }
       const tasks = taken.map(([taskId, entry]) => ({
         taskId,
         changes: entry.changes,
@@ -177,13 +206,20 @@ export class TaskEventCoalescer {
         for (const [taskId] of taken) this.dirty.delete(taskId);
         return;
       }
+      notRun.clear();
       // One chat's turn failing leaves the other chats' turns to run.
       for (const delivery of deliveries) {
-        await this.deps.deliver(delivery).catch((error: unknown) =>
+        const outcome = await this.deps.deliver(delivery).catch((error: unknown) => {
           log.warn("task event delivery to one chat failed", {
             error: error instanceof Error ? error.message : String(error),
-          }),
-        );
+          });
+          return "failed" as const;
+        });
+        if (outcome === "completed") continue;
+        // Only a Stop drops what the turn carried. A turn a newer message cut
+        // short may never have sent it to the model.
+        const ended = outcome === "stopped" ? stopped : notRun;
+        for (const taskId of delivery.taskIds) ended.add(taskId);
       }
     } catch (error) {
       log.warn("task event flush failed", {
@@ -191,16 +227,50 @@ export class TaskEventCoalescer {
       });
     } finally {
       this.flushing = false;
-      this.afterFlush(taken.map(([taskId]) => taskId));
+      this.afterFlush(
+        taken.map(([taskId]) => taskId),
+        notRun,
+        stopped,
+        carried,
+      );
       this.arm();
     }
   }
 
-  private afterFlush(taskIds: string[]): void {
+  private afterFlush(
+    taskIds: string[],
+    notRun: Set<string>,
+    stopped: Set<string>,
+    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean }>,
+  ): void {
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
       if (!entry) continue;
-      if (entry.builtAt !== undefined && entry.since > entry.builtAt) {
+      if (notRun.has(taskId)) {
+        // The turn did not run to its end: the changes stay, later ones join
+        // them, a write still settles them, and the attempt does not count.
+        const before = carried.get(taskId);
+        // A write settled the row while the turn ran and a later change
+        // started afresh: the failed turn carried none of it.
+        if (before && entry !== before.entry) continue;
+        if (before && entry.changes !== before.changes) {
+          // A change while the turn ran started a new round: the carried
+          // changes go back in front of it, and no write has settled them.
+          entry.changes = [...before.changes, ...entry.changes];
+          entry.urgent ||= before.urgent;
+          entry.builtAt = undefined;
+          entry.flushes = 0;
+        } else {
+          entry.flushes -= 1;
+        }
+        entry.undelivered = true;
+        entry.notBefore = this.deps.now() + RETRY_MS;
+      } else if (stopped.has(taskId) && entry.changes === carried.get(taskId)?.changes) {
+        // The guardian stopped the turn: what it carried is never handed over
+        // again, and the row shows it is not synced.
+        this.dirty.delete(taskId);
+        this.deps.giveUp(taskId);
+      } else if (entry.builtAt !== undefined && entry.since > entry.builtAt) {
         // A change came after the build: it waits for its own flush.
         entry.builtAt = undefined;
         entry.flushes = 0;

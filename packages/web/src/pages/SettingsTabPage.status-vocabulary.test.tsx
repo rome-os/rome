@@ -10,8 +10,9 @@ rs.mock("@/components/system-upgrade-section", () => ({
   SystemUpgradeSection: () => null,
 }));
 
+// The relay status renders in the diagnosis sheet; the mock shows it inline.
 rs.mock("@/components/system-diagnosis-section", () => ({
-  SystemDiagnosisSection: () => null,
+  SystemDiagnosisSection: ({ details }: { details?: React.ReactNode }) => details,
 }));
 
 beforeAll(async () => {
@@ -73,12 +74,6 @@ describe("Settings connection status vocabulary", () => {
       lastEventAt: null,
       deliveredCount: 0,
     });
-
-    const developerSettings = await screen.findByText("Developer Settings");
-    const details = developerSettings.closest("details");
-    expect(details).not.toBeNull();
-    (details as HTMLDetailsElement).open = true;
-    fireEvent(details as HTMLDetailsElement, new Event("toggle"));
 
     await screen.findByRole("heading", { name: "Webhook relay" });
     await expectStatusIndicator("Not connected");

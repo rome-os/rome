@@ -6,9 +6,6 @@ import type { AgentTurnStatus } from "@rome-os/app-runtime";
 /** Where the work came from. Subagent and fork turns take their root's kind. */
 export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
 
-/** Who paid the model provider for a turn. */
-export type UsageFunding = "rome_credits" | "byok" | "subscription" | "unknown";
-
 /**
  * What set the work off: a person, a schedule, an event or webhook, or
  * an app's own code with no person behind it.
@@ -26,7 +23,8 @@ export interface TurnUsageEvent {
   status: AgentTurnStatus;
   provider: string;
   model: string | null;
-  funding: UsageFunding;
+  /** Rome Cloud's word for the turn's login kind. */
+  funding: "rome_credits" | "byok" | "subscription" | "unknown";
   /** The provider's own turn id. Rome Cloud joins credit charges on it. */
   providerTurnId: string | null;
   inputTokens: number;

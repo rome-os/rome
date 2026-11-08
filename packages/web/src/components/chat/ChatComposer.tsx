@@ -45,7 +45,8 @@ import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
 import { PendingUploadsList } from "./composer/PendingUploadsList";
 import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
-import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
+import { SlashSkillMenu } from "./composer/SlashSkillMenu";
+import { useSlashSkill } from "./composer/use-slash-skill";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { ReplyBar } from "./reply/ReplyBar";
 import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
@@ -290,12 +291,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     setHint((current) => (hints.includes(current) ? current : pickComposerHint(hints, current)));
   }, [hints]);
 
-  // Open while the message starts with `/` and the cursor is still inside the
-  // first token. Selecting pins the skill as a structured chip (mirroring the
-  // `@` mention) — the turn carries it as a `skillName` field, so no
-  // name-shape constraint applies. Expansion stays server-side.
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashQuery, setSlashQuery] = useState("");
   const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(
     () => storedDraft?.skill ?? null,
   );
@@ -397,6 +392,23 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // State drives the UI, while the ref closes the same-event gap before React
   // commits that state (for example, two rapid Enter keydown events).
   const uploadInFlightRef = useRef(false);
+  const {
+    slashMenuOpen,
+    setSlashMenuOpen,
+    slashQuery,
+    setSlashQuery,
+    slashMenuRef,
+    reevaluateSlashContext,
+    acceptSlashSkill,
+    handleSlashKeyDown,
+  } = useSlashSkill({
+    inputText,
+    setInputText,
+    setDraftSkill,
+    textareaRef,
+    uploadInFlightRef,
+    enabled: !textOnly,
+  });
   // Live for exactly one upload; `cancelUpload` aborts through it.
   const uploadAbortRef = useRef<AbortController | null>(null);
   // The last failed send, kept until a send succeeds.
@@ -842,35 +854,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     [agentMentionLocked, mentionMenuOpen],
   );
 
-  // The slash menu is active only while the cursor sits inside a leading
-  // `/<token>` (slash at index 0, no whitespace before the cursor). A single
-  // internal slash is allowed only for scoped app ids (`@publisher/app`), so
-  // canonical scoped skills remain pickable without treating paths such as
-  // `/etc/hosts` as skill queries.
-  const reevaluateSlashContext = useCallback(
-    (value: string, cursor: number) => {
-      const token = value.slice(1, cursor);
-      const slashCount = token.split("/").length - 1;
-      const slashShapeAllowed = slashCount === 0 || (token.startsWith("@") && slashCount === 1);
-      if (
-        !textOnly &&
-        value.startsWith("/") &&
-        cursor >= 1 &&
-        !/\s/.test(token) &&
-        slashShapeAllowed
-      ) {
-        setSlashQuery(token);
-        setSlashMenuOpen(true);
-        return;
-      }
-      if (slashMenuOpen) {
-        setSlashMenuOpen(false);
-        setSlashQuery("");
-      }
-    },
-    [slashMenuOpen, textOnly],
-  );
-
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
@@ -920,36 +903,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     [inputText, mentionAnchorIndex],
   );
 
-  const acceptSlashSkill = useCallback(
-    (skill: SkillSelection) => {
-      if (uploadInFlightRef.current) return;
-      // Mirror acceptMention: splice out the leading `/<query>` token so the
-      // chip becomes the single source of truth for "which skill" — whatever
-      // the user already typed after the cursor stays as the task text.
-      const el = textareaRef.current;
-      const cursor = el?.selectionEnd ?? inputText.length;
-      const after = inputText.slice(cursor).replace(/^\s+/, "");
-      setInputText(after);
-      requestAnimationFrame(() => {
-        const t = textareaRef.current;
-        if (!t) return;
-        t.focus();
-        t.setSelectionRange(0, 0);
-      });
-      setDraftSkill({
-        name: skill.name,
-        localName: skill.localName,
-        description: skill.description,
-        iconUrl: skill.iconUrl,
-      });
-      setSlashMenuOpen(false);
-      setSlashQuery("");
-    },
-    [inputText],
-  );
-
   const mentionMenuRef = useRef<AgentMentionMenuHandle>(null);
-  const slashMenuRef = useRef<SlashSkillMenuHandle>(null);
 
   // On desktop, Enter submits (Shift+Enter for a newline); Stop button is
   // intentionally not bound to Enter so it doesn't race a finishing stream.
@@ -958,47 +912,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // While the slash menu is open, hijack arrow/enter/escape the same way the
-    // mention menu does. The two are mutually exclusive in practice: slash
-    // requires the message to start with `/`, mentions require an `@` token.
-    if (slashMenuOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        slashMenuRef.current?.move(1);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        slashMenuRef.current?.move(-1);
-        return;
-      }
-      // Horizontal navigation mirrors the mention menu: the slash menu is the
-      // same two-panel app → item picker, so ArrowRight drills into the
-      // skills panel and ArrowLeft returns to apps instead of moving the
-      // textarea cursor.
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        slashMenuRef.current?.moveHorizontal(1);
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        slashMenuRef.current?.moveHorizontal(-1);
-        return;
-      }
-      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
-        if (slashMenuRef.current?.acceptSelected()) {
-          e.preventDefault();
-          return;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSlashMenuOpen(false);
-        setSlashQuery("");
-        return;
-      }
-    }
+    if (handleSlashKeyDown(e)) return;
     // While the mention menu is open, hijack arrow/enter/escape so the user
     // can navigate without leaving the textarea. Falls through to normal
     // typing otherwise.

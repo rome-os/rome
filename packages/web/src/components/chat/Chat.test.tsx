@@ -172,7 +172,10 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace,
   }: {
     onOpenStoredTrace: (target: unknown) => void;
-    live: { identity: { name: string } };
+    live: {
+      identity: { name: string };
+      snapshot: { segments: unknown[]; summary: { totalSteps: number } } | null;
+    };
     rows: {
       kind: string;
       key: string;
@@ -186,6 +189,13 @@ rs.mock("@/components/chat/MessageList", () => ({
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
+      {live.snapshot ? (
+        <div
+          data-testid="live-snapshot"
+          data-steps={live.snapshot.summary.totalSteps}
+          data-segments={live.snapshot.segments.length}
+        />
+      ) : null}
       <div data-testid="agent-anchor" data-timeline-anchor="a1 a2" />
       <ReplyJump />
       <button
@@ -660,6 +670,47 @@ describe("Chat agent identity", () => {
     expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
   });
 
+  it("shows a spinner and Loading… instead of New Chat while an existing session loads", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      loading: true,
+      sessionName: null,
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByRole("status", { name: "sidebar.loading" })).toBeTruthy();
+    expect(screen.getByText("sidebar.loading")).toBeTruthy();
+    expect(screen.queryByText("sidebar.newChat")).toBeNull();
+  });
+
+  it("shows no loading title for a draft chat without a session", () => {
+    renderChat(<Chat />);
+    expect(screen.queryByRole("status", { name: "sidebar.loading" })).toBeNull();
+    expect(screen.queryByText("sidebar.loading")).toBeNull();
+  });
+
+  it("shows the session name once loaded, and New Chat for a loaded unnamed session", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      loading: false,
+      sessionName: "A conversation",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const { unmount } = renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByText("A conversation")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "sidebar.loading" })).toBeNull();
+    unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      loading: false,
+      sessionName: "  ",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByText("sidebar.newChat")).toBeTruthy();
+  });
+
   it("does not invent a model for a session without a pin", () => {
     renderChat(<Chat sessionId="session-1" />);
     expect(screen.queryByLabelText("navbar.sessionModel")).toBeNull();
@@ -925,6 +976,33 @@ describe("Chat history paging", () => {
     await waitFor(() => expect(shownKeys()).toEqual(["user-6", "user-7", "user-8", "user-9"]));
     expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c9" });
   });
+
+  it("hands the first page's layout to the host once, not an older page's or a refetch's", async () => {
+    const layout = [{ id: "files", type: "projects", order: 0 }];
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({
+        messages: [userMessage(3), userMessage(4)],
+        nextCursor: "c1",
+        layout,
+      })
+      .mockResolvedValueOnce({ messages: [userMessage(1), userMessage(2)], nextCursor: null })
+      .mockResolvedValueOnce({
+        messages: [userMessage(3), userMessage(4)],
+        nextCursor: "c1",
+        layout: [],
+      });
+    const onSessionLayout = rs.fn();
+    renderChat(<Chat sessionId="session-1" onSessionLayout={onSessionLayout} />);
+    await waitFor(() => expect(shownKeys()).toEqual(["user-3", "user-4"]));
+    expect(onSessionLayout).toHaveBeenCalledWith("session-1", layout);
+
+    await reachTop();
+    await waitFor(() => expect(shownKeys()).toHaveLength(4));
+    act(() => MockEventSource.instances[0]!.emitLifecycle("error", MockEventSource.CLOSED));
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(3));
+
+    expect(onSessionLayout).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Chat session recovery", () => {
@@ -1057,6 +1135,7 @@ describe("Chat turn poll", () => {
 
   afterEach(() => {
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
     delete (document as { visibilityState?: unknown }).visibilityState;
   });
 
@@ -1164,6 +1243,59 @@ describe("Chat turn poll", () => {
       onBehalf ? "guardian" : null,
     );
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("keeps the saved trace summary on the live entry while reattaching, then lets the replay update it", async () => {
+    // The turn's saved trace is already in the transcript when the poll reattaches.
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "trace-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "trace",
+        createdAt: "2026-10-24T12:00:00Z",
+        content: "",
+        traceSummary: { distinctApps: [], totalSteps: 3, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    rs.mocked(openTurnStream).mockImplementationOnce(
+      async (_id, signal) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+              signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        ),
+    );
+    await renderIdle();
+    await flush();
+
+    // Reattached, nothing replayed yet: the live entry carries the saved summary
+    // rather than an empty snapshot, so the bubble never flashes "0 steps".
+    const snapshot = () => screen.getByTestId("live-snapshot");
+    expect(snapshot().getAttribute("data-steps")).toBe("3");
+    expect(snapshot().getAttribute("data-segments")).toBe("0");
+
+    // A replayed segment lands before any summary_update: the summary stays put.
+    const send = (chunk: string) =>
+      act(async () => stream.enqueue(new TextEncoder().encode(chunk)));
+    await send(
+      'event: segment_upsert\ndata: {"id":"seg-1","ordinal":0,"kind":"block","block":{"type":"thinking","content":"x"}}\n\n',
+    );
+    await flush();
+    expect(snapshot().getAttribute("data-steps")).toBe("3");
+    expect(snapshot().getAttribute("data-segments")).toBe("1");
+
+    // The replayed summary replaces the saved one.
+    await send(
+      'event: summary_update\ndata: {"distinctApps":[],"totalSteps":4,"invocationCounts":{}}\n\n',
+    );
+    await flush();
+    expect(snapshot().getAttribute("data-steps")).toBe("4");
   });
 
   it("asks for the turns again once the socket comes back", async () => {
@@ -1981,6 +2113,38 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
     expect(screen.queryByTestId("tasks-pill")).toBeNull();
+  });
+
+  it("titles the main Concierge chat with the agent's chosen name, and a topic chat with its own", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const main = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeName="Milo" />,
+    );
+    await screen.findByTestId("tasks-pill");
+    expect(screen.getByText("Milo")).toBeTruthy();
+    expect(screen.queryByText("Concierge")).toBeNull();
+    main.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(
+      <Chat
+        sessionId="topic-1"
+        variant="concierge"
+        conciergeMainChatId="concierge"
+        conciergeName="Milo"
+      />,
+    );
+    await screen.findByTestId("tasks-pill");
+    expect(screen.getByText("Calendar")).toBeTruthy();
+    expect(screen.queryByText("Milo")).toBeNull();
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {

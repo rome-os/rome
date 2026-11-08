@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { guardianAuth } from "../db/schema.js";
 import { createSession, createVisitorSession } from "./auth.js";
 import {

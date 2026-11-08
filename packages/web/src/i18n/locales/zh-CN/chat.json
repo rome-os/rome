@@ -19,6 +19,17 @@
     "openForwardedChat": "打开任务对话：{{title}}",
     "showFullText": "展开全文",
     "showLess": "收起",
+    "connect": {
+      "action": "连接",
+      "connecting": "连接中…",
+      "connected": "已连接",
+      "retry": "重试",
+      "settings": "设置",
+      "notConnected": "尚未连接",
+      "unavailable": "无法在此连接",
+      "blocked": "弹窗被拦截",
+      "checkFailed": "无法检查连接状态"
+    },
     "openTaskChat": "打开",
     "tasks": {
       "title": "任务",
@@ -39,8 +50,8 @@
         "archive": "正在归档…",
         "done": "正在发送…"
       },
-      "unchanged": "Concierge 没有改动这一项",
-      "timeout": "Concierge 还没有处理",
+      "unchanged": "{{name}} 没有改动这一项",
+      "timeout": "{{name}} 还没有处理",
       "failed": "没发出去，请再试一次。",
       "notSynced": "未同步",
       "sourceMissing": "找不到原消息",
@@ -65,7 +76,7 @@
         "idle": "任务"
       },
       "emptyTitle": "还没有任务",
-      "emptyDescription": "Concierge 正在做、计划做或盯着的任务会显示在这里。"
+      "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
     },
     "messageDetails": "消息详情",
     "chooseFolder": "选择文件夹…",
@@ -110,6 +121,7 @@
   "documentTitle": "{{guardian}} 与 {{agent}} | Rome",
   "sidebar": {
     "newChat": "新对话",
+    "loading": "加载中…",
     "noSessions": "暂无会话",
     "openSidebar": "打开侧边栏"
   },

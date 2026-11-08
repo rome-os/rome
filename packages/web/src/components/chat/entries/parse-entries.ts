@@ -32,6 +32,7 @@ const REQUIRED_FIELDS = {
   error: { error: "string" },
   quota_switch: { from: "string", to: "string", model: "string" },
   task_chat: { chatId: "string", title: "string" },
+  connect_card: { service: "string", label: "string", connect: "object" },
   reply_to: { messageId: "string", author: "string", text: "string" },
 } satisfies {
   [K in TranscriptPart["type"]]: Partial<

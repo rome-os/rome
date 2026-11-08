@@ -12,7 +12,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AgentMention } from "@/lib/chat-types";
@@ -20,9 +20,11 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
+import { chatPath } from "@/lib/chat-session";
 import { useApps } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
@@ -41,7 +43,7 @@ import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { cn } from "@/lib/utils";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
-import { useConciergeChatId, useConciergeChats } from "@/hooks/use-concierge";
+import { useConciergeChatId, useConciergeChats, useConciergeName } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import { useToolTrace } from "./tool-trace";
 import { getWidgetFullHref } from "./widget-links";
@@ -49,8 +51,9 @@ import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
+  applyFirstPageLayout,
   collapseToolsOnMount,
-  loadLayoutForSession,
+  isLayoutLoaded,
   placeWidgetsIfSessionActive,
   setActiveSession,
   type PlacementLink,
@@ -164,7 +167,11 @@ function ToolsToggle({ unread }: { unread: boolean }) {
   );
 }
 
-export function FreeGrid() {
+/**
+ * The chat workspace. The chat is the one the route names, `/chat/<id>`, or
+ * `sessionId` when the route has no id to name it, as `/message` has not.
+ */
+export function FreeGrid({ sessionId }: { sessionId?: string }) {
   const { t } = useTranslation("common");
   const params = useParams<{ "*"?: string }>();
   const location = useLocation();
@@ -203,7 +210,7 @@ export function FreeGrid() {
   const [workspaceStore] = useState(() => createWorkspaceStore());
   const [eventBus] = useState(() => createWorkspaceEventBus());
   const [workspaceContextRegistry] = useState(() => createWorkspaceContextRegistry());
-  const urlSessionId = params["*"]?.split("/")[0] || undefined;
+  const urlSessionId = sessionId ?? (params["*"]?.split("/")[0] || undefined);
   const locState = location.state as {
     projectPath?: string;
     deviceFolder?: DraftDeviceFolder;
@@ -259,11 +266,18 @@ export function FreeGrid() {
   }, []);
 
   const suppressProjectsRef = useRef(false);
-  useEffect(() => {
+  // A widget handoff waiting for the session's server layout, so it lands on top
+  // of that layout instead of making it lose the revision guard.
+  const pendingWidgetsRef = useRef<{ sessionId: string; apply: () => void } | null>(null);
+  // A layout effect, so the session's cached layout is in the store before the
+  // first paint. `flushLayout` still reads the outgoing session's iframes: the
+  // render that carries the new URL keeps showing them until the switch below.
+  useLayoutEffect(() => {
     flushLayout();
     suppressProjectsRef.current = false;
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
+    pendingWidgetsRef.current = null;
     const applyInitialWidgets = (targetSessionId: string | null) => {
       if (!initialWidgetsKey || !initialWidgets) {
         return;
@@ -274,15 +288,27 @@ export function FreeGrid() {
         chatFirst: window.innerWidth < COMPACT_WIDTH,
       });
     };
-    if (urlSessionId) {
-      const targetSessionId = urlSessionId;
-      void loadLayoutForSession(targetSessionId).finally(() =>
-        applyInitialWidgets(targetSessionId),
-      );
-    } else {
+    if (!urlSessionId) {
       applyInitialWidgets(null);
+    } else if (isLayoutLoaded(urlSessionId)) {
+      applyInitialWidgets(urlSessionId);
+    } else if (initialWidgetsKey) {
+      // The layout rides the session's first messages page; `handleSessionLayout`
+      // places the widgets once it has been applied.
+      pendingWidgetsRef.current = {
+        sessionId: urlSessionId,
+        apply: () => applyInitialWidgets(urlSessionId),
+      };
     }
   }, [urlSessionId, initialWidgets, initialWidgetsKey, flushLayout]);
+
+  const handleSessionLayout = useCallback((sessionId: string, layout: unknown[] | null) => {
+    applyFirstPageLayout(sessionId, layout);
+    const pending = pendingWidgetsRef.current;
+    if (pending?.sessionId !== sessionId) return;
+    pendingWidgetsRef.current = null;
+    pending.apply();
+  }, []);
 
   useEffect(() => {
     return eventBus.on<{ appId: string }>("app:installed", ({ appId }) => {
@@ -340,30 +366,43 @@ export function FreeGrid() {
     [placements, removeWidget],
   );
 
+  const conciergeChatId = useConciergeChatId();
   const handleSessionChosen = useCallback(
-    (sessionId: string) => {
-      setChatSessionId(sessionId);
-      setActiveSession(sessionId);
-      navigate(`/chat/${sessionId}`, { replace: true });
+    (chosenId: string) => {
+      setChatSessionId(chosenId);
+      setActiveSession(chosenId);
+      navigate(chatPath(chosenId, conciergeChatId), { replace: true });
     },
-    [navigate],
+    [conciergeChatId, navigate],
   );
 
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
-    useSessionIdentity(chatSessionId);
-  // The chat a guardian names is the one they keep a tab on, so the name
-  // outranks the route's own title. Claimed here rather than in FreePage so it
-  // reads the same identity the header does, and follows a rename with it.
-  useDocumentTitle(sessionName);
-  const setPinned = usePinSession();
-  const conciergeChatId = useConciergeChatId();
+  const {
+    loading: sessionLoading,
+    sessionName,
+    model,
+    reasoningEffort,
+    pinnedAgentMention,
+    pinnedAt,
+  } = useSessionIdentity(chatSessionId);
   const conciergeChats = useConciergeChats();
+  const conciergeName = useConciergeName();
   const isConcierge =
     chatSessionId !== undefined &&
     (chatSessionId === conciergeChatId || conciergeChats.some((chat) => chat.id === chatSessionId));
+  // The main chat goes by the guardian's name for the agent, not the session name the server stores.
+  const isMainConcierge =
+    chatSessionId !== undefined &&
+    (chatSessionId === conciergeChatId ||
+      conciergeChats.some((chat) => chat.id === chatSessionId && chat.main));
+  const chatName = isMainConcierge ? conciergeName : sessionName;
+  // The chat a guardian names is the one they keep a tab on, so the name
+  // outranks the route's own title. Claimed here rather than in FreePage so it
+  // reads the same identity the header does, and follows a rename with it.
+  useDocumentTitle(chatName);
+  const setPinned = usePinSession();
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
   // desktop navbar: drop the session, refresh the sidebar list, land on a fresh
@@ -413,6 +452,7 @@ export function FreeGrid() {
             <ChatWidget
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}
+              onSessionLayout={handleSessionLayout}
               initialProjectName={initialProjectName}
               initialDeviceFolder={initialDeviceFolder}
               initialAgentMention={initialAgentMention}
@@ -429,9 +469,15 @@ export function FreeGrid() {
                   model={model}
                   reasoningEffort={reasoningEffort}
                 />
-                <span className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}>
-                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-                </span>
+                {sessionLoading ? (
+                  <SessionLoadingTitle />
+                ) : (
+                  <span
+                    className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}
+                  >
+                    {chatName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
+                  </span>
+                )}
                 {isConcierge ? <ConciergeTasksPill chatId={chatSessionId ?? null} /> : null}
                 {/* Same label as the desktop navbar, also none for the Concierge. */}
                 {!isConcierge && sessionName?.trim() && pinnedAgentMention && (

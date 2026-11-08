@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { AppConnectionAccessRepository } from "../../db/repositories/app-connection-access.js";
 import { runWithSessionActor, type SessionActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";

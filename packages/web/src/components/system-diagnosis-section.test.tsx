@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
@@ -74,11 +74,14 @@ function mockDiagnosis(...responses: Array<{ status: number; body: unknown }>) {
 
 function renderSection() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <SystemDiagnosisSection />
     </QueryClientProvider>,
   );
+  // The checks live in the details sheet.
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
+  return view;
 }
 
 describe("SystemDiagnosisSection", () => {

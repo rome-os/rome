@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import type { ActionRunUsageEvent } from "../../usage/events.js";
 import { UsageOutboxRepository } from "./usage-outbox.js";
 

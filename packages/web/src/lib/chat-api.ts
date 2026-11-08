@@ -193,6 +193,12 @@ export interface ChatMessagePage {
   messages: ChatMessage[];
   /** Pass as `before` for the page of older turns; null when this page reaches the start. */
   nextCursor: string | null;
+  /**
+   * The session's saved workspace layout, as `GET /layout` returns it. Sent on
+   * the first page only (no `before`); `null` when none is saved, absent on
+   * older pages.
+   */
+  layout?: unknown[] | null;
 }
 
 /**

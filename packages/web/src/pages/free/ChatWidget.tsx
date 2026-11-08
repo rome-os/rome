@@ -29,6 +29,7 @@ function extractProjectPathsFromBlocks(blocks: TraceEventDto[]): string[] {
 interface ChatWidgetProps {
   sessionId?: string;
   onSessionChosen: (sessionId: string) => void;
+  onSessionLayout?: (sessionId: string, layout: unknown[] | null) => void;
   initialProjectName?: string;
   initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
@@ -39,6 +40,7 @@ interface ChatWidgetProps {
 export function ChatWidget({
   sessionId,
   onSessionChosen,
+  onSessionLayout,
   initialProjectName,
   initialDeviceFolder,
   initialAgentMention,
@@ -115,6 +117,7 @@ export function ChatWidget({
       sessionId={sessionId}
       onSessionCreated={onSessionChosen}
       onSessionMessage={handleSessionMessage}
+      onSessionLayout={onSessionLayout}
       initialProjectName={initialProjectName}
       initialDeviceFolder={initialDeviceFolder}
       initialAgentMention={initialAgentMention}

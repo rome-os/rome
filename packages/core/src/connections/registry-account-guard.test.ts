@@ -5,7 +5,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { createTestDb, testAccountLinkOf } from "../test/helpers.js";
+import { createTestDb, testAccountLinkOf } from "../test/db.js";
 import { platformOf } from "@rome/api-types/platform";
 import { AccountAlreadyConnectedError } from "./errors.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";

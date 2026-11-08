@@ -26,7 +26,11 @@ import {
   clearGithubShellIntegrationForProvider,
   syncGithubShellIntegrationForProvider,
 } from "../../lib/github-shell-integration.js";
-import { normalizeShopifyShopDomain, type OAuthProvider } from "../../lib/oauth-providers.js";
+import {
+  normalizeShopifyShopDomain,
+  OAUTH_PROVIDER_DESCRIPTORS,
+  type OAuthProvider,
+} from "../../lib/oauth-providers.js";
 import { clearProviderTokenFile, syncProviderTokenFile } from "../../lib/provider-token-files.js";
 import { romeCloudOAuth } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
@@ -367,6 +371,7 @@ export function makeOAuthProviderDescriptor(
   if (setupDeps) scheme.setup = makeOAuthProviderSetup(provider, setupDeps);
   return {
     connectionKind: provider,
+    label: OAUTH_PROVIDER_DESCRIPTORS[provider].label,
     grant: OAUTH_PROVIDER_GRANTS[provider],
     auth: scheme,
     reviveProfile: (record) => OAUTH_PROVIDER_REVIVERS[provider](record),

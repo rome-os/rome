@@ -6,15 +6,16 @@ import {
   type ModelSession,
   type ModelSessionParams,
 } from "../../core/agent-runner.js";
+import { executeActionTool } from "../tool-calls.js";
 
 // FakeModel — scriptable ModelProvider for the testkit.
 //
 // The model API is a genuine process boundary, so it is the one place agent
 // tests are allowed to fake. Unlike `MockModelProvider` (fixed response
 // queue), FakeModel scripts are matched per turn and can drive REAL action
-// execution: an `invokeAction` step calls the provider's `executeAction`
-// callback, which the real AgentSession wires to the real ActionEngine — so
-// everything below the model (engine, repos, DB) runs for real.
+// execution: an `invokeAction` step calls the session's `execute_action` tool,
+// which the real AgentSession wires to the real ActionEngine — so everything
+// below the model (engine, repos, DB) runs for real.
 
 export interface ActionCallStep {
   kind: "invoke_action";
@@ -43,7 +44,7 @@ export function errorMessage(error: string): AgentEvent {
 
 /**
  * Script step that makes the fake model call a real action through the
- * session's `executeAction` callback, emitting the same `tool_use` /
+ * session's `execute_action` tool, emitting the same `tool_use` /
  * `tool_result` message pair a real provider would.
  */
 export function invokeAction(name: string, args: Record<string, unknown> = {}): ActionCallStep {
@@ -70,7 +71,6 @@ export interface ReplyBuilder {
 
 export class FakeModel implements ModelProvider {
   readonly id = "mock" as const;
-  readonly displayName = "Fake Model";
   builtinTools: ReadonlySet<string> = new Set();
 
   /** Every turn the model was asked to run, in order. */
@@ -136,7 +136,7 @@ export class FakeModel implements ModelProvider {
         // whole session mid-turn, mis-modeling those paths.
         let output: unknown;
         try {
-          output = await params.executeAction(step.name, step.args);
+          output = await executeActionTool(params.tools, step.name, step.args, { toolUseId: id });
         } catch (err) {
           output = { error: err instanceof Error ? err.message : String(err) };
         }

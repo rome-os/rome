@@ -24,6 +24,8 @@ dist/
 **/*.e2e.test.ts
 packages/core/src/test/
 coverage/
+# Static checks run in CI, never at runtime.
+lint/
 
 # Dev configs
 .eslintrc*

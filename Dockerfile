@@ -363,8 +363,11 @@ COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencl
 # /opt/rome, which the rome user owns, so rome cannot change what root runs.
 COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
+COPY scripts/docker/rome-init-lib.sh /etc/s6-overlay/scripts/rome-init-lib
+COPY scripts/docker/rome-init-tools.sh /etc/s6-overlay/scripts/rome-init-tools
+COPY scripts/docker/rome-wait-for-rome.sh /etc/s6-overlay/scripts/rome-wait-for-rome
 COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
-# rome-init.sh has the rome and user shells source this. It sits outside /app
+# rome-init-tools.sh has the rome and user shells source this. It sits outside /app
 # because user cannot read /app.
 COPY scripts/docker/rome-shell-path.sh /usr/local/share/rome/rome-shell-path.sh
 

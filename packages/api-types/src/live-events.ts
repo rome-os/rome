@@ -8,10 +8,29 @@ export const CHAT_STATUS_TOPIC = "chat.status";
 export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
+/**
+ * The chat the guardian's phone app has on screen. It carries no events: the
+ * phone holds it for that one chat, and the Concierge does not push what it
+ * says there. Only a phone socket's watch counts ({@link LIVE_EVENTS_CLIENT_HEADER}).
+ */
+export const CHAT_WATCH_TOPIC_PREFIX = "chat.watch:";
+
+/**
+ * The upgrade header the phone app sends, with {@link PHONE_CLIENT} as its
+ * value. Only such a socket's `chat.watch:` subscription counts as the phone
+ * showing that chat. Browsers cannot set it on a WebSocket.
+ */
+export const LIVE_EVENTS_CLIENT_HEADER = "x-rome-client";
+export const PHONE_CLIENT = "phone";
 
 /** The topic carrying one chat session's events. */
 export function chatSessionTopicName(sessionId: string): string {
   return `${CHAT_SESSION_TOPIC_PREFIX}${sessionId}`;
+}
+
+/** The topic the phone holds for the chat on its screen. */
+export function chatWatchTopicName(chatId: string): string {
+  return `${CHAT_WATCH_TOPIC_PREFIX}${chatId}`;
 }
 
 /** Client to server. Subscribing to a topic the socket already holds is a no-op. */

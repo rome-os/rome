@@ -181,7 +181,7 @@ export function buildMessageContext(
   // system prefix. The per-thread, dynamic thread + project framing is rendered
   // separately as a `<thread_context>` block on the session's FIRST user message
   // (one renderer for every channel) — see `buildThreadContextBlock` in
-  // @rome/core prompt-builder.ts and AgentSession.runOneTurn. The thread context
+  // @rome/core agent/domain/prompt.ts and AgentSession.runOneTurn. The thread context
   // travels there via the `threadContext` already forwarded into the agent run.
   const sections: string[] = [
     "# Context",

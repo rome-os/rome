@@ -86,13 +86,13 @@ function renderAdvancedSettings() {
 }
 
 describe("SettingsPage Access Control section", () => {
-  it("renders Access Control as the section title with Allowed emails beneath it", async () => {
+  it("renders Access and privacy as the section title with Allowed emails beneath it", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
     const sectionTitle = await screen.findByRole("heading", {
       level: 2,
-      name: "Access Control",
+      name: "Access and privacy",
     });
     const emailsTitle = await screen.findByRole("heading", {
       level: 3,

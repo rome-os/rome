@@ -1,3 +1,5 @@
+import { readAnswerShape, TurnUsageReporter } from "../../agent/index.js";
+import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +12,7 @@ import type { Tracer } from "@opentelemetry/api";
 import {
   createTestDb,
   buildAgentConfig,
+  type TestAgentFile,
   channelNamed,
   createTestConnections,
   noAccounts,
@@ -36,17 +39,18 @@ import { chatsWiring } from "../../chats-wiring.js";
 import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
-import { AgentLoader } from "../../core/agent-loader.js";
-import { SessionRepository } from "../../sessions/session-repository.js";
-import { PromptBuilder } from "../../core/prompt-builder.js";
-import { createModelResolver } from "../../core/model-resolver.js";
+import { AgentLoader } from "../../agent/index.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
+import { createTestSystemPrompts } from "../system-prompts.js";
+import { createModelResolver } from "../../agent/index.js";
+import { bothAvailable, fakeAccounts } from "./model-accounts.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../../agent/index.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
-import { SkillCatalog } from "../../core/skill-catalog.js";
+import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { AgentConfig, AgentEvent } from "../../types.js";
+import type { AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
@@ -61,7 +65,7 @@ import { testChannelSurface } from "../channel-surface.js";
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
-  agents?: AgentConfig[];
+  agents?: TestAgentFile[];
   /** Actions registered into the real ActionRegistry / ActionEngine. */
   actions?: Action[];
   /** Channel names to expose as FakeChannelEndpoints. */
@@ -69,7 +73,7 @@ export interface TestRomeOptions {
   /** Forwarded to the agent session manager (Phase 4 keep-alive). */
   keepAliveAcrossTurns?: boolean;
   /**
-   * "real" (default) keeps the caller's project/core roots, so PromptBuilder
+   * "real" (default) keeps the caller's project/core roots, so SystemPrompts
    * reads the production repo context (CHARTER.md, repo apps) — versioned
    * content, deterministic everywhere. "empty" points them at the sandbox for
    * tests that want a bare repo view.
@@ -169,7 +173,7 @@ export async function createTestRome(options: TestRomeOptions = {}): Promise<Tes
   // data, lockfiles) — resolves under `root` and is deleted on cleanup, never
   // under the developer's real ~/.rome; projects root likewise. Read-only
   // repo roots (project/core: CHARTER.md, repo apps) stay real by default so
-  // PromptBuilder produces the production system prompt — they're versioned
+  // SystemPrompts produces the production system prompt — they're versioned
   // content, equally deterministic everywhere.
   const savedEnv = new Map<string, string | undefined>(
     SCOPED_ENV_KEYS.map((key) => [key, process.env[key]]),
@@ -213,7 +217,7 @@ async function buildHarness(
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new SessionRepository(db, artifactIdentity),
+    sessions: new DrizzleSessionRepository(db, artifactIdentity),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
@@ -242,16 +246,7 @@ async function buildHarness(
   const model = new FakeModel();
   const modelResolver = createModelResolver({
     providers: [model],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    accounts: fakeAccounts(bothAvailable()),
   });
 
   const actionRegistry = new ActionRegistryImpl();
@@ -277,20 +272,23 @@ async function buildHarness(
     },
   );
 
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
       sessionRepository: repos.sessions,
-      promptBuilder,
+      systemPrompts,
       actionRegistry,
       modelResolver,
       actionEngine,
       // Real but inert collaborators: CapabilityDiscovery is never start()ed
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(artifactIdentity),
-      lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      skillCatalog: new SkillLoader(artifactIdentity),
+      turnLifecycle: new TurnListeners(new AppTurnHooks()),
+      readAnswerShape,
+      turnUsage: new TurnUsageReporter(),
+      folders: agentFolders(),
       channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },

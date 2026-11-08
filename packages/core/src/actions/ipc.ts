@@ -252,7 +252,13 @@ export class IpcRpc {
     const actionContext = actionExecutionContext.getStore();
     if (actionContext?.actionName) {
       request.callerActionName = actionContext.actionName;
-      if (method.startsWith("connections.app.")) {
+      // A dashboard read or send carries who makes it, so private chats stay private.
+      if (
+        method.startsWith("connections.app.") ||
+        method === "channels.query" ||
+        method === "channels.send" ||
+        method === "agent.session.runTurn"
+      ) {
         request.callerActionContext = {
           actor: actionContext.actor,
           channelContext: actionContext.channelContext,

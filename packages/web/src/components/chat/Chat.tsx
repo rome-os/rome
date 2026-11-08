@@ -1,4 +1,6 @@
+import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
+import { flushSync } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -41,6 +43,7 @@ import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipbo
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
@@ -101,7 +104,6 @@ import {
   ConciergeTopicEmptyState,
 } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -295,6 +297,11 @@ export interface ChatProps {
   recoverMissingSession?: (sessionId: string) => Promise<boolean>;
   onSessionMessage?: (message: SessionMessage) => void;
   /**
+   * Called with a session's saved workspace layout (`null` when none) when its
+   * first messages page arrives, in the same render as that page's messages.
+   */
+  onSessionLayout?: (sessionId: string, layout: unknown[] | null) => void;
+  /**
    * Called once with the id of the session a draft's first send created,
    * before that turn is posted. A host that navigates to the session must keep
    * this instance mounted for it.
@@ -330,6 +337,22 @@ export interface ChatProps {
    * trace, turn summary, pickers, and Stop.
    */
   variant?: ChatVariant;
+  /** The signed-in person's main Concierge chat, which shows the starters a topic chat does not. The guardian's by default. */
+  conciergeMainChatId?: string;
+  /** What the main Concierge chat is called in its title, in place of the session name the server stores. */
+  conciergeName?: string;
+}
+
+// The summary persisted for a turn's trace, once the turn has one.
+function savedTraceSummary(
+  messages: readonly ChatMessage[] | undefined,
+  turnId: string | null,
+): TraceSummary | null {
+  if (!turnId) return null;
+  return (
+    messages?.find((m) => m.role === "trace" && m.turnId === turnId && m.traceSummary)
+      ?.traceSummary ?? null
+  );
 }
 
 export function Chat({
@@ -339,6 +362,7 @@ export function Chat({
   onSessionNotFound,
   recoverMissingSession,
   onSessionMessage,
+  onSessionLayout,
   onSessionCreated,
   startSession,
   emptyState,
@@ -349,6 +373,8 @@ export function Chat({
   composerRef: hostComposerRef,
   navbarSlot,
   variant = "default",
+  conciergeMainChatId = CONCIERGE_CHAT_ID,
+  conciergeName,
 }: ChatProps) {
   const concierge = variant === "concierge";
   const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
@@ -426,6 +452,7 @@ export function Chat({
   // composer renders the agent as a non-removable chip and the navbar shows the
   // name as the title; the mobile header bar (FreeGrid) reuses the same hook.
   const {
+    loading: sessionLoading,
     sessionName,
     model,
     largeModelSelection: storedModelSelection,
@@ -734,12 +761,24 @@ export function Chat({
   }, [viewer]);
   const isReadVisibleSession = useCallback((id: string) => id === mainSessionIdRef.current, []);
   const activeSessionStream = streamingSessions.get(activeSessionId) ?? null;
-  const currentSnapshot = activeSessionStream?.snapshot ?? null;
   // The `turnId` the stream was opened under addresses the follower and Stop.
   // The transcript matches the turn by its runningTurnId, which differs for a
   // backend task.
   const activeStreamTurnId = activeSessionStream?.turnId ?? null;
   const runningTurnId = runningTurnIdOf(activeSessionStream);
+  // A reattached turn has no replayed snapshot yet, but its saved trace is
+  // already in the transcript. The live row replaces that trace, so it starts
+  // from the saved summary instead of an empty bubble; the replay then fills in
+  // the segments and `summary_update` replaces the summary. Derived at render
+  // so it holds whichever of the messages and the turn lookup lands first.
+  const streamSnapshot = activeSessionStream?.snapshot ?? null;
+  const savedSummary = streamSnapshot
+    ? null
+    : savedTraceSummary(messages.get(activeSessionId), runningTurnId);
+  const currentSnapshot = useMemo<TraceSnapshot | null>(
+    () => streamSnapshot ?? (savedSummary ? { segments: [], summary: savedSummary } : null),
+    [streamSnapshot, savedSummary],
+  );
   const isActiveSessionStreaming = !!activeSessionStream;
   const awaitingGuardian = useMemo(
     () => isAwaitingGuardian(view, runningTurnId),
@@ -761,6 +800,7 @@ export function Chat({
   const onSessionsChangedRef = useRef(onSessionsChanged);
   const onSessionNotFoundRef = useRef(onSessionNotFound);
   const onSessionMessageRef = useRef(onSessionMessage);
+  const onSessionLayoutRef = useRef(onSessionLayout);
   const recoverMissingSessionRef = useRef(recoverMissingSession);
   recoverMissingSessionRef.current = recoverMissingSession;
   useEffect(() => {
@@ -776,6 +816,9 @@ export function Chat({
   useEffect(() => {
     onSessionMessageRef.current = onSessionMessage;
   }, [onSessionMessage]);
+  useEffect(() => {
+    onSessionLayoutRef.current = onSessionLayout;
+  }, [onSessionLayout]);
   const notifySessionsChanged = useCallback(() => {
     onSessionsChangedRef.current?.();
   }, []);
@@ -915,17 +958,30 @@ export function Chat({
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
-        setMessages((prev) => {
-          const next = new Map(prev);
-          next.set(
-            id,
-            mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
-              restart,
-              dropMessageIds,
-            }),
-          );
-          return next;
-        });
+        const commitMessages = () =>
+          setMessages((prev) => {
+            const next = new Map(prev);
+            next.set(
+              id,
+              mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
+                restart,
+                dropMessageIds,
+              }),
+            );
+            return next;
+          });
+        const handLayoutToHost = onSessionLayoutRef.current;
+        if (handLayoutToHost && !loadedSessionsRef.current.has(id)) {
+          // The host's layout store re-renders synchronously while this state
+          // update is not, so flush both together: the tool panel and the
+          // messages then appear in one frame instead of reflowing the chat.
+          flushSync(() => {
+            commitMessages();
+            handLayoutToHost(id, page.layout ?? null);
+          });
+        } else {
+          commitMessages();
+        }
         // A refetch of the newest page leaves older loaded pages, and the
         // cursor that reaches past them, as they are.
         if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
@@ -1015,12 +1071,20 @@ export function Chat({
       // segment's first upsert in ordinal order.
       const segArr: TraceSegment[] = [];
       const segIdx = new Map<string, number>();
-      let summary: TraceSnapshot["summary"] = {
-        distinctApps: [],
-        totalSteps: 0,
-        invocationCounts: {},
-      };
+      // The last `summary_update`. Until one arrives, a reattached turn keeps
+      // its saved summary, looked up at each flush because the transcript may
+      // still be loading when the stream opens.
+      let replayedSummary: TraceSnapshot["summary"] | null = null;
       const flushSnapshot = () => {
+        const summary = replayedSummary ??
+          savedTraceSummary(
+            messagesRef.current.get(sessionId),
+            runningTurnIdOf(streamingSessionsRef.current.get(sessionId)) ?? turnId,
+          ) ?? {
+            distinctApps: [],
+            totalSteps: 0,
+            invocationCounts: {},
+          };
         updateSessionSnapshot(sessionId, turnId, { segments: segArr.slice(), summary });
       };
       let shouldStop = false;
@@ -1134,7 +1198,7 @@ export function Chat({
           }
           if (evt.event === "summary_update") {
             try {
-              summary = JSON.parse(evt.data) as TraceSnapshot["summary"];
+              replayedSummary = JSON.parse(evt.data) as TraceSnapshot["summary"];
               flushSnapshot();
             } catch {
               // ignore parse errors
@@ -1237,6 +1301,7 @@ export function Chat({
     },
     [
       t,
+      streamingSessionsRef,
       updateSessionSnapshot,
       updateSessionAssistantText,
       adoptSessionAgentTurn,
@@ -1983,9 +2048,16 @@ export function Chat({
               model={model}
               reasoningEffort={reasoningEffort}
             />
-            <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-            </span>
+            {sessionLoading ? (
+              <SessionLoadingTitle />
+            ) : (
+              <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
+                {(concierge && mainSessionId === conciergeMainChatId && conciergeName) ||
+                  sessionName?.trim() ||
+                  pinnedAgentMention?.appLabel ||
+                  t("sidebar.newChat")}
+              </span>
+            )}
             {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
             {/* The agent's app beside a titled chat. The Concierge's is always
                 Rome, so it shows none. */}
@@ -2122,7 +2194,7 @@ export function Chat({
               )}
             >
               {conciergeEmpty ? (
-                mainSessionId === CONCIERGE_CHAT_ID ? (
+                mainSessionId === conciergeMainChatId ? (
                   <ConciergeEmptyState
                     onPick={(prompt) => composerRef.current?.insertText(prompt)}
                   />

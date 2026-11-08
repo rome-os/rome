@@ -57,6 +57,22 @@ describe("resume_session dispatcher", () => {
     );
   });
 
+  it("passes on whose chat the wake-up was scheduled in", async () => {
+    const { deps, runAndDeliver } = makeDeps();
+    const action = createResumeSessionAction(config, deps);
+
+    await action.execute({
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "sess-1",
+      agentName: "core:concierge",
+      text: "x",
+      ownerKey: "visitor:a",
+    });
+
+    expect(runAndDeliver).toHaveBeenCalledWith(expect.objectContaining({ ownerKey: "visitor:a" }));
+  });
+
   it("errors when channel or threadId is missing", async () => {
     const { deps } = makeDeps();
     const action = createResumeSessionAction(config, deps);

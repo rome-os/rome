@@ -107,7 +107,7 @@ describe("SettingsPage Advanced autosave", () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
-    expect(await screen.findByText("Advanced Settings")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Features" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
@@ -116,7 +116,7 @@ describe("SettingsPage Advanced autosave", () => {
     const user = userEvent.setup();
     renderAdvancedSettings();
 
-    await user.click(await screen.findByText("Enable model selector in chat"));
+    await user.click(await screen.findByRole("switch", { name: "Enable model selector in chat" }));
 
     await waitFor(() =>
       expect(calls).toContainEqual({
@@ -127,16 +127,14 @@ describe("SettingsPage Advanced autosave", () => {
     );
   });
 
-  it("keeps Concierge under Experimental features, outside Developer Settings", async () => {
+  it("keeps Presentation mode under Features, outside Developer Settings", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
-    const toggle = await screen.findByRole("switch", { name: "Show Concierge in Chats" });
+    const toggle = await screen.findByRole("switch", { name: "Mask agent identity in chat" });
     const section = toggle.closest("section");
     expect(section).not.toBeNull();
-    expect(
-      within(section as HTMLElement).getByRole("heading", { name: "Experimental features" }),
-    ).toBeTruthy();
+    expect(within(section as HTMLElement).getByRole("heading", { name: "Features" })).toBeTruthy();
     expect(toggle.closest("details")).toBeNull();
   });
 

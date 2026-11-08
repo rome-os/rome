@@ -1,4 +1,12 @@
-import { subagentSessionKey } from "./agent-session-key.js";
+import {
+  refuseResume,
+  storedAgentName,
+  storeSubagentParent,
+  SubagentOutcomeReader,
+  subagentRequest,
+  subagentSessionName,
+  type SubagentOutcome,
+} from "../agent/index.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
@@ -7,7 +15,6 @@ import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-re
 import type { ThreadContext } from "./types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
 
 const log = createLogger("subagent-execution");
 
@@ -16,19 +23,8 @@ export interface ExecuteSubagentInput {
   resumeSessionId?: string;
 }
 
-export type SubagentCompletion =
-  | {
-      status: "completed";
-      sessionId: string;
-      turnId: string;
-      output: unknown;
-    }
-  | {
-      status: "failed" | "cancelled";
-      sessionId: string;
-      turnId: string;
-      error: { message: string; code?: string };
-    };
+/** How a subagent call ended, with the session and turn that answered it. */
+export type SubagentCompletion = SubagentOutcome & { sessionId: string; turnId: string };
 
 export interface SubagentExecution {
   sessionId: string;
@@ -69,41 +65,34 @@ export function createSubagentExecutionService(deps: {
 }): SubagentExecutionService {
   return {
     async startSubagent(name, input, context) {
-      if (!input.prompt || typeof input.prompt !== "string") {
-        throw new Error("execute_subagent requires a non-empty prompt");
-      }
+      const request = subagentRequest(input);
       const parentSession = await deps.webchatRepo.getSession(context.parentSessionId);
 
       let child;
       let isFresh = false;
-      if (input.resumeSessionId) {
-        if (!parentSession) {
-          throw new Error(`Parent Rome session "${context.parentSessionId}" was not found`);
-        }
-        const stored = await deps.webchatRepo.getSession(input.resumeSessionId);
-        if (!stored || stored.type !== "subagent") {
-          throw new Error(`Subagent session "${input.resumeSessionId}" was not found`);
-        }
-        const storedAgentName = stored.agentName ?? "main";
-        if (storedAgentName !== name) {
-          throw new Error(
-            `Subagent session "${input.resumeSessionId}" belongs to agent "${storedAgentName}", not "${name}"`,
-          );
-        }
-        if (stored.parentSessionId !== context.parentSessionId) {
-          throw new Error(
-            `Subagent session "${input.resumeSessionId}" belongs to a different Parent session`,
-          );
-        }
-        if ((stored.projectPath ?? null) !== (parentSession?.projectPath ?? null)) {
-          throw new Error(
-            `Subagent session "${input.resumeSessionId}" belongs to a different project`,
-          );
-        }
+      if (request.resumeSessionId) {
+        const stored = parentSession
+          ? await deps.webchatRepo.getSession(request.resumeSessionId)
+          : null;
+        const refusal = refuseResume(
+          stored && {
+            type: stored.type,
+            agentName: stored.agentName ?? null,
+            parentSessionId: stored.parentSessionId ?? null,
+            projectPath: stored.projectPath ?? null,
+          },
+          parentSession && { projectPath: parentSession.projectPath ?? null },
+          {
+            subagent: name,
+            parentRecordId: context.parentSessionId,
+            resumeSessionId: request.resumeSessionId,
+          },
+        );
+        if (refusal) throw new Error(refusal);
         // Naming the conversation lets the resume fill a row whose record
         // failed when the subagent was minted.
-        child = await context.childManager.acquireBySessionId(input.resumeSessionId, name, {
-          romeSessionId: input.resumeSessionId,
+        child = await context.childManager.acquireBySessionId(request.resumeSessionId, name, {
+          romeSessionId: request.resumeSessionId,
           workingDir: context.workingDir,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
@@ -113,7 +102,7 @@ export function createSubagentExecutionService(deps: {
         child = await context.childManager.acquire(
           {
             agentName: name,
-            channelThreadKey: subagentSessionKey(context.parentChannelThreadKey),
+            channelThreadKey: storeSubagentParent(context.parentChannelThreadKey),
           },
           {
             workingDir: context.workingDir,
@@ -127,18 +116,18 @@ export function createSubagentExecutionService(deps: {
         await deps.webchatRepo.ensureRomeSession({
           id: child.sessionId,
           type: "subagent",
-          name: `${name}: ${parentSession?.name ?? context.parentAgentName}`,
-          agentName: isCoreMainAgentId(name) ? null : name,
+          name: subagentSessionName(name, parentSession?.name, context.parentAgentName),
+          agentName: storedAgentName(name),
           projectName: parentSession?.projectName,
           projectPath: parentSession?.projectPath,
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
         });
-        // A subagent's conversation is minted under its own session id.
+        // A subagent's chat is minted under its own session id.
         try {
-          await context.childManager.recordConversation(child.sessionId, child.sessionId);
+          await deps.webchatRepo.recordSessionInChat(child.sessionId, child.sessionId);
         } catch (err) {
-          log.warn("failed to record the subagent session's conversation", {
+          log.warn("failed to record the chat that has the subagent's session", {
             agentName: name,
             sessionId: child.sessionId,
             error: err instanceof Error ? err.message : String(err),
@@ -147,7 +136,7 @@ export function createSubagentExecutionService(deps: {
       }
 
       const handle = child.sendTurn(
-        { prompt: input.prompt },
+        { prompt: request.prompt },
         {
           lifecycleParent: {
             sessionId: context.parentAgentSessionId,
@@ -173,6 +162,8 @@ export function createSubagentExecutionService(deps: {
       };
       const stream = deps.turnStreams.register({
         sessionId: child.sessionId,
+        // The subagent's row is saved above, under its own session id.
+        chatId: child.sessionId,
         turnId: handle.turnId,
         agentName: name,
         interrupt,
@@ -243,11 +234,7 @@ export function createSubagentExecutionService(deps: {
       });
 
       void (async () => {
-        let resultText = "";
-        let structuredOutput: unknown;
-        let hasStructuredOutput = false;
-        let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
-        let cancelled = false;
+        const outcome = new SubagentOutcomeReader();
         try {
           for await (const message of handle.events) {
             stream.publish(message);
@@ -255,41 +242,13 @@ export function createSubagentExecutionService(deps: {
               turnId: handle.turnId,
               source: "subagent-execution",
             });
-            if (message.type === "result") {
-              resultText = message.content;
-              if (Object.prototype.hasOwnProperty.call(message, "structuredOutput")) {
-                structuredOutput = message.structuredOutput;
-                hasStructuredOutput = true;
-              }
-            }
-            if (message.type === "error") terminalError = message;
-            if (message.type === "turn_end" && message.status === "interrupted") cancelled = true;
+            outcome.read(message);
           }
-          if (cancelled) {
-            resolveCompletion({
-              status: "cancelled",
-              sessionId: child.sessionId,
-              turnId: handle.turnId,
-              error: { message: terminalError?.error ?? "Subagent execution was cancelled" },
-            });
-          } else if (terminalError) {
-            resolveCompletion({
-              status: "failed",
-              sessionId: child.sessionId,
-              turnId: handle.turnId,
-              error: {
-                message: terminalError.error,
-                ...(terminalError.code ? { code: terminalError.code } : {}),
-              },
-            });
-          } else {
-            resolveCompletion({
-              status: "completed",
-              sessionId: child.sessionId,
-              turnId: handle.turnId,
-              output: hasStructuredOutput ? structuredOutput : resultText,
-            });
-          }
+          resolveCompletion({
+            ...outcome.outcome(),
+            sessionId: child.sessionId,
+            turnId: handle.turnId,
+          });
         } catch (err) {
           resolveCompletion({
             status: "failed",

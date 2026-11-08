@@ -676,6 +676,30 @@ describe("composer scoped slash skill", () => {
     });
   });
 
+  it("keeps the original composing-key and empty-Backspace behavior", async () => {
+    renderComposer({});
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "/" } });
+    await screen.findByText("/identity_probe");
+
+    const arrow = new KeyboardEvent("keydown", {
+      key: "ArrowRight",
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+    });
+    fireEvent(textarea, arrow);
+    expect(arrow.defaultPrevented).toBe(true);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+    expect(textarea.value).toBe("");
+
+    fireEvent.keyDown(textarea, { key: "Backspace" });
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove skill" }));
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
   it("does not open the skill picker for path-like text", async () => {
     renderComposer({});
 

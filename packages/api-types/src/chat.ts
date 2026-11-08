@@ -2,6 +2,7 @@
 // content, re-exported so web reads the same union core writes.
 
 import type { MessagePart } from "@rome-os/app-runtime";
+import type { ConciergeConnectEntry } from "./concierge.js";
 import type { TraceErrorEvent } from "./trace-segments.js";
 
 export type {
@@ -42,6 +43,19 @@ export interface TaskChatPart {
   title: string;
 }
 
+/** A card that connects a service for the guardian. `connect` is the service's
+ * entry from the Concierge's connector list, which says how the client starts
+ * connecting it. Only the host writes one: the client acts on its `connect`. */
+export interface ConnectCardPart {
+  type: "connect_card";
+  service: string;
+  label: string;
+  /** The id of the service's mark, as the connector list gave it. A card
+   * written before it existed has none. */
+  icon?: string | null;
+  connect: ConciergeConnectEntry;
+}
+
 /** Longest `text` a {@link ReplyToPart} keeps; core truncates longer snapshots with an ellipsis. */
 export const REPLY_TO_TEXT_MAX_LENGTH = 1000;
 
@@ -72,6 +86,7 @@ export type TranscriptPart =
   | WebchatTextPart
   | StoredErrorPart
   | TaskChatPart
+  | ConnectCardPart
   | ReplyToPart
   | QuotaSwitchPart;
 

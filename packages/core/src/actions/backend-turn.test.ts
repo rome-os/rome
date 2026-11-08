@@ -65,7 +65,7 @@ describe("backend turn delivery", () => {
   it.each([
     ["completed", "completed"],
     ["error", "failed"],
-    ["interrupted", "failed"],
+    ["interrupted", "interrupted"],
   ] as const)("reports a turn that ended %s as %s", async (status, outcome) => {
     const agentRunner = createMockAgentRunner([
       [
@@ -97,6 +97,38 @@ describe("backend turn delivery", () => {
     expect(await runner.runAndReport(params)).toBe(outcome);
   });
 
+  it("reports an interrupted turn a Stop request reached as stopped", async () => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+        { type: "result", content: "" },
+        { type: "turn_end", turnId: "turn-1", status: "interrupted", durationMs: 5 },
+      ],
+    ]);
+    const webchat = {
+      name: "webchat",
+      send: { send: rs.fn(), direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => undefined, stopRequested: () => true });
+      },
+    });
+    expect(
+      await runner.runAndReport({
+        agentName: "core:concierge",
+        sessionId: "s",
+        channel: "webchat",
+        threadId: "concierge",
+        prompt: "<external_events/>",
+      }),
+    ).toBe("stopped");
+  });
+
   it("reports a turn that never ran as failed", async () => {
     const agentRunner = createMockAgentRunner([[]]);
     const webchat = {
@@ -120,8 +152,8 @@ describe("backend turn delivery", () => {
     ).toBe("failed");
   });
 
-  it("asks the runner to keep a turn's input only when the caller labels it", async () => {
-    const run = async (options?: { inputLabel?: string }) => {
+  it("asks the runner to keep a turn's input only when the caller labels it, and hands on its push level", async () => {
+    const run = async (options?: { inputLabel?: string; pushLevel?: "active" | "passive" }) => {
       const agentRunner = createMockAgentRunner([
         [
           { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
@@ -158,6 +190,8 @@ describe("backend turn delivery", () => {
     });
     // A task event, a nudge or a defer resume passes no label and keeps no input.
     expect(await run()).not.toHaveProperty("inputLabel");
+    expect(await run({ pushLevel: "passive" })).toMatchObject({ pushLevel: "passive" });
+    expect(await run()).not.toHaveProperty("pushLevel");
   });
 
   it("passes a quiet turn's option to the webchat runtime, and nothing for an ordinary one", async () => {

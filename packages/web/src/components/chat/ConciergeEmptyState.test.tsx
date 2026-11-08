@@ -82,7 +82,7 @@ describe("ConciergeTopicEmptyState", () => {
       "Keep track of work here: project progress, PRs and meetings",
     );
     expect(screen.getByRole("link", { name: "Ask in the main chat →" }).getAttribute("href")).toBe(
-      "/chat/concierge",
+      "/message",
     );
   });
 

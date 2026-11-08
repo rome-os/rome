@@ -11,7 +11,7 @@
 import { describe, it, expect } from "@rstest/core";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import {
   makeCustodyGrant,
   makeGatedWatch,

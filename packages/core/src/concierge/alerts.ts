@@ -45,6 +45,9 @@ export const MAX_DIGEST_LINES = 40;
 /** Lines a digest shows of one source and kind before counting the rest. */
 const DIGEST_LINES_PER_GROUP = 5;
 
+/** One owner's copy of an event: the same event followed by two people is two. */
+const keyOf = (event: FollowEvent) => `${event.owner ?? ""}\u0000${event.id}`;
+
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -55,7 +58,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export class FollowBatcher {
   private queue: FollowEvent[] = [];
   private seen = new Set<string>();
-  /** Failed tries per event id, for events put back after a failed batch. */
+  /** Failed tries per owner and event, for events put back after a failed batch. */
   private attempts = new Map<string, number>();
   /** After a failed batch, the next one waits a whole window from the failure. */
   private notBefore = 0;
@@ -69,10 +72,11 @@ export class FollowBatcher {
     },
   ) {}
 
-  /** Queues an event. Answers false for a repeat. */
+  /** Queues an event. Answers false for a repeat of the same event for the same owner. */
   add(event: FollowEvent): boolean {
-    if (this.seen.has(event.id)) return false;
-    this.seen.add(event.id);
+    const key = keyOf(event);
+    if (this.seen.has(key)) return false;
+    this.seen.add(key);
     if (this.seen.size > MAX_SEEN_IDS) {
       const [oldest] = this.seen;
       if (oldest !== undefined) this.seen.delete(oldest);
@@ -107,13 +111,14 @@ export class FollowBatcher {
     this.queue = [];
     try {
       await this.deps.flush(batch);
-      for (const event of batch) this.attempts.delete(event.id);
+      for (const event of batch) this.attempts.delete(keyOf(event));
     } catch (error) {
       const retry = batch.filter((event) => {
-        const tries = (this.attempts.get(event.id) ?? 0) + 1;
-        this.attempts.set(event.id, tries);
+        const key = keyOf(event);
+        const tries = (this.attempts.get(key) ?? 0) + 1;
+        this.attempts.set(key, tries);
         if (tries < BATCH_ATTEMPTS) return true;
-        this.attempts.delete(event.id);
+        this.attempts.delete(key);
         return false;
       });
       log.warn("follow batch failed", {
@@ -134,9 +139,10 @@ export class FollowBatcher {
 
 export interface ImportantDeliveryDeps {
   now(): number;
-  isEnabled(): Promise<boolean>;
-  /** When the quiet window `at` falls in ends, or null when `at` is not quiet. */
-  quietUntil(at: number): Promise<number | null>;
+  /** Whether Rome serves `owner` now. One who is not is told nothing, and their items stay owed. */
+  isServed?(owner: string): Promise<boolean>;
+  /** When `owner`'s quiet window `at` falls in ends, or null when `at` is not quiet for them. */
+  quietUntil(at: number, owner: string): Promise<number | null>;
   /** The important items owed, oldest first. */
   owed(): Promise<ConciergeFollowItemRow[]>;
   /** Marks items the hourly cap keeps from the Concierge; the digest still has them. */
@@ -147,14 +153,18 @@ export interface ImportantDeliveryDeps {
   groupOf?(item: ConciergeFollowItemRow): string;
 }
 
+/** Whose an item is: each owner has their own quiet hours and hourly cap. */
+const ownerOfItem = (item: ConciergeFollowItemRow) => item.ownerKey ?? "guardian";
+
 /**
  * Hands owed important items to the Concierge, one turn at a time, holding them
  * through quiet hours and sending them to the digest past the breaker.
  */
 export class ImportantDelivery {
-  /** Start times of recent important turns, oldest first. */
-  private turns: number[] = [];
-  private held = false;
+  /** Start times of each owner's recent important turns, oldest first. */
+  private turns = new Map<string, number[]>();
+  /** The owners whose items waited out their quiet hours. */
+  private held = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private again = false;
@@ -206,38 +216,45 @@ export class ImportantDelivery {
   }
 
   private async once(): Promise<void> {
-    if (!(await this.deps.isEnabled())) return;
     const owed = await this.deps.owed();
     if (owed.length === 0) return;
     const now = this.deps.now();
-    const quietEnd = await this.deps.quietUntil(now);
-    if (quietEnd !== null && quietEnd > now) {
-      this.held = true;
-      this.schedule(quietEnd);
-      return;
-    }
-    this.turns = this.turns.filter((start) => start > now - HOUR_MS);
     const groups = new Map<string, ConciergeFollowItemRow[]>();
     for (const item of owed) {
-      const key = this.deps.groupOf?.(item) ?? "";
+      const key = `${ownerOfItem(item)}\u0000${this.deps.groupOf?.(item) ?? ""}`;
       groups.set(key, [...(groups.get(key) ?? []), item]);
     }
-    const held = this.held;
-    this.held = false;
     // Each chat's turn stands alone: one that fails leaves its own items owed
-    // and tried again later, and the other chats still get theirs now.
+    // and tried again later, and the other chats still get theirs now. Quiet
+    // hours and the hourly cap are each owner's own.
     let failed = false;
+    let quietEnd: number | null = null;
+    const quietOf = new Map<string, number | null>();
+    const servedOf = new Map<string, boolean>();
     for (const group of groups.values()) {
-      if (this.turns.length >= IMPORTANT_TURNS_PER_HOUR) {
+      const owner = ownerOfItem(group[0]!);
+      if (!servedOf.has(owner)) servedOf.set(owner, (await this.deps.isServed?.(owner)) ?? true);
+      if (!servedOf.get(owner)) continue;
+      if (!quietOf.has(owner)) quietOf.set(owner, await this.deps.quietUntil(now, owner));
+      const ends = quietOf.get(owner) ?? null;
+      if (ends !== null && ends > now) {
+        this.held.add(owner);
+        quietEnd = quietEnd === null ? ends : Math.min(quietEnd, ends);
+        continue;
+      }
+      const turns = (this.turns.get(owner) ?? []).filter((start) => start > now - HOUR_MS);
+      this.turns.set(owner, turns);
+      if (turns.length >= IMPORTANT_TURNS_PER_HOUR) {
         log.warn("important breaker open: items wait for the digest", {
           items: group.length,
-          turnsLastHour: this.turns.length,
+          turnsLastHour: turns.length,
         });
         await this.deps.skip(group);
         continue;
       }
       const items = group.slice(0, MAX_IMPORTANT_LINES);
-      this.turns.push(now);
+      const held = this.held.has(owner);
+      turns.push(now);
       try {
         await this.deps.send(items, held);
       } catch (error) {
@@ -251,7 +268,9 @@ export class ImportantDelivery {
       // More than one turn holds waits for the next run.
       if (group.length > items.length) this.again = true;
     }
+    for (const [owner, ends] of quietOf) if (ends === null || ends <= now) this.held.delete(owner);
     if (failed) this.schedule(this.deps.now() + RETRY_MS);
+    else if (quietEnd !== null) this.schedule(quietEnd);
   }
 }
 

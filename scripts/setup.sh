@@ -92,6 +92,11 @@ collect_config() {
 
 generate_env() {
   local env_file="$ROME_DIR/.env"
+  # A re-run keeps the existing file, so the JWT secret and any added settings stay.
+  if [ -f "$env_file" ]; then
+    info "Keeping existing $env_file"
+    return
+  fi
   info "Generating $env_file"
 
   cat >"$env_file" <<EOF
@@ -129,19 +134,24 @@ services:
   rome:
     image: $ROME_IMAGE
     ports:
-      - "$WEB_PORT:3000"
+      - "$WEB_PORT:8080"
     volumes:
       - app:/app
       - $ROME_DIR/home/user:/home/user
       - rome-home:/home/rome
       - $ROME_DIR/ssh-host-keys:/etc/ssh/ssh_host_keys
+      # The signer's socket only. The key volume is never mounted here.
+      - signer-sock:/run/rome-signer:ro
     env_file: .env
     environment:
       - NODE_ENV=production
       - WEB_HOST=0.0.0.0
       - TS_HOSTNAME=$ts_hostname
       - ROME_DOCKER_USER_MODE=$ROME_DOCKER_USER_MODE
+      - ROME_SIGNER_SOCKET=/run/rome-signer/signer.sock
     restart: unless-stopped
+    depends_on:
+      - signer
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:4141/api/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
       interval: 30s
@@ -149,9 +159,33 @@ services:
       retries: 3
       start_period: 30s
 
+  # Holds the instance's signing key and issues the short-lived tokens Rome
+  # uses to authenticate to Rome Cloud. It runs from the same image, has no
+  # network, and shares only its socket with the rome service.
+  signer:
+    image: $ROME_IMAGE
+    entrypoint: ["node", "/opt/rome/packages/signer/dist/main.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    environment:
+      - SIGNER_AUDIENCE=\${PANTHEON_BASE_ORIGIN:-https://romeos.cc}
+      - SIGNER_KEY_DIR=/keys
+      - SIGNER_SOCKET=/run/rome-signer/signer.sock
+    volumes:
+      - signer-key:/keys
+      - signer-sock:/run/rome-signer
+    restart: unless-stopped
+
 volumes:
   app:
   rome-home:
+  signer-key:
+  signer-sock:
 EOF
 }
 

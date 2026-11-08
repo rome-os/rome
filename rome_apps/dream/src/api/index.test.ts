@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { RomeAppApiRequest, RomeAppCaller, RomeAppContext } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
+import { createTestDb, type TestDb } from "../../../../packages/core/src/test/db.js";
 import { createRunsRepository } from "../db/repositories/runs.js";
 import type { RunDetail, RunListItem } from "../lib/run-view.js";
 import { createApiHandler } from "./index.js";

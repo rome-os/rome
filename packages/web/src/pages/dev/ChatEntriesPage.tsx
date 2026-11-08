@@ -144,6 +144,42 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
     ]),
   },
   {
+    id: "question-card-follow",
+    title: "QuestionCard — follow defaults and descriptions",
+    note: "Selected defaults, descriptions and editable text at phone and desktop widths.",
+    block: askQuestion("dev-ask-follow", [
+      {
+        id: "kinds",
+        question: "Which repository events?",
+        type: "multi",
+        options: ["Review requests", "Comments, mentions", "New issues"],
+        defaults: ["Review requests", "Comments, mentions"],
+        optionDescriptions: {
+          "Review requests": "Hear when a pull request needs a review.",
+          "Comments, mentions": "Hear about comments on pull requests and issues.",
+          "New issues": "Hear when someone opens an issue in this repository.",
+        },
+        optional: true,
+      },
+      {
+        id: "bots",
+        question: "Include bots?",
+        type: "single",
+        options: ["Yes", "No"],
+        defaults: ["No"],
+        optionDescriptions: { Yes: "Include events from bots.", No: "Leave out events from bots." },
+      },
+      {
+        id: "people",
+        question: "Ignore which logins?",
+        type: "text",
+        defaultText: "",
+        optional: true,
+      },
+      { id: "preference", question: "Anything else?", type: "text", optional: true },
+    ]),
+  },
+  {
     id: "question-card-text",
     title: "QuestionCard — free-text question",
     note: "The Textarea branch, and the one question kind that may be left blank without blocking Send.",

@@ -72,7 +72,7 @@ x-rome-volumes: &rome-volumes
   - type: bind
     source: ${ROME_HOST_PNPM_STORE:-/var/empty/rome-pnpm-store-unset}
     target: /pnpm-store
-  # The signer's socket, when `ROME_DEV_SIGNER=1` starts one. Empty otherwise.
+  # The signer's socket. Empty when `ROME_DEV_SIGNER=0` leaves the signer off.
   - type: volume
     source: signer-sock
     target: /run/rome-signer
@@ -165,7 +165,7 @@ x-rome-env: &rome-env
   # forcing the real browser consent → enroll round trip. Empty by default so the
   # fast loop / CI keep their seeded token.
   ROME_DEV_SKIP_TOKEN_SEED: ${ROME_DEV_SKIP_TOKEN_SEED:-}
-  # Set by dev-up.sh when ROME_DEV_SIGNER=1. Empty keeps the legacy token path.
+  # Set by dev-up.sh unless ROME_DEV_SIGNER=0. Empty keeps the legacy token path.
   ROME_SIGNER_SOCKET: ${ROME_DEV_SIGNER_SOCKET:-}
 
 # ---------------------------------------------------------------------------
@@ -248,9 +248,10 @@ services:
       rome-sync:
         condition: service_healthy
 
-  # Opt-in signer (`ROME_DEV_SIGNER=1 pnpm dev:all`): runs the workspace's
-  # built packages/signer like production runs its own container, so local
-  # development can exercise the signed-token path. Not started by default.
+  # The signer: runs the workspace's built packages/signer like production runs
+  # its own container, so local development uses the signed-token path. The
+  # `signer` profile is how dev-up.sh turns it off (`ROME_DEV_SIGNER=0`); pass
+  # `--profile signer` to compose commands that should include it.
   signer:
     profiles: ["signer"]
     image: rome-dev:${ROME_WORKTREE_SLUG:-dev}
