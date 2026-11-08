@@ -1,4 +1,4 @@
-import type { ChatRef, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;
@@ -6,8 +6,6 @@ export interface ActiveAgentTurnStream {
   chatId: string;
   turnId: string;
   agentName: string;
-  conversation?: ChatRef;
-  initiatorId?: string;
   startedAt: string;
   finished: boolean;
   messages(): readonly StreamAgentEvent[];
@@ -28,12 +26,9 @@ export interface AgentTurnStreamRegistry {
     chatId: string;
     turnId: string;
     agentName: string;
-    conversation?: ChatRef;
-    initiatorId?: string;
     interrupt?(reason?: string): Promise<void>;
   }): MutableAgentTurnStream;
   get(turnId: string): ActiveAgentTurnStream | undefined;
-  getActiveByConversation(ref: ChatRef): ActiveAgentTurnStream | undefined;
   listBySession(sessionId: string): ActiveAgentTurnStream[];
   /** Calls `listener` with the session id whenever one of its turns starts or finishes. */
   onSessionChange(listener: (sessionId: string) => void): () => void;
@@ -41,13 +36,8 @@ export interface AgentTurnStreamRegistry {
 
 const FINISHED_STREAM_TTL_MS = 30_000;
 
-function conversationKey(ref: ChatRef): string {
-  return `${ref.connectionId}\u0000${ref.chatId}`;
-}
-
 export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
   const streams = new Map<string, MutableAgentTurnStream>();
-  const activeByConversation = new Map<string, MutableAgentTurnStream>();
   const sessionListeners = new Set<(sessionId: string) => void>();
   const notifySession = (sessionId: string) => {
     for (const listener of sessionListeners) listener(sessionId);
@@ -69,8 +59,6 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
         chatId: input.chatId,
         turnId: input.turnId,
         agentName: input.agentName,
-        conversation: input.conversation,
-        initiatorId: input.initiatorId,
         startedAt: new Date().toISOString(),
         finished: false,
         messages: () => values,
@@ -88,12 +76,6 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
         finish() {
           if (stream.finished) return;
           stream.finished = true;
-          if (
-            input.conversation &&
-            activeByConversation.get(conversationKey(input.conversation)) === stream
-          ) {
-            activeByConversation.delete(conversationKey(input.conversation));
-          }
           resolveFinished();
           notifySession(input.sessionId);
           setTimeout(() => {
@@ -102,20 +84,12 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
         },
       };
       streams.set(input.turnId, stream);
-      if (input.conversation) {
-        activeByConversation.set(conversationKey(input.conversation), stream);
-      }
       notifySession(input.sessionId);
       return stream;
     },
 
     get(turnId) {
       return streams.get(turnId);
-    },
-
-    getActiveByConversation(ref) {
-      const stream = activeByConversation.get(conversationKey(ref));
-      return stream && !stream.finished ? stream : undefined;
     },
 
     listBySession(sessionId) {

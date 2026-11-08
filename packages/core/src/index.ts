@@ -220,6 +220,7 @@ import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-foll
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
+import { createChatTurns } from "./core/chat-turns.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
@@ -1045,6 +1046,7 @@ async function main() {
   }
 
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
+  const chatTurns = createChatTurns();
   const dashboardSessions = new WebChatDashboardSessions(webchatRepo);
   const subagentCalls = createSubagentCalls({
     dashboard: dashboardSessions,
@@ -1053,6 +1055,7 @@ async function main() {
   });
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
+      chatTurns,
       turns: agentTurnStreamRegistry,
       isGuardian: async (service, senderId) => {
         const platform = stopSenderPlatform(input.ref, service, {
@@ -1186,6 +1189,7 @@ async function main() {
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
+    (chat, turn) => chatTurns.start(chat, turn),
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 

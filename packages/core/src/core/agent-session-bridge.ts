@@ -11,6 +11,7 @@ import { walkToRoot } from "../agent/index.js";
 import { parseSessionKey } from "./agent-session-key.js";
 import type {
   ChatId,
+  ChatRef,
   CurrentActionContext,
   MessageReplyReference,
   RomeSessionRef,
@@ -87,6 +88,15 @@ export interface AgentSessionChildBridge {
 }
 
 /**
+ * Told that a turn started in a connected account's chat, with the platform
+ * user whose message started it. The returned call is told when it ends.
+ */
+export type TurnStartedInChat = (
+  chat: ChatRef,
+  turn: { turnId: string; initiatorId?: string },
+) => () => void;
+
+/**
  * Bridge wires `AgentSessionManager` into a worker child's IPC channel.
  * Constructed once in main; call `attach(rpc, child)` for each forked worker.
  *
@@ -117,6 +127,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private openingFor: SessionOpeningFor = sessionOpeningFor({
       channelSurface: () => null,
     }),
+    /** Told when a turn starts in a connected account's chat. Absent, nobody is told. */
+    private turnStartedInChat?: TurnStartedInChat,
   ) {}
 
   /**
@@ -338,6 +350,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // Drain the per-turn events into the IPC stream.
         void (async () => {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
+          let endChatTurn: (() => void) | null = null;
           try {
             for await (const msg of handle.events()) {
               // Recorded first, so a turn that opens its conversation has its
@@ -357,17 +370,17 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                     chatId: romeSessionId,
                     turnId: msg.turnId,
                     agentName: session.key.agentName,
-                    ...(thread?.connectionId
-                      ? {
-                          conversation: {
-                            connectionId: thread.connectionId,
-                            chatId: thread.threadId as ChatId,
-                          },
-                        }
-                      : {}),
-                    ...(thread?.channelUserId ? { initiatorId: thread.channelUserId } : {}),
                     interrupt,
                   });
+                  if (thread?.connectionId && this.turnStartedInChat) {
+                    endChatTurn = this.turnStartedInChat(
+                      { connectionId: thread.connectionId, chatId: thread.threadId as ChatId },
+                      {
+                        turnId: msg.turnId,
+                        ...(thread.channelUserId ? { initiatorId: thread.channelUserId } : {}),
+                      },
+                    );
+                  }
                 } catch (err) {
                   log.warn("failed to register agent turn stream", {
                     turnId: handle.id,
@@ -388,6 +401,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           } finally {
             workerWatch.release();
             liveStream?.finish();
+            endChatTurn?.();
           }
         })();
 
