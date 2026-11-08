@@ -432,3 +432,178 @@ describe("DashboardAccessStore", () => {
     expect(await store.read()).toEqual({ emails: ["b@example.com"], revision: 6 });
   });
 });
+
+// A fake Rome Cloud with the agreed contract: it stores a list whose revision
+// is at least the stored one (an equal revision replaces it) and answers
+// `{revision, applied, unmatched}`. `accounts` are the emails with a Rome Cloud
+// account. `hold` keeps the next send in flight until the test releases it.
+function appliedCloud(opts: { revision?: number; emails?: string[]; accounts?: string[] } = {}) {
+  const state = { revision: opts.revision ?? -1, emails: opts.emails ?? [] };
+  const accounts = new Set(opts.accounts ?? []);
+  const sent: Array<{ emails: string[]; revision: number }> = [];
+  let release: (() => void) | null = null;
+  let holdNext = false;
+  const failures: number[] = [];
+  const fetchImpl = (async (_input: URL | RequestInfo, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { emails: string[]; revision: number };
+    sent.push(body);
+    const failure = failures.shift();
+    // Rome Cloud decides when the request arrives; a held send only answers late.
+    const applied = !failure && body.revision >= state.revision;
+    if (applied) Object.assign(state, body);
+    const unmatched = applied ? body.emails.filter((email) => !accounts.has(email)) : [];
+    if (holdNext) {
+      holdNext = false;
+      await new Promise<void>((resolve) => (release = resolve));
+    }
+    if (failure) return new Response("{}", { status: failure });
+    return new Response(JSON.stringify({ revision: state.revision, applied, unmatched }), {
+      status: 200,
+    });
+  }) as typeof fetch;
+  return {
+    state,
+    sent,
+    accounts,
+    fetchImpl,
+    failNext: (status: number) => failures.push(status),
+    hold: () => (holdNext = true),
+    release: () => release?.(),
+  };
+}
+
+function linkedSync(cloud: { fetchImpl: typeof fetch }, store?: DashboardAccessStore) {
+  return new VisitorAllowListSync({
+    getEnrollmentId: () => "enrollment-1",
+    getToken: () => "inst-token",
+    getOrigin: () => ORIGIN,
+    onLinkChanged: () => () => {},
+    raiseRevisionPast: store ? (floor) => store.raisePast(floor) : undefined,
+    fetchImpl: cloud.fetchImpl,
+    retryDelaysMs: [0],
+    resyncDelayMs: 0,
+  });
+}
+
+describe("VisitorAllowListSync — applied contract", () => {
+  const testDb = createTestDb();
+  afterAll(() => testDb.close());
+
+  async function storeAt(revision: number, emails: string[]): Promise<DashboardAccessStore> {
+    const settingsRepo = new SettingsRepository(testDb.db);
+    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { cloudEmailAccess: emails, revision });
+    return new DashboardAccessStore(settingsRepo);
+  }
+
+  it("ends with Rome Cloud holding the newest list when a save lands during a boot send after a reset", async () => {
+    // Rome Cloud holds revision 1. The instance database was reset to 0.
+    const cloud = appliedCloud({ revision: 1, emails: ["old@example.com"] });
+    const store = await storeAt(0, ["a@example.com"]);
+    const sync = linkedSync(cloud, store);
+
+    cloud.hold();
+    await syncStoredVisitorAllowList(store, sync);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sync.push(await store.save({ cloudEmailAccess: ["c@example.com"] }));
+    cloud.release();
+    await settle(sync);
+
+    expect(cloud.state).toEqual({ revision: 1, emails: ["c@example.com"] });
+    // Delivered: the same list is not sent again.
+    const sends = cloud.sent.length;
+    sync.push(await store.read());
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(sends);
+  });
+
+  it("delivers a save whose revision equals the one Rome Cloud holds after a restore", async () => {
+    // Rome Cloud holds a different list at 5. The instance was restored to 4,
+    // its boot send failed, and the guardian then saves revision 5.
+    const cloud = appliedCloud({ revision: 5, emails: ["a@example.com"] });
+    const store = await storeAt(4, ["b@example.com"]);
+    const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
+      getToken: () => "inst-token",
+      getOrigin: () => ORIGIN,
+      onLinkChanged: () => () => {},
+      raiseRevisionPast: (floor) => store.raisePast(floor),
+      fetchImpl: cloud.fetchImpl,
+      retryDelaysMs: [60_000],
+    });
+
+    cloud.failNext(503);
+    await syncStoredVisitorAllowList(store, sync);
+    await settle(sync);
+    sync.push(await store.save({ cloudEmailAccess: ["c@example.com"] }));
+    await settle(sync);
+    sync.stop();
+
+    expect(cloud.state).toEqual({ revision: 5, emails: ["c@example.com"] });
+  });
+
+  it("raises past Rome Cloud's revision and sends again when Rome Cloud did not apply the list", async () => {
+    const cloud = appliedCloud({ revision: 7, emails: ["x@example.com"] });
+    const store = await storeAt(2, ["a@example.com"]);
+    const sync = linkedSync(cloud, store);
+
+    await syncStoredVisitorAllowList(store, sync);
+    await settle(sync);
+
+    expect(cloud.sent.map((list) => list.revision)).toEqual([2, 8]);
+    expect(cloud.state).toEqual({ revision: 8, emails: ["a@example.com"] });
+    expect((await store.read()).revision).toBe(8);
+  });
+
+  it("sends the list once more when an invited email without an account signs in, and only then", async () => {
+    const cloud = appliedCloud({ accounts: ["visitor@example.com"] });
+    const sync = linkedSync(cloud);
+
+    sync.push({
+      emails: ["visitor@example.com", "invitee@example.com", "invitee2@example.com"],
+      revision: 3,
+    });
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(1);
+
+    // A visitor Rome Cloud already matched: nothing to resend.
+    sync.visitorSignedIn("visitor@example.com");
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(1);
+
+    // Both invitees sign up and sign in at once: one resend.
+    cloud.accounts.add("invitee@example.com");
+    cloud.accounts.add("invitee2@example.com");
+    sync.visitorSignedIn("Invitee@Example.com");
+    sync.visitorSignedIn("invitee@example.com");
+    sync.visitorSignedIn("invitee2@example.com");
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(2);
+    expect(cloud.sent[1]).toEqual(cloud.sent[0]);
+
+    // Rome Cloud now matches them, so later sign-ins send nothing.
+    sync.visitorSignedIn("invitee@example.com");
+    await settle(sync);
+    expect(cloud.sent).toHaveLength(2);
+  });
+
+  it("resends after a sign-in that lands while a send Rome Cloud answered before the sign-up is in flight", async () => {
+    const cloud = appliedCloud();
+    const sync = linkedSync(cloud);
+    sync.push({ emails: ["invitee@example.com"], revision: 1 });
+    await settle(sync);
+
+    // A save goes out and Rome Cloud processes it before the invitee signs up.
+    cloud.hold();
+    sync.push({ emails: ["invitee@example.com", "lin@example.com"], revision: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The invitee signs up and signs in while that answer is still on its way.
+    cloud.accounts.add("invitee@example.com");
+    sync.visitorSignedIn("invitee@example.com");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    cloud.release();
+    await settle(sync);
+
+    expect(cloud.sent.map((list) => list.revision)).toEqual([1, 2, 2]);
+    expect(cloud.state.revision).toBe(2);
+  });
+});
