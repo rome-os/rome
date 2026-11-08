@@ -240,3 +240,121 @@ final class Counter: @unchecked Sendable {
         #expect(UpdateGate.progress(version: "1.1.190", target: "1.1.190") == .almostDone)
     }
 }
+
+/// The minimum version decides between the blocking page and the offer.
+@MainActor
+@Suite struct SoftUpdateTests {
+    private func defaults() -> UserDefaults { UserDefaults(suiteName: "SoftUpdateTests-\(UUID().uuidString)")! }
+
+    private func updater(_ defaults: UserDefaults) -> InstanceUpdater {
+        InstanceUpdater(store: PendingUpgradeStore(defaults: defaults), banners: UpdateBannerStore(defaults: defaults))
+    }
+
+    @Test func theMinimumVersionReadsReleases() {
+        let floor = UpdateGate.minimumInstanceVersion
+        #expect(UpdateGate.isSupported(floor))
+        #expect(UpdateGate.isSupported("v\(floor)"))
+        #expect(UpdateGate.isSupported("1.1.185", minimum: "1.1.185"))
+        #expect(!UpdateGate.isSupported("1.1.184", minimum: "1.1.185"))
+        #expect(!UpdateGate.isSupported("1.0.999", minimum: "1.1.185"))
+        #expect(UpdateGate.isSupported("1.2.0", minimum: "1.1.185"))
+        #expect(UpdateGate.isSupported("1.1.185-rc.1", minimum: "1.1.185"))
+        // Unknown or unreadable versions are never held against the instance.
+        #expect(UpdateGate.isSupported(nil))
+        #expect(UpdateGate.isSupported("dev"))
+    }
+
+    @Test func behindButSupportedIsOnlyOffered() async {
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        let updater = updater(defaults())
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(!updater.blocking)
+        #expect(updater.offered == "1.1.190")
+        #expect(updater.showsBanner)
+
+        updater.openPage()
+        #expect(updater.blocking)
+        #expect(updater.canClose)
+        #expect(!updater.showsBanner)
+        updater.closePage()
+        #expect(!updater.blocking)
+        #expect(updater.showsBanner)
+    }
+
+    @Test func belowTheMinimumBlocksWithNoWayPast() async {
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.100"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        let updater = updater(defaults())
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(updater.blocking)
+        #expect(updater.belowMinimum)
+        #expect(!updater.canClose)
+        #expect(updater.offered == nil)
+        #expect(!updater.showsBanner)
+        updater.closePage()
+        #expect(updater.blocking)
+    }
+
+    @Test func aClosedBannerStaysClosedForThatRelease() async {
+        let store = defaults()
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        let first = updater(store)
+        await first.attach(backend: backend, instanceID: "i1")
+        first.dismissBanner()
+        #expect(!first.showsBanner)
+        // The drawer's line stays while the instance is behind.
+        #expect(first.offered == "1.1.190")
+
+        // Next launch: still closed for this release, not for another instance.
+        let again = updater(store)
+        await again.attach(backend: backend, instanceID: "i1")
+        #expect(!again.showsBanner)
+        let other = updater(store)
+        await other.attach(backend: backend, instanceID: "i2")
+        #expect(other.showsBanner)
+
+        // A newer release shows it once more.
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.191"), upgradeAvailable: true))
+        let newer = updater(store)
+        await newer.attach(backend: backend, instanceID: "i1")
+        #expect(newer.showsBanner)
+    }
+
+    @Test func aFailedOfferedUpdateCanBeClosed() async {
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
+        let updater = updater(defaults())
+        await updater.attach(backend: backend, instanceID: "i1")
+        updater.openPage()
+        await updater.updateNow()
+        guard case .failed = updater.state else { Issue.record("not failed"); return }
+        #expect(updater.blocking)
+        #expect(updater.canClose)
+        updater.closePage()
+        #expect(!updater.blocking)
+        #expect(updater.offered == "1.1.190")
+    }
+
+    /// A visitor cannot update: their workspace is never checked, so no page,
+    /// banner or drawer line.
+    @Test func visitorsAreNotOffered() async {
+        let backend = FakeBackend()
+        let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-soft-\(UUID().uuidString)/Drafts"), instance: "t")
+        let guardianSpace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
+        backend.identity = .success(AccountIdentity(name: "Owner", isGuardian: true))
+        await guardianSpace.readRole()
+        #expect(AppModel.offersUpdates(to: guardianSpace))
+
+        let visitorBackend = FakeBackend()
+        visitorBackend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
+        let visitorSpace = Workspace(backend: visitorBackend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
+        await visitorSpace.readRole()
+        #expect(!AppModel.offersUpdates(to: visitorSpace))
+        // What a visitor's never-attached updater shows.
+        let idle = updater(defaults())
+        #expect(!idle.blocking && idle.offered == nil && !idle.showsBanner)
+    }
+}

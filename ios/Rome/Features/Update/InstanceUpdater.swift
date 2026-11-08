@@ -1,11 +1,36 @@
 import Foundation
 import Observation
 
-/// The app always requires the instance's latest release. The instance API
-/// stays backward compatible, so the app never pins an instance version: it
-/// only asks whether the instance is behind, and if so, has it updated.
+/// An instance below `minimumInstanceVersion` lacks an API the app calls:
+/// the update page covers the app until it is updated. A newer release for
+/// an instance at or above it is only offered, in a banner and the drawer.
 /// These are the rules, kept free of state so tests can read them.
 enum UpdateGate {
+    /// The oldest instance release with every API the app calls. Raise it
+    /// only when the app starts calling an API a newer release brought.
+    static let minimumInstanceVersion = "1.1.185"
+
+    /// Whether the app works with an instance on `version`. An unknown or
+    /// unreadable version is never held against it.
+    static func isSupported(_ version: String?, minimum: String = minimumInstanceVersion) -> Bool {
+        guard let version, let have = numbers(version), let need = numbers(minimum) else { return true }
+        for index in 0..<max(have.count, need.count) {
+            let a = index < have.count ? have[index] : 0, b = index < need.count ? need[index] : 0
+            if a != b { return a > b }
+        }
+        return true
+    }
+
+    /// "v1.1.185" or "1.1.185-rc.1" as [1, 1, 185]; nil when it is not a version.
+    private static func numbers(_ version: String) -> [Int]? {
+        var text = version.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("v") { text.removeFirst() }
+        let core = text.prefix { $0.isNumber || $0 == "." }
+        let parts = core.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard !parts.isEmpty, !parts.contains(nil) else { return nil }
+        return parts.compactMap { $0 }
+    }
+
     /// How long Rome Cloud may take to roll out a new release.
     static let upgradeTimeout: TimeInterval = 40 * 60
     static let pollInterval: Duration = .seconds(5)
@@ -136,6 +161,16 @@ struct PendingUpgrade: Codable, Equatable {
     var from: String?
 }
 
+/// The latest release whose banner the guardian closed, per instance: a
+/// newer release shows the banner again.
+struct UpdateBannerStore {
+    var defaults: UserDefaults = .standard
+
+    func dismissed(_ instanceID: String) -> String? { defaults.string(forKey: key(instanceID)) }
+    func dismiss(_ version: String, for instanceID: String) { defaults.set(version, forKey: key(instanceID)) }
+    private func key(_ instanceID: String) -> String { "updateBannerDismissed.\(instanceID)" }
+}
+
 struct PendingUpgradeStore {
     var defaults: UserDefaults = .standard
 
@@ -155,7 +190,9 @@ struct PendingUpgradeStore {
 }
 
 /// Whether the open instance is on its latest release, and the upgrade that
-/// brings it there. While `blocking`, the update page covers the app.
+/// brings it there. While `blocking`, the update page covers the app: always
+/// below the minimum version and while an update runs, otherwise only once
+/// the guardian opens it.
 @MainActor
 @Observable
 final class InstanceUpdater {
@@ -183,10 +220,46 @@ final class InstanceUpdater {
     /// While updating: what the last look at the instance found.
     private(set) var progress: UpdateGate.Progress = .downloading
 
+    /// The guardian opened the update page from the banner or the drawer.
+    private(set) var presented = false
+    /// The release the guardian closed the banner for, on this instance.
+    private(set) var dismissedVersion: String?
+    /// The instance's release when the check last found it behind.
+    private var behindOn: String?
+
     var blocking: Bool {
         switch state {
-        case .required, .starting, .updating, .failed: return true
+        case .starting, .updating: return true
+        case .required, .failed: return belowMinimum || presented
         case .idle, .upToDate, .unknown: return false
+        }
+    }
+
+    /// Behind and missing an API the app calls: no way past the page.
+    var belowMinimum: Bool {
+        switch state {
+        case .required, .failed: return !UpdateGate.isSupported(behindOn)
+        default: return false
+        }
+    }
+
+    /// A newer release this instance can do without: offered, never forced.
+    var offered: String? {
+        guard case .required(_, let latest, _) = state, !belowMinimum else { return nil }
+        return latest
+    }
+
+    /// The banner: offered, not open, and not closed for this release.
+    var showsBanner: Bool {
+        guard let offered, !presented else { return false }
+        return dismissedVersion != offered
+    }
+
+    /// The page can be closed: it was only offered, and nothing is running.
+    var canClose: Bool {
+        switch state {
+        case .required, .failed: return !belowMinimum
+        default: return false
         }
     }
 
@@ -204,14 +277,42 @@ final class InstanceUpdater {
     /// used while it restarts with no backend open.
     private var reconnect: (() async -> Void)?
     private let store: PendingUpgradeStore
+    private let banners: UpdateBannerStore
     private var generation = 0
     private var poll: Task<Void, Never>?
     private var reconnecting = false
     /// Probes since the last check while waiting; a check runs every few.
     private var probesSinceCheck = 0
 
-    init(store: PendingUpgradeStore = PendingUpgradeStore()) {
+    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore()) {
         self.store = store
+        self.banners = banners
+    }
+
+    // MARK: Offering
+
+    func openPage() {
+        guard offered != nil || canClose else { return }
+        presented = true
+    }
+
+    /// Back to the app; a failed start goes back to being offered.
+    func closePage() {
+        guard canClose else { return }
+        presented = false
+        if case .failed(let failure) = state {
+            switch failure {
+            case .start(let current, let latest, _): state = .required(current: current, latest: latest, latestChanged: false)
+            case .timedOut(let target): state = .required(current: behindOn, latest: target, latestChanged: false)
+            }
+        }
+    }
+
+    /// Closes the banner for this release; a newer one shows it again.
+    func dismissBanner() {
+        guard let offered, let instanceID else { return }
+        banners.dismiss(offered, for: instanceID)
+        dismissedVersion = offered
     }
 
     // MARK: Attaching
@@ -221,6 +322,7 @@ final class InstanceUpdater {
         reset()
         self.backend = backend
         self.instanceID = instanceID
+        dismissedVersion = banners.dismissed(instanceID)
         await check()
     }
 
@@ -253,6 +355,9 @@ final class InstanceUpdater {
         instanceID = nil
         reconnect = nil
         state = .idle
+        presented = false
+        dismissedVersion = nil
+        behindOn = nil
     }
 
     // MARK: Checking
@@ -312,7 +417,9 @@ final class InstanceUpdater {
         switch verdict {
         case .upToDate: state = .upToDate
         case .unknown(let reason): state = .unknown(reason: reason)
-        case .required(let current, let latest): state = .required(current: current, latest: latest, latestChanged: latestChanged)
+        case .required(let current, let latest):
+            behindOn = current
+            state = .required(current: current, latest: latest, latestChanged: latestChanged)
         }
     }
 
@@ -461,6 +568,7 @@ final class InstanceUpdater {
         poll = nil
         self.state = state
         self.progress = progress
+        if case .required(let current, _, _) = state { behindOn = current }
     }
     #endif
 }

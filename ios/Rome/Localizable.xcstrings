@@ -97,6 +97,16 @@
         }
       }
     },
+    "A new version of Rome is available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 有新版本，建议更新"
+          }
+        }
+      }
+    },
     "A newer release just came out." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1031,6 +1041,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新的话题聊天"
+          }
+        }
+      }
+    },
+    "New version available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版本可用"
           }
         }
       }
@@ -2067,12 +2087,22 @@
         }
       }
     },
-    "The latest is %@. The app needs the latest Rome." : {
+    "The latest is %@." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最新版本是 %@。App 需要最新的 Rome。"
+            "value" : "最新版本是 %@。"
+          }
+        }
+      }
+    },
+    "The latest is %@. This app needs a newer Rome." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新版本是 %@。App 需要更新的 Rome。"
           }
         }
       }
@@ -2113,6 +2143,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个 Rome 还没准备好。"
+          }
+        }
+      }
+    },
+    "This Rome needs an update from its owner" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 Rome 需要所有者先更新"
           }
         }
       }
@@ -2283,6 +2323,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在回复"
+          }
+        }
+      }
+    },
+    "Update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
           }
         }
       }
@@ -2475,12 +2525,22 @@
         }
       }
     },
-    "Your Rome is on %@. The latest is %@. The app needs the latest Rome." : {
+    "Your Rome is on %@. The latest is %@." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的 Rome 是 %@，最新版本是 %@。App 需要最新的 Rome。"
+            "value" : "你的 Rome 是 %@，最新版本是 %@。"
+          }
+        }
+      }
+    },
+    "Your Rome is on %@. The latest is %@. This app needs a newer Rome." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 是 %@，最新版本是 %@。App 需要更新的 Rome。"
           }
         }
       }

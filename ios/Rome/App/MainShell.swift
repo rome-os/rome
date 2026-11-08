@@ -83,6 +83,10 @@ struct MainShell: View {
                     onSettings: {
                         settingsPath = []
                         showSettings = true
+                    },
+                    onUpdate: {
+                        closeDrawer()
+                        model.update.openPage()
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
@@ -207,9 +211,15 @@ struct MainShell: View {
                 }
                 .padding(.top, 58)
                 .transition(.move(edge: .top).combined(with: .opacity))
+            } else if model.update.showsBanner, !drawerOpen {
+                // The drawer has its own line for it.
+                UpdateBanner(onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
+                    .padding(.top, 58)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: model.update.showsBanner && !drawerOpen)
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in
             switch command {

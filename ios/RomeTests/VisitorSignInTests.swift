@@ -182,6 +182,16 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         #expect(CloudAuth.completeError(status: 401, body: Data(#"{"error":"not_owner"}"#.utf8)) == .sessionRejected)
     }
 
+    /// A Rome from before the visitor sign-in says so, instead of claiming lost access.
+    @Test func anOlderRomeAsksItsOwnerToUpdate() async {
+        visitorRoutes()
+        RouteProtocol.routes["/api/auth/visitor/native/start"] = [.init(status: 401, body: #"{"error":"Unauthorized"}"#)]
+        await #expect(throws: AuthError.instanceTooOld) { try await auth().session(for: Self.visitorInstance) }
+        #expect(CloudAuth.visitorStartError(status: 404, body: Data("404 Not Found".utf8)) == .instanceTooOld)
+        #expect(CloudAuth.visitorStartError(status: 404, body: Data(#"{"error":"dashboard_not_cloud_email_restricted"}"#.utf8)) == .accessRevoked)
+        #expect(CloudAuth.visitorStartError(status: 503, body: Data()) == .network)
+    }
+
     /// Sign-out forgets visitor sessions with the rest.
     @Test func signOutForgetsVisitorSessions() async throws {
         visitorRoutes()

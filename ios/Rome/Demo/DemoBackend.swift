@@ -47,11 +47,13 @@ final class DemoBackend: RomeBackend {
     private var running: [String: String] = [:]
     private var counter = 0
 
-    /// `updateRequired`: the full data on a Rome one release behind, so the
+    /// `updateRequired`: the full data on a Rome below the app's minimum, so the
     /// update page shows; "Update now" brings it up to date after a few seconds.
     /// `manyApps`: the full data with a screenful of apps.
     /// `visitor`: the full demo, seen by a dashboard visitor of the shared Rome.
-    enum Variant { case full, empty, conciergeOff, updateRequired, manyApps, visitor }
+    /// `updateOffered`: a Rome behind its latest release but new enough for
+    /// the app, which offers the update instead of requiring it.
+    enum Variant { case full, empty, conciergeOff, updateRequired, updateOffered, manyApps, visitor }
     private let variant: Variant
 
     init(variant: Variant = .full) {
@@ -275,7 +277,7 @@ final class DemoBackend: RomeBackend {
             InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
         ]
         switch variant {
-        case .full, .visitor:
+        case .full, .visitor, .updateOffered:
             return few
         case .manyApps:
             let names = ["记账本", "Recipes", "Workout plan", "家庭相册", "Plant care", "Budget", "单词卡片", "Meal planner",
@@ -325,8 +327,15 @@ final class DemoBackend: RomeBackend {
 
     // MARK: Updates
 
-    static let releasedVersion = "0.42.0"
-    private lazy var runningVersion = variant == .updateRequired ? "0.41.3" : Self.releasedVersion
+    static let releasedVersion = "1.1.190"
+    /// Below the app's minimum, and between it and the latest.
+    static let tooOldVersion = "1.1.120"
+    static let offeredFromVersion = "1.1.186"
+    private lazy var runningVersion = switch variant {
+    case .updateRequired: Self.tooOldVersion
+    case .updateOffered: Self.offeredFromVersion
+    default: Self.releasedVersion
+    }
     private var upgradeDoneAt: Date?
 
     func upgradeCheck() async throws -> UpgradeCheck {

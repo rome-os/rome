@@ -8,6 +8,8 @@ struct DrawerView: View {
     let onSection: (MainSection) -> Void
     let onNewTopic: () -> Void
     let onSettings: () -> Void
+    /// Opens the update page from the line shown while the Rome is behind.
+    let onUpdate: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -74,6 +76,12 @@ struct DrawerView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: .infinity)
+
+            // A guardian's Rome behind its latest release; a visitor's is never checked.
+            if model.update.offered != nil {
+                DrawerUpdateRow(action: onUpdate)
+                    .padding(.horizontal, 8)
+            }
 
             Button(action: onSettings) {
                 HStack(spacing: 12) {

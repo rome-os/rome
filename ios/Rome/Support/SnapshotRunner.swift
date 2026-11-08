@@ -195,11 +195,18 @@ enum SnapshotRunner {
             await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
+            // Behind but new enough: the banner, the drawer's line, and the page it opens.
+            await capture("48-update-banner", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
+            await capture("49-update-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+            model.debugCommand = .drawer(false)
+            try? await Task.sleep(for: .seconds(0.8))
+            await capture("50-update-offered-page", style: styleName, in: directory, wait: 1.2) { model.update.openPage() }
+            model.update.closePage()
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }
             await capture("31-update-starting", style: styleName, in: directory, wait: 1) {
-                model.update.debugShow(.starting(current: "0.41.3", latest: DemoBackend.releasedVersion))
+                model.update.debugShow(.starting(current: DemoBackend.tooOldVersion, latest: DemoBackend.releasedVersion))
             }
             await capture("32-update-restarting", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now), progress: .restarting)

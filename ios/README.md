@@ -93,7 +93,9 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | Variable | Effect |
 |---|---|
 | `ROME_DEMO=1` | Opens built-in demo data: every task state, an approval, a question, a failed task. Also available by long-pressing "Rome" on the sign-in screen. |
-| `ROME_DEMO=update` | Opens the demo data on a Rome one release behind, so the update page shows; "Update now" finishes after a few seconds. |
+| `ROME_DEMO=update` | Opens the demo data on a Rome below the app's minimum version, so the update page covers the app; "Update now" finishes after a few seconds. |
+| `ROME_DEMO=update-offered` | Opens the demo data on a Rome behind its latest release but new enough for the app: the banner and the drawer's line offer the update. |
+| `ROME_DEMO=visitor` | Opens the demo data as a dashboard visitor of a shared Rome. |
 | `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
 
@@ -115,6 +117,13 @@ xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simul
 ```
 
 Debug allows plain HTTP to names under `localhost`. The app opens an `http://` instance only while Rome Cloud itself is on `http://`, which is only ever a Cloud on this Mac: Release always signs in with `https://romeos.cc`.
+
+## Instance versions
+
+The app works with any instance at or above `UpdateGate.minimumInstanceVersion` (in `Rome/Features/Update/InstanceUpdater.swift`), the oldest release with every API the app calls. An instance below it gets the update page over the whole app, with no way past it but updating. An instance at or above it that is behind its latest release only gets an offer: a banner when the guardian opens it, which stays closed for that release once closed, and a line in the drawer until it is current. Visitors see neither.
+
+Raise the minimum only when the app starts calling an API a newer release brought, to the first release tag (`v1.*`) that has it. Anything else the app reads from an older supported instance is optional and degrades quietly.
+
 ## Tests
 
 Unit tests use Swift Testing. They run on a simulator, or on Mac Catalyst when no simulator is available:

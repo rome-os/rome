@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Covers the app while the instance is behind its latest release. There is
-/// no way past it but updating; switching instance and signing out stay.
+/// The update page. Below the app's minimum version it covers the app with no
+/// way past it but updating; switching instance and signing out stay. A
+/// release the instance can do without opens it from the banner or the
+/// drawer, and it closes again.
 struct UpdateScreen: View {
     @Environment(AppModel.self) private var model
     @State private var showInstances = false
@@ -88,6 +90,16 @@ struct UpdateScreen: View {
 
     private var topBar: some View {
         HStack {
+            if updater.canClose {
+                Button { updater.closePage() } label: {
+                    Image(systemName: "xmark")
+                        .romeFont(16, .semibold)
+                        .foregroundStyle(Palette.fg)
+                        .frame(width: 44, height: 44)
+                        .glassSurface(Circle(), interactive: true)
+                }
+                .accessibilityLabel(Text("Close"))
+            }
             Spacer()
             Menu {
                 Button { showInstances = true } label: {
@@ -165,10 +177,16 @@ struct UpdateScreen: View {
                 }
                 if let release {
                     Group {
-                        if let current = release.current {
-                            Text("Your Rome is on \(current). The latest is \(release.latest). The app needs the latest Rome.")
+                        if updater.belowMinimum {
+                            if let current = release.current {
+                                Text("Your Rome is on \(current). The latest is \(release.latest). This app needs a newer Rome.")
+                            } else {
+                                Text("The latest is \(release.latest). This app needs a newer Rome.")
+                            }
+                        } else if let current = release.current {
+                            Text("Your Rome is on \(current). The latest is \(release.latest).")
                         } else {
-                            Text("The latest is \(release.latest). The app needs the latest Rome.")
+                            Text("The latest is \(release.latest).")
                         }
                     }
                     .romeFont(16)

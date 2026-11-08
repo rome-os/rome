@@ -58,6 +58,8 @@ enum AuthError: Error, Equatable, LocalizedError {
     /// The instance's owner seat records another Rome Cloud account, often a
     /// stale one: one sign-in from a browser binds it again.
     case notOwner
+    /// The Rome predates the visitor sign-in this app uses; only its owner can update it.
+    case instanceTooOld
     case sessionRejected
     case network
     case invalidResponse
@@ -70,6 +72,7 @@ enum AuthError: Error, Equatable, LocalizedError {
         case .accessDenied: return String(localized: "No access to this Rome")
         case .accessRevoked: return String(localized: "You no longer have access to this Rome")
         case .notOwner: return String(localized: "Sign in to this Rome once in a browser, then try again")
+        case .instanceTooOld: return String(localized: "This Rome needs an update from its owner")
         case .sessionRejected: return String(localized: "Sign-in did not finish")
         case .network: return String(localized: "Could not reach Rome Cloud")
         case .invalidResponse: return String(localized: "Invalid sign-in response")
@@ -277,6 +280,18 @@ final class CloudAuth {
         return session
     }
 
+    /// Why the visitor sign-in could not start. The dashboard closed to
+    /// visitors says so; a Rome from before this sign-in has no such route
+    /// (its edge asks for a session, or the API knows no such path).
+    nonisolated static func visitorStartError(status: Int, body: Data) -> AuthError {
+        let code = (try? JSONDecoder().decode(JSONValue.self, from: body))?["error"]?.string
+        switch status {
+        case 404 where code == "dashboard_not_cloud_email_restricted": return .accessRevoked
+        case 401, 404: return .instanceTooOld
+        default: return .network
+        }
+    }
+
     /// Why the instance refused the owner's code.
     nonisolated static func completeError(status: Int, body: Data) -> AuthError {
         if status == 403, (try? JSONDecoder().decode(JSONValue.self, from: body))?["error"]?.string == "not_owner" {
@@ -295,8 +310,7 @@ final class CloudAuth {
         start.setValue("application/json", forHTTPHeaderField: "Accept")
         let (startData, startStatus) = try await perform(start)
         guard (200..<300).contains(startStatus) else {
-            // 404: the dashboard no longer lets visitors in at all.
-            throw startStatus == 404 ? AuthError.accessRevoked : AuthError.network
+            throw Self.visitorStartError(status: startStatus, body: startData)
         }
         guard let startBody = try? JSONDecoder().decode(JSONValue.self, from: startData),
               let authorizationRequest = startBody["visitor_authorization_request"],
