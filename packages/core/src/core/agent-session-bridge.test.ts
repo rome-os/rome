@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { createChatTurns } from "./chat-turns.js";
 import type {
   AgentSession,
   AgentSessionInit,
@@ -66,8 +67,19 @@ describe("AgentSessionBridge turn routing", () => {
       peek: () => session,
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
+    const chatTurns = createChatTurns();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, turns).attach(
+    new AgentSessionBridge(
+      manager,
+      undefined,
+      undefined,
+      turns,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      chatTurns,
+    ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -97,18 +109,17 @@ describe("AgentSessionBridge turn routing", () => {
     await rs.waitFor(() =>
       expect(child.sent).toContainEqual(expect.objectContaining({ type: "rpc_response" })),
     );
-    expect(turns.getActiveByConversation(ref)).toBeUndefined();
+    expect(chatTurns.runningIn(ref)).toBeUndefined();
 
     startTurn();
-    await rs.waitFor(() => expect(turns.getActiveByConversation(ref)?.turnId).toBe("turn-1"));
-    const active = turns.getActiveByConversation(ref)!;
-    expect(active.initiatorId).toBe("user-1");
+    await rs.waitFor(() => expect(chatTurns.runningIn(ref)?.turnId).toBe("turn-1"));
+    expect(chatTurns.runningIn(ref)?.initiatorId).toBe("user-1");
 
-    await active.interrupt?.("chat-stop");
+    await turns.get("turn-1")?.interrupt?.("chat-stop");
     expect(interrupt).toHaveBeenCalledWith("chat-stop");
 
     finishTurn();
-    await rs.waitFor(() => expect(turns.getActiveByConversation(ref)).toBeUndefined());
+    await rs.waitFor(() => expect(chatTurns.runningIn(ref)).toBeUndefined());
   });
 });
 
