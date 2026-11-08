@@ -55,15 +55,52 @@ export async function findChat(
   return await readChat(() => webchatRepo.getSession(chatId), { chatId });
 }
 
+/** A session as its opener holds it. */
+interface OpenedSession {
+  sessionId: string;
+  key: { agentName: string; channelThreadKey: string };
+}
+
+/**
+ * Tell the chat side what an opener knows right after it acquires a session:
+ * the chat it names has the session. Every caller that acquires a session
+ * calls this, naming a chat or not. The link names the chat the last opener
+ * named, and replacing another chat is logged, since one continuity key
+ * belongs to one chat. An opener that is not trusted to move the link passes
+ * `replace: false`, and only fills a link the row lacks.
+ */
+export async function openedInChat(
+  webchatRepo: Pick<WebChatRepository, "recordSessionInChat"> | undefined,
+  session: OpenedSession,
+  chatId: string | undefined,
+  options: { replace?: boolean } = {},
+): Promise<void> {
+  noteOpenerChat(session, chatId);
+  if (!chatId || !webchatRepo) return;
+  const replaced = await webchatRepo.recordSessionInChat(session.sessionId, chatId, {
+    replace: options.replace ?? true,
+  });
+  if (replaced) {
+    log.warn("agent session serves a different conversation than requested", {
+      sessionId: session.sessionId,
+      agentName: session.key.agentName,
+      channelThreadKey: session.key.channelThreadKey,
+      storedChatId: replaced,
+      requestedChatId: chatId,
+    });
+  }
+}
+
 // Temporary, until ZHA-157 decides where a turn records when its caller names
 // no chat. An open session's later turns that name no chat record into the
 // chat its opener named, as they did when the session held that chat itself.
 // Kept per open session in this process, so a reopened session forgets it.
+// The first caller to acquire an open session is the one that opened it.
 const openerChats = new WeakMap<object, string | undefined>();
 
-/** Note the chat the caller that opened `session` named, if any. */
+/** Note the chat the caller that opened `session` named, before anything is recorded. */
 export function noteOpenerChat(session: object, chatId: string | undefined): void {
-  openerChats.set(session, chatId);
+  if (!openerChats.has(session)) openerChats.set(session, chatId);
 }
 
 /** The chat the caller that opened `session` named, while it stays open. */

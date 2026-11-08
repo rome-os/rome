@@ -2837,7 +2837,10 @@ describe("Webchat API", () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async (key: unknown, init?: Record<string, unknown>) => {
         acquired.push([key, init]);
-        return { sessionId: "runtime-topic" };
+        return {
+          sessionId: "runtime-topic",
+          key: { agentName: "core:concierge", channelThreadKey: "webchat:topic-1" },
+        };
       }),
       peek: () => undefined,
       shutdown: async () => undefined,
@@ -2851,12 +2854,13 @@ describe("Webchat API", () => {
       undefined,
       "core:concierge",
     );
+    const recordSessionInChat = rs.spyOn(deps.webchatRepo, "recordSessionInChat");
     const { runtime } = createWebchatRuntime(deps);
     expect(await runtime.openSession("topic-1")).toBe("runtime-topic");
     const [key, init] = acquired[0]!;
     expect(key).toEqual({ agentName: "core:concierge", channelThreadKey: "webchat:topic-1" });
+    expect(recordSessionInChat).toHaveBeenCalledWith("runtime-topic", "topic-1", { replace: true });
     expect(init).toMatchObject({
-      romeSessionId: "topic-1",
       selectionId: "claude-sonnet",
       threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
     });
@@ -6005,11 +6009,10 @@ describe("Webchat API", () => {
 
     it("resumes the branch's own thread for a follow-up turn, with no interactive surface", async () => {
       rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
+      const recordSessionInChat = rs.spyOn(deps.webchatRepo, "recordSessionInChat");
       let acquiredKey: unknown;
-      let acquiredInit: AgentSessionInit | undefined;
-      deps.agentSessionManager = fakeSessionManager(async (key, init) => {
+      deps.agentSessionManager = fakeSessionManager(async (key) => {
         acquiredKey = key;
-        acquiredInit = init;
         return {
           key: { agentName: "main", channelThreadKey: `webchat:${PROMOTED_ID}` },
           sessionId: "fork-agent-session",
@@ -6044,7 +6047,9 @@ describe("Webchat API", () => {
         agentName: "main",
         channelThreadKey: `webchat:${PROMOTED_ID}`,
       });
-      expect(acquiredInit?.romeSessionId).toBe(PROMOTED_ID);
+      expect(recordSessionInChat).toHaveBeenCalledWith("fork-agent-session", PROMOTED_ID, {
+        replace: true,
+      });
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {

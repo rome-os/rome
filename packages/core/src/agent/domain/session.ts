@@ -19,16 +19,10 @@ export interface CreateSessionOptions {
    *  already carry it. Every other caller leaves it out and Sessions mints
    *  the id. Goes when a fork's chat stops reusing the session id as its own. */
   deprecatedId?: SessionId;
-  /** @deprecated The Rome chat (`rome_sessions.id`) the session records into,
-   *  until the turn log keeps that link itself. */
-  deprecatedChatId?: string;
 }
 
 export interface ReplaceSessionOptions {
   workingDir?: string;
-  /** @deprecated The chat the successor records into. Omitted, the successor
-   *  inherits the retired session's stored chat when the reset is written. */
-  deprecatedChatId?: string;
 }
 
 /** What one turn ran on. */
@@ -65,19 +59,12 @@ export interface SessionState {
   workingDir: string | null;
   createdAt: Date;
   lastActiveAt: Date;
-  chatId: string | null;
 }
 
 /** The facts a session can change after it is created. The repository writes
  *  only the ones that changed, so two instances of one session, each changing
  *  a different fact, never undo each other's write. */
-export type SessionChange =
-  | "turn"
-  | "reasoningEffort"
-  | "workingDir"
-  | "lastActiveAt"
-  | "status"
-  | "chat";
+export type SessionChange = "turn" | "reasoningEffort" | "workingDir" | "lastActiveAt" | "status";
 
 /**
  * One agent's conversation from one reset to the next: the agent, what it last
@@ -110,7 +97,6 @@ export class Session {
       workingDir: options.workingDir ?? null,
       createdAt: now,
       lastActiveAt: now,
-      chatId: options.deprecatedChatId ?? null,
     });
   }
 
@@ -154,11 +140,6 @@ export class Session {
   }
   get lastActiveAt(): Date {
     return this.state.lastActiveAt;
-  }
-
-  /** @deprecated The chat the session records into. Goes with the turn log's move. */
-  get deprecatedChatId(): string | null {
-    return this.state.chatId;
   }
 
   /** @deprecated Whether the provider has a thread for this session, which the
@@ -224,28 +205,10 @@ export class Session {
    */
   replace(options: ReplaceSessionOptions = {}): Session {
     this.complete();
-    // The successor has no chat unless one is named: the repository gives it
-    // the retired session's stored chat when it writes the reset.
     return Session.create(this.state.agentName, {
       continuityKey: this.state.continuityKey ?? undefined,
       workingDir: options.workingDir,
-      deprecatedChatId: options.deprecatedChatId,
     });
-  }
-
-  /** @deprecated Records the chat only when none is recorded yet. Answers
-   *  whether it did. */
-  deprecatedRecordChat(chatId: string): boolean {
-    if (this.state.chatId !== null) return false;
-    this.state.chatId = chatId;
-    this.changes.add("chat");
-    return true;
-  }
-
-  /** @deprecated Only the repository calls this, on a successor that named
-   *  no chat, with the chat the retired session's row held. */
-  deprecatedInheritChat(chatId: string): void {
-    this.state.chatId = chatId;
   }
 
   /** The state to write. Only the repository calls this. */

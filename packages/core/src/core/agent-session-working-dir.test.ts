@@ -11,7 +11,13 @@ import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.j
 import { AgentLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import {
+  createAgentSessionManager,
+  type AgentSessionInit,
+  type AgentSessionKey,
+  type AgentSessionManager,
+} from "./agent-session.js";
+import { eq } from "drizzle-orm";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -21,7 +27,8 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
-import { openerChat } from "./session-conversation.js";
+import { openedInChat, openerChat } from "./session-conversation.js";
+import { sessions } from "../db/schema.js";
 
 const AGENT = "worker";
 
@@ -195,46 +202,54 @@ describe("AgentSessionManager working dirs", () => {
     );
   });
 
-  it("records the conversation a session serves and keeps it in a fresh generation", async () => {
+  /** Acquires the way every opener does: the session, then the chat it names. */
+  async function open(key: AgentSessionKey, chatId?: string, init: AgentSessionInit = {}) {
+    const session = await manager.acquire(key, init);
+    await openedInChat(webchatRepo, session, chatId);
+    return session;
+  }
+
+  async function rowChat(sessionId: string): Promise<string | null | undefined> {
+    const [row] = await testDb.db.select().from(sessions).where(eq(sessions.id, sessionId));
+    return row?.chatId;
+  }
+
+  it("records the chat an opener names and keeps it in a fresh generation", async () => {
     const projectDir = join(directory, "moved-away");
     await mkdir(projectDir);
     await webchatRepo.createSession("conv-1", "Conversation");
     const key = { agentName: AGENT, channelThreadKey: "webchat:conv-1" };
-    const original = await manager.acquire(key, {
-      workingDir: projectDir,
-      romeSessionId: "conv-1",
-    });
+    const original = await open(key, "conv-1", { workingDir: projectDir });
     await original.close("idle");
-    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("conv-1");
+    expect(await rowChat(original.sessionId)).toBe("conv-1");
 
     await rm(projectDir, { recursive: true });
-    const replacement = await manager.acquire(key);
+    const replacement = await open(key);
 
     expect(replacement.sessionId).not.toBe(original.sessionId);
-    expect((await sessionRepository.session(replacement.sessionId))?.deprecatedChatId).toBe(
-      "conv-1",
-    );
+    expect(await rowChat(replacement.sessionId)).toBe("conv-1");
     expect(await webchatRepo.chatOfSession(replacement.sessionId)).toMatchObject({ id: "conv-1" });
   });
 
   it("keeps a reuse or resume that names no chat in the chat the row recorded", async () => {
     await webchatRepo.createSession("stored", "Stored");
     const key = { agentName: AGENT, channelThreadKey: "webchat:stored" };
-    const original = await manager.acquire(key, { romeSessionId: "stored" });
+    const original = await open(key, "stored");
     const sessionId = original.sessionId;
     await original.close("idle");
 
-    const byKey = await manager.acquire(key);
+    const byKey = await open(key);
     expect(byKey.sessionId).toBe(sessionId);
     await byKey.close("idle");
 
     const byId = await manager.acquireBySessionId(sessionId, AGENT);
+    await openedInChat(webchatRepo, byId, undefined);
     expect(byId.sessionId).toBe(sessionId);
     expect(await webchatRepo.chatOfSession(sessionId)).toMatchObject({ id: "stored" });
   });
 
   it("finds a chat recorded after open by the session's id", async () => {
-    const session = await manager.acquire({
+    const session = await open({
       agentName: AGENT,
       channelThreadKey: "webchat:late:subagent:1",
     });
@@ -263,11 +278,11 @@ describe("AgentSessionManager working dirs", () => {
     });
     const kept = { agentName: AGENT, channelThreadKey: "telegram:kept" };
     const gone = { agentName: AGENT, channelThreadKey: "telegram:gone" };
-    await (await manager.acquire(kept, { romeSessionId: "channel:telegram:kept" })).close("idle");
-    await (await manager.acquire(gone, { romeSessionId: "channel:telegram:gone" })).close("idle");
+    await (await open(kept, "channel:telegram:kept")).close("idle");
+    await (await open(gone, "channel:telegram:gone")).close("idle");
 
-    const reopened = await manager.acquire(kept);
-    const orphaned = await manager.acquire(gone);
+    const reopened = await open(kept);
+    const orphaned = await open(gone);
 
     expect(await webchatRepo.chatOfSession(reopened.sessionId)).toMatchObject({
       id: "channel:telegram:kept",
@@ -276,72 +291,66 @@ describe("AgentSessionManager working dirs", () => {
     expect(await webchatRepo.chatOfSession(orphaned.sessionId)).toBeNull();
   });
 
-  it("records the conversation on a reused row that had none", async () => {
+  it("records the chat on a reused row that had none", async () => {
     const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
-    const original = await manager.acquire(key);
+    const original = await open(key);
     await original.close("idle");
-    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBeNull();
+    expect(await rowChat(original.sessionId)).toBeNull();
 
-    const reused = await manager.acquire(key, { romeSessionId: "legacy" });
+    const reused = await open(key, "legacy");
 
     expect(reused.sessionId).toBe(original.sessionId);
-    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("legacy");
+    expect(await rowChat(original.sessionId)).toBe("legacy");
   });
 
   it("remembers the chat an open session's opener named, and forgets it on reopen", async () => {
     const key = { agentName: AGENT, channelThreadKey: "webchat:opened" };
-    const opened = await manager.acquire(key, { romeSessionId: "opened" });
-    const reused = await manager.acquire(key);
+    const opened = await open(key, "opened");
+    const reused = await open(key);
 
     expect(reused).toBe(opened);
     expect(openerChat(reused)).toBe("opened");
 
     await opened.close("idle");
-    const reopened = await manager.acquire(key);
+    const reopened = await open(key);
     expect(reopened.sessionId).toBe(opened.sessionId);
     expect(openerChat(reopened)).toBeUndefined();
   });
 
-  it("keeps a reused row's conversation when the caller names another", async () => {
+  it("moves a reused row to the chat the caller names", async () => {
     const key = { agentName: AGENT, channelThreadKey: "webchat:kept" };
-    const original = await manager.acquire(key, { romeSessionId: "kept" });
+    const original = await open(key, "kept");
     await original.close("idle");
 
-    const reused = await manager.acquire(key, { romeSessionId: "other" });
+    const reused = await open(key, "other");
 
     expect(reused.sessionId).toBe(original.sessionId);
-    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe("kept");
+    expect(await rowChat(original.sessionId)).toBe("other");
   });
 
-  it("records a chat learned after acquire, without overwriting it", async () => {
-    const child = await manager.acquire({
+  it("records a chat learned after acquire", async () => {
+    const child = await open({
       agentName: AGENT,
       channelThreadKey: "main:subagent:1",
     });
-    expect((await sessionRepository.session(child.sessionId))?.deprecatedChatId).toBeNull();
+    expect(await rowChat(child.sessionId)).toBeNull();
 
     await webchatRepo.recordSessionInChat(child.sessionId, child.sessionId);
-    await webchatRepo.recordSessionInChat(child.sessionId, "other");
 
-    expect((await sessionRepository.session(child.sessionId))?.deprecatedChatId).toBe(
-      child.sessionId,
-    );
+    expect(await rowChat(child.sessionId)).toBe(child.sessionId);
   });
 
-  it("fills a row with no conversation when a resume names one", async () => {
-    const original = await manager.acquire({
+  it("fills a row with no chat when a resume names one", async () => {
+    const original = await open({
       agentName: AGENT,
       channelThreadKey: "main:subagent:2",
     });
     await original.close("idle");
 
-    await manager.acquireBySessionId!(original.sessionId, AGENT, {
-      romeSessionId: original.sessionId,
-    });
+    const resumed = await manager.acquireBySessionId!(original.sessionId, AGENT);
+    await openedInChat(webchatRepo, resumed, original.sessionId);
 
-    expect((await sessionRepository.session(original.sessionId))?.deprecatedChatId).toBe(
-      original.sessionId,
-    );
+    expect(await rowChat(original.sessionId)).toBe(original.sessionId);
   });
 
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {

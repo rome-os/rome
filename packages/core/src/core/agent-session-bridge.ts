@@ -40,7 +40,12 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import { findSessionChat, openerChat } from "./session-conversation.js";
+import {
+  findSessionChat,
+  noteOpenerChat,
+  openedInChat,
+  openerChat,
+} from "./session-conversation.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -51,7 +56,10 @@ const SUMMON_ACTION = "system:summon";
 
 export interface RunTurnRequest {
   key: AgentSessionKey;
-  init?: AgentSessionInit;
+  init?: AgentSessionInit & {
+    /** The chat the caller names, which the bridge records as having the session. */
+    romeSessionId?: string;
+  };
   input: AgentTurnInput;
   platformMessageId?: string;
   replyTo?: MessageReplyReference;
@@ -171,8 +179,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // run an agent — a nested subagent run (e.g. blocking `summon`) by
         // construction. Mark it so `rome.session.acquire` labels these opens
         // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
+        const { romeSessionId: namedChat, ...sessionInit } = req.init ?? {};
         const init = {
-          ...req.init,
+          ...sessionInit,
           workingDir,
           isSubagent: true,
           applyProviderSessionReset: Boolean(req.platformMessageId),
@@ -185,11 +194,15 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           session = req.sessionId
             ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
             : await this.manager.acquire(req.key, init);
+          noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
           if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
             throw new Error(`Agent session "${req.sessionId}" was not found`);
           }
+          // An action's worker may only fill a link the session lacks, never
+          // move one, and only once the check above has passed.
+          await openedInChat(this.webchatRepo, session, namedChat, { replace: false });
         } catch (err) {
           log.warn("agent.session.manager.acquire failed", {
             ...baseLogFields,
@@ -208,10 +221,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const conversation = resolveTurnConversation({
           agentName: req.key.agentName,
           agentSessionId: session.sessionId,
-          romeSessionId: req.init?.romeSessionId,
+          romeSessionId: namedChat,
           openerChat: openerChat(session),
           sessionChat:
-            (openerChat(session) ?? req.init?.romeSessionId)
+            (openerChat(session) ?? namedChat)
               ? undefined
               : await findSessionChat(this.webchatRepo, session.sessionId),
           channelThreadKey: req.key.channelThreadKey,

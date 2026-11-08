@@ -19,6 +19,7 @@ import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb } from "../test/db.js";
 import { sessions } from "../db/schema.js";
+import { eq } from "drizzle-orm";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 class FakeChild extends EventEmitter {
@@ -260,6 +261,97 @@ describe("AgentSessionBridge resuming a session by its id", () => {
 
       summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
       await rs.waitFor(() => expect(sent).toHaveLength(1));
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
+describe("AgentSessionBridge chat link on resume", () => {
+  it("never lets a worker move the chat that has a session it resumes", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "private-chat",
+        "Private",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await repo.createSession("worker-chat", "Worker");
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "runtime-1",
+        agentName: "main",
+        channelThreadKey: "telegram:t1",
+        chatId: "private-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
+      const sent: unknown[] = [];
+      const open = () =>
+        ({
+          key: { agentName: "main", channelThreadKey: "telegram:t1" },
+          sessionId: "runtime-1",
+          sendTurn: (input: unknown) => {
+            sent.push(input);
+            return {
+              turnId: `turn-${sent.length}`,
+              events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+              interrupt: async () => undefined,
+            } as unknown as AgentTurnHandle;
+          },
+        }) as unknown as AgentSession;
+      // Each resume reopens the session, as a cold open would.
+      const manager = {
+        acquire: async () => open(),
+        acquireBySessionId: async () => open(),
+        peek: () => undefined,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      const resume = (reqId: string, actor: Record<string, unknown>, sessionId?: string) =>
+        child.emit("message", {
+          type: "rpc_request",
+          reqId,
+          method: "agent.session.runTurn",
+          callerActionName: "system:summon",
+          callerActionContext: {
+            actor,
+            channelContext: { channel: "webchat", threadId: "worker-chat" },
+          },
+          params: {
+            key: { agentName: "main", channelThreadKey: "telegram:t1" },
+            ...(sessionId ? { sessionId } : {}),
+            input: { prompt: "hello" },
+            init: { romeSessionId: "worker-chat" },
+          },
+        });
+      const responseTo = (reqId: string) =>
+        child.sent.find(
+          (m) =>
+            (m as { reqId?: string }).reqId === reqId &&
+            (m as { type?: string }).type === "rpc_response",
+        );
+      const linked = async () =>
+        (await testDb.db.select().from(sessions).where(eq(sessions.id, "runtime-1")))[0]?.chatId;
+
+      resume("by-id", { kind: "visitor", accountId: "a", email: "a@example.com" }, "runtime-1");
+      await rs.waitFor(() => expect(responseTo("by-id")).toBeDefined());
+      resume("by-key", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      await rs.waitFor(() => expect(responseTo("by-key")).toBeDefined());
+
+      expect(await linked()).toBe("private-chat");
     } finally {
       testDb.close();
     }
@@ -661,6 +753,7 @@ describe("AgentSessionBridge worker disconnect", () => {
   it("interrupts a turn whose message assignment fails, and only once", async () => {
     const turn = controllableTurn("turn-1");
     const webchatRepo = {
+      recordSessionInChat: async () => null,
       assignConversationMessageTurn: async () => {
         throw new Error("db down");
       },

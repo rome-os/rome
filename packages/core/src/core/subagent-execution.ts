@@ -9,6 +9,7 @@ import {
 } from "../agent/index.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { openedInChat } from "./session-conversation.js";
 import { createLogger } from "../logger.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
@@ -89,14 +90,14 @@ export function createSubagentExecutionService(deps: {
           },
         );
         if (refusal) throw new Error(refusal);
-        // Naming the conversation lets the resume fill a row whose record
-        // failed when the subagent was minted.
         child = await context.childManager.acquireBySessionId(request.resumeSessionId, name, {
-          romeSessionId: request.resumeSessionId,
           workingDir: context.workingDir,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
         });
+        // Naming the chat lets the resume fill a row whose record failed when
+        // the subagent was minted.
+        await openedInChat(deps.webchatRepo, child, request.resumeSessionId);
       } else {
         isFresh = true;
         child = await context.childManager.acquire(
@@ -110,6 +111,7 @@ export function createSubagentExecutionService(deps: {
             sharedContext: context.sharedContext,
           },
         );
+        await openedInChat(deps.webchatRepo, child, undefined);
       }
 
       if (isFresh) {

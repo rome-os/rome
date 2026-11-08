@@ -139,7 +139,6 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
-import { noteOpenerChat } from "./session-conversation.js";
 
 const log = createLogger("agent-session");
 
@@ -152,8 +151,6 @@ export interface AgentSessionKey {
 export interface AgentSessionInit {
   workingDir?: string;
   threadContext?: ThreadContext;
-  /** Stable Rome conversation bound to this provider/runtime session. */
-  romeSessionId?: string;
   sharedContext?: Record<string, unknown>;
   /**
    * Set by `AgentSessionBridge` for runs that reach the top-level manager over
@@ -473,7 +470,7 @@ export function createAgentSessionManager(
     if (init && resetRef && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
       const reset = await deps.sessionSettings!.resetPolicy(resetRef);
-      const chatId = init.romeSessionId ?? init.threadContext?.romeSessionId;
+      const chatId = init.threadContext?.romeSessionId;
       if (reset)
         return await lifecycleMutex.runExclusive(k, async () => {
           const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
@@ -498,8 +495,7 @@ export function createAgentSessionManager(
           }
           let prepared: Session | undefined;
           if (decision.due && active) {
-            warnOnConversationMismatch(key, active.id, active.deprecatedChatId, init.romeSessionId);
-            prepared = active.replace({ deprecatedChatId: init.romeSessionId });
+            prepared = active.replace();
             await deps.sessionRepository.replace(active, prepared);
             log.info("provider_session.rotated", {
               chatId,
@@ -766,28 +762,6 @@ async function reachableRecordedWorkingDir(
   return isDirectory ? recorded : undefined;
 }
 
-/** A channel-thread key maps to one conversation, so a stored row that names
- *  another one than the caller means the stored value cannot be trusted yet.
- *  The live session records turns under the caller's conversation, and the
- *  next rotation writes the caller's value onto the new row. Checked only when
- *  a row is read (cold open and rotation); a cached live session reads none. */
-function warnOnConversationMismatch(
-  key: AgentSessionKey,
-  sessionId: string | undefined,
-  storedChatId: string | null | undefined,
-  requestedChatId: string | undefined,
-): void {
-  if (!storedChatId || !requestedChatId) return;
-  if (storedChatId === requestedChatId) return;
-  log.warn("agent session serves a different conversation than requested", {
-    sessionId,
-    agentName: key.agentName,
-    channelThreadKey: key.channelThreadKey,
-    storedChatId,
-    requestedChatId,
-  });
-}
-
 /**
  * The session an explicit id names, when this agent can resume it: it is
  * active, has a continuity key, and belongs to this agent under any of the
@@ -832,7 +806,6 @@ async function openSession(
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
   // without the agent filter a subagent could inherit its parent's provider
   // thread and system prompt/history.
-  const requestedRomeSessionId = init.romeSessionId;
   // The session the reset path already wrote, or the one this open resumes.
   // Neither set, this open creates one.
   let prepared = opts.prepared;
@@ -875,8 +848,7 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumed.workingDir,
       });
-      warnOnConversationMismatch(key, resumed.id, resumed.deprecatedChatId, requestedRomeSessionId);
-      prepared = resumed.replace({ deprecatedChatId: requestedRomeSessionId });
+      prepared = resumed.replace();
       await deps.sessionRepository.replace(resumed, prepared);
       resumed = undefined;
     }
@@ -890,7 +862,6 @@ async function openSession(
     Session.create(key.agentName, {
       continuityKey: key.channelThreadKey || undefined,
       workingDir,
-      deprecatedChatId: requestedRomeSessionId,
     });
   const sessionId = session.id;
   const isNewSession = !resumed;
@@ -918,10 +889,6 @@ async function openSession(
     await deps.sessionRepository.save(prepared);
   } else if (!resumed) {
     await deps.sessionRepository.add(session);
-  } else if (requestedRomeSessionId && session.deprecatedRecordChat(requestedRomeSessionId)) {
-    await deps.sessionRepository.save(session);
-  } else {
-    warnOnConversationMismatch(key, sessionId, session.deprecatedChatId, requestedRomeSessionId);
   }
 
   let structuredOutputValidator: AnswerShape | undefined;
@@ -1540,9 +1507,6 @@ async function openSession(
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
   });
-  // Temporary (ZHA-157): turns on this open session that name no chat
-  // record into the chat its opener named.
-  noteOpenerChat(impl, requestedRomeSessionId);
 
   impl.startModelSessionEvents();
 
@@ -2452,8 +2416,6 @@ class AgentSessionImpl implements AgentSession {
         deprecatedId: forkSessionId,
         continuityKey: channelThreadKey,
         workingDir: this.workingDir,
-        // A persisted fork's conversation is minted under the fork's own id.
-        deprecatedChatId: forkSessionId,
       });
       fork.recordTurn({
         provider: forkSession.providerId,

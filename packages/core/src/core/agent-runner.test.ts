@@ -20,7 +20,7 @@ import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import { noteOpenerChat } from "./session-conversation.js";
+import { openedInChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -1047,7 +1047,7 @@ describe("AgentRunner", () => {
         const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
         // The session is still open from a caller that named the chat. A
         // reopened one is the case above, which leaves the chat alone.
-        noteOpenerChat(session, "user-chat");
+        await openedInChat(undefined, session, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1139,6 +1139,53 @@ describe("AgentRunner", () => {
         name: "recap: Stored chat",
         parentSessionId: "stored-chat",
       });
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("records the chat that has a stored fork when its consumer stops early", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Fork summary", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+
+      for await (const message of runner.runForked({
+        agentName: "main",
+        sourceSessionId: "source-session",
+        channelThreadKey: "webchat:stored-chat",
+        prompt: "summarize",
+      })) {
+        if (message.type === "turn_start") break;
+      }
+
+      expect(recordSessionInChat).toHaveBeenCalledWith("fork-session", "fork-session");
     } finally {
       testDb.close();
     }
