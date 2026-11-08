@@ -18,6 +18,7 @@ import { canOpen } from "../concierge/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb } from "../test/helpers.js";
+import { sessions } from "../db/schema.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 class FakeChild extends EventEmitter {
@@ -55,7 +56,6 @@ describe("AgentSessionBridge turn routing", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      conversation: { origin: "named", id: "channel:discord:channel-1" },
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
@@ -120,17 +120,22 @@ describe("AgentSessionBridge conversation", () => {
         name: "researcher: Parent",
         agentName: "researcher",
       });
+      // The chat that has the session is read from the session's stored row.
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "session-1",
+        agentName: "main",
+        channelThreadKey: "discord:channel-1",
+        chatId: "child-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const sent: TurnRef[] = [];
       const session = {
         key: { agentName: "main", channelThreadKey: "discord:channel-1" },
         sessionId: "session-1",
-        conversation: {
-          origin: "recorded" as const,
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        },
         sendTurn: (_input: unknown, options: TurnRef) => {
           sent.push({
             romeSessionId: options.romeSessionId,
@@ -508,9 +513,6 @@ describe("AgentSessionBridge worker disconnect", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      conversation: options.romeSessionId
-        ? { origin: "named", id: options.romeSessionId }
-        : undefined,
       sendTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
@@ -535,7 +537,12 @@ describe("AgentSessionBridge worker disconnect", () => {
         type: "rpc_request",
         reqId,
         method: "agent.session.runTurn",
-        params: { key: session.key, input: { prompt: "hello" }, ...params },
+        params: {
+          key: session.key,
+          input: { prompt: "hello" },
+          ...(options.romeSessionId ? { init: { romeSessionId: options.romeSessionId } } : {}),
+          ...params,
+        },
       });
       return reqId;
     };

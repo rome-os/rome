@@ -106,12 +106,11 @@ describe("SubagentExecutionService", () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
-    const recordConversation = rs.fn(async () => undefined);
+    const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
       acquire: rs.fn(async () => children.shift()!),
       acquireBySessionId: rs.fn(),
       peek: rs.fn(),
-      recordConversation,
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const registry = createActiveSubagentRegistry();
@@ -185,7 +184,7 @@ describe("SubagentExecutionService", () => {
     expect(childTrace.some((message) => message.content.includes("working"))).toBe(true);
     await expect(repo.getSession("child-1")).resolves.toMatchObject({ type: "subagent" });
     await expect(repo.getSession("child-2")).resolves.toMatchObject({ type: "subagent" });
-    expect(recordConversation.mock.calls).toEqual([
+    expect(recordSessionInChat.mock.calls).toEqual([
       ["child-1", "child-1"],
       ["child-2", "child-2"],
     ]);
@@ -194,15 +193,13 @@ describe("SubagentExecutionService", () => {
     expect(homeChats.map((session) => session.id)).not.toContain("child-2");
   });
 
-  it("still runs a fresh Child when recording its conversation fails", async () => {
+  it("still runs a fresh Child when recording the chat that has its session fails", async () => {
     const child = fakeChildSession("child-unrecorded", ["child-turn"]);
+    rs.spyOn(repo, "recordSessionInChat").mockRejectedValue(new Error("database is locked"));
     const childManager = {
       acquire: rs.fn(async () => child.session),
       acquireBySessionId: rs.fn(),
       peek: rs.fn(),
-      recordConversation: rs.fn(async () => {
-        throw new Error("database is locked");
-      }),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
@@ -244,7 +241,6 @@ describe("SubagentExecutionService", () => {
       }),
       acquireBySessionId: rs.fn(),
       peek: rs.fn(),
-      recordConversation: rs.fn(async () => undefined),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
@@ -288,7 +284,6 @@ describe("SubagentExecutionService", () => {
       acquire: rs.fn(),
       acquireBySessionId: rs.fn(async () => resumed.session),
       peek: rs.fn(),
-      recordConversation: rs.fn(async () => undefined),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({

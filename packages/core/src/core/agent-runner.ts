@@ -25,7 +25,7 @@ import {
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
-import { findRecordedConversation } from "./session-conversation.js";
+import { findSessionChat } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
@@ -301,7 +301,9 @@ export class AgentRunner {
       agentName,
       agentSessionId: session.sessionId,
       romeSessionId: params.romeSessionId,
-      sessionConversation: session.conversation,
+      sessionChat: params.romeSessionId
+        ? undefined
+        : await findSessionChat(this.webchatRepo, session.sessionId),
       channelThreadKey,
       threadContext,
     });
@@ -446,7 +448,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
+          recorder = await this.createForkTraceRecorder(params, message, source.sessionId);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -501,13 +503,12 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceChatId?: string,
+    sourceSessionId: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     const thread = params.threadContext;
-    // Prefer the source's conversation while it exists. Read again rather
-    // than trusting the session's cached row, which can outlive a deletion.
-    const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
+    // Prefer the chat that has the source session, while it exists.
+    const recorded = await findSessionChat(this.webchatRepo, sourceSessionId);
     // The chat the fork is of, when the turn names one.
     const named = recorded?.id ?? thread?.romeSessionId;
     // A channel thread that recorded no conversation may still have its row.

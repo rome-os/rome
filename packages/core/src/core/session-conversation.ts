@@ -4,44 +4,35 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("session-conversation");
 
-export interface RecordedConversation {
+/** The chat that has a session, as the web chat side holds it. */
+export interface SessionChat {
   id: string;
   name: string;
   type: RomeSessionType;
 }
 
 /**
- * The conversation a session's row recorded, when it still exists. A deleted
- * conversation leaves its id on the row, and recording under that id would
- * recreate it.
+ * Which chat has this session, asked by the session's id. Participation owns
+ * the question; the web chat side answers it until Participation has the
+ * query. A failed read counts as no chat.
  */
-export async function findRecordedConversation(
-  webchatRepo: WebChatRepository | undefined,
-  chatId: string | undefined,
-): Promise<RecordedConversation | undefined> {
-  if (!webchatRepo || !chatId) return undefined;
-  let conversation;
+export async function findSessionChat(
+  webchatRepo: Pick<WebChatRepository, "chatOfSession"> | undefined,
+  sessionId: string,
+): Promise<SessionChat | undefined> {
+  if (!webchatRepo) return undefined;
+  let chat;
   try {
-    conversation = await webchatRepo.getSession(chatId);
+    chat = await webchatRepo.chatOfSession(sessionId);
   } catch (err) {
-    // The lookup only refines where turns record, so it must not fail the session.
-    log.warn("failed to read a session's recorded conversation", {
-      chatId,
+    // The lookup only refines where turns record, so it must not fail the turn.
+    log.warn("failed to read the chat that has a session", {
+      sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
     return undefined;
   }
-  if (!conversation) return undefined;
-  const { id, name, type } = conversation;
+  if (!chat) return undefined;
+  const { id, name, type } = chat;
   return { id, name, type: type as RomeSessionType };
 }
-
-/**
- * The conversation a session serves. A `named` one was passed in by the
- * caller that opened the session. A `recorded` one is the conversation the
- * session's row stored, looked up only when no caller named one and only if it
- * still exists.
- */
-export type SessionConversation =
-  | { origin: "named"; id: string }
-  | ({ origin: "recorded" } & RecordedConversation);

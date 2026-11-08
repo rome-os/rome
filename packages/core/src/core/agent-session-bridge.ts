@@ -40,6 +40,7 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import { findSessionChat } from "./session-conversation.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -104,7 +105,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
    * chat the session runs in (its own, its parent's, a fork's or subagent's
    * row) must exist and be one its caller may open.
    */
-  private async callerMayResume(session: AgentSession, ctx: IpcCallContext): Promise<boolean> {
+  private async callerMayResume(
+    session: AgentSession,
+    named: string | undefined,
+    ctx: IpcCallContext,
+  ): Promise<boolean> {
     if (!this.webchatRepo) return true;
     const repo = this.webchatRepo;
     const caller = ctx.callerActionContext;
@@ -115,7 +120,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     });
     const required: string[] = [];
     const known = new Set<string>([session.sessionId]);
-    if (session.conversation?.origin === "recorded") known.add(session.conversation.id);
+    if (!named) {
+      const chat = await findSessionChat(repo, session.sessionId);
+      if (chat) known.add(chat.id);
+    }
     const root = walkToRoot(session.key.channelThreadKey);
     for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
     const rootKey = parseSessionKey(root);
@@ -181,7 +189,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             : await this.manager.acquire(req.key, init);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
-          if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
+          if (
+            req.sessionId &&
+            !(await this.callerMayResume(session, req.init?.romeSessionId, ctx))
+          ) {
             throw new Error(`Agent session "${req.sessionId}" was not found`);
           }
         } catch (err) {
@@ -203,7 +214,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           agentName: req.key.agentName,
           agentSessionId: session.sessionId,
           romeSessionId: req.init?.romeSessionId,
-          sessionConversation: session.conversation,
+          sessionChat: req.init?.romeSessionId
+            ? undefined
+            : await findSessionChat(this.webchatRepo, session.sessionId),
           channelThreadKey: req.key.channelThreadKey,
           threadContext: req.init?.threadContext,
           actionContext: req.actionContext,
