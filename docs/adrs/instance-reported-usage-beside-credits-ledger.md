@@ -22,19 +22,19 @@ Instances report usage as their own per-turn and per-action-run events, stored i
 
 ## Alternatives
 
-- **Write instance reports into `inference_requests` as unfunded rows.** Rejected because the ledger's constraints and limits assume every row is a credit hold. An unfunded row fails the hold check, and BYOK traffic would count against the same account's credit rate limit and throttle it.
+- **Write instance reports into `inference_requests` as unfunded rows.** Rejected because the ledger's constraints and limits assume every row is a credit hold. An unfunded row fails the hold check, and traffic on an API credential would count against the same account's credit rate limit and throttle it.
 - **Charge Rome credits from the instance's reported tokens and drop the gateway ledger.** Rejected because a guardian controls the reporting process and can under-report. A charge must rest on what Rome Cloud observed itself.
 - **Report only aggregates, such as hourly totals per kind and model.** Rejected because a total cannot be split again. Billing, reconciliation against the gateway, and corrections all need the per-turn record, and the per-turn record still yields any total.
 - **Have Rome mint a usage id and send it to the gateway as a request header.** Rejected because Codex runs as one shared app-server process whose provider headers are fixed at spawn. Rome cannot set a per-turn header, and Codex already sends a per-turn id of its own.
 - **Join on time windows and the model name instead of an id.** Rejected because concurrent turns on one instance overlap in time and often share a model. The join would attribute charges to the wrong turn.
-- **Let Rome Cloud reject events whose kind, provider, or funding it does not recognize.** Rejected because instances update on their own schedule. An instance newer than Rome Cloud would lose every event that uses a new value, so categorical fields are an open vocabulary and only structure and counts are validated.
+- **Let Rome Cloud reject events whose kind, provider, or login kind it does not recognize.** Rejected because instances update on their own schedule. An instance newer than Rome Cloud would lose every event that uses a new value, so categorical fields are an open vocabulary and only structure and counts are validated.
 - **Give the guardian a switch to turn reporting off.** Rejected because billing is expected to read these events, and a guardian cannot opt billed usage out of the record it is billed from.
 
 ## Consequences
 
-Every funding source is visible in one place without loosening the ledger that moves money. A usage view reads both tables: tokens from the events, and charges from the gateway rows joined on `provider_turn_id`. A credits charge with no matching event stays visible as unattributed, so a missing report never hides a charge.
+Every login kind is visible in one place without loosening the ledger that moves money. A usage view reads both tables: tokens from the events, and charges from the gateway rows joined on `provider_turn_id`. A credits charge with no matching event stays visible as unattributed, so a missing report never hides a charge.
 
-Billing that wants to charge for non-credit usage, such as a platform fee on BYOK turns, has to price self-reported numbers. That is safe where an instance runs a build Rome controls, and it carries under-reporting risk on a self-hosted instance. The gateway-observed credits path does not carry that risk.
+Billing that wants to charge for non-credit usage, such as a platform fee on turns that ran on an API credential, has to price self-reported numbers. That is safe where an instance runs a build Rome controls, and it carries under-reporting risk on a self-hosted instance. The gateway-observed credits path does not carry that risk.
 
 The join depends on Codex continuing to send `turn_id` in `x-codex-turn-metadata`. That header is not a documented contract. A Codex upgrade that drops it leaves events and charges unjoined but still correct on their own. The bundled-binary integration test asserts that the header carries the same id `turn/start` returns. A provider other than Codex reaching the gateway needs its own way to carry a turn id.
 

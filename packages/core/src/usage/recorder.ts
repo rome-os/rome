@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
-import type { ModelLoginKind, TurnUsageFacts } from "../agent/index.js";
+import type { TurnUsageFacts } from "../agent/index.js";
 import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
 
 const log = createLogger("usage-recorder");
@@ -97,7 +97,7 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
       status: facts.status,
       provider: accounting?.provider ?? facts.provider,
       model: accounting?.model ?? facts.model,
-      funding: fundingOf(facts.loginKind),
+      loginKind: facts.loginKind,
       providerTurnId: facts.providerTurnId ?? null,
       inputTokens: tokenCount(usage?.inputTokens),
       outputTokens: tokenCount(usage?.outputTokens),
@@ -109,11 +109,6 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
     };
     await this.deps.outbox.enqueue(event, credential);
   }
-}
-
-function fundingOf(kind: ModelLoginKind | undefined): TurnUsageEvent["funding"] {
-  if (kind === "api_credential") return "byok";
-  return kind ?? "unknown";
 }
 
 function tokenCount(value: number | undefined): number {

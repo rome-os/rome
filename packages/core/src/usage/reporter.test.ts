@@ -41,7 +41,7 @@ function turn(eventId: string): UsageEvent {
     status: "completed",
     provider: "openai",
     model: "gpt-6-sol",
-    funding: "byok",
+    loginKind: "api_credential",
     providerTurnId: null,
     inputTokens: 1,
     outputTokens: 1,
