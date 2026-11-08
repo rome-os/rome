@@ -348,6 +348,9 @@ final class AppModel {
     private(set) var instances: [CloudInstance] = []
     private(set) var currentInstanceID: String?
     private(set) var signInError: String?
+    /// The instance to sign in to once from a browser before the phone can,
+    /// set with its error.
+    private(set) var browserSignIn: URL?
     private(set) var sessionExpired = false
     /// Shown once after the app picked an instance among several on its own.
     var autoOpenHint: String?
@@ -422,6 +425,7 @@ final class AppModel {
 
     func beginSignIn() -> CloudSignInRequest {
         signInError = nil
+        browserSignIn = nil
         phase = .signingIn
         return cloud.beginSignIn()
     }
@@ -525,6 +529,7 @@ final class AppModel {
             await lostAccess(to: instance)
         } catch {
             signInError = (error as? LocalizedError)?.errorDescription
+            browserSignIn = error as? AuthError == .notOwner ? URL(string: instance.origin) : nil
             phase = .signedOut
         }
     }
@@ -577,6 +582,7 @@ final class AppModel {
 
     func retry() async {
         signInError = nil
+        browserSignIn = nil
         await openInstance(preferring: nil, showHint: false)
     }
 
@@ -598,6 +604,7 @@ final class AppModel {
         instances = []
         currentInstanceID = nil
         sessionExpired = false
+        browserSignIn = nil
         phase = .signedOut
     }
 

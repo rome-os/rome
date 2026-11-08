@@ -167,6 +167,23 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         #expect(old?.cookie == "rome_session")
     }
 
+    /// The instance's owner seat records another account: the phone says to
+    /// sign in once from a browser, never a generic failure.
+    @Test func aStaleOwnerSeatAsksForABrowserSignIn() async {
+        RouteProtocol.reset()
+        RouteProtocol.routes = [
+            "/api/auth/cloud/native/start": [.init(status: 200, body: #"{"authorization_request":{"client_id":"rome-instance","state":"s-1"},"origin":"https://me.romeos.cc"}"#)],
+            "/v1/instances/i-me/authorizations": [.init(status: 200, body: #"{"code":"code-1","state":"s-1","iss":"https://romeos.cc"}"#)],
+            "/api/auth/cloud/native/complete": [.init(status: 403, body: #"{"error":"not_owner"}"#)],
+        ]
+        await #expect(throws: AuthError.notOwner) { try await auth().session(for: Self.ownInstance) }
+        #expect(AuthError.notOwner.errorDescription == "Sign in to this Rome once in a browser, then try again")
+        // Any other refusal keeps its old meaning.
+        #expect(CloudAuth.completeError(status: 403, body: Data(#"{"error":"forbidden"}"#.utf8)) == .network)
+        #expect(CloudAuth.completeError(status: 403, body: Data()) == .network)
+        #expect(CloudAuth.completeError(status: 401, body: Data(#"{"error":"not_owner"}"#.utf8)) == .sessionRejected)
+    }
+
     /// Sign-out forgets visitor sessions with the rest.
     @Test func signOutForgetsVisitorSessions() async throws {
         visitorRoutes()

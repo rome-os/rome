@@ -5,6 +5,7 @@ import SwiftUI
 struct LoginView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(\.openURL) private var openURL
     @State private var showDebugMenu = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -108,8 +109,14 @@ struct LoginView: View {
                     .background(Palette.dangerSoft, in: Capsule())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                PrimaryButton(title: "Sign in with Rome Cloud", loadingTitle: "Signing in", loading: model.phase == .signingIn) {
-                    signIn()
+                if let site = model.browserSignIn {
+                    // Signed in to Rome Cloud already: the Rome itself wants one browser sign-in.
+                    PrimaryButton(title: "Open in browser") { openURL(site) }
+                    SecondaryButton(title: "Try again") { Task { await model.retry() } }
+                } else {
+                    PrimaryButton(title: "Sign in with Rome Cloud", loadingTitle: "Signing in", loading: model.phase == .signingIn) {
+                        signIn()
+                    }
                 }
             case .stopped, .noInstance:
                 // Why the list is short now: taken off a Rome's allow-list.

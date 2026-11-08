@@ -55,6 +55,9 @@ enum AuthError: Error, Equatable, LocalizedError {
     case accessDenied
     /// Taken off this Rome's allow-list: its owner no longer shares it.
     case accessRevoked
+    /// The instance's owner seat records another Rome Cloud account, often a
+    /// stale one: one sign-in from a browser binds it again.
+    case notOwner
     case sessionRejected
     case network
     case invalidResponse
@@ -66,6 +69,7 @@ enum AuthError: Error, Equatable, LocalizedError {
         case .instanceNotReady: return String(localized: "This Rome is not ready yet")
         case .accessDenied: return String(localized: "No access to this Rome")
         case .accessRevoked: return String(localized: "You no longer have access to this Rome")
+        case .notOwner: return String(localized: "Sign in to this Rome once in a browser, then try again")
         case .sessionRejected: return String(localized: "Sign-in did not finish")
         case .network: return String(localized: "Could not reach Rome Cloud")
         case .invalidResponse: return String(localized: "Invalid sign-in response")
@@ -259,7 +263,7 @@ final class CloudAuth {
         let (sessionData, sessionStatus) = try await perform(complete)
         if sessionStatus == 400, retry { return try await createSession(for: instance, retry: false) }
         guard (200..<300).contains(sessionStatus) else {
-            throw sessionStatus == 401 ? AuthError.sessionRejected : AuthError.network
+            throw Self.completeError(status: sessionStatus, body: sessionData)
         }
         guard let body = try? JSONDecoder().decode(JSONValue.self, from: sessionData),
               body["cookie_name"]?.string == "rome_session",
@@ -271,6 +275,14 @@ final class CloudAuth {
         guard session.isFresh else { throw AuthError.invalidResponse }
         store.set(session, for: Key.session(instance.origin))
         return session
+    }
+
+    /// Why the instance refused the owner's code.
+    nonisolated static func completeError(status: Int, body: Data) -> AuthError {
+        if status == 403, (try? JSONDecoder().decode(JSONValue.self, from: body))?["error"]?.string == "not_owner" {
+            return .notOwner
+        }
+        return status == 401 ? .sessionRejected : .network
     }
 
     /// A visitor's session, as the instance's dashboard sign-in for an

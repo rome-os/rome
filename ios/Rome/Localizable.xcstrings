@@ -1225,6 +1225,16 @@
         }
       }
     },
+    "Open in browser" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在浏览器中打开"
+          }
+        }
+      }
+    },
     "Open navigation" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1813,6 +1823,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录后打开你的 Rome"
+          }
+        }
+      }
+    },
+    "Sign in to this Rome once in a browser, then try again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先在浏览器中登录一次这个 Rome，再试一次"
           }
         }
       }
