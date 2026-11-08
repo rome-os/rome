@@ -1,4 +1,5 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { CodexLoginChoice } from "../../../domain/model-login.js";
 import { setInstanceTokenInMemory } from "../../../../lib/instance-identity.js";
 import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
@@ -359,7 +360,14 @@ describe("CodexAppServerManager", () => {
 });
 
 describe("CodexAppServerManager Rome credits wiring", () => {
-  const PAYER_RESTART = "the model payer or Rome instance credential changed";
+  const ROME_CREDITS: CodexLoginChoice = { kind: "rome_credits", credentialId: "romeinst_123" };
+  beforeEach(() => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+  });
+  afterEach(() => {
+    rs.unstubAllEnvs();
+  });
+  const LOGIN_RESTART = "the model login changed";
   const capture = () => {
     const clients: FakeConnection[] = [];
     const manager = new CodexAppServerManager({
@@ -396,7 +404,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("does not route buffered callbacks after replacing the payer", async () => {
+  it("does not route buffered callbacks after replacing the login", async () => {
     const { clients, manager } = capture();
     const callbacks = binding("credits");
     const dynamicToolCall = rs.fn(callbacks.onDynamicToolCall);
@@ -404,7 +412,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     try {
       const { threadId } = await manager.openThread(config("rome_credits"), callbacks);
 
-      manager.setDefaultProvider("rome_credits");
+      manager.useLogin(ROME_CREDITS);
       const result = await clients[0].options.onServerRequest(ServerRequestMethod.dynamicToolCall, {
         threadId,
         turnId: "turn-credits",
@@ -427,7 +435,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("does not publish a client invalidated by successive payer switches during initialize", async () => {
+  it("does not publish a client invalidated by successive login changes during initialize", async () => {
     const clients: FakeConnection[] = [];
     let resolveInitialize!: (value: unknown) => void;
     const manager = new CodexAppServerManager({
@@ -441,8 +449,8 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     try {
       const initializing = manager.warmup();
       resolveInitialize({});
-      manager.setDefaultProvider("rome_credits");
-      manager.setDefaultProvider(null);
+      manager.useLogin(ROME_CREDITS);
+      manager.useLogin({ kind: "subscription" });
 
       await expect(initializing).rejects.toThrow(
         "codex app-server was replaced during initialization",
@@ -456,7 +464,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("treats a payer change like an exit and lazily resumes idle threads", async () => {
+  it("treats a login change like an exit and lazily resumes idle threads", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     const { clients, manager } = capture();
     const callbacks = binding("credits");
@@ -465,12 +473,12 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     try {
       const { threadId } = await manager.openThread(config("rome_credits"), callbacks);
 
-      manager.setDefaultProvider("rome_credits");
+      manager.useLogin(ROME_CREDITS);
 
       expect(clients).toHaveLength(1);
       expect(clients[0].closed).toBe(1);
-      expect(callbacks.exits).toEqual([expect.objectContaining({ message: PAYER_RESTART })]);
-      expect(exited).toHaveBeenCalledWith(expect.objectContaining({ message: PAYER_RESTART }));
+      expect(callbacks.exits).toEqual([expect.objectContaining({ message: LOGIN_RESTART })]);
+      expect(exited).toHaveBeenCalledWith(expect.objectContaining({ message: LOGIN_RESTART }));
 
       await manager.requestForThread(threadId, Method.turnStart, { threadId });
 
@@ -487,17 +495,17 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("cancels an active sign-in when the payer replaces Codex", async () => {
+  it("cancels an active sign-in when a login change replaces Codex", async () => {
     const { manager } = capture();
     const accountService = new SharedCodexAccountService(manager);
     try {
       await accountService.startDeviceAuthorization();
 
-      manager.setDefaultProvider("rome_credits");
+      manager.useLogin(ROME_CREDITS);
 
       expect(accountService.authorizationState()).toMatchObject({
         running: false,
-        lastError: `Codex sign-in stopped: ${PAYER_RESTART}`,
+        lastError: `Codex sign-in stopped: ${LOGIN_RESTART}`,
       });
     } finally {
       accountService.close();
@@ -505,7 +513,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("does not restore a sign-in whose start response raced with a payer switch", async () => {
+  it("does not restore a sign-in whose start response raced with a login change", async () => {
     const { clients, manager } = capture();
     const accountService = new SharedCodexAccountService(manager);
     try {
@@ -523,12 +531,12 @@ describe("CodexAppServerManager Rome credits wiring", () => {
         userCode: "ABCD-EFGH",
         verificationUrl: "https://auth.openai.com/codex/device",
       });
-      manager.setDefaultProvider("rome_credits");
+      manager.useLogin(ROME_CREDITS);
 
       await expect(starting).rejects.toThrow("Codex login was canceled");
       expect(accountService.authorizationState()).toMatchObject({
         running: false,
-        lastError: `Codex sign-in stopped: ${PAYER_RESTART}`,
+        lastError: `Codex sign-in stopped: ${LOGIN_RESTART}`,
       });
     } finally {
       accountService.close();

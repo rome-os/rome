@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { createLogger } from "../../../../logger.js";
-import type { AIToolStatusProbeResult } from "../../../../lib/ai-tool-probes.js";
 import {
   getCodexCliStatus,
   markCodexAuthRevoked,
@@ -14,13 +14,32 @@ import {
   readLiveOrCachedUsage,
   type AIToolUsageStatus,
 } from "../../../../lib/provider-usage.js";
+import { fetchRomeCredits } from "../../../../lib/rome-credits.js";
 import type {
   ModelAccount,
+  ModelAccountStatus,
   ModelAuthorizationMode,
   ModelAuthorizationState,
   ModelBrowserAuthorization,
   ModelDeviceAuthorization,
 } from "../../../domain/model-account.js";
+import {
+  sameCodexLogin,
+  type CodexLogin,
+  type CodexLoginChoice,
+  type CodexLogins,
+} from "../../../domain/model-login.js";
+import { CODEX_LUNA_MODEL, CODEX_SOL_MODEL } from "../../../domain/model-selection.js";
+import type { ModelAccountReport } from "../../../domain/model-account-report.js";
+import { accountReport, refusalAfterReport, usageShowsCapacity } from "../account-report.js";
+import {
+  type LearnsRefusedTurns,
+  type RefusedTurn,
+  type UsageRefusal,
+  usageReadClearsRefusal,
+  usageRefusalAt,
+  usageRefusalEnded,
+} from "../refused-turn.js";
 import { isCodexAuthRevokedError } from "./auth-revoked.js";
 import { Method, Notify } from "./app-server-protocol.js";
 import type {
@@ -35,6 +54,8 @@ const CODEX_USAGE_CACHE_PATHS = ["usage-limits.json", "rate-limits.json"].map((f
   join(homedir(), ".codex", file),
 );
 const DEFAULT_LOGIN_TIMEOUT_MS = 16 * 60 * 1000;
+/** The app-server's RPC has no timeout of its own, and a usage read holds the account's report. */
+const DEFAULT_USAGE_TIMEOUT_MS = 10_000;
 
 interface ActiveLogin {
   loginId: string;
@@ -72,6 +93,14 @@ interface CodexAccountRpc {
   request<T>(method: string, params?: unknown): Promise<T>;
   onNotification(method: string, listener: CodexAppServerNotificationListener): () => void;
   onExit(listener: CodexAppServerExitListener): () => void;
+  login(): CodexLoginChoice;
+  useLogin(login: CodexLoginChoice): void;
+}
+
+/** The account's side of a model the Rome credits gateway refused. */
+export interface LearnsRefusedModels {
+  /** Settles once the gateway's list has been read again. Never rejects. */
+  refusedModel(): Promise<void>;
 }
 
 export interface SharedCodexAccountServiceOptions {
@@ -79,9 +108,13 @@ export interface SharedCodexAccountServiceOptions {
   usageCachePaths?: string[];
   readFileStatus?: () => Promise<CodexCliStatus>;
   markAuthRevoked?: () => Promise<void>;
+  now?: () => number;
+  usageTimeoutMs?: number;
+  /** Where the gateway's model list comes from while Rome credits are the login. */
+  readRomeCredits?: () => Promise<RomeCreditsView | null>;
 }
 
-function statusFromFile(fileStatus: CodexCliStatus): AIToolStatusProbeResult {
+function statusFromFile(fileStatus: CodexCliStatus): ModelAccountStatus {
   return {
     loggedIn: fileStatus.loggedIn,
     authMode: fileStatus.authMode,
@@ -90,6 +123,39 @@ function statusFromFile(fileStatus: CodexCliStatus): AIToolStatusProbeResult {
     email: fileStatus.email,
     needsReauth: fileStatus.needsReauth,
   };
+}
+
+/** The ChatGPT plans that serve every Codex model. The others do not serve the frontier models below. */
+const FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
+  "plus",
+  "pro",
+  "prolite",
+  "team",
+  "self_serve_business_usage_based",
+  "business",
+  "enterprise_cbp_usage_based",
+  "enterprise",
+  "edu",
+]);
+
+/** The frontier models a restricted plan does not serve: the Sol, Luna and Astra family. */
+export const RESTRICTED_PLAN_DENIED_MODELS: readonly string[] = [
+  "gpt-6-astra",
+  CODEX_SOL_MODEL,
+  "gpt-6-sol",
+  "gpt-5.6-sol",
+  CODEX_LUNA_MODEL,
+  "gpt-5.6-luna",
+];
+
+/** What the account's plan withholds and whether the provider limits its usage. */
+function planFacts(
+  status: ModelAccountStatus,
+): Pick<ModelAccountStatus, "modelsDenied" | "usageLimited"> {
+  if (!status.loggedIn) return {};
+  if (status.authMode === "apikey") return { usageLimited: false };
+  const full = status.planType !== undefined && FULL_MODEL_ACCESS_PLANS.has(status.planType);
+  return { usageLimited: true, ...(full ? {} : { modelsDenied: RESTRICTED_PLAN_DENIED_MODELS }) };
 }
 
 function rateLimitsPayload(value: unknown): unknown {
@@ -104,10 +170,13 @@ function rateLimitsPayload(value: unknown): unknown {
   return record.rateLimits ?? value;
 }
 
-export class SharedCodexAccountService implements ModelAccount {
+export class SharedCodexAccountService
+  implements ModelAccount, CodexLogins, LearnsRefusedTurns, LearnsRefusedModels
+{
   private readonly manager: CodexAccountRpc;
   private readonly loginTimeoutMs: number;
   private readonly usageCachePaths: string[];
+  private readonly usageTimeoutMs: number;
   private readonly readFileStatus: () => Promise<CodexCliStatus>;
   private readonly markAuthRevoked: () => Promise<void>;
   private readonly accountChangedListeners = new Set<() => void>();
@@ -118,6 +187,15 @@ export class SharedCodexAccountService implements ModelAccount {
   private cancelPendingLoginStart = false;
   private earlyLoginCompletion: LoginCompletedNotification | null = null;
   private lastLoginError: string | null = null;
+  /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
+  private refusal: UsageRefusal | undefined;
+  /** The last report, so a limit still ahead survives a usage read that fails. */
+  private last: ModelAccountReport | undefined;
+  private readonly readRomeCredits: () => Promise<RomeCreditsView | null>;
+  /** The gateway's list for the current login, or null while it has not said. */
+  private modelsServed: readonly string[] | null = null;
+  private modelsRead: { promise: Promise<void> } | null = null;
+  private readonly now: () => number;
   private closed = false;
 
   constructor(
@@ -127,8 +205,11 @@ export class SharedCodexAccountService implements ModelAccount {
     this.manager = manager;
     this.loginTimeoutMs = options.loginTimeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
     this.usageCachePaths = options.usageCachePaths ?? CODEX_USAGE_CACHE_PATHS;
+    this.usageTimeoutMs = options.usageTimeoutMs ?? DEFAULT_USAGE_TIMEOUT_MS;
     this.readFileStatus = options.readFileStatus ?? getCodexCliStatus;
     this.markAuthRevoked = options.markAuthRevoked ?? markCodexAuthRevoked;
+    this.now = options.now ?? Date.now;
+    this.readRomeCredits = options.readRomeCredits ?? (() => fetchRomeCredits());
     this.unsubscribers = [
       manager.onNotification(Notify.accountLoginCompleted, (params) => {
         this.handleLoginCompleted(params);
@@ -145,7 +226,35 @@ export class SharedCodexAccountService implements ModelAccount {
     ];
   }
 
-  async status(): Promise<AIToolStatusProbeResult> {
+  /**
+   * Reads the status and the usage together. A usage read that shows
+   * capacity after the hold ends a refusal; one in the hold describes the
+   * account before the refused turn.
+   */
+  async report(): Promise<ModelAccountReport> {
+    void this.readModelsServed();
+    const readAt = this.now();
+    const [status, usage] = await Promise.all([this.status(), this.usage()]);
+    if (usage && usageShowsCapacity(usage) && this.refusal) {
+      if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
+    }
+    this.last = accountReport(status, usage, this.heldRefusal(), this.now(), this.last);
+    this.refusal = refusalAfterReport(this.refusal, this.last);
+    return this.last;
+  }
+
+  async status(): Promise<ModelAccountStatus> {
+    const read = await this.readStatus();
+    return { ...read, ...planFacts(read) };
+  }
+
+  /** The refusal still held: one whose end has not passed. */
+  private heldRefusal(): UsageRefusal | undefined {
+    if (this.refusal && usageRefusalEnded(this.refusal, this.now())) this.refusal = undefined;
+    return this.refusal;
+  }
+
+  private async readStatus(): Promise<ModelAccountStatus> {
     const loginStartEpoch = this.isLoginIdle() ? this.loginStartEpoch : null;
     let response: CodexAccountReadResponse;
     try {
@@ -155,7 +264,7 @@ export class SharedCodexAccountService implements ModelAccount {
     } catch (err) {
       // A workspace routing 401 also matches. When the refresh succeeds but the
       // workspace keeps refusing the account, the next refresh clears the mark,
-      // so the payer switches back and forth at each hourly status refresh.
+      // so the login switches back and forth at each hourly status refresh.
       if (isCodexAuthRevokedError(err)) {
         if (this.noLoginSince(loginStartEpoch)) await this.markAuthRevoked();
       } else {
@@ -174,7 +283,7 @@ export class SharedCodexAccountService implements ModelAccount {
         ? (response.account as Record<string, unknown>)
         : null;
     // A custom default provider has no OpenAI account of its own. Preserve the
-    // saved guardian login so the payer resolver can select it again later.
+    // saved guardian login so Rome's setup can choose it again later.
     if (!account && !response.requiresOpenaiAuth) return statusFromFile(fileStatus);
     if (
       !account &&
@@ -236,7 +345,9 @@ export class SharedCodexAccountService implements ModelAccount {
     return await readLiveOrCachedUsage(
       async () => {
         try {
-          const response = await this.manager.request<unknown>(Method.accountRateLimitsRead);
+          const response = await this.withUsageTimeout(
+            this.manager.request<unknown>(Method.accountRateLimitsRead),
+          );
           return (
             normalizeUsageStatus(rateLimitsPayload(response), "codex app-server", {
               utilizationUnit: "fraction",
@@ -364,10 +475,75 @@ export class SharedCodexAccountService implements ModelAccount {
     }
   }
 
+  private withUsageTimeout<T>(read: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Codex rate limit read timed out after ${this.usageTimeoutMs}ms`)),
+        this.usageTimeoutMs,
+      );
+      timer.unref?.();
+    });
+    return Promise.race([read, timeout]).finally(() => clearTimeout(timer));
+  }
+
   async revoke(): Promise<void> {
     await this.cancelAuthorization();
     await this.manager.request(Method.accountLogout);
+    this.refusal = undefined;
+    this.last = undefined;
     this.emitAccountChanged();
+  }
+
+  /** The provider adapter saw the provider refuse a turn. A credential refusal is already in auth.json. */
+  refusedTurn(refusal: RefusedTurn): void {
+    if (refusal.kind === "usage") {
+      this.refusal = usageRefusalAt(refusal, this.now());
+    }
+    this.emitAccountChanged();
+  }
+
+  login(): CodexLogin {
+    const login = this.manager.login();
+    if (login.kind === "rome_credits") return { ...login, modelsServed: this.modelsServed };
+    return this.last?.account.authMode === "apikey" ? { kind: "api_credential" } : login;
+  }
+
+  useLogin(login: CodexLoginChoice): void {
+    this.assertOpen();
+    const before = this.manager.login();
+    this.manager.useLogin(login);
+    if (sameCodexLogin(before, login)) return;
+    // Another credential can belong to another account, so neither the list
+    // nor a read still in flight describes this login.
+    this.modelsServed = null;
+    this.modelsRead = null;
+    void this.readModelsServed();
+  }
+
+  /** The list is stale. Reads it again, then tells listeners the gateway has spoken. */
+  async refusedModel(): Promise<void> {
+    await this.readModelsServed();
+    this.emitAccountChanged();
+  }
+
+  /** One read at a time, only on Rome credits. A failed read keeps the last list. */
+  private readModelsServed(): Promise<void> {
+    if (this.closed || this.manager.login().kind !== "rome_credits") return Promise.resolve();
+    if (this.modelsRead) return this.modelsRead.promise;
+    const read = { promise: Promise.resolve() };
+    this.modelsRead = read;
+    read.promise = (async () => {
+      try {
+        const view = await this.readRomeCredits();
+        if (this.modelsRead === read) this.modelsServed = view?.models ? [...view.models] : null;
+      } catch (err) {
+        log.warn("Rome credits model list unavailable", { error: getErrorMessage(err) });
+      } finally {
+        if (this.modelsRead === read) this.modelsRead = null;
+      }
+    })();
+    return read.promise;
   }
 
   onChanged(listener: () => void): () => void {
@@ -431,6 +607,10 @@ export class SharedCodexAccountService implements ModelAccount {
     if (active) this.takeActiveLogin();
     if (notification.success === true) {
       this.lastLoginError = null;
+      // The authorization may name another account; a refusal and a remembered
+      // limit were the old one's.
+      this.refusal = undefined;
+      this.last = undefined;
     } else {
       this.lastLoginError =
         typeof notification.error === "string" && notification.error.trim()

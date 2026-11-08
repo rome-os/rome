@@ -14,7 +14,7 @@ import type {
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
-import type { AgentLoader } from "./agent-loader.js";
+import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -228,7 +228,7 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
 export class AgentRunner {
   constructor(
     private agentSessionManager: AgentSessionManager,
-    private agentLoader: AgentLoader,
+    private agentLoader: AgentCatalog,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
     private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
@@ -244,7 +244,7 @@ export class AgentRunner {
    * configured to route to an agent that has been uninstalled.
    */
   hasAgent(name: string): boolean {
-    return this.agentLoader.has(name);
+    return this.agentLoader.find(name) !== undefined;
   }
 
   /**
@@ -254,12 +254,9 @@ export class AgentRunner {
    */
   hasAction(agentName: string, actionName: string): boolean {
     if (!this.actionRegistry) return false;
-    let actions: string[];
-    try {
-      actions = this.agentLoader.getRecord(agentName).config.actions ?? [];
-    } catch {
-      return false;
-    }
+    const agent = this.agentLoader.find(agentName);
+    if (!agent) return false;
+    const actions = agent.definition.actions ?? [];
     const canonical = this.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
     return this.actionRegistry
       .getForAgent(actions)
@@ -327,6 +324,7 @@ export class AgentRunner {
         replyTo: params.replyTo,
         ...(lines ? { quoted: lines.quoted } : {}),
         initiatedBy: params.initiatedBy ?? "user",
+        ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
       },
     );
     this.runLineDeps?.replies?.runs(handle.turnId, agentName);

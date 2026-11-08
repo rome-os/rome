@@ -24,9 +24,15 @@ const repoTrigger = (type: string) => ({
 });
 
 /** A Composio service as the connector lists it. */
-const composio = (service: string, label: string, working: boolean) => ({
+const composio = (
+  service: string,
+  label: string,
+  working: boolean,
+  glyph: string | null = service,
+) => ({
   service,
   label,
+  ...(glyph === null ? {} : { glyph }),
   state: working ? ("working" as const) : null,
   connect: working
     ? null
@@ -46,7 +52,8 @@ const connectionViews = (): ConnectionView[] =>
     {
       id: "c1",
       connectionKind: "github",
-      label: "GitHub",
+      label: "github",
+      kindLabel: "GitHub",
       state: "working",
       display: { github: { displayName: null, handle: "octo-me", email: null, avatarUrl: null } },
       account: null,
@@ -60,7 +67,8 @@ const connectionViews = (): ConnectionView[] =>
     {
       id: null,
       connectionKind: "telegram_user",
-      label: "Telegram",
+      label: "telegram_user",
+      kindLabel: "Telegram",
       state: null,
       display: {},
       account: null,
@@ -203,6 +211,7 @@ function setup(
   /** While on, every Concierge turn fails to run to its end. */
   const turnFails = { on: false };
   const inputLabels: (string | undefined)[] = [];
+  const pushLevels: (string | undefined)[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
   const testDb = createTestDb();
@@ -346,7 +355,6 @@ function setup(
   const ownerOfChat = async (id: string | null | undefined) =>
     (id && chatOwners.get(id)) || GUARDIAN_OWNER;
   const service = {
-    isEnabled: async () => true,
     findChatId: async (owner = GUARDIAN_OWNER) => mainChatIdOf(owner),
     ownerOfChat,
     isServed: async (owner: string) => !dropped.has(owner),
@@ -356,11 +364,12 @@ function setup(
     runSystemTurn: async (
       chatId: string,
       prompt: string,
-      turnOptions?: { inputLabel?: string },
+      turnOptions?: { inputLabel?: string; pushLevel?: string },
     ) => {
       turnChats.push(chatId);
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
+      pushLevels.push(turnOptions?.pushLevel);
       return !turnFails.on;
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
@@ -376,6 +385,7 @@ function setup(
     turns,
     turnFails,
     inputLabels,
+    pushLevels,
     triaged,
     prompts,
     omitted,
@@ -1002,6 +1012,18 @@ describe("the follow pipeline", () => {
     s.stop();
   });
 
+  it("pushes an important turn's message with an alert and a digest's without one", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e2: "digest" } });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await fire(s, "e1");
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.pushLevels).toEqual(["active", "passive"]);
+    s.stop();
+  });
+
   it("hands the owed digest to the Concierge at a digest time, and an empty one when none is owed", async () => {
     const s = setup({ triage: { e1: "digest" } });
     const digest = s.action("core:concierge_digest");
@@ -1121,20 +1143,23 @@ describe("watchProvidersOf", () => {
         services: [
           composio("gmail", "Other Gmail", true),
           composio("linear", "Linear", true),
-          composio("telegram_user", "Telegram (Composio)", true),
+          composio("telegram_user", "Telegram (Composio)", true, null),
         ],
         watch: [],
       },
     });
     const { connectors } = await s.following().list();
-    // Telegram the toolkit is listed beside Telegram the channel.
-    expect(connectors.map((c) => [c.service, c.label])).toEqual([
-      ["github", "GitHub"],
-      ["gmail", "Gmail"],
-      ["telegram_user", "Telegram"],
-      ["notion", "Notion"],
-      ["linear", "Linear"],
-      ["telegram_user", "Telegram (Composio)"],
+    // Telegram the toolkit is listed beside Telegram the channel. A connection
+    // is named by its kind's display label (its own label is the kind id), and
+    // each service's mark id comes from its source: a brand for Rome's own
+    // connections, the provider's glyph for the rest, none when it names none.
+    expect(connectors.map((c) => [c.service, c.label, c.icon])).toEqual([
+      ["github", "GitHub", "brand:github"],
+      ["gmail", "Gmail", "glyph:gmail"],
+      ["telegram_user", "Telegram", "brand:telegram_user"],
+      ["notion", "Notion", "glyph:notion"],
+      ["linear", "Linear", "glyph:linear"],
+      ["telegram_user", "Telegram (Composio)", null],
     ]);
   });
 });

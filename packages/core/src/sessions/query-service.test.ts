@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../test/db.js";
+import { buildAgent, createTestDb, type TestDb } from "../test/helpers.js";
+import type { Agent } from "../agent/index.js";
 import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -37,12 +38,13 @@ describe("SessionQueryService", () => {
         .run();
     }
     webchat = new ChatsWebChatRepository(testDb.db);
-    const codeReviewAgent = {
-      metadata: { ownerType: "app" as const, ownerId: "code-review" },
-    };
-    const skillReviewAgent = {
-      metadata: { ownerType: "app" as const, ownerId: "code-review" },
-    };
+    const appAgent = (name: string): Agent => ({
+      ...buildAgent(name),
+      ownerType: "app",
+      ownerId: "code-review",
+    });
+    const codeReviewAgent = appAgent("code-review:code-review-agent");
+    const skillReviewAgent = appAgent("code-review:skill_review");
     const currentRecords = new Map([
       ["code-review:code-review-agent", codeReviewAgent],
       ["code-review:skill_review", skillReviewAgent],
@@ -53,14 +55,8 @@ describe("SessionQueryService", () => {
     ]);
     service = new SessionQueryService({
       repository: new SessionQueryRepository(testDb.db),
-      agentLoader: {
-        getRecord: (name) => {
-          const record = resolvableRecords.get(name);
-          if (!record) throw new Error(`Agent ${name} not found`);
-          return record;
-        },
-        getAllResolvableRecords: () => new Map(resolvableRecords),
-      },
+      agentLoader: { find: (name) => resolvableRecords.get(name) },
+      agentsByName: () => new Map(resolvableRecords),
       appCatalog: {
         listResolved: () => [
           {

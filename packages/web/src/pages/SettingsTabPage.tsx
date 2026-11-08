@@ -126,7 +126,6 @@ interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableImpersonation?: boolean;
-  experimentalConcierge?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -940,7 +939,7 @@ function AdvancedSection({
           <SystemDiagnosisSection details={<RelayHealthSection />} />
         </Section>
         <AppKeysSection />
-        <FeaturesSection settings={settings} onSave={onSave} saving={saving} />
+        <FeaturesSection />
         <AccessControlSection settings={settings} onSave={onSave} saving={saving} />
         <ComputerUseSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
@@ -971,7 +970,6 @@ function PresentationModeRow() {
 
 function SettingsToggleRow({
   title,
-  badge,
   description,
   label,
   checked,
@@ -979,7 +977,6 @@ function SettingsToggleRow({
   disabled,
 }: {
   title: string;
-  badge?: string;
   description?: string;
   label: string;
   checked: boolean;
@@ -990,14 +987,7 @@ function SettingsToggleRow({
   return (
     <FormRow>
       <FormRowHeading>
-        <FormRowLabel htmlFor={id}>
-          {title}
-          {badge && (
-            <Badge variant="muted" className="ml-2 align-middle">
-              {badge}
-            </Badge>
-          )}
-        </FormRowLabel>
+        <FormRowLabel htmlFor={id}>{title}</FormRowLabel>
         {description && <FormRowDescription>{description}</FormRowDescription>}
       </FormRowHeading>
       <FormRowControl>
@@ -1393,25 +1383,9 @@ function ImpersonationAdvancedSection({
   );
 }
 
-/** Switches for what Rome does in chats. Concierge is still being tried out,
- *  so it carries an Experimental badge; `experimentalConcierge` shows its chat
- *  under Chats. */
-function FeaturesSection({
-  settings,
-  onSave,
-  saving,
-}: {
-  settings: SettingsData;
-  onSave: (p: Record<string, unknown>) => Promise<void>;
-  saving: boolean;
-}) {
+/** Switches for what Rome does in chats. */
+function FeaturesSection() {
   const { t } = useTranslation("settings");
-  const [concierge, setConcierge] = useState(settings.experimentalConcierge ?? false);
-
-  function toggleConcierge(next: boolean) {
-    setConcierge(next);
-    void onSave({ experimentalConcierge: next });
-  }
 
   return (
     <Section>
@@ -1419,15 +1393,6 @@ function FeaturesSection({
         <SectionTitle>{t("advanced.features.title")}</SectionTitle>
       </SectionHeader>
       <FormRows>
-        <SettingsToggleRow
-          title={t("advanced.experimental.concierge.title")}
-          badge={t("advanced.experimental.badge")}
-          description={t("advanced.experimental.concierge.description")}
-          label={t("advanced.experimental.concierge.toggleLabel")}
-          checked={concierge}
-          onChange={toggleConcierge}
-          disabled={saving}
-        />
         <SpokenRecapsRows />
         <PresentationModeRow />
       </FormRows>

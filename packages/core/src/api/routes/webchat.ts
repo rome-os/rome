@@ -66,20 +66,14 @@ import {
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
-import type { ModelSelection } from "../../agent/index.js";
-import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
+import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
+import { toModelResolutionErrorPayload } from "../../agent/index.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
-import {
-  buildWorkspaceContextSection,
-  type WorkspaceContextSnapshot,
-} from "../../core/prompt-builder.js";
-import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
+import { buildWorkspaceContextSection, type WorkspaceContextSnapshot } from "../../agent/index.js";
+import { normalizeRoutineDraftForCard } from "../../routines/propose-routine-tool.js";
 import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
-import {
-  buildSlashSkillPrompt,
-  parseSlashSkillInvocation,
-} from "../../core/slash-skill-command.js";
+import { buildSlashSkillPrompt, parseSlashSkillInvocation } from "../../agent/index.js";
 import { buildConciergeSkillPrompt } from "../../concierge/skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -104,8 +98,7 @@ import type {
   BackendTurnOptions,
 } from "../../actions/backend-turn.js";
 import { z } from "zod";
-import { resolveSessionPolicy } from "../../core/session-policy.js";
-import { withReplyContext } from "../../core/reply-context.js";
+import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 
 const log = createLogger("api:webchat");
@@ -121,12 +114,9 @@ const isReplyToPart = (part: unknown): boolean =>
 function agentPolicySource(
   agentLoader: ApiDeps["agentLoader"],
   agentName: string,
-): Parameters<typeof resolveSessionPolicy>[0] {
-  try {
-    return agentLoader.get(agentName);
-  } catch {
-    return { name: agentName };
-  }
+): Parameters<typeof resolveAgentPolicy>[0] {
+  const agent = agentLoader.find(agentName);
+  return agent ? { name: agent.localName, policy: agent.definition.policy } : { name: agentName };
 }
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
 const SESSIONS_HOST_APP_ID = "sessions";
@@ -383,11 +373,11 @@ const isProposeRoutineTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
 /** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
- * JSON-serialized through the facade. Returns null for any non-suspended
+ * JSON-serialized through the Rome tools. Returns null for any non-suspended
  * result so the drain loop ignores ordinary tool calls. */
 function readSuspensionFromOutput(output: unknown): Suspension | null {
   let value: unknown = output;
-  // An MCP facade tool_result surfaces as `[{ type: "text", text: "<json>" }]`
+  // A Rome tool_result surfaces as `[{ type: "text", text: "<json>" }]`
   // (or `{ content: [...] }`); unwrap to the JSON text the action returned.
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const content = (value as { content?: unknown }).content;
@@ -434,8 +424,8 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
 
 /** The host-owned inline cards rome-web renders itself, each paired with the
  * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
- * has no agent tool and is emitted by turn middleware alone (the welcome
- * conversation), so an exact name is the whole allow-list. */
+ * has no agent tool and is emitted by turn middleware alone, so an exact
+ * name is the whole allow-list. */
 const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
   [
     {
@@ -483,7 +473,7 @@ function buildBuiltinCard(
 }
 
 /** Pull a fire-and-forget `placeWidget` descriptor out of an action's tool_result
- * output (the agent-session shim returns `{ placeWidget: true, appId }` for an
+ * output (`actionToolOutput` returns `{ placeWidget: true, appId }` for an
  * action whose ActionResult carried `place_widget`). Unlike a pending
  * interaction this does NOT park the agent or persist a card — the drain loop just
  * emits a `widget_placement` event so the live client mounts the widget. Returns
@@ -768,6 +758,8 @@ export interface WebchatRuntime {
   startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
+  /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -1788,7 +1780,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * session, so it stays in the cacheable system prefix). The per-thread,
    * dynamic thread + project framing is rendered separately as a
    * `<thread_context>` block on the session's first user message — see
-   * `buildThreadContextBlock` in prompt-builder.ts and AgentSession.runOneTurn.
+   * `buildThreadContextBlock` in agent/domain/prompt.ts and AgentSession.runOneTurn.
    */
   const readGuardianProfile = (): string | null => {
     try {
@@ -2282,7 +2274,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   });
 
   app.get("/chat/agents", (c) => {
-    const records = deps.agentLoader.getAllRecords();
     const apps = deps.appCatalog.listResolved();
     const appById = new Map(apps.map((app) => [app.appId, app]));
 
@@ -2298,27 +2289,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     >();
 
-    for (const [name, { config, metadata }] of records) {
-      const resolved = appById.get(metadata.ownerId);
-      let group = groups.get(metadata.ownerId);
+    for (const agent of deps.agentLoader.list()) {
+      const resolved = appById.get(agent.ownerId);
+      let group = groups.get(agent.ownerId);
       if (!group) {
         group = {
-          ownerId: metadata.ownerId,
-          ownerType: metadata.ownerType,
+          ownerId: agent.ownerId,
+          ownerType: agent.ownerType,
           // Core agents live outside the app catalog, so `resolved` is empty
           // and the fallback would surface the raw ownerId ("core"). Render
           // them as "Rome" instead — that's the product name users know.
-          label:
-            metadata.ownerType === "core" ? "Rome" : (resolved?.displayName ?? metadata.ownerId),
+          label: agent.ownerType === "core" ? "Rome" : (resolved?.displayName ?? agent.ownerId),
           description: resolved?.manifest.description ?? "",
           iconUrl: resolved?.iconAbsolutePath
-            ? `/api/apps/${appIdToPathSegment(metadata.ownerId)}/icon`
+            ? `/api/apps/${appIdToPathSegment(agent.ownerId)}/icon`
             : null,
           agents: [],
         };
-        groups.set(metadata.ownerId, group);
+        groups.set(agent.ownerId, group);
       }
-      group.agents.push({ name, localName: config.name, description: config.description });
+      group.agents.push({
+        name: agent.name,
+        localName: agent.localName,
+        description: agent.definition.description,
+      });
     }
 
     for (const group of groups.values()) {
@@ -2446,15 +2440,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Reject unknown names up-front so the user gets immediate feedback in
     // the composer rather than a delayed turn-time error.
     const requestedAgentName = body.agentName?.trim() || null;
-    if (requestedAgentName && !isCoreMainAgentId(requestedAgentName)) {
-      if (!deps.agentLoader.has(requestedAgentName)) {
-        return answer({ error: `Agent "${requestedAgentName}" not found` }, 400);
-      }
-    }
-    const storedAgentName =
+    const requestedAgent =
       requestedAgentName && !isCoreMainAgentId(requestedAgentName)
-        ? deps.agentLoader.getCanonicalName(requestedAgentName)
+        ? deps.agentLoader.find(requestedAgentName)
         : null;
+    if (requestedAgent === undefined) {
+      return answer({ error: `Agent "${requestedAgentName}" not found` }, 400);
+    }
+    const storedAgentName = requestedAgent?.name ?? null;
 
     await deps.webchatRepo.createSession(
       id,
@@ -3389,7 +3382,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // the typed-slash pass-through.
     const requestedSkillName = typeof body.skillName === "string" ? body.skillName.trim() : "";
     const requestedSkill =
-      requestedSkillName && !resolution ? deps.skillCatalog.get(requestedSkillName) : undefined;
+      requestedSkillName && !resolution ? deps.skillCatalog.find(requestedSkillName) : undefined;
     const skillName = requestedSkill?.name ?? null;
 
     // A skill selection with no task text is a valid turn on its own — the
@@ -3458,7 +3451,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // An agent whose text is private speaks one message per tool call, so
         // each of its rows is a message of its own.
         ownRowOnly:
-          resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
+          resolveAgentPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
             .finalText === "private",
       });
       if (!resolved.ok) return answer({ error: resolved.error }, 400);
@@ -3543,7 +3536,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // keeps it.
     const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
-    // user message so the cached system prefix in PromptBuilder stays stable.
+    // user message so the cached fixed part of the system prompt stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`
@@ -3633,7 +3626,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // workflow-planner). There is no cross-session reroute.
     const agentName = session.agentName ?? "main";
     if (!isCoreMainAgentId(agentName)) {
-      if (!deps.agentLoader.has(agentName)) {
+      if (!deps.agentLoader.find(agentName)) {
         return answer(
           {
             error: `Agent "${agentName}" is unavailable. The owning app may have been uninstalled.`,
@@ -3643,7 +3636,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
-    const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
+    const policy = resolveAgentPolicy(agentPolicySource(deps.agentLoader, agentName));
     // The main Concierge chat keeps its fixed name, and so does a topic chat
     // started with one. An untitled topic chat is named from its first
     // message, as an ordinary chat is.
@@ -4285,7 +4278,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The same rule as a foreground turn: an agent whose text is private keeps
     // its narration in the trace.
     const deliversText =
-      resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
+      resolveAgentPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
         .finalText === "deliver";
     // Position of the recorded turn's next text block, numbered as a foreground
     // turn numbers its blocks.
@@ -4439,7 +4432,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return Boolean(session && isStoredWebchatSession(session));
     },
     async post(chatId, body, as) {
-      if (!deps.agentLoader.has(as.id)) {
+      if (!deps.agentLoader.find(as.id)) {
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
       const inputId = randomUUID();
@@ -4508,6 +4501,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
       );
       return opened.sessionId;
+    },
+    async sendAsGuardian(chatId, text) {
+      const inputId = randomUUID();
+      const sent = await handleChatSend(chatId, { inputId, text });
+      if (sent.status < 400) return;
+      // Once the input is recorded it is said, even when the agent could not be woken on it.
+      if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
+        throw new Error(routeError(sent));
+      }
+      log.warn("guardian message recorded but its agent was not woken", {
+        chatId,
+        inputId,
+        error: routeError(sent),
+      });
     },
     isRunning: isSessionRunning,
     activeTurns: (sessionId) =>

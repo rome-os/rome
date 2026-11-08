@@ -815,8 +815,8 @@ export function AiToolsPanel({
           {showRomeCredits && romeCredits && statusLoaded && (
             <RomeCreditsRow
               credits={romeCredits}
-              // The payer counts an unknown ChatGPT login as connected, so only
-              // an explicit false lets credits pay.
+              // Rome counts an unknown ChatGPT login as connected, so only
+              // an explicit false puts Codex on credits.
               chatgptConnected={toolStatus.codex?.loggedIn !== false}
               claudeConnected={toolStatus.claude?.loggedIn === true}
             />

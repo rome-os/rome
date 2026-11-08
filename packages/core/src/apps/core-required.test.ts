@@ -34,7 +34,6 @@ describe("deriveCoreRequiredApps", () => {
       "inbox",
       "skills",
       "system",
-      "welcome-to-rome",
     ]);
   });
 

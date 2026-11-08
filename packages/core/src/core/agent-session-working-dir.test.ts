@@ -1,3 +1,5 @@
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,18 +8,19 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
-import { AgentLoader } from "./agent-loader.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AgentLoader } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 const AGENT = "worker";
 
@@ -63,27 +66,31 @@ describe("AgentSessionManager working dirs", () => {
         ),
     };
     const state = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: true, quotaExhausted: false },
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Working dir test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Working dir test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
         webchatRepo,
-        promptBuilder,
+        sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          accounts: fakeAccounts(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
@@ -379,6 +386,19 @@ describe("AgentSessionManager working dirs", () => {
     );
     expect((await sessionRepository.session("legacy-session"))?.workingDir).toBe(
       join(directory, "projects", "default"),
+    );
+  });
+
+  it("refuses a session stored under one unknown agent when another unknown agent asks for it", async () => {
+    await sessionRepository.add(
+      Session.create("gone:writer", {
+        deprecatedId: "orphan-session",
+        continuityKey: "action:orphan",
+      }),
+    );
+
+    await expect(manager.acquireBySessionId!("orphan-session", "gone:reader")).rejects.toThrow(
+      'Agent session "orphan-session" was not found or cannot be resumed',
     );
   });
 });

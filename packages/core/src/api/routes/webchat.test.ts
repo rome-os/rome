@@ -20,7 +20,13 @@ import {
 } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
-import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  buildAgent,
+  createTestDb,
+  buildTestDeps,
+  type TestDb,
+  type TestDeps,
+} from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import type {
   AgentSession,
@@ -32,12 +38,13 @@ import type {
   SendTurnOptions,
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
-import { ModelResolutionError } from "../../core/model-resolver.js";
+import { ModelResolutionError } from "../../agent/index.js";
 import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import { reportOf } from "../../test/kit/model-accounts.js";
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -478,10 +485,8 @@ describe("Webchat API", () => {
     const sessionId = "automation-senders";
     await deps.webchatRepo.createSession(sessionId, "Automation");
     const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
-    const records = new Map([
-      ["coding:coding", { config: { name: "coding" }, metadata: { ownerId: "coding" } }],
-    ]);
-    deps.agentLoader = { getAllRecords: () => records } as never;
+    const coding = { ...buildAgent("coding:coding"), ownerType: "app" as const, ownerId: "coding" };
+    deps.agentLoader = { list: () => [coding] } as never;
     deps.appCatalog = {
       get: (id: string) =>
         id === "coding" || id === "review"
@@ -818,7 +823,9 @@ describe("Webchat API", () => {
       recordConversation: async () => {},
       shutdown: async () => {},
     };
-    rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
     const id = await runtime.startChat({}, "guardian");
@@ -862,6 +869,21 @@ describe("Webchat API", () => {
       expect(
         (await deps.webchatRepo.getMessages(id)).filter((message) => message.role === "user"),
       ).toHaveLength(2);
+
+      // The guardian's own message, as their composer sends it: said by no agent.
+      await runtime.sendAsGuardian(id, "Help me follow Gmail.");
+      const inputs3 = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      expect(inputs3).toHaveLength(3);
+      const said = inputs3.find((m) => m.content.includes("Help me follow Gmail."));
+      expect(said).toBeDefined();
+      const [{ sender_account_id: sender }] = testDb.db.all<{ sender_account_id: string | null }>(
+        sql`SELECT sender_account_id FROM chat_messages WHERE key = ${said!.id}`,
+      );
+      // Recorded before the agent failed to wake, so it counts as said.
+      expect(sender ?? "").not.toMatch(/^agent:/);
+      await expect(runtime.sendAsGuardian("no-such-chat", "hi")).rejects.toThrow(
+        "Session not found",
+      );
     } finally {
       for (const finish of finishers) finish();
     }
@@ -869,28 +891,12 @@ describe("Webchat API", () => {
 
   it("encodes scoped owner ids in agent picker icon URLs", async () => {
     const ownerId = "@foo/bar";
-    deps.agentLoader = {
-      getAllRecords: () =>
-        new Map([
-          [
-            `${ownerId}:baz`,
-            {
-              config: {
-                name: "baz",
-                description: "Scoped agent",
-              },
-              metadata: {
-                kind: "agent",
-                ownerType: "app",
-                ownerId,
-                publicName: "baz",
-                aliases: [],
-                sourcePath: "/installed/%40foo%2Fbar/agents/baz.yaml",
-              },
-            },
-          ],
-        ]),
-    } as unknown as typeof deps.agentLoader;
+    const baz = {
+      ...buildAgent(`${ownerId}:baz`, { description: "Scoped agent" }),
+      ownerType: "app" as const,
+      ownerId,
+    };
+    deps.agentLoader = { list: () => [baz] } as unknown as typeof deps.agentLoader;
     deps.appCatalog = {
       listResolved: () => [
         {
@@ -2672,7 +2678,9 @@ describe("Webchat API", () => {
     } as unknown as typeof deps.agentSessionManager;
     const turnFailedBeforeStart = rs.fn();
     deps.concierge = { turnFailedBeforeStart } as never;
-    rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
     const id = await runtime.startChat({}, "guardian");
@@ -2870,11 +2878,9 @@ describe("Webchat API", () => {
       peek: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
-    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-    rs.spyOn(deps.agentLoader, "get").mockReturnValue({
-      name: "concierge",
-      policy: { finalText: "private", autoTitle: false },
-    } as ReturnType<typeof deps.agentLoader.get>);
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      buildAgent(name, { name: "concierge", policy: { finalText: "private", autoTitle: false } }),
+    );
     deps.concierge = {
       switchIfExhausted: async () => null,
       conciergeChat: async () => null,
@@ -3228,11 +3234,9 @@ describe("Webchat API", () => {
     });
 
     it("keeps a private agent's text in the trace: no commentary message, no reply", async () => {
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      rs.spyOn(deps.agentLoader, "get").mockReturnValue({
-        name: "main",
-        policy: { finalText: "private", autoTitle: false },
-      } as ReturnType<typeof deps.agentLoader.get>);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+        buildAgent(name, { name: "main", policy: { finalText: "private", autoTitle: false } }),
+      );
       const { sendMessageRun, sessionId } = await runScriptedStream(
         () =>
           (async function* () {
@@ -3805,11 +3809,11 @@ describe("Webchat API", () => {
       } satisfies FakeSession;
     });
     deps.skillCatalog = {
-      get: (name) =>
+      find: (name) =>
         name === "app_creation" || name === "@ray/calendar:daily_brief"
           ? ({ name } as never)
           : undefined,
-      getAll: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
+      list: () => [{ name: "app_creation" }, { name: "@ray/calendar:daily_brief" }] as never[],
       getRegistryLoadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
@@ -3890,8 +3894,8 @@ describe("Webchat API", () => {
     // The structured field is the composer chip's explicit selection — it
     // resolves against the catalog independently of any typed text.
     deps.skillCatalog = {
-      get: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
-      getAll: () => [{ name: "research:deep-research" } as never],
+      find: (name) => (name === "research:deep-research" ? ({ name } as never) : undefined),
+      list: () => [{ name: "research:deep-research" } as never],
       getRegistryLoadFailures: () => [],
     };
     const app = createWebchatRuntime(deps).routes;
@@ -3971,10 +3975,10 @@ describe("Webchat API", () => {
       interrupt: async () => undefined,
       close: async () => undefined,
     }));
-    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     deps.skillCatalog = {
-      get: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
-      getAll: () => [],
+      find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      list: () => [],
       getRegistryLoadFailures: () => [],
     };
     await deps.webchatRepo.createSession(
@@ -4045,10 +4049,10 @@ describe("Webchat API", () => {
       interrupt: async () => undefined,
       close: async () => undefined,
     }));
-    rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     deps.skillCatalog = {
-      get: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
-      getAll: () => [],
+      find: (name) => (name === "coding:app_creation" ? ({ name } as never) : undefined),
+      list: () => [],
       getRegistryLoadFailures: () => [],
     };
     const { runtime } = createWebchatRuntime(deps);
@@ -4275,7 +4279,7 @@ describe("Webchat API", () => {
 
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         switchIfExhausted: async () => null,
         conciergeChat: async (id: string) =>
@@ -4311,7 +4315,7 @@ describe("Webchat API", () => {
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
       mockScriptedManager();
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         switchIfExhausted: async (chatId: string) => {
           await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
@@ -4345,12 +4349,15 @@ describe("Webchat API", () => {
 
     it("fails over only the Concierge pre-turn and leaves an ordinary quota failure unchanged", async () => {
       mockScriptedManager();
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      rs.spyOn(deps.aiToolState, "get").mockReturnValue({
-        claude: { loggedIn: true, quotaExhausted: true },
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      rs.spyOn(deps.modelAccounts, "read").mockReturnValue({
+        anthropic: reportOf("usage_limit_reached"),
+        openai: reportOf("available"),
       });
-      deps.concierge = new ConciergeService({ ...deps } as unknown as ConciergeDeps);
+      deps.concierge = new ConciergeService({
+        ...deps,
+        accounts: deps.modelAccounts,
+      } as unknown as ConciergeDeps);
       const acquire = deps.agentSessionManager.acquire;
       deps.agentSessionManager.acquire = rs.fn(
         async (key: AgentSessionKey, init?: AgentSessionInit) => {
@@ -4482,7 +4489,7 @@ describe("Webchat API", () => {
 
     const parkedEvents = (toolUseId: string) =>
       async function* () {
-        // Mirror the real MCP facade tool_result shape: the action's JSON is
+        // Mirror the real tool_result shape: the action's JSON is
         // wrapped in a `[{ type: "text", text }]` content block, not handed back
         // as a bare object — the drain loop must unwrap it.
         yield {
@@ -6750,11 +6757,9 @@ describe("Webchat API", () => {
       });
 
       it("keeps a private agent's commentary in the trace", async () => {
-        rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-        rs.spyOn(deps.agentLoader, "get").mockReturnValue({
-          name: "main",
-          policy: { finalText: "private", autoTitle: false },
-        } as ReturnType<typeof deps.agentLoader.get>);
+        rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+          buildAgent(name, { name: "main", policy: { finalText: "private", autoTitle: false } }),
+        );
         const sessionId = "sess-recorded-private-commentary";
         await deps.webchatRepo.createSession(sessionId, "Recorded Private Commentary");
 
@@ -6953,8 +6958,7 @@ describe("Webchat API", () => {
       }));
       if (options.agentName) {
         deps.agentLoader = {
-          get: (name: string) => ({ name, policy: { finalText: "private" } }),
-          has: () => true,
+          find: (name: string) => buildAgent(name, { name, policy: { finalText: "private" } }),
         } as never;
       }
       await deps.webchatRepo.createSession(
@@ -7176,8 +7180,8 @@ describe("Webchat API", () => {
     it("tells the agent on every automated turn, preserves slash expansion, and leaves a plain loopback turn unchanged", async () => {
       const { send, sessionId } = await setup();
       deps.skillCatalog = {
-        get: (name: string) => (name === "brief" ? { name } : undefined),
-        getAll: () => [],
+        find: (name: string) => (name === "brief" ? { name } : undefined),
+        list: () => [],
         getRegistryLoadFailures: () => [],
       } as never;
       const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
@@ -7266,8 +7270,8 @@ describe("Webchat API", () => {
     it("wraps the expanded skill prompt and keeps the workspace block outside the reply", async () => {
       const { text, seed, send } = await setup();
       deps.skillCatalog = {
-        get: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
-        getAll: () => [{ name: "app_creation" }] as never[],
+        find: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
+        list: () => [{ name: "app_creation" }] as never[],
         getRegistryLoadFailures: () => [],
       };
       await seed("a1", "assistant", text("Start in Lisbon."), "t1");

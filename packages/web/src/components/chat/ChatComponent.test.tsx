@@ -21,10 +21,20 @@ rs.mock("@/components/logo", () => ({
 // mount the real Chat, because the draft composer lives inside it.
 const chatStub = rs.hoisted(() => ({ enabled: false }));
 
-function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound, variant }: ChatProps) {
+function StubChat({
+  sessionId,
+  mainAgentDisplayName,
+  onSessionNotFound,
+  variant,
+  conciergeName,
+}: ChatProps) {
   return (
     <>
-      <div data-testid="session-chat" data-variant={variant ?? "default"}>
+      <div
+        data-testid="session-chat"
+        data-variant={variant ?? "default"}
+        data-concierge-name={conciergeName}
+      >
         {mainAgentDisplayName}
       </div>
       <button type="button" onClick={() => onSessionNotFound?.(sessionId ?? "")}>
@@ -301,22 +311,38 @@ describe("ChatComponent Concierge chats", () => {
   });
 
   it("shows a topic chat as a Concierge chat, and an ordinary chat as one of its own", async () => {
-    renderChatComponent(
-      { sessionId: "topic-1" },
-      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
-      "/chat/topic-1",
-    );
+    renderChatComponent({ sessionId: "topic-1" }, { sessions: [], projects: [] }, "/chat/topic-1");
     await waitFor(() =>
       expect(screen.getByTestId("session-chat").getAttribute("data-variant")).toBe("concierge"),
     );
     cleanup();
     renderChatComponent(
       { sessionId: "session-1" },
-      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      { sessions: [], projects: [] },
       "/chat/session-1",
     );
     await act(async () => {});
     expect(screen.getByTestId("session-chat").getAttribute("data-variant")).toBe("default");
+  });
+});
+
+describe("ChatComponent Concierge name", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
+
+  it.each([
+    ["the agent name the guardian chose", " Milo ", "Milo"],
+    ["Concierge when the agent name is blank", "  ", "Concierge"],
+  ])("hands Chat %s", async (_label, agentName, expected) => {
+    renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { agentName } },
+      "/chat/concierge",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-chat").getAttribute("data-concierge-name")).toBe(expected),
+    );
   });
 });
 
@@ -330,7 +356,7 @@ describe("ChatComponent topic chat draft", () => {
     const onSessionCreated = rs.fn();
     const { fetchSpy } = renderChatComponent(
       { onSessionCreated },
-      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      { sessions: [], projects: [] },
       { pathname: "/chat", state: { conciergeTopic: true } },
     );
     const original = fetchSpy.getMockImplementation()!;
@@ -432,7 +458,7 @@ describe("ChatComponent Concierge", () => {
     });
     const { fetchSpy } = renderChatComponent(
       { sessionId: "concierge" },
-      { sessions: [], projects: [], settings: { experimentalConcierge: true }, conciergeCreated },
+      { sessions: [], projects: [], conciergeCreated },
       "/chat/concierge",
     );
 
@@ -450,7 +476,7 @@ describe("ChatComponent Concierge", () => {
     });
     const { fetchSpy } = renderChatComponent(
       { sessionId: "concierge" },
-      { sessions: [], projects: [], settings: { experimentalConcierge: true }, conciergeCreated },
+      { sessions: [], projects: [], conciergeCreated },
       "/chat/concierge",
     );
     await waitFor(() => expect(messageFetches(fetchSpy)).toHaveLength(1));
@@ -464,28 +490,13 @@ describe("ChatComponent Concierge", () => {
   it("shows the main chat its own empty state, not a topic chat's", async () => {
     renderChatComponent(
       { sessionId: "concierge" },
-      { sessions: [], projects: [], settings: { experimentalConcierge: true } },
+      { sessions: [], projects: [] },
       "/chat/concierge",
     );
     expect(
       await screen.findByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Start an ongoing topic" })).toBeNull();
-  });
-
-  it("leaves for a new chat when the instance has Concierge off", async () => {
-    const { fetchSpy } = renderChatComponent(
-      { sessionId: "concierge" },
-      { sessions: [], projects: [], conciergeCreated: new Promise<void>(() => {}) },
-      "/chat/concierge",
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId("chat-location").textContent).toBe("/chat REPLACE"),
-    );
-    expect(fetchSpy.mock.calls.some(([input]) => String(input) === "/api/concierge/session")).toBe(
-      false,
-    );
   });
 });
 

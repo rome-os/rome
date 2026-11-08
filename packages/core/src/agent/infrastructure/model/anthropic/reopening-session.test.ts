@@ -4,7 +4,7 @@ import type {
   ModelSessionParams,
   ThreadStart,
 } from "../../../domain/model-port.js";
-import type { UsageFunding } from "../../../../usage/events.js";
+import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { noRomeTools } from "../../../../test/tool-calls.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
 
@@ -16,7 +16,7 @@ interface FakeQuery extends ClaudeQuerySession {
   readonly interrupts: number;
 }
 
-function fakeQuery(modelThreadId?: string, funding?: UsageFunding): FakeQuery {
+function fakeQuery(modelThreadId?: string, loginKind?: ModelLoginKind): FakeQuery {
   const queue: Array<ModelSessionEvent | Error | null> = [];
   let wake: (() => void) | undefined;
   let ended = false;
@@ -30,7 +30,7 @@ function fakeQuery(modelThreadId?: string, funding?: UsageFunding): FakeQuery {
     providerId: "anthropic",
     model: "claude-test",
     modelThreadId,
-    funding,
+    loginKind,
     sent,
     get interrupts() {
       return interrupts;
@@ -87,7 +87,7 @@ function setup(first: FakeQuery, thread: ThreadStart = { kind: "new" }) {
   const open = rs.fn(async (_params: ModelSessionParams) => {
     const next = fakeQuery(
       _params.thread.kind === "resume" ? _params.thread.modelThreadId : undefined,
-      "byok",
+      "api_credential",
     );
     reopened.push(next);
     return next;
@@ -239,14 +239,14 @@ describe("createReopeningSession", () => {
     await expect(session.sendUserInput({ text: "late" })).rejects.toThrow("closed");
   });
 
-  it("reports the payer of the query that took the input", async () => {
+  it("reports the login kind of the query that took the input", async () => {
     const first = fakeQuery("thread-1", "subscription");
     const { session } = setup(first);
-    expect(session.funding).toBe("subscription");
+    expect(session.loginKind).toBe("subscription");
     first.finish();
 
     await session.sendUserInput({ text: "next" });
-    expect(session.funding).toBe("byok");
+    expect(session.loginKind).toBe("api_credential");
     await session.close();
   });
 

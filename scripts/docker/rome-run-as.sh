@@ -2,7 +2,7 @@
 # Runs a command as the rome or user account with that account's HOME, USER,
 # LOGNAME and PATH, replacing this process so a supervisor signals the command
 # itself. In single-UID mode gosu cannot switch users, so the command keeps the
-# current user. rome-init.sh detects the mode the same way.
+# current user. rome-init-lib.sh detects the mode the same way.
 #
 # Usage: rome-run-as <rome|user> [--log <path>] <command> [args...]
 set -euo pipefail

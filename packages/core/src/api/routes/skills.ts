@@ -5,7 +5,7 @@ import type { ApiDeps } from "../deps.js";
 /**
  * Lists skills currently loaded in the catalog so dashboard surfaces (the
  * Skills app, the chat composer's slash-command autocomplete) can offer them.
- * Metadata only — agents read skill bodies via the MCP facade (`read_skill`),
+ * Metadata only — agents read skill bodies via the Rome tools (`read_skill`),
  * the SPA never needs them.
  */
 export function skillsRoutes(deps: ApiDeps): Hono {
@@ -17,24 +17,21 @@ export function skillsRoutes(deps: ApiDeps): Hono {
     // the SPA falls back to the Rome mark).
     const apps = deps.appCatalog.listResolved();
     const appById = new Map(apps.map((app) => [app.appId, app]));
-    const skills = deps.skillCatalog.getAll().map((skill) => {
-      const resolved = appById.get(skill.metadata.ownerId);
+    const skills = deps.skillCatalog.list().map((skill) => {
+      const resolved = appById.get(skill.ownerId);
       return {
         name: skill.name,
         localName: skill.localName,
         description: skill.description,
         tools: skill.tools ?? [],
-        ownerType: skill.metadata.ownerType,
-        ownerId: skill.metadata.ownerId,
+        ownerType: skill.ownerType,
+        ownerId: skill.ownerId,
         // Owner display identity, resolved the same way as /chat/agents — the
         // composer's slash menu groups skills by app like the @ mention menu.
-        ownerLabel:
-          skill.metadata.ownerType === "core"
-            ? "Rome"
-            : (resolved?.displayName ?? skill.metadata.ownerId),
+        ownerLabel: skill.ownerType === "core" ? "Rome" : (resolved?.displayName ?? skill.ownerId),
         ownerDescription: resolved?.manifest.description ?? "",
         iconUrl: resolved?.iconAbsolutePath
-          ? `/api/apps/${appIdToPathSegment(skill.metadata.ownerId)}/icon`
+          ? `/api/apps/${appIdToPathSegment(skill.ownerId)}/icon`
           : null,
       };
     });

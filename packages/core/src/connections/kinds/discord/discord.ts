@@ -1,24 +1,16 @@
-import {
+import type {
   Client,
-  GatewayIntentBits,
-  Partials,
   ChannelType,
-  MessageReferenceType,
-  MessageType,
-  AttachmentBuilder,
   DiscordAPIError,
   REST,
-  RESTEvents,
-  Routes,
-  SlashCommandBuilder,
-  type Message,
-  type MessageCreateOptions,
-  type TextChannel,
-  type DMChannel,
-  type NewsChannel,
-  type ThreadChannel,
-  type ChatInputCommandInteraction,
-  type AutocompleteInteraction,
+  Message,
+  MessageCreateOptions,
+  TextChannel,
+  DMChannel,
+  NewsChannel,
+  ThreadChannel,
+  ChatInputCommandInteraction,
+  AutocompleteInteraction,
 } from "discord.js";
 import { randomBytes } from "node:crypto";
 import { SendRefused, chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
@@ -30,6 +22,7 @@ import type {
   RESTOptions,
 } from "discord.js";
 import { isCoreMainAgentId } from "../../../apps/artifact-id.js";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 import {
   filterConnectionApiResponseHeaders,
   isProtectedConnectionApiRequestHeader,
@@ -70,6 +63,9 @@ import {
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+
+// discord.js loads when a Discord connection first needs it, not with every boot.
+const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
 /**
  * The human-readable attachment name as the uploader saw it. Discord sanitizes
@@ -118,25 +114,25 @@ interface DiscordChannelConfig {
 export function resolveDiscordReplyToMessageId(
   message: Pick<Message, "type" | "reference">,
 ): string | undefined {
-  if (message.type !== MessageType.Reply) return undefined;
-  if (message.reference?.type === MessageReferenceType.Forward) return undefined;
+  if (message.type !== discordJs().MessageType.Reply) return undefined;
+  if (message.reference?.type === discordJs().MessageReferenceType.Forward) return undefined;
   return message.reference?.messageId;
 }
 
 function isThreadType(type: ChannelType): boolean {
   return (
-    type === ChannelType.PublicThread ||
-    type === ChannelType.PrivateThread ||
-    type === ChannelType.AnnouncementThread
+    type === discordJs().ChannelType.PublicThread ||
+    type === discordJs().ChannelType.PrivateThread ||
+    type === discordJs().ChannelType.AnnouncementThread
   );
 }
 
 export function buildDiscordSlashCommands() {
-  const stop = new SlashCommandBuilder()
+  const stop = new (discordJs().SlashCommandBuilder)()
     .setName("stop")
     .setDescription("Stop the active Rome response in this conversation");
 
-  const channel = new SlashCommandBuilder()
+  const channel = new (discordJs().SlashCommandBuilder)()
     .setName("channel")
     .setDescription("Configure Rome Bot behavior for this channel")
     .addSubcommand((sub) =>
@@ -234,12 +230,12 @@ export function buildDiscordSlashCommands() {
       sub.setName("status").setDescription("Show current configuration for this channel"),
     );
 
-  const bot = new SlashCommandBuilder()
+  const bot = new (discordJs().SlashCommandBuilder)()
     .setName("bot")
     .setDescription("Global Rome Bot status and management")
     .addSubcommand((sub) => sub.setName("status").setDescription("Show all channel overrides"));
 
-  const help = new SlashCommandBuilder()
+  const help = new (discordJs().SlashCommandBuilder)()
     .setName("help")
     .setDescription("Show available Rome Bot commands");
 
@@ -392,19 +388,19 @@ export class DiscordAdapter {
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
-    this.client = new Client({
+    this.client = new (discordJs().Client)({
       intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.DirectMessageReactions,
+        discordJs().GatewayIntentBits.Guilds,
+        discordJs().GatewayIntentBits.GuildMessages,
+        discordJs().GatewayIntentBits.MessageContent,
+        discordJs().GatewayIntentBits.DirectMessages,
+        discordJs().GatewayIntentBits.DirectMessageReactions,
       ],
-      partials: [Partials.Channel, Partials.Message],
+      partials: [discordJs().Partials.Channel, discordJs().Partials.Message],
       ...(config.rest ? { rest: config.rest } : {}),
     });
     this._botToken = config.botToken;
-    this.rest = new REST({
+    this.rest = new (discordJs().REST)({
       version: DISCORD_API_VERSION,
       userAgentAppendix: "Rome Discord broker/1",
       ...config.rest,
@@ -427,9 +423,9 @@ export class DiscordAdapter {
     for (const guild of this.client.guilds.cache.values()) {
       for (const channel of guild.channels.cache.values()) {
         let kind: "text" | "news" | "thread" | "forum" | null = null;
-        if (channel.type === ChannelType.GuildText) kind = "text";
-        else if (channel.type === ChannelType.GuildAnnouncement) kind = "news";
-        else if (channel.type === ChannelType.GuildForum) kind = "forum";
+        if (channel.type === discordJs().ChannelType.GuildText) kind = "text";
+        else if (channel.type === discordJs().ChannelType.GuildAnnouncement) kind = "news";
+        else if (channel.type === discordJs().ChannelType.GuildForum) kind = "forum";
         else if (isThreadType(channel.type)) kind = "thread";
         if (!kind) continue;
         out.push({
@@ -463,7 +459,7 @@ export class DiscordAdapter {
     let capturedResponse: ResponseLike | null = null;
     let rateLimit: RateLimitData | null = null;
     const routeData = (
-      REST as unknown as {
+      discordJs().REST as unknown as {
         generateRouteData(endpoint: string, method: string): { bucketRoute: string };
       }
     ).generateRouteData(path, request.method);
@@ -476,8 +472,8 @@ export class DiscordAdapter {
         rateLimit = data;
       }
     };
-    this.rest.on(RESTEvents.Response, onResponse);
-    this.rest.on(RESTEvents.RateLimited, onRateLimited);
+    this.rest.on(discordJs().RESTEvents.Response, onResponse);
+    this.rest.on(discordJs().RESTEvents.RateLimited, onRateLimited);
     this.activeApiRequestControllers.add(controller);
 
     const aborted = new Promise<never>((_resolve, reject) => {
@@ -545,7 +541,7 @@ export class DiscordAdapter {
       const observedResponse = capturedResponse as ResponseLike | null;
       if (observedResponse) {
         const projected =
-          error instanceof DiscordAPIError
+          error instanceof discordJs().DiscordAPIError
             ? this.projectDiscordApiError(error, observedResponse)
             : await this.projectDiscordResponse(observedResponse);
         if (projected.response?.status === 401) {
@@ -566,8 +562,8 @@ export class DiscordAdapter {
       clearTimeout(timer);
       this.activeApiRequestControllers.delete(controller);
       controller.abort();
-      this.rest.off(RESTEvents.Response, onResponse);
-      this.rest.off(RESTEvents.RateLimited, onRateLimited);
+      this.rest.off(discordJs().RESTEvents.Response, onResponse);
+      this.rest.off(discordJs().RESTEvents.RateLimited, onRateLimited);
     }
   }
 
@@ -689,7 +685,9 @@ export class DiscordAdapter {
         this.slashCommandsRegistered = true;
         try {
           const commands = buildDiscordSlashCommands();
-          await this.rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+          await this.rest.put(discordJs().Routes.applicationCommands(client.user.id), {
+            body: commands,
+          });
           log.info("slash commands registered", { count: commands.length });
         } catch (err) {
           this.slashCommandsRegistered = false; // allow retry on next ready
@@ -722,7 +720,7 @@ export class DiscordAdapter {
         this.client.channels as unknown as {
           _add(data: { id: string; type: ChannelType; recipients: unknown[] }): unknown;
         }
-      )._add({ id: channelId, type: ChannelType.DM, recipients: [data.author] });
+      )._add({ id: channelId, type: discordJs().ChannelType.DM, recipients: [data.author] });
     });
 
     this.client.on("messageCreate", async (message: Message) => {
@@ -735,7 +733,8 @@ export class DiscordAdapter {
       if (this.client.user && message.author.id === this.client.user.id) return;
 
       const isDm =
-        message.channel.type === ChannelType.DM || message.channel.type === ChannelType.GroupDM;
+        message.channel.type === discordJs().ChannelType.DM ||
+        message.channel.type === discordJs().ChannelType.GroupDM;
 
       const isThread = isThreadType(message.channel.type);
 
@@ -1488,7 +1487,7 @@ Use \`/channel agent clear\` to undo.`,
       "guild" in channel ? channel.guild?.name : undefined,
     );
     const autoThread = snapshot?.effective.replies.placement !== "inline";
-    if (replyTo && channel.type === ChannelType.GuildText && autoThread)
+    if (replyTo && channel.type === discordJs().ChannelType.GuildText && autoThread)
       return this.getOrCreateThread(channel, replyTo);
     return channel;
   }
@@ -1577,8 +1576,10 @@ Use \`/channel agent clear\` to undo.`,
   ): Promise<string> {
     const isUrl = att.source.startsWith("http");
     const file = isUrl
-      ? new AttachmentBuilder(att.source, { name: basename(att.source) })
-      : new AttachmentBuilder(createReadStream(att.source), { name: basename(att.source) });
+      ? new (discordJs().AttachmentBuilder)(att.source, { name: basename(att.source) })
+      : new (discordJs().AttachmentBuilder)(createReadStream(att.source), {
+          name: basename(att.source),
+        });
 
     const sent = await sendQuoting(channel, quoting({ content: att.caption, files: [file] }));
     return sent.id;
@@ -1590,7 +1591,7 @@ Use \`/channel agent clear\` to undo.`,
  *  invalid form whose fault is the message reference. Any other invalid form
  *  is the send's own fault. */
 function isRefusedQuote(err: unknown): boolean {
-  if (!(err instanceof DiscordAPIError)) return false;
+  if (!(err instanceof discordJs().DiscordAPIError)) return false;
   if (Number(err.code) === 10008 || Number(err.code) === 160002) return true;
   const errors = (err.rawError as { errors?: Record<string, unknown> }).errors;
   return Number(err.code) === 50035 && errors?.message_reference !== undefined;

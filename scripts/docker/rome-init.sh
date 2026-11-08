@@ -5,46 +5,12 @@ set -e
 # =============================================================================
 # Rome — one-time container setup, run as root by the s6 oneshot "init" before
 # any long-running service starts. Drops privileges via gosu where it acts for
-# the rome and user accounts. The services themselves are defined under
-# /etc/s6-overlay/s6-rc.d (scripts/docker/s6-rc.d in the repo).
+# the rome and user accounts. Setup that Rome's boot does not need runs after
+# Rome is healthy, in rome-init-tools.sh. The services themselves are defined
+# under /etc/s6-overlay/s6-rc.d (scripts/docker/s6-rc.d in the repo).
 # =============================================================================
 
-ROME_DOCKER_USER_MODE="${ROME_DOCKER_USER_MODE:-multi}"
-ROME_SINGLE_UID_MODE=0
-if [ "$ROME_DOCKER_USER_MODE" = "root" ] || ! gosu rome true >/dev/null 2>&1; then
-  ROME_SINGLE_UID_MODE=1
-  if [ "$ROME_DOCKER_USER_MODE" != "root" ]; then
-    echo "Using single-UID Docker mode: gosu cannot switch users in this container."
-  fi
-fi
-
-safe_chown() {
-  if [ "$ROME_SINGLE_UID_MODE" = "1" ]; then
-    return 0
-  fi
-  chown "$@"
-}
-
-run_as_account() {
-  local username="$1"
-  local home_dir="$2"
-  shift 2
-
-  if [ "$ROME_SINGLE_UID_MODE" = "1" ]; then
-    HOME="$home_dir" USER="$username" LOGNAME="$username" "$@"
-    return
-  fi
-
-  gosu "$username" env HOME="$home_dir" USER="$username" LOGNAME="$username" "$@"
-}
-
-run_as_rome() {
-  run_as_account rome /home/rome "$@"
-}
-
-run_as_user() {
-  run_as_account user /home/user "$@"
-}
+. /etc/s6-overlay/scripts/rome-init-lib
 
 # ─── Ensure home directories exist (bind-mounted /home may be empty) ────────
 for dir_user_pair in "rome:rome" "user:user"; do
@@ -60,6 +26,8 @@ chmod 2775 /home/user
 
 run_as_rome mkdir -p /home/rome/.rome
 chmod 750 /home/rome /home/rome/.rome
+mkdir -p /home/user/.rome
+safe_chown user:user /home/user/.rome
 
 # WeChat writes only into the runtime user's home and private session directory.
 # Prepare its canonical link while this script still runs as root.
@@ -158,9 +126,6 @@ PY
 }
 
 # ─── Prepare the browser ────────────────────────────────────────────────────
-if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then
-  echo "Warning: OpenCLI could not start. Browser connections are unavailable."
-fi
 if [ "${ROME_ENABLE_CHROME:-1}" != "0" ]; then
   write_chrome_clipboard_policy
 fi
@@ -213,111 +178,6 @@ link_image_backed_node_modules() {
   rm -rf "$target_path"
   ln -s "$source_path" "$target_path"
   safe_chown -h rome:rome "$target_path" 2>/dev/null || true
-}
-
-ensure_line_present() {
-  local file_path="$1"
-  local line="$2"
-
-  touch "$file_path"
-  if ! grep -Fqx "$line" "$file_path"; then
-    printf '\n%s\n' "$line" >>"$file_path"
-  fi
-}
-
-ensure_git_instead_of() {
-  local username="$1"
-  local home_dir="$2"
-  local instead_of_value="$3"
-  local existing_values=""
-
-  existing_values="$(run_as_account "$username" "$home_dir" git config --global --get-all 'url.https://github.com/.insteadOf' 2>/dev/null || true)"
-  if printf '%s\n' "$existing_values" | grep -Fxq "$instead_of_value"; then
-    return 0
-  fi
-
-  run_as_account "$username" "$home_dir" git config --global --add 'url.https://github.com/.insteadOf' "$instead_of_value"
-}
-
-github_shell_token_file() {
-  printf '%s' "${ROME_GITHUB_TOKEN_FILE:-/run/rome/github-oauth-token}"
-}
-
-github_shell_token() {
-  local token_file=""
-  token_file="$(github_shell_token_file)"
-
-  if [ -r "$token_file" ]; then
-    tr -d '\r\n' <"$token_file"
-  fi
-}
-
-configure_github_git_helper() {
-  local username="$1"
-  local home_dir="$2"
-  local token=""
-
-  token="$(github_shell_token)"
-  if [ -n "$token" ]; then
-    printf '%s\n' "$token" | run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth login --hostname github.com --git-protocol https --with-token
-    run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com
-    return 0
-  fi
-
-  if run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth status --hostname github.com >/dev/null 2>&1; then
-    run_as_account "$username" "$home_dir" env GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com
-    return 0
-  fi
-
-  echo "GitHub CLI is not authenticated for ${username}; skipping git credential helper setup."
-}
-
-# Points npm's global prefix at ~/.local, so `npm install -g` works without root,
-# survives upgrades with the home directory, and puts commands in ~/.local/bin.
-# ~/.npmrc keeps any prefix already there, including one the account chose. The
-# account writes the file itself, so root never follows a link it planted.
-ensure_npm_prefix() {
-  local username="$1"
-  local home_dir="$2"
-
-  run_as_account "$username" "$home_dir" sh -c '
-    npmrc="$HOME/.npmrc"
-    if grep -Eqs "^[[:space:]]*prefix[[:space:]]*=" "$npmrc"; then
-      exit 0
-    fi
-    if [ -s "$npmrc" ] && [ -n "$(tail -c 1 "$npmrc")" ]; then
-      printf "\n" >>"$npmrc"
-    fi
-    printf "prefix=%s\n" "$HOME/.local" >>"$npmrc"
-  '
-}
-
-configure_shell_user() {
-  local username="$1"
-  local group_name="$2"
-  local home_dir="$3"
-  local alias_source_line='[ -f /app/scripts/docker/rome-shell-aliases.sh ] && . /app/scripts/docker/rome-shell-aliases.sh'
-  local github_source_line='[ -f /app/scripts/docker/rome-github-shell.sh ] && . /app/scripts/docker/rome-github-shell.sh'
-  local path_source_line='[ -f /usr/local/share/rome/rome-shell-path.sh ] && . /usr/local/share/rome/rome-shell-path.sh'
-
-  mkdir -p "$home_dir/.rome"
-  safe_chown "$username:$group_name" "$home_dir/.rome"
-
-  for shell_rc in "$home_dir/.bashrc" "$home_dir/.profile"; do
-    ensure_line_present "$shell_rc" "$alias_source_line"
-    ensure_line_present "$shell_rc" "$github_source_line"
-    ensure_line_present "$shell_rc" "$path_source_line"
-    safe_chown "$username:$group_name" "$shell_rc"
-  done
-  if ! ensure_npm_prefix "$username" "$home_dir"; then
-    echo "Warning: failed to set the npm global prefix for ${username}; continuing without it."
-  fi
-
-  if ! configure_github_git_helper "$username" "$home_dir"; then
-    echo "Warning: failed to configure GitHub git credential helper for ${username}; continuing without it."
-  fi
-  ensure_git_instead_of "$username" "$home_dir" 'git@github.com:'
-  ensure_git_instead_of "$username" "$home_dir" 'ssh://git@github.com/'
 }
 
 ROME_DOCKER_APP_CODE_MODE="${ROME_DOCKER_APP_CODE_MODE:-source}"
@@ -389,65 +249,9 @@ for package_dir in /opt/rome/apps/* /opt/rome/packages/* /opt/rome/rome_apps/*; 
   link_image_backed_node_modules "$package_dir/node_modules" "$target_dir/node_modules"
 done
 
-# ─── Register the Rome OpenCLI plugins (idempotent) ────────────────────────
-# Each opencli-plugins/<site>/ dir is a standalone OpenCLI plugin named
-# "rome-<site>" that overrides/extends that site's built-in commands (see
-# opencli-plugins/README.md). A local install symlinks the source dir into
-# ~/.opencli/plugins/, so the rsync-updated /app copy is picked up by the next
-# opencli invocation — the install itself only has to happen once per volume.
-install_opencli_plugins() {
-  local plugins_root="/app/opencli-plugins"
-  local plugin_src=""
-  local plugin_link=""
-  local failed=0
-
-  command -v opencli >/dev/null 2>&1 || return 0
-
-  for plugin_src in "$plugins_root"/*/; do
-    plugin_src="${plugin_src%/}"
-    [ -f "$plugin_src/opencli-plugin.json" ] || continue
-    plugin_link="/home/rome/.opencli/plugins/rome-$(basename "$plugin_src")"
-
-    # The host-opencli link inside the plugin dir is the LAST artifact `plugin
-    # install` produces, so its presence distinguishes a completed install from
-    # a half-failed one (the plugins-dir symlink alone is created first).
-    if [ "$(readlink "$plugin_link" 2>/dev/null)" = "$plugin_src" ] &&
-      [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then
-      continue
-    fi
-    rm -rf "$plugin_link"
-    run_as_rome opencli plugin install "$plugin_src" || failed=1
-  done
-  for plugin_src in /home/rome/.rome/*/projects/browser-automation/*/; do
-    plugin_src="${plugin_src%/}"
-    [ -f "$plugin_src/opencli-plugin.json" ] || continue
-    plugin_link="/home/rome/.opencli/plugins/user-$(basename "$plugin_src")"
-    if [ "$(readlink "$plugin_link" 2>/dev/null)" = "$plugin_src" ] &&
-      [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then
-      continue
-    fi
-    if ! { run_as_rome rm -f "$plugin_link" && run_as_rome opencli plugin install "$plugin_src"; }; then
-      echo "Warning: user opencli plugin install failed: $plugin_src; continuing."
-    fi
-  done
-  return "$failed"
-}
-if ! install_opencli_plugins; then
-  echo "Warning: opencli plugin install failed; built-in opencli commands remain available."
-fi
-
 # ─── Ensure profile projects directory exists ──────────────────────────────
 PROFILE="${ROME_PROFILE:-default}"
 run_as_rome mkdir -p "/home/rome/.rome/$PROFILE/projects/default"
-
-# /run/rome is tmpfs (wiped on restart); the provider OAuth token files + gh/git
-# shell auth are re-materialized IN PROCESS by the connection registry's custody
-# hook during boot rehydration (packages/core/src/connections/registry.ts —
-# syncCustody on grant load). Nothing consumes those files before the main
-# process is up, so no separate pre-boot reconciler runs here.
-
-configure_shell_user rome rome /home/rome
-configure_shell_user user user /home/user
 
 # ─── DB migrations ────────────────────────────────────────────────────────
 # Migrations run inside the rome backend process — see

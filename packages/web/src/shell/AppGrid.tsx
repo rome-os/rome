@@ -22,6 +22,7 @@ import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
+import { isChatPath } from "@/lib/chat-session";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
 import {
@@ -259,14 +260,14 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   const openAppInSplitView = useCallback(
     (app: InstalledAppCard | CachedApp) => {
-      const currentChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+      const currentChat = isChatPath(location.pathname);
       const destination = currentChat
         ? `${location.pathname}${location.search}${location.hash}`
         : "/chat";
       // Outside a chat, Chat with app starts a new one in the app's source
       // folder, as the app actions menu does. Inside a chat, the app joins the
       // conversation and the chat keeps its folder.
-      const projectPath = location.pathname.startsWith("/chat/") ? null : app.projectPath;
+      const projectPath = currentChat && location.pathname !== "/chat" ? null : app.projectPath;
       navigate(destination, {
         state: {
           widgets: [{ type: "app", appId: app.id }],

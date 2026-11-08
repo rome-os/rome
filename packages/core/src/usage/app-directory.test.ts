@@ -25,10 +25,7 @@ const directory = createUsageAppDirectory({
   },
   actionRegistry: { getMetadata: (name) => owners[name] },
   agentLoader: {
-    getRecord: (name: string) => {
-      if (name === "news_agent") return { metadata: owners["news.digest"] } as never;
-      throw new Error(`Agent "${name}" not found`);
-    },
+    find: (name: string) => (name === "news_agent" ? (owners["news.digest"] as never) : undefined),
   },
 });
 

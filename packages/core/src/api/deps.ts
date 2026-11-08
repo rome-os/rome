@@ -1,5 +1,6 @@
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
 import type { ConciergeService } from "../concierge/service.js";
@@ -27,14 +28,15 @@ import type { RoutineEngine } from "../routines/engine.js";
 import type { EventCatalog } from "../event-catalog.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
+import type { ArtifactLoadFailureSource } from "../apps/artifact-load-failure-reporter.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { OgImageStore } from "../apps/og/store.js";
 import type { AppManager } from "../apps/manager.js";
 import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
-import type { AgentLoader } from "../core/agent-loader.js";
-import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { Agent, AgentCatalog, AgentLoader } from "../agent/index.js";
+import type { SkillCatalog } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
@@ -45,9 +47,8 @@ import type { SessionRepository } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
-import type { AIToolState } from "../core/ai-tool-state.js";
 import type { Hono } from "hono";
-import type { ModelAccount } from "../agent/index.js";
+import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
 import type { PublicAccessState } from "../lib/public-access-state.js";
 import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
 import type { RelayDrainer } from "../relay/drainer.js";
@@ -86,7 +87,7 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
-  /** The Concierge feature. Absent ⇒ its routes answer as if the setting were off. */
+  /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
@@ -143,6 +144,8 @@ export interface ApiDeps {
   routineRunsRepo: RoutineRunsRepository;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
+  /** The agents under every name they have had, for reading names stored before ids were canonical. */
+  agentsByName: () => ReadonlyMap<string, Agent>;
   /** Social card PNGs rendered by apps/og/subscriber.ts. */
   ogImageStore: OgImageStore;
   /** AppManager — sole writer for install/uninstall/setEnabled. */
@@ -151,7 +154,7 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
-  agentLoader: AgentLoader;
+  agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */
   accountListening: Pick<AccountListening, "changed">;
@@ -159,7 +162,7 @@ export interface ApiDeps {
    * the chat composer's slash-command autocomplete. `getRegistryLoadFailures`
    * surfaces app-owned skills that were declared but failed to load, so the
    * Skills app can show an author *why* a skill is missing. */
-  skillCatalog: Pick<SkillCatalog, "get" | "getAll" | "getRegistryLoadFailures">;
+  skillCatalog: SkillCatalog & ArtifactLoadFailureSource;
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
@@ -170,6 +173,8 @@ export interface ApiDeps {
   >;
   /** Starts what needs a linked instance: node caller, relay mailbox, favor sync. Never rejects. */
   provisionAfterLink?: () => Promise<void>;
+  /** The guardian's Rome Cloud account, whose signup survey a first sign-in reads. */
+  cloudProfile?: CloudProfileService;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
    *  Never rejects. */
   autoConnectEmail?: () => Promise<void>;
@@ -195,9 +200,12 @@ export interface ApiDeps {
   agentRunner: AgentRunnerInterface;
   activeSubagentRegistry: ActiveSubagentRegistry;
   agentTurnStreamRegistry: AgentTurnStreamRegistry;
-  aiToolState: AIToolState;
+  /** Whether a run can use each model provider now, from the accounts' own reports. */
+  modelAccounts: ModelAccounts;
   /** The guardian's Codex account, served by the shared app-server. */
-  codexAccountService: ModelAccount;
+  codexAccountService: ModelAccount & CodexLogins;
+  /** The guardian's Claude account, read from the Claude CLI and Rome's stored credentials. */
+  claudeAccount: ModelAccount & ClaudeLogins;
   /** Codex's loopback route to Rome credits, built by the composition root. */
   romeCreditsProxy: Hono;
   /**

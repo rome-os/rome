@@ -11,7 +11,7 @@
 // The JSON-RPC transport lives in app-server-client.ts; the
 // notification→AgentEvent translation is below. Headless config:
 // approvalPolicy=never, so Rome's per-action approval gate (inside the Rome tool
-// facade) is the only gate and no server→client approval round-trips are
+// handler) is the only gate and no server→client approval round-trips are
 // needed. The agent's declared builtins pick Codex's own tools and the sandbox
 // (codexToolOverrides).
 
@@ -28,7 +28,6 @@ import type {
   ProviderId,
   ModelPosition,
   ThreadStart,
-  ModelFunding,
 } from "../../../domain/model-port.js";
 import {
   createBorrowedExactForkSession,
@@ -46,7 +45,7 @@ import {
 } from "./image-trace.js";
 import {
   CodexAppServerManager,
-  PayerChangedError,
+  LoginChangedError,
   type CodexThreadBinding,
 } from "./app-server-manager.js";
 import {
@@ -81,6 +80,9 @@ import {
 import { buildTurnInput } from "./turn-input.js";
 import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
 import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
+import type { LearnsRefusedTurns } from "../refused-turn.js";
+import type { LearnsRefusedModels } from "./account-service.js";
+import type { CodexLoginChoice, ModelLoginKind } from "../../../domain/model-login.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
@@ -95,7 +97,7 @@ import {
 } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./tool-result-error.js";
 import type { RomeToolResult } from "../../../domain/rome-tools.js";
-import { codexStop } from "../../../../core/stop-reason.js";
+import { codexStop } from "./stop.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
 import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
 import { CODEX_SHELL_ENV_EXCLUDE } from "./rome-credits-provider.js";
@@ -436,17 +438,16 @@ interface ActiveTurn {
 
 interface CodexAppServerProviderOptions {
   appServerManager?: CodexAppServerManager;
-  /** Update runtime auth state before an auth-revoked terminal is exposed. */
-  onAuthRevoked?: () => Promise<void> | void;
-  /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
-  onQuotaExhausted?: () => void;
-  /** Only the Rome credits payer may classify its 402 as exhausted credits, and
-   *  only the ChatGPT payer may mark the saved login as needing re-login. */
-  isUsingRomeCredits?: () => boolean;
-  /** The Rome credits gateway refused a model it no longer serves. */
-  onRomeCreditsModelNotServed?: () => Promise<void> | void;
-  /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
-  funding?: () => ModelFunding;
+  /** The account this provider runs under, told of each turn the provider refuses. */
+  account?: LearnsRefusedTurns & Partial<LearnsRefusedModels>;
+  /**
+   * Starts the app-server on construction so the first turn finds it ready.
+   * Defaults to true. Rome's boot passes false and warms the shared manager
+   * once it has started, so the spawn does not compete with boot for CPU.
+   */
+  warmup?: boolean;
+  /** The login kind Codex runs on now. AgentSession reads it when it sends each turn. */
+  loginKind?: () => ModelLoginKind | undefined;
 }
 
 interface CodexFailureClassification {
@@ -502,9 +503,7 @@ function turnErrorInfo(
   };
 }
 
-async function persistCodexAuthRevoked(
-  onAuthRevoked: CodexAppServerProviderOptions["onAuthRevoked"],
-): Promise<void> {
+async function persistCodexAuthRevoked(account: LearnsRefusedTurns | undefined): Promise<void> {
   try {
     await markCodexAuthRevoked();
   } catch (err) {
@@ -512,13 +511,7 @@ async function persistCodexAuthRevoked(
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  try {
-    await onAuthRevoked?.();
-  } catch (err) {
-    log.warn("failed to update AI tool state after codex auth revocation", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  account?.refusedTurn({ kind: "credential" });
 }
 
 /**
@@ -548,14 +541,18 @@ function isChatGptModelNotSupportedError(turnError: unknown): boolean {
 function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
+  loginKind: CodexLoginChoice["kind"],
 ): CodexFailureClassification {
-  if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
+  // Only Rome credits can exhaust credits, and only the guardian's own login
+  // can need signing in again.
+  const onRomeCredits = loginKind === "rome_credits";
+  if (onRomeCredits && isRomeCreditsExhaustedError(turnError)) {
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
   }
   // The served list is stale. Re-read it before the terminal block, so a retry
   // falls back or fails closed instead of choosing the same model again.
-  if (options.isUsingRomeCredits?.() && isRomeCreditsModelNotServedError(turnError)) {
-    const refreshed = options.onRomeCreditsModelNotServed?.();
+  if (onRomeCredits && isRomeCreditsModelNotServedError(turnError)) {
+    const refreshed = options.account?.refusedModel?.();
     return {
       code: "model_unavailable",
       httpStatus: 403,
@@ -569,18 +566,18 @@ function classifyCodexFailure(
     // Matches the resolver's refusal, so clients show the same recovery.
     return { code: "model_unavailable", provider: "openai", reason: "model_access_denied" };
   }
-  // The turn never started; a retry runs under the new payer.
-  if (turnError instanceof PayerChangedError) {
+  // The turn never started; a retry runs on the new login.
+  if (turnError instanceof LoginChangedError) {
     return { code: "transient" };
   }
   if (isCodexUsageLimitError(turnError)) {
-    options.onQuotaExhausted?.();
+    options.account?.refusedTurn({ kind: "usage" });
     return { code: "usage_limit" };
   }
-  if (!options.isUsingRomeCredits?.() && isCodexAuthRevokedError(turnError)) {
+  if (!onRomeCredits && isCodexAuthRevokedError(turnError)) {
     return {
       code: CODEX_AUTH_REVOKED_CODE,
-      pending: persistCodexAuthRevoked(options.onAuthRevoked),
+      pending: persistCodexAuthRevoked(options.account),
     };
   }
   const info = classifyCodexErrorInfo(turnError);
@@ -613,11 +610,13 @@ export class CodexAppServerProvider implements ModelProvider {
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.appServerManager = options.appServerManager ?? new CodexAppServerManager();
-    void this.appServerManager.warmup().catch((err) => {
-      log.warn("codex app-server warmup failed", {
-        error: err instanceof Error ? err.message : String(err),
+    if (options.warmup !== false) {
+      void this.appServerManager.warmup().catch((err) => {
+        log.warn("codex app-server warmup failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
+    }
   }
 
   close(): void {
@@ -722,7 +721,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
     let lastCheckpointId: string | undefined;
-    const funding = this.options.funding;
+    const loginKind = this.options.loginKind;
     const dynamicToolOutputs = new Map<string, RomeToolResult>();
     const usageByTurnId = new Map<
       string,
@@ -739,8 +738,8 @@ export class CodexAppServerProvider implements ModelProvider {
           threadId ?? (params.thread.kind === "resume" ? params.thread.modelThreadId : undefined)
         );
       },
-      get funding(): ModelFunding | undefined {
-        return funding?.();
+      get loginKind(): ModelLoginKind | undefined {
+        return loginKind?.();
       },
     } as ModelSession;
 
@@ -819,7 +818,7 @@ export class CodexAppServerProvider implements ModelProvider {
       const tool = toolNameForItem(item);
       // External MCP tools arrive as `mcpToolCall`, which nests the real result
       // in `item.result`. Rome-owned tools arrive as `dynamicToolCall` and use
-      // the in-process facade output retained by callId. Normalize both so the
+      // the in-process tool output retained by callId. Normalize both so the
       // drain loop sees the real args/result rather than the wrapper item.
       const isMcp = item.type === "mcpToolCall";
       const isDynamic = item.type === "dynamicToolCall";
@@ -975,7 +974,11 @@ export class CodexAppServerProvider implements ModelProvider {
               // not a string — extract the human message and classify quota
               // exhaustion / revoked credentials off it.
               activeTurn.failed = true;
-              const classification = classifyCodexFailure(p.turn?.error, this.options);
+              const classification = classifyCodexFailure(
+                p.turn?.error,
+                this.options,
+                this.appServerManager.login().kind,
+              );
               activeTurn.errorMessage =
                 classification.error ?? codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               activeTurn.errorCode = classification.code;
@@ -997,7 +1000,11 @@ export class CodexAppServerProvider implements ModelProvider {
           if (p.turnId && (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId))) {
             return;
           }
-          const classification = classifyCodexFailure(p.error, this.options);
+          const classification = classifyCodexFailure(
+            p.error,
+            this.options,
+            this.appServerManager.login().kind,
+          );
           const message =
             classification.error ?? codexTurnErrorMessage(p.error, "codex app-server error");
           const code = classification.code;
@@ -1110,9 +1117,9 @@ export class CodexAppServerProvider implements ModelProvider {
     const failedTurnAccounting = (turn: ActiveTurn) =>
       turn.usage ? turnAccounting(turn, true) : undefined;
 
-    // The payer each source input was sent under. Codex may replace its
+    // The login each source input was sent under. Codex may replace its
     // process while an input waits in the turn lane or in buildTurnInput.
-    const payerAtSend = new WeakMap<ModelUserInput, string | null>();
+    const loginAtSend = new WeakMap<ModelUserInput, CodexLoginChoice["kind"]>();
 
     const runOne = async (inputs: ModelUserInput[], runtime: CodexTurnRuntime): Promise<void> => {
       const text = inputs
@@ -1175,13 +1182,11 @@ export class CodexAppServerProvider implements ModelProvider {
       // A borrowed exact fork runs here too, and leaves the source's head alone.
       if (runtime === sourceRuntime) lastCheckpointId = undefined;
       try {
-        const payers = new Set(
-          inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
-        );
-        // A batch that spans a payer change fails whole, including inputs sent
-        // under the current payer, and surfaces as a transient failure to retry.
-        if (payers.size > 1) throw new PayerChangedError();
-        const [expectedProvider] = payers;
+        const logins = new Set(inputs.flatMap((i) => loginAtSend.get(i) ?? []));
+        // A batch that spans a login change fails whole, including inputs sent
+        // under the current login, and surfaces as a transient failure to retry.
+        if (logins.size > 1) throw new LoginChangedError();
+        const [expectedLogin] = logins;
         const started = (await this.appServerManager.requestForThread(
           tid,
           Method.turnStart,
@@ -1192,7 +1197,7 @@ export class CodexAppServerProvider implements ModelProvider {
             ...(params.config.outputSchema ? { outputSchema: params.config.outputSchema } : {}),
             ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
           },
-          { expectedProvider },
+          { expectedLogin },
         )) as { turn?: { id?: string } } | undefined;
         nameProviderTurn(turn, started?.turn?.id);
         // turn/start can acknowledge before the native input becomes steerable.
@@ -1272,7 +1277,11 @@ export class CodexAppServerProvider implements ModelProvider {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.warn("codex app-server turn failed", { error: message });
-        const classification = classifyCodexFailure(err, this.options);
+        const classification = classifyCodexFailure(
+          err,
+          this.options,
+          this.appServerManager.login().kind,
+        );
         if (classification.pending) await classification.pending;
         // A restart or shutdown records its cause on the turn and then closes
         // the client, which rejects a pending turn/start with a bare
@@ -1316,7 +1325,7 @@ export class CodexAppServerProvider implements ModelProvider {
         sourceStarted = new Promise<void>((resolve) => {
           resolveSourceStarted = resolve;
         });
-        payerAtSend.set(input, this.appServerManager.getDefaultProvider());
+        loginAtSend.set(input, this.appServerManager.login().kind);
         dispatcher.enqueue(input);
       }
     };
@@ -1440,7 +1449,7 @@ export class CodexAppServerProvider implements ModelProvider {
             runExclusive: async (work) => await turnCoordinator.run(work),
             runTurn: async (input, runtime) => await runOne([input], runtime),
             // The fork turn queues behind the source's turns like any other.
-            onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
+            onSend: (input) => loginAtSend.set(input, this.appServerManager.login().kind),
             revertTurn: async (threadIdToRevert, beforeTurnId) => {
               // Revert is the only thing keeping the borrowed turn out of
               // the source conversation, so its failure cannot be a plain
@@ -1489,7 +1498,7 @@ export class CodexAppServerProvider implements ModelProvider {
               throw new Error(contaminatedReason);
             },
             interrupt: async (reason) => await interruptOwnerTurn(forkOwnerId, reason),
-            funding,
+            loginKind,
           });
         }
 

@@ -61,10 +61,11 @@ export function connectedAccountsRoutes(
     const agent = parsed.data.agent;
     // The repository stores main by its canonical id, so main skips the loader.
     if (agent === null || isCoreMainAgentId(agent)) return { agent };
-    if (!deps.agentLoader.has(agent)) {
+    const loaded = deps.agentLoader.find(agent);
+    if (!loaded) {
       return c.json({ error: `Agent "${agent}" is not loaded.` }, 400);
     }
-    return { agent: deps.agentLoader.getCanonicalName(agent) };
+    return { agent: loaded.name };
   }
 
   // Every connected account with its agent, and the connection that reaches

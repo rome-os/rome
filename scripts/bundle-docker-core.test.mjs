@@ -57,6 +57,36 @@ test("the daemon bundle loads the OpenTelemetry SDK only from its telemetry chun
   assert.match(entry, /import\("\.\/chunks\/telemetry-[A-Z0-9]+\.js"\)/);
 });
 
+test("the main bundle loads no chat channel SDK at startup", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "rome-compiled-main-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outfile = join(directory, "index.js");
+  await build({
+    ...dockerBundleOptions("esm"),
+    entryPoints: [join(root, "packages/core/src/index.ts")],
+    outfile,
+    logLevel: "silent",
+  });
+
+  const bundle = await readFile(outfile, "utf8");
+  for (const sdk of [
+    "jsdom",
+    "turndown",
+    "discord.js",
+    "telegram",
+    "@larksuiteoapi/node-sdk",
+    "@whiskeysockets/baileys",
+  ]) {
+    const specifier = sdk.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    // A static import ends its line with `from "<sdk>";`, on one line or after a
+    // multi-line specifier list. Subpaths such as telegram/events count too.
+    assert.doesNotMatch(
+      bundle,
+      new RegExp(`^(import .* |\\} )from "${specifier}(/[^"]*)?";$`, "m"),
+    );
+  }
+});
+
 test("the relocated Caddy generator runs without Core workspace dependencies", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "rome-compiled-caddy-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

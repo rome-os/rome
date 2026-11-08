@@ -2,7 +2,16 @@ import { createLogger } from "../../../../logger.js";
 import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
 import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
-import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
+import {
+  codexAppServerConfigArgs,
+  ROME_CREDITS_MODEL_PROVIDER_ID,
+  ROME_CREDITS_TOKEN_ENV,
+} from "./rome-credits-provider.js";
+import {
+  sameCodexLogin,
+  type CodexLogin,
+  type CodexLoginChoice,
+} from "../../../domain/model-login.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -15,11 +24,11 @@ import {
   type ThreadStartParams,
 } from "./app-server-protocol.js";
 
-/** A queued turn whose payer changed between send and dispatch. */
-export class PayerChangedError extends Error {
+/** A queued turn whose login changed between send and dispatch. */
+export class LoginChangedError extends Error {
   constructor() {
-    super("Model payer changed while preparing this turn; please retry.");
-    this.name = "PayerChangedError";
+    super("Model login changed while preparing this turn; please retry.");
+    this.name = "LoginChangedError";
   }
 }
 
@@ -45,7 +54,7 @@ interface StoredThreadBinding {
 interface Connection {
   client: CodexAppServerConnection;
   generation: number;
-  defaultProvider: string | null;
+  loginKind: CodexLoginChoice["kind"];
   invalidate(): void;
 }
 
@@ -68,8 +77,8 @@ export interface CodexAppServerManagerOptions {
   env?: Record<string, string>;
   /** Additional fixed root `-c` overrides, applied before Rome's provider configuration. */
   configArgs?: readonly string[];
-  /** Codex's process-wide model provider. Null uses the guardian's OpenAI login. */
-  defaultProvider?: string | null;
+  /** The login Codex starts on. Defaults to the guardian's own. */
+  login?: CodexLoginChoice;
   createClient?: (options: AppServerClientOptions) => CodexAppServerConnection;
 }
 
@@ -124,8 +133,8 @@ export class CodexAppServerManager {
   private connection: Connection | null = null;
   private connectionPromise: Promise<Connection> | null = null;
   private startingConnection: Connection | null = null;
-  private defaultProvider: string | null;
-  // A→B→A restores defaultProvider, so this distinguishes the first, closed
+  private currentLogin: CodexLoginChoice;
+  // A→B→A restores the login, so this distinguishes the first, closed
   // client from a current one while it is still initializing.
   private connectionEpoch = 0;
   private nextGeneration = 1;
@@ -135,7 +144,7 @@ export class CodexAppServerManager {
     this.cwd = options.cwd ?? process.cwd();
     this.env = options.env;
     this.configArgs = options.configArgs;
-    this.defaultProvider = options.defaultProvider ?? null;
+    this.currentLogin = options.login ?? { kind: "subscription" };
     this.createClient =
       options.createClient ?? ((clientOptions) => new AppServerClient(clientOptions));
   }
@@ -144,26 +153,27 @@ export class CodexAppServerManager {
     await this.ensureConnection();
   }
 
-  /** The provider Codex turns run on: null for the guardian's own login. */
-  getDefaultProvider(): string | null {
-    return this.defaultProvider;
+  /** The login Codex turns run on. */
+  login(): CodexLoginChoice {
+    return this.currentLogin;
   }
 
   /**
-   * Replace Codex immediately with a process whose default provider is
-   * `provider`. This deliberately has the same effect as an app-server exit:
-   * active turns fail, while idle threads lazily resume on their next request.
+   * Replace Codex immediately with a process on `login`, when it is another
+   * login. This deliberately has the same effect as an app-server exit: active
+   * turns fail, while idle threads lazily resume on their next request.
    */
-  setDefaultProvider(provider: string | null): void {
+  useLogin(login: CodexLoginChoice): void {
     if (this.closed) throw new Error("codex app-server manager is closed");
-    if (this.defaultProvider === provider) return;
-    this.defaultProvider = provider;
+    if (login.kind === "rome_credits" && !getRomeCloudOrigin()) {
+      throw new Error("Rome credits cannot be the login without Rome Cloud");
+    }
+    if (sameCodexLogin(this.currentLogin, login)) return;
+    this.currentLogin = login;
     this.restart();
   }
 
-  /** Immediately replace Codex while retaining the current process-wide payer. */
-  restart(): void {
-    if (this.closed) throw new Error("codex app-server manager is closed");
+  private restart(): void {
     this.connectionEpoch += 1;
 
     const connection = this.connection;
@@ -174,7 +184,7 @@ export class CodexAppServerManager {
     // Do not make a later request join an initialization that has the old
     // process default. Closing that client rejects its own in-flight callers.
     this.connectionPromise = null;
-    const error = new Error("the model payer or Rome instance credential changed");
+    const error = new Error("the model login changed");
     this.failCurrentGeneration(connection?.generation, error);
     connection?.client.close();
     if (!connection && startingConnection) startingConnection.client.close();
@@ -250,22 +260,19 @@ export class CodexAppServerManager {
   }
 
   /**
-   * `expectedProvider` refuses the request when the process that would serve
-   * it runs on a different payer, so a queued turn cannot start on a process
+   * `expectedLogin` refuses the request when the process that would serve it
+   * runs on another kind of login, so a queued turn cannot start on a process
    * that replaced the one its caller resolved against.
    */
   async requestForThread<T>(
     threadId: string,
     method: string,
     params: unknown,
-    options: { expectedProvider?: string | null } = {},
+    options: { expectedLogin?: CodexLoginChoice["kind"] } = {},
   ): Promise<T> {
     const connection = await this.ensureThreadSubscribed(threadId);
-    if (
-      options.expectedProvider !== undefined &&
-      connection.defaultProvider !== options.expectedProvider
-    ) {
-      throw new PayerChangedError();
+    if (options.expectedLogin !== undefined && connection.loginKind !== options.expectedLogin) {
+      throw new LoginChangedError();
     }
     return (await connection.client.request(method, params)) as T;
   }
@@ -357,7 +364,7 @@ export class CodexAppServerManager {
     let connectionPromise!: Promise<Connection>;
     connectionPromise = this.createConnection(
       generation,
-      this.defaultProvider,
+      this.currentLogin.kind,
       connectionEpoch,
     ).finally(() => {
       if (this.connectionPromise !== connectionPromise) return;
@@ -369,7 +376,7 @@ export class CodexAppServerManager {
 
   private async createConnection(
     generation: number,
-    defaultProvider: string | null,
+    loginKind: CodexLoginChoice["kind"],
     connectionEpoch: number,
   ): Promise<Connection> {
     const startedAt = Date.now();
@@ -381,7 +388,10 @@ export class CodexAppServerManager {
       env: this.env ?? defaultCodexEnvironment(),
       configArgs: [
         ...(this.configArgs ?? []),
-        ...codexAppServerConfigArgs(getRomeCloudOrigin(), defaultProvider),
+        ...codexAppServerConfigArgs(
+          getRomeCloudOrigin(),
+          loginKind === "rome_credits" ? ROME_CREDITS_MODEL_PROVIDER_ID : null,
+        ),
       ],
       onNotification: (method, params) => {
         // close() can leave stdout callbacks buffered; do not route them after replacement.
@@ -400,7 +410,7 @@ export class CodexAppServerManager {
     const connection = {
       client,
       generation,
-      defaultProvider,
+      loginKind,
       invalidate: () => {
         invalidated = true;
       },

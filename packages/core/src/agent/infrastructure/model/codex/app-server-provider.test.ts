@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { UsageFunding } from "../../../../usage/events.js";
+import type { ModelLoginKind } from "../../../domain/model-login.js";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { CodexAppServerProvider } from "./app-server-provider.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import { testRomeTools, type TestRomeToolsOptions } from "../../../../test/tool-calls.js";
 import { NO_ROME_TOOLS, type RomeTools } from "../../../domain/rome-tools.js";
+import { subagentToolName } from "../../../domain/subagent.js";
 import { CodexAppServerManager } from "./app-server-manager.js";
+import type { CodexLoginChoice } from "../../../domain/model-login.js";
 import type {
   ModelSession,
   ModelSessionConfig,
@@ -93,16 +94,11 @@ rs.mock("./app-server-client.js", () => ({
 type ParamOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
   /** What the session's Rome tools are built from. */
-  tools?: Partial<FacadeParams>;
+  tools?: TestRomeToolsOptions;
 };
 
-function buildTools(overrides: Partial<FacadeParams> = {}): RomeTools {
-  return createRomeTools({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "delegated",
+function buildTools(overrides: TestRomeToolsOptions = {}): RomeTools {
+  return testRomeTools({
     ...overrides,
   });
 }
@@ -206,7 +202,26 @@ async function collectUntilTerminal(session: ModelSession): Promise<ModelSession
   return out;
 }
 
+const ROME_CREDITS: CodexLoginChoice = { kind: "rome_credits", credentialId: "romeinst_test" };
+
+/** A manager on Rome credits. */
+function onRomeCredits(): CodexAppServerManager {
+  return new CodexAppServerManager({ login: ROME_CREDITS });
+}
+
 describe("CodexAppServerProvider", () => {
+  it("warms its app-server on construction unless told not to", () => {
+    const manager = new CodexAppServerManager();
+    const warmup = rs.spyOn(manager, "warmup").mockResolvedValue(undefined);
+
+    new CodexAppServerProvider({ appServerManager: manager, warmup: false });
+    expect(warmup).not.toHaveBeenCalled();
+
+    new CodexAppServerProvider({ appServerManager: manager });
+    expect(warmup).toHaveBeenCalledTimes(1);
+    manager.close();
+  });
+
   it("steers the owned native turn, correlating consumption separately from RPC acceptance", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };
@@ -280,7 +295,12 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  afterEach(() => {
+    rs.unstubAllEnvs();
+  });
+
   beforeEach(() => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     rs.clearAllMocks();
     getCodexCliStatusMock.mockResolvedValue({ loggedIn: true });
     markCodexAuthRevokedMock.mockResolvedValue(undefined);
@@ -475,13 +495,17 @@ describe("CodexAppServerProvider", () => {
       if (method === "thread/start") {
         const names = payload.dynamicTools?.map((tool) => tool.name) ?? [];
         return {
-          thread: { id: names.includes("alpha_researcher") ? "thread-alpha" : "thread-beta" },
+          thread: {
+            id: names.includes(subagentToolName("alpha_researcher"))
+              ? "thread-alpha"
+              : "thread-beta",
+          },
         };
       }
       if (method === "turn/start") {
         const isAlpha = payload.threadId === "thread-alpha";
         const turnId = isAlpha ? "turn-alpha" : "turn-beta";
-        const tool = isAlpha ? "alpha_researcher" : "beta_researcher";
+        const subagentName = isAlpha ? "alpha_researcher" : "beta_researcher";
         const callId = isAlpha ? "call-alpha" : "call-beta";
         captured.onNotification?.("turn/started", {
           threadId: payload.threadId,
@@ -492,8 +516,8 @@ describe("CodexAppServerProvider", () => {
           turnId,
           callId,
           namespace: null,
-          tool,
-          arguments: { prompt: tool },
+          tool: subagentToolName(subagentName),
+          arguments: { prompt: subagentName },
         });
         captured.onNotification?.("turn/completed", {
           threadId: payload.threadId,
@@ -502,15 +526,7 @@ describe("CodexAppServerProvider", () => {
       }
       return {};
     });
-    const tool = (name: string) => ({
-      name,
-      description: name,
-      inputSchema: {
-        type: "object" as const,
-        properties: { prompt: { type: "string" } },
-        required: ["prompt"],
-      },
-    });
+    const subagent = (name: string) => ({ name, description: name });
     const provider = new CodexAppServerProvider();
 
     const [alpha, beta] = await Promise.all([
@@ -520,7 +536,7 @@ describe("CodexAppServerProvider", () => {
             systemPrompt: "alpha",
           },
           tools: {
-            subagentTools: [tool("alpha_researcher")],
+            subagents: [subagent("alpha_researcher")],
             executeSubagent: alphaExecute,
           },
         }),
@@ -531,7 +547,7 @@ describe("CodexAppServerProvider", () => {
             systemPrompt: "beta",
           },
           tools: {
-            subagentTools: [tool("beta_researcher")],
+            subagents: [subagent("beta_researcher")],
             executeSubagent: betaExecute,
           },
         }),
@@ -569,7 +585,7 @@ describe("CodexAppServerProvider", () => {
     expect(closeMock).toHaveBeenCalledTimes(1);
   });
 
-  it("maps dynamic facade results into app-server responses and Rome tool traces", async () => {
+  it("maps dynamic tool results into app-server responses and Rome tool traces", async () => {
     let dynamicResponse: unknown;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thread-ask" } };
@@ -616,9 +632,7 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const provider = new CodexAppServerProvider();
-    const session = await provider.openSession(
-      buildParams({ tools: { supportsInteractiveSurface: true } }),
-    );
+    const session = await provider.openSession(buildParams({ tools: { widgetsShow: true } }));
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "ask" });
     const messages = await collected;
@@ -725,7 +739,7 @@ describe("CodexAppServerProvider", () => {
           turnId: "isolated-turn",
           callId: "call-source-tool",
           namespace: null,
-          tool: "source_researcher",
+          tool: subagentToolName("source_researcher"),
           arguments: { prompt: "inspect" },
         });
         n("turn/completed", {
@@ -740,13 +754,7 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({
         tools: {
-          subagentTools: [
-            {
-              name: "source_researcher",
-              description: "Research for the source",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
+          subagents: [{ name: "source_researcher", description: "Research for the source" }],
           executeSubagent: sourceExecuteSubagent,
         },
       }),
@@ -760,7 +768,7 @@ describe("CodexAppServerProvider", () => {
       contentItems: [
         {
           type: "inputText",
-          text: "Dynamic tool is disabled in this fork: source_researcher",
+          text: `Dynamic tool is disabled in this fork: ${subagentToolName("source_researcher")}`,
         },
       ],
       success: false,
@@ -791,7 +799,9 @@ describe("CodexAppServerProvider", () => {
     );
     expect(logMock.debug).toHaveBeenCalledWith(
       "codex isolated fork disabled inherited dynamic tools",
-      { disabledInheritedToolNames: expect.arrayContaining(["source_researcher"]) },
+      {
+        disabledInheritedToolNames: expect.arrayContaining([subagentToolName("source_researcher")]),
+      },
     );
 
     await forkSession.close();
@@ -813,13 +823,7 @@ describe("CodexAppServerProvider", () => {
     const source = await provider.openSession(
       buildParams({
         tools: {
-          subagentTools: [
-            {
-              name: "source_researcher",
-              description: "Research for the source",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
+          subagents: [{ name: "source_researcher", description: "Research for the source" }],
         },
       }),
     );
@@ -832,13 +836,7 @@ describe("CodexAppServerProvider", () => {
             model: "gpt-5.4-mini",
           },
           tools: {
-            subagentTools: [
-              {
-                name: "fork_reviewer",
-                description: "Review for the fork",
-                inputSchema: { type: "object", properties: {} },
-              },
-            ],
+            subagents: [{ name: "fork_reviewer", description: "Review for the fork" }],
           },
         },
       ),
@@ -850,8 +848,8 @@ describe("CodexAppServerProvider", () => {
     );
     expect(logMock.warn).toHaveBeenCalledWith("codex native fork dynamic tool catalogs differ", {
       isolated: false,
-      disabledInheritedToolNames: ["source_researcher"],
-      droppedConfiguredToolNames: ["fork_reviewer"],
+      disabledInheritedToolNames: [subagentToolName("source_researcher")],
+      droppedConfiguredToolNames: [subagentToolName("fork_reviewer")],
     });
     expect(logMock.debug).not.toHaveBeenCalledWith(
       "codex isolated fork disabled inherited dynamic tools",
@@ -1128,17 +1126,7 @@ describe("CodexAppServerProvider", () => {
       turnId: "fork-child-turn",
       output: "fork result",
     }));
-    const subagentTools = [
-      {
-        name: "researcher",
-        description: "Research a topic",
-        inputSchema: {
-          type: "object" as const,
-          properties: { prompt: { type: "string" } },
-          required: ["prompt"],
-        },
-      },
-    ];
+    const subagents = [{ name: "researcher", description: "Research a topic" }];
 
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -1151,7 +1139,7 @@ describe("CodexAppServerProvider", () => {
           item: {
             type: "dynamicToolCall",
             id: "call-fork-subagent",
-            tool: "researcher",
+            tool: subagentToolName("researcher"),
             arguments: { prompt: "inspect the fork" },
           },
           threadId: "source-thread",
@@ -1162,14 +1150,14 @@ describe("CodexAppServerProvider", () => {
           turnId: "fork-turn",
           callId: "call-fork-subagent",
           namespace: null,
-          tool: "researcher",
+          tool: subagentToolName("researcher"),
           arguments: { prompt: "inspect the fork" },
         });
         n("item/completed", {
           item: {
             type: "dynamicToolCall",
             id: "call-fork-subagent",
-            tool: "researcher",
+            tool: subagentToolName("researcher"),
             arguments: { prompt: "inspect the fork" },
           },
           threadId: "source-thread",
@@ -1188,7 +1176,7 @@ describe("CodexAppServerProvider", () => {
       buildParams({
         thread: { kind: "new" },
         tools: {
-          subagentTools,
+          subagents,
           executeSubagent: sourceExecuteSubagent,
         },
       }),
@@ -1197,7 +1185,7 @@ describe("CodexAppServerProvider", () => {
     const forkSession = await provider.openSession(
       buildBranchParams(
         { lifetime: "ephemeral" },
-        { tools: { subagentTools, executeSubagent: forkExecuteSubagent } },
+        { tools: { subagents, executeSubagent: forkExecuteSubagent } },
       ),
     );
     const collected = collectUntilTerminal(forkSession);
@@ -1297,12 +1285,12 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("names the payer change when Codex restarts before turn/start returns", async () => {
+  it("names the login change when Codex restarts before turn/start returns", async () => {
     const appServerManager = new CodexAppServerManager();
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };
       if (method === "turn/start") {
-        appServerManager.restart();
+        appServerManager.useLogin(ROME_CREDITS);
         throw new Error("app-server client closed");
       }
       return {};
@@ -1315,8 +1303,7 @@ describe("CodexAppServerProvider", () => {
 
       const error = (await collected).find((m) => m.type === "error");
       expect(error).toMatchObject({
-        error:
-          "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+        error: "Codex stopped before the turn finished: the model login changed",
       });
       expect(error).not.toHaveProperty("code");
       await session.close();
@@ -1349,14 +1336,14 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("fails a queued turn instead of starting it after the payer changes", async () => {
+  it("fails a queued turn instead of starting it after the login changes", async () => {
     const previousOrigin = process.env.PANTHEON_BASE_ORIGIN;
     process.env.PANTHEON_BASE_ORIGIN = "https://rome.example";
     requestMock.mockImplementation(async (method: string) => {
-      if (method === "thread/start") return { thread: { id: "thread-payer" } };
+      if (method === "thread/start") return { thread: { id: "thread-login" } };
       if (method === "turn/start") {
         captured.onNotification?.("turn/started", {
-          threadId: "thread-payer",
+          threadId: "thread-login",
           turn: { id: "turn-1" },
         });
       }
@@ -1371,22 +1358,21 @@ describe("CodexAppServerProvider", () => {
       await rs.waitFor(() => {
         expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);
       });
-      // Queued behind the active turn while ChatGPT is still the payer.
+      // Queued behind the active turn while ChatGPT is still the login.
       await session.sendUserInput({ text: "second" });
 
-      appServerManager.setDefaultProvider("rome_credits");
+      appServerManager.useLogin(ROME_CREDITS);
       expect(await first).toEqual([
         { type: "model_turn_started", modelTurnId: "turn-1" },
         expect.objectContaining({
           type: "error",
-          error:
-            "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+          error: "Codex stopped before the turn finished: the model login changed",
         }),
       ]);
       expect(await collectUntilTerminal(session)).toEqual([
         expect.objectContaining({
           type: "error",
-          error: "Model payer changed while preparing this turn; please retry.",
+          error: "Model login changed while preparing this turn; please retry.",
           code: "transient",
         }),
       ]);
@@ -1689,7 +1675,7 @@ describe("CodexAppServerProvider", () => {
           turnId: "provider-turn-1",
           callId: "call-subagent-1",
           namespace: null,
-          tool: "researcher",
+          tool: subagentToolName("researcher"),
           arguments: { prompt: "inspect" },
         });
         captured.onNotification?.("turn/completed", {
@@ -1703,17 +1689,7 @@ describe("CodexAppServerProvider", () => {
     const session = await provider.openSession(
       buildParams({
         tools: {
-          subagentTools: [
-            {
-              name: "researcher",
-              description: "Research a topic",
-              inputSchema: {
-                type: "object",
-                properties: { prompt: { type: "string" } },
-                required: ["prompt"],
-              },
-            },
-          ],
+          subagents: [{ name: "researcher", description: "Research a topic" }],
           executeSubagent,
         },
       }),
@@ -1721,7 +1697,9 @@ describe("CodexAppServerProvider", () => {
 
     const startCall = requestMock.mock.calls.find((call) => call[0] === "thread/start");
     expect(startCall?.[1]).toMatchObject({
-      dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "researcher" })]),
+      dynamicTools: expect.arrayContaining([
+        expect.objectContaining({ name: subagentToolName("researcher") }),
+      ]),
     });
     expect((startCall?.[1] as { config: Record<string, unknown> }).config).not.toHaveProperty(
       "mcp_servers",
@@ -2694,8 +2672,8 @@ describe("CodexAppServerProvider", () => {
   });
 
   it("tags a usage-limit turn failure with code:usage_limit (structured codexErrorInfo)", async () => {
-    const onQuotaExhausted = rs.fn();
-    const provider = new CodexAppServerProvider({ onQuotaExhausted });
+    const refusedTurn = rs.fn();
+    const provider = new CodexAppServerProvider({ account: { refusedTurn } });
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
@@ -2729,17 +2707,20 @@ describe("CodexAppServerProvider", () => {
       error: "You've hit your usage limit. Try again in 3 hours.",
       code: "usage_limit",
     });
-    expect(onQuotaExhausted).toHaveBeenCalledTimes(1);
+    expect(refusedTurn).toHaveBeenCalledWith({ kind: "usage" });
     await session.close();
   });
 
   it("re-reads the served models before exposing a Rome credits model refusal", async () => {
     let refreshed = false;
     const provider = new CodexAppServerProvider({
-      isUsingRomeCredits: () => true,
-      onRomeCreditsModelNotServed: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        refreshed = true;
+      appServerManager: onRomeCredits(),
+      account: {
+        refusedTurn: () => {},
+        refusedModel: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          refreshed = true;
+        },
       },
     });
     requestMock.mockImplementation(async (method: string) => {
@@ -2821,9 +2802,9 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
-    let funding: UsageFunding = "byok";
-    const provider = new CodexAppServerProvider({ funding: () => funding });
+  it("reports a failed turn's Codex turn id and reads login kind when asked", async () => {
+    let loginKind: ModelLoginKind = "api_credential";
+    const provider = new CodexAppServerProvider({ loginKind: () => loginKind });
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
@@ -2848,9 +2829,9 @@ describe("CodexAppServerProvider", () => {
     const terminal = events.at(-1);
     expect(terminal).toMatchObject({ type: "error" });
     expect(terminal).not.toHaveProperty("position");
-    expect(session.funding).toBe("byok");
-    funding = "rome_credits";
-    expect(session.funding).toBe("rome_credits");
+    expect(session.loginKind).toBe("api_credential");
+    loginKind = "rome_credits";
+    expect(session.loginKind).toBe("rome_credits");
     await session.close();
   });
 
@@ -2907,9 +2888,11 @@ describe("CodexAppServerProvider", () => {
       markerPersisted = true;
     });
     const provider = new CodexAppServerProvider({
-      onAuthRevoked: async () => {
-        expect(markerPersisted).toBe(true);
-        authStateMarked = true;
+      account: {
+        refusedTurn: () => {
+          expect(markerPersisted).toBe(true);
+          authStateMarked = true;
+        },
       },
     });
     requestMock.mockImplementation(async (method: string) => {
@@ -2952,10 +2935,14 @@ describe("CodexAppServerProvider", () => {
 
   it("finishes marking revoked credentials before reporting them after turn/start fails", async () => {
     let authStateMarked = false;
+    markCodexAuthRevokedMock.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
     const provider = new CodexAppServerProvider({
-      onAuthRevoked: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        authStateMarked = true;
+      account: {
+        refusedTurn: () => {
+          authStateMarked = true;
+        },
       },
     });
     requestMock.mockImplementation(async (method: string) => {
@@ -3012,27 +2999,25 @@ describe("CodexAppServerProvider", () => {
       return error;
     }
 
-    it("flags the login for re-login while ChatGPT pays", async () => {
-      const onAuthRevoked = rs.fn(async () => {});
-      const error = await runFailedTurn(
-        new CodexAppServerProvider({ onAuthRevoked, isUsingRomeCredits: () => false }),
-      );
+    it("flags the login for re-login on the guardian's own login", async () => {
+      const refusedTurn = rs.fn();
+      const error = await runFailedTurn(new CodexAppServerProvider({ account: { refusedTurn } }));
 
       expect(error).toMatchObject({ type: "error", error: WORKSPACE_401, code: "auth_revoked" });
       expect(markCodexAuthRevokedMock).toHaveBeenCalledTimes(1);
-      expect(onAuthRevoked).toHaveBeenCalledTimes(1);
+      expect(refusedTurn).toHaveBeenCalledWith({ kind: "credential" });
     });
 
-    it("leaves the login alone while Rome credits pay", async () => {
-      const onAuthRevoked = rs.fn(async () => {});
+    it("leaves the login alone on Rome credits", async () => {
+      const refusedTurn = rs.fn();
       const error = await runFailedTurn(
-        new CodexAppServerProvider({ onAuthRevoked, isUsingRomeCredits: () => true }),
+        new CodexAppServerProvider({ account: { refusedTurn }, appServerManager: onRomeCredits() }),
       );
 
       expect(error).toMatchObject({ type: "error", error: WORKSPACE_401 });
       expect(error).not.toMatchObject({ code: "auth_revoked" });
       expect(markCodexAuthRevokedMock).not.toHaveBeenCalled();
-      expect(onAuthRevoked).not.toHaveBeenCalled();
+      expect(refusedTurn).not.toHaveBeenCalled();
     });
   });
 

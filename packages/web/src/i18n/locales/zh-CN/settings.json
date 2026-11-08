@@ -87,7 +87,7 @@
         "title": "项目",
         "label": "Composio 项目",
         "default": "{{name}}（默认）",
-        "switched": "请在这个项目里重新连接服务，然后让 Concierge 重新关注它们。"
+        "switched": "请在这个项目里重新连接服务，然后让 {{name}} 重新关注它们。"
       }
     },
     "loadFailedFallback": "加载连接失败。",
@@ -683,14 +683,6 @@
     },
     "features": {
       "title": "功能"
-    },
-    "experimental": {
-      "badge": "实验",
-      "concierge": {
-        "title": "Concierge",
-        "description": "一个对话：代理用短消息和你聊天，较长的工作交给任务对话。",
-        "toggleLabel": "在对话中显示 Concierge"
-      }
     },
     "developerSettings": {
       "title": "开发者设置"

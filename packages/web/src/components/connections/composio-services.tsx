@@ -35,6 +35,7 @@ import {
   type ComposioServiceRow,
 } from "@/lib/composio-services";
 import { StatusIndicator, type ConnectionStatus } from "@/lib/connection-status";
+import { useConciergeName } from "@/hooks/use-concierge";
 
 /**
  * The Composio services as Settings › Connections rows. The catalog loads once
@@ -421,6 +422,7 @@ export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => 
  */
 export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => void }) {
   const { t } = useTranslation("settings");
+  const conciergeName = useConciergeName();
   const client = useQueryClient();
   const [switched, setSwitched] = useState(false);
   const projects = useQuery({
@@ -475,7 +477,7 @@ export function ComposioProjectRow({ onFlash }: { onFlash: (message: string) => 
       </div>
       {switched ? (
         <p className="text-aux text-muted-foreground">
-          {t("connections.composioServices.project.switched")}
+          {t("connections.composioServices.project.switched", { name: conciergeName })}
         </p>
       ) : null}
     </div>

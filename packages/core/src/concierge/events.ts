@@ -4,10 +4,7 @@
 // one reminder turn.
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type {
-  AgentLifecycleDispatcher,
-  AgentTurnFailedBeforeStart,
-} from "../core/agent-lifecycle.js";
+import type { AgentTurnFailedBeforeStart, TurnListeners } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
@@ -170,7 +167,7 @@ export async function renderTaskEvents(
 /** Starts listening. Returns the unsubscribe. */
 export function startConciergeEvents(
   service: ConciergeService,
-  dispatcher: Pick<AgentLifecycleDispatcher, "onFinished" | "onFailedBeforeStart">,
+  turns: Pick<TurnListeners, "listen">,
   options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
   const remindersRunning = new Set<string>();
@@ -179,7 +176,6 @@ export function startConciergeEvents(
 
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
-    isEnabled: () => service.isEnabled(),
     render: (dirty) => renderTaskEvents(service, dirty),
     deliver: async ({ chatId: from, owner, prompt, quiet }) => {
       // A row whose chat is gone or archived reports to the main chat.
@@ -188,7 +184,7 @@ export function startConciergeEvents(
       // A visitor dropped from the dashboard allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
-      return await service.systemTurnOutcome(chatId, prompt, { quiet });
+      return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
@@ -207,12 +203,11 @@ export function startConciergeEvents(
     }
     if (event.status === "error") {
       const failure = event.output.failure;
-      const reason = failoverReason(failure, service.deps.aiToolState.get());
+      const reason = failoverReason(failure, service.deps.accounts.read());
       if (!reason || !failure) return;
       const chain: { finished?: AgentTurnFinishedEvent } = {};
       recoveriesRunning.set(chatId, chain);
       try {
-        if (!(await service.isEnabled())) return;
         const recover = async (
           input: AgentTurnFailure,
           kind: typeof reason,
@@ -231,9 +226,8 @@ export function startConciergeEvents(
           await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
             30_000,
           );
-          // The wait may have ended Concierge or the subscription that paid for this turn.
-          if (!(await service.isEnabled())) return;
-          if (!failoverReason(failure, service.deps.aiToolState.get())) return;
+          // The wait may have ended the subscription that paid for this turn.
+          if (!failoverReason(failure, service.deps.accounts.read())) return;
           next = await recover(failure, reason, true);
         } else {
           const moved = await service.switchForFailure(chatId, failure, reason);
@@ -242,7 +236,7 @@ export function startConciergeEvents(
           next = await recover(failure, reason, !crossed);
         }
         if (crossed || next?.status !== "error" || !next.output.failure) return;
-        const second = failoverReason(next.output.failure, service.deps.aiToolState.get());
+        const second = failoverReason(next.output.failure, service.deps.accounts.read());
         if (!second) return;
         const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
         if (moved) await recover(next.output.failure, second, false);
@@ -251,7 +245,6 @@ export function startConciergeEvents(
       }
       return;
     }
-    if (!(await service.isEnabled())) return;
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,
@@ -275,7 +268,6 @@ export function startConciergeEvents(
   };
 
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
-    if (!(await service.isEnabled())) return;
     const taskId = await taskOf(chatId);
     if (!taskId) return;
     await waitForTurnStream(service, chatId, event.turn.turnId);
@@ -325,7 +317,6 @@ export function startConciergeEvents(
     const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
       ?.channelContext;
     if (typeof context?.threadId !== "string") return;
-    if (!(await service.isEnabled())) return;
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
     coalescer.mark({
@@ -373,21 +364,23 @@ export function startConciergeEvents(
   service.attachFailedBeforeStart(onFailedBeforeStart);
 
   const unsubscribers = [
-    dispatcher.onFailedBeforeStart(onFailedBeforeStart),
+    turns.listen({
+      couldNotStart: onFailedBeforeStart,
+      ended: (event) => {
+        const thread = event.turn.threadContext;
+        // A subagent's turn belongs to its parent's turn, which reports on its own.
+        if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+        const chatId = thread.threadId;
+        const handled = isConciergeAgent(event.turn.agentName)
+          ? onConciergeTurn(event, chatId)
+          : onTaskChatTurn(event, chatId);
+        void guard(`concierge turn handling (${event.turn.turnId})`, handled);
+      },
+    }),
     tasks.repo.onChange(({ row }, change) => {
       if (change === "write") coalescer.settle(row.id);
     }),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
-    dispatcher.onFinished((event) => {
-      const thread = event.turn.threadContext;
-      // A subagent's turn belongs to its parent's turn, which reports on its own.
-      if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
-      const chatId = thread.threadId;
-      const handled = isConciergeAgent(event.turn.agentName)
-        ? onConciergeTurn(event, chatId)
-        : onTaskChatTurn(event, chatId);
-      void guard(`concierge turn handling (${event.turn.turnId})`, handled);
-    }),
   ];
 
   return () => {

@@ -4,7 +4,7 @@ import type {
   ToolUseBlock,
 } from "@rome/api-types/trace-segments";
 import type { ActionRegistryImpl } from "../actions/registry.js";
-import type { AgentLoader } from "../core/agent-loader.js";
+import type { AgentCatalog } from "../agent/index.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import { isResolvedApp, type ResolvedApp } from "../apps/state.js";
 import {
@@ -19,7 +19,7 @@ import { appIdToPathSegment } from "../apps/packaging/app-id.js";
 export interface RegistryAppResolverDeps {
   appCatalog: AppCatalog;
   actionRegistry: Pick<ActionRegistryImpl, "getMetadata">;
-  agentLoader: Pick<AgentLoader, "getAllRecords">;
+  agentLoader: AgentCatalog;
 }
 
 interface CachedAppRef {
@@ -84,10 +84,10 @@ export function createRegistryAppResolver(deps: RegistryAppResolverDeps): AppRes
       const builtinKey = TOOL_TO_BUILTIN[tool];
       if (builtinKey) return BUILTIN_TOOL_APPS[builtinKey];
 
-      const agentRecord = deps.agentLoader.getAllRecords().get(tool);
-      if (agentRecord) {
-        if (agentRecord.metadata.ownerType === "app") {
-          return refForApp(agentRecord.metadata.ownerId);
+      const agent = deps.agentLoader.list().find((candidate) => candidate.name === tool);
+      if (agent) {
+        if (agent.ownerType === "app") {
+          return refForApp(agent.ownerId);
         }
         return SYSTEM_PSEUDO_APP;
       }

@@ -1,7 +1,9 @@
+import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,
@@ -9,12 +11,13 @@ import {
   type ModelRunParams,
 } from "../core/agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { createModelResolver } from "../core/model-resolver.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -81,7 +84,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const testDb = createTestDb();
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
     tracer: options.tracer,
@@ -96,27 +99,21 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
 
   const modelResolver = createModelResolver({
     providers: [options.modelProvider],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    accounts: fakeAccounts(bothAvailable()),
   });
   const manager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
-    promptBuilder,
+    systemPrompts,
     actionRegistry,
     modelResolver,
     actionEngine,
     capabilityDiscovery: new CapabilityDiscovery(),
-    skillCatalog: new SkillCatalog(artifactIdentity),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    skillCatalog: new SkillLoader(artifactIdentity),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
+    turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
     channelSurface: testChannelSurface,
   });
   const runner = new AgentRunner(manager, agentLoader);

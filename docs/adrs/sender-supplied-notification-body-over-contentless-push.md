@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-08-11
 - **Architecture**: [Notification delivery](../architecture/notification-delivery.md)
+- **Amended by**: [Proactive Concierge messages push without per-message consent](proactive-concierge-push-without-per-message-consent.md), which allows instance-set routing data and an instance-built preview
 
 ## Context
 
@@ -33,7 +34,7 @@ Nothing structural keeps a secret out of the payload. The rule is behavioral, th
 
 Future diffs must respect:
 
-- The body is the only sender-supplied field, and the title stays Rome Cloud-owned. A caller-supplied title, subtitle, or tap payload widens the sender surface and reopens this record.
+- The body is the only sender-supplied field, and the title stays Rome Cloud-owned. A caller-supplied title, subtitle, or tap payload widens the sender surface and reopens this record. The [proactive push record](proactive-concierge-push-without-per-message-consent.md) amends this for routing data the instance sets itself, never an agent.
 - Every content path crosses Rome Cloud's single enforcement point before device lookup and fan-out. No send path bypasses it.
 - No secrets in the body, and no body in operational logs. A diff may harden the rule with classification or redaction. No diff relaxes the logging rule or treats a disabled preview setting as license to carry a secret.
 - Rome adds no parallel preview preference. Lock-screen exposure control stays with the device's own lock-screen preview setting (iOS Show Previews, and Android's equivalent).

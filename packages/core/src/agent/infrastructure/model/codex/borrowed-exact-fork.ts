@@ -17,8 +17,8 @@ import type {
   ModelSessionParams,
   ModelUserInput,
   ProviderId,
-  ModelFunding,
 } from "../../../domain/model-port.js";
+import type { ModelLoginKind } from "../../../domain/model-login.js";
 import {
   createGeneratedImageTracker,
   createImageTraceSessionState,
@@ -89,7 +89,7 @@ export interface CreateBorrowedExactForkSessionArgs {
   onSend?: (input: ModelUserInput) => void;
   revertTurn(threadId: string, beforeTurnId: string): Promise<void>;
   interrupt(reason?: string): Promise<void>;
-  funding?: () => ModelFunding | undefined;
+  loginKind?: () => ModelLoginKind | undefined;
 }
 
 /** Build the ephemeral one-turn ModelSession used only by eligible exact forks. */
@@ -131,8 +131,8 @@ export async function createBorrowedExactForkSession(
     model: args.openParams.config.model,
     events: sink.iter(),
     modelThreadId: args.sourceThreadId,
-    get funding(): ModelFunding | undefined {
-      return args.funding?.();
+    get loginKind(): ModelLoginKind | undefined {
+      return args.loginKind?.();
     },
     sendUserInput: async (input) => {
       if (closed || closing) throw new Error("ModelSession is closed");

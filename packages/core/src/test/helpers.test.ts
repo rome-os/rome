@@ -68,7 +68,7 @@ describe("Test Helpers", () => {
   });
 
   describe("buildAgentConfig", () => {
-    it("returns an AgentConfig with defaults", () => {
+    it("returns an agent file with defaults", () => {
       const config = buildAgentConfig();
       expect(config.name).toBe("test-agent");
       expect(config.tier).toBe("small");

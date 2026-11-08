@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogEvent, ResolvedApp } from "../state.js";
@@ -43,11 +43,13 @@ describe("createAppOgImageSubscriber", () => {
   });
 
   it("generates an image for an installed web app and passes the full-route link", async () => {
-    const store = createOgImageStore(root);
+    // Store and subscriber share one host getter, as index.ts wires them.
+    const host = () => "jessie.romeos.cc";
+    const store = createOgImageStore(root, host);
     const calls: Array<string | null> = [];
     const handler = createAppOgImageSubscriber({
       store,
-      host: "jessie.romeos.cc",
+      host,
       generate: async (_app, link) => {
         calls.push(link);
         return Buffer.from("png");
@@ -59,12 +61,85 @@ describe("createAppOgImageSubscriber", () => {
     expect(await store.read("reddit")).not.toBeNull();
   });
 
+  it("regenerates a card drawn for another host once the instance host changes", async () => {
+    let host: string | null = "pool-7.romeos.cc";
+    const store = createOgImageStore(root, () => host);
+    const links: Array<string | null> = [];
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: () => host,
+      generate: async (_app, link) => {
+        links.push(link);
+        return Buffer.from(link ?? "none");
+      },
+    });
+    const event = { appId: "reddit", change: "changed", current: resolvedApp() } as const;
+
+    await handler(event);
+    await tick();
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit"]);
+
+    // Same host, newer card than the app: the replay is a no-op.
+    await handler(event);
+    await tick();
+    expect(links).toHaveLength(1);
+
+    host = "acme.romeos.cc";
+    await handler(event);
+    await tick();
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit", "acme.romeos.cc/full/apps/reddit"]);
+    expect((await store.read("reddit"))?.toString()).toBe("acme.romeos.cc/full/apps/reddit");
+  });
+
+  it("files a card under the host it was drawn for when the host changes mid-render", async () => {
+    let host: string | null = "pool-7.romeos.cc";
+    const store = createOgImageStore(root, () => host);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const links: Array<string | null> = [];
+    let first = true;
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: () => host,
+      generate: async (_app, link) => {
+        links.push(link);
+        if (first) {
+          first = false;
+          await gate;
+        }
+        return Buffer.from(link ?? "none");
+      },
+    });
+    const event = { appId: "reddit", change: "changed", current: resolvedApp() } as const;
+
+    await handler(event);
+    await tick();
+    // Adoption lands while the pool-host card is still rendering.
+    host = "acme.romeos.cc";
+    release();
+    await tick();
+
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit"]);
+    expect(readFileSync(store.path("reddit", "pool-7.romeos.cc")).toString()).toBe(
+      "pool-7.romeos.cc/full/apps/reddit",
+    );
+    // Nothing is filed under the tenant host's name, so the replay is not skipped.
+    expect(await store.stat("reddit")).toBeNull();
+
+    await handler(event);
+    await tick();
+    expect(links).toEqual(["pool-7.romeos.cc/full/apps/reddit", "acme.romeos.cc/full/apps/reddit"]);
+    expect((await store.read("reddit"))?.toString()).toBe("acme.romeos.cc/full/apps/reddit");
+  });
+
   it("skips when the image is newer than the app's updatedAt, and regenerates when older", async () => {
     const store = createOgImageStore(root);
     let calls = 0;
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         calls += 1;
         return Buffer.from("png");
@@ -87,7 +162,7 @@ describe("createAppOgImageSubscriber", () => {
     let calls = 0;
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         calls += 1;
         return Buffer.from("png");
@@ -112,7 +187,7 @@ describe("createAppOgImageSubscriber", () => {
     const store = createOgImageStore(root);
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: () => new Promise((_r, reject) => setTimeout(() => reject(new Error("boom")), 10)),
     });
     const started = Date.now();
@@ -130,7 +205,7 @@ describe("createAppOgImageSubscriber", () => {
     });
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         await gate;
         return Buffer.from("stale");
@@ -150,7 +225,7 @@ describe("createAppOgImageSubscriber", () => {
     const gates = new Map<string, () => void>();
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async (app) => {
         await new Promise<void>((r) => gates.set(app.updatedAt, r));
         return Buffer.from(app.updatedAt);
@@ -180,7 +255,7 @@ describe("createAppOgImageSubscriber", () => {
     });
     const handler = createAppOgImageSubscriber({
       store,
-      host: null,
+      host: () => null,
       generate: async () => {
         await gate;
         return Buffer.from("late");

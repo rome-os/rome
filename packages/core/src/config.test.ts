@@ -7,7 +7,6 @@ import { DEFAULT_SQLITE_PATH } from "./db/index.js";
  * `rs.stubEnv()` calls within each test are the only source of config.
  */
 const CONFIG_ENV_KEYS = [
-  "PANTHEON_SLUG",
   "ANTHROPIC_API_KEY",
   "DATABASE_TYPE",
   "SQLITE_PATH",
@@ -225,32 +224,6 @@ describe("loadConfig()", () => {
     rs.stubEnv("SQLITE_ENCRYPTION_KEY", "secret123");
 
     expect(loadConfig().database).toMatchObject({ type: "sqlite", encryptionKey: "secret123" });
-  });
-
-  it("surfaces PANTHEON_SLUG as the instance slug", () => {
-    rs.stubEnv("PANTHEON_SLUG", "feature-foo");
-
-    const config = loadConfig();
-    expect(config.instanceSlug).toBe("feature-foo");
-  });
-
-  it("leaves the instance slug undefined when PANTHEON_SLUG is unset", () => {
-    const config = loadConfig();
-    expect(config.instanceSlug).toBeUndefined();
-  });
-
-  it("treats a blank PANTHEON_SLUG as no slug", () => {
-    rs.stubEnv("PANTHEON_SLUG", "   ");
-
-    const config = loadConfig();
-    expect(config.instanceSlug).toBeUndefined();
-  });
-
-  it("trims surrounding whitespace from the instance slug", () => {
-    rs.stubEnv("PANTHEON_SLUG", "  prod-tenant-7  ");
-
-    const config = loadConfig();
-    expect(config.instanceSlug).toBe("prod-tenant-7");
   });
 
   it("accepts INTERNAL_API_WEBHOOK_API_KEY", () => {

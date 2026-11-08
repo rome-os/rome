@@ -22,9 +22,11 @@ import {
   CONCIERGE_SESSION_QUERY_KEY,
   CONCIERGE_UNREAD_CAP,
   useConciergeChats,
+  useConciergeName,
   useConciergeUnread,
 } from "@/hooks/use-concierge";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 
@@ -49,6 +51,7 @@ export function ConciergeEntry({
   onNewTopic: () => void;
 }) {
   const { t } = useTranslation("common");
+  const name = useConciergeName();
   const queryClient = useQueryClient();
   const unread = useConciergeUnread(chatId);
   const recount = useCallback(() => {
@@ -65,9 +68,11 @@ export function ConciergeEntry({
   return (
     <div className="group/concierge relative flex items-center">
       <Link
-        to={`/chat/${chatId}`}
+        to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
-        aria-label={count > 0 ? t("recentChats.conciergeUnread", { count, label }) : undefined}
+        aria-label={
+          count > 0 ? t("recentChats.conciergeUnread", { name, count, label }) : undefined
+        }
       >
         <span
           className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
@@ -75,7 +80,7 @@ export function ConciergeEntry({
         >
           <RomeLogo className="size-4 shrink-0" aria-hidden />
         </span>
-        <span className="flex-1 truncate">{t("recentChats.concierge")}</span>
+        <span className="flex-1 truncate">{name}</span>
         {count > 0 ? (
           <Badge
             variant="destructive"
@@ -137,7 +142,7 @@ export function ConciergeChats({
           active={activeSessionId === chat.id}
           onChanged={refresh}
           onGone={() => {
-            if (activeSessionId === chat.id) navigate(`/chat/${mainChatId}`);
+            if (activeSessionId === chat.id) navigate(MAIN_CHAT_PATH);
           }}
         />
       ))}
@@ -157,6 +162,7 @@ function ConciergeTopicEntry({
   onGone: () => void;
 }) {
   const { t } = useTranslation("common");
+  const conciergeName = useConciergeName();
   // An untitled chat shows as a new chat until its first message names it.
   const name = chat.name || t("recentChats.newChat");
   const [editing, setEditing] = useState(false);
@@ -264,7 +270,7 @@ function ConciergeTopicEntry({
         open={confirmDelete}
         destructive
         title={t("recentChats.delete")}
-        description={t("recentChats.topicChatDeleteConfirm")}
+        description={t("recentChats.topicChatDeleteConfirm", { name: conciergeName })}
         confirmLabel={t("recentChats.delete")}
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => {

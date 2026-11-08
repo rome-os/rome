@@ -4,7 +4,13 @@ import { platformOf } from "../../connections/platform.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { createTestDb, grantReaching, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
+import {
+  buildAgent,
+  createTestDb,
+  grantReaching,
+  type TestDb,
+  testAccountLinkOf,
+} from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectedAccountsRoutes } from "./connected-accounts.js";
 
@@ -43,8 +49,7 @@ describe("connected account routes", () => {
       held.push(connection);
     };
     const agentLoader = {
-      has: (name: string) => name in loaded,
-      getCanonicalName: (name: string) => loaded[name]!,
+      find: (name: string) => (name in loaded ? buildAgent(loaded[name]!) : undefined),
     } as unknown as ApiDeps["agentLoader"];
     // The connections Rome holds and the descriptors' kinds of link, as the
     // registry answers them.

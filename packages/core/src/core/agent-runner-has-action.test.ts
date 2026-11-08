@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import { AgentRunner } from "./agent-runner.js";
-import type { AgentLoader } from "./agent-loader.js";
+import type { AgentCatalog } from "../agent/index.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import type { Action } from "../actions/types.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { buildAgent } from "../test/helpers.js";
 
 function action(name: string, visibility: "public" | "explicit"): Action {
   return {
@@ -45,12 +46,10 @@ describe("AgentRunner.hasAction", () => {
     main: ["*", "system:execute_root_script"],
     explore: ["*"],
   };
-  const loader = {
-    getRecord: (name: string) => {
-      if (!agents[name]) throw new Error(`unknown agent ${name}`);
-      return { config: { actions: agents[name] } };
-    },
-  } as unknown as AgentLoader;
+  const loader: AgentCatalog = {
+    list: () => [],
+    find: (name) => (agents[name] ? buildAgent(name, { actions: agents[name] }) : undefined),
+  };
   const runner = new AgentRunner({} as AgentSessionManager, loader, undefined, undefined, registry);
 
   it("resolves through the agent's allow-list, honoring explicit visibility", () => {

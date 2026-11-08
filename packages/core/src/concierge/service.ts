@@ -8,26 +8,34 @@ import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
-import { claudeUsesApiKey, type AIToolStateValue } from "../core/ai-tool-state.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
-import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
+import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
-import { MODEL_SELECTIONS, type ModelSelectionId, type SessionRepository } from "../agent/index.js";
 import {
-  quotaSwitchTarget,
+  accountAllowsModel,
+  CODEX_LUNA_MODEL,
+  MODEL_SELECTIONS,
   sameProviderTarget,
-  soleExhaustedProvider,
-} from "../core/quota-switch.js";
+  soleProviderAtUsageLimit,
+  usageSwitchTarget,
+  type ModelAccounts,
+  type ModelSelectionId,
+  type SessionRepository,
+} from "../agent/index.js";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
+import type { NotifyLevel } from "../lib/notify-client.js";
+import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { quietWindowEnd } from "./alerts.js";
+import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import {
   type ConciergeOwner,
   GUARDIAN_OWNER,
@@ -60,8 +68,8 @@ export {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 };
-/** The guardian setting that turns Concierge on. Any value but `true` is off. */
-const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
+/** The dashboard language the guardian picked: `en` or `zh-CN`. */
+const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
@@ -110,6 +118,8 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): string[];
   interruptTurn(turnId: string): Promise<void>;
@@ -124,7 +134,7 @@ export interface ConciergeDashboard {
 }
 
 export interface ConciergeDeps {
-  skillCatalog: Pick<SkillCatalog, "get">;
+  skillCatalog: Pick<SkillCatalog, "find">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
   owners?: ConciergeOwners;
@@ -146,15 +156,25 @@ export interface ConciergeDeps {
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
-  aiToolState: { get(): AIToolStateValue };
+  accounts: Pick<ModelAccounts, "read">;
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
   runBackendTurn: (
     params: BackendTurnParams,
-    options?: { quiet?: boolean; inputLabel?: string },
+    options?: SystemTurnOptions,
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
+  /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
+  notify?: ConciergePushDeps["notify"];
+}
+
+export interface SystemTurnOptions {
+  quiet?: boolean;
+  inputLabel?: string;
+  /** The first message the Concierge says in the turn goes to the guardian's
+   *  phone at this level. Only a turn the guardian did not start has one. */
+  pushLevel?: NotifyLevel;
 }
 
 export class ConciergeService {
@@ -165,8 +185,38 @@ export class ConciergeService {
   private taskEvents: TaskEventCoalescer | null = null;
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
+  private readonly push: ConciergePush | null;
 
-  constructor(readonly deps: ConciergeDeps) {}
+  constructor(readonly deps: ConciergeDeps) {
+    this.push = deps.notify
+      ? new ConciergePush({
+          notify: deps.notify,
+          quietUntil: (at) => this.quietUntil(at),
+          pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
+          language: async () => {
+            const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+            return typeof stored === "string" ? stored : null;
+          },
+        })
+      : null;
+  }
+
+  /**
+   * The Concierge said something in a chat. The first message of a turn with a
+   * push level in one of the guardian's chats also goes to the guardian's
+   * phone, outside quiet hours. A visitor's Concierge never pushes: Rome Cloud
+   * delivers only to the guardian's devices.
+   */
+  said(said: SaidInTurn): void {
+    this.push?.said(said);
+  }
+
+  /** When the guardian's quiet window `at` falls in ends, or null outside it. */
+  private async quietUntil(at: number): Promise<number | null> {
+    const quietHours = (await this.attachedFollowing?.rules(GUARDIAN_OWNER))?.quietHours;
+    if (!quietHours) return null;
+    return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(this.deps.settingsRepo));
+  }
 
   attachDashboard(dashboard: ConciergeDashboard): void {
     this.attached = dashboard;
@@ -177,17 +227,6 @@ export class ConciergeService {
   get dashboard(): ConciergeDashboard {
     if (!this.attached) throw new Error("The dashboard is not up yet");
     return this.attached;
-  }
-
-  async isEnabled(): Promise<boolean> {
-    try {
-      return (await this.deps.settingsRepo.get(EXPERIMENTAL_CONCIERGE_SETTING_KEY)) === true;
-    } catch (error) {
-      log.warn("concierge setting unreadable, treating it as off", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
   }
 
   /** An owner's main Concierge chat's id, or null when it does not exist yet. */
@@ -239,6 +278,44 @@ export class ConciergeService {
     );
     log.info("concierge chat created", { chatId: id });
     return id;
+  }
+
+  /**
+   * The guardian's first sign-in: makes sure their main chat exists. With a
+   * `message`, it goes into that chat as the guardian's own, the way the
+   * composer sends it, and the Concierge answers it as any other. Answers the
+   * main chat's id. The message is not awaited, and a failure to send it (no
+   * model signed in yet) is logged, so the sign-in that calls this never fails
+   * on it.
+   */
+  async startMainChat(message: string | null): Promise<string> {
+    const chatId = await this.ensureChatId();
+    if (message) {
+      this.dashboard.chats.sendAsGuardian(chatId, message).catch((error: unknown) =>
+        log.warn("first message to the Concierge was not sent", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return chatId;
+  }
+
+  /**
+   * The guardian connected `service` from a connect card in `chatId`: tells the
+   * Concierge there, quietly, so it goes on without the guardian typing. Not
+   * awaited; a failure is logged.
+   */
+  serviceConnected(chatId: string, service: string): void {
+    this.runSystemTurn(chatId, `<service_connected service="${attr(service)}"/>`, {
+      quiet: true,
+      inputLabel: "Service connected",
+    }).catch((error: unknown) =>
+      log.warn("service connected notice failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 
   /** Who each owner is, and whether Rome still serves them. */
@@ -367,12 +444,12 @@ export class ConciergeService {
   // its own models through the tier mappings, so it keeps the tier's choice,
   // as does a chat that neither provider can serve.
   private pickModel(): ModelSelectionId | null {
-    const { claude, codex } = this.deps.aiToolState.get();
-    if (claude.loggedIn === true && !claude.quotaExhausted && !claude.anthropicCompatible) {
+    const { anthropic: claude, openai: codex } = this.deps.accounts.read();
+    if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
       return "claude-sonnet";
     }
-    if (codex.loggedIn === true && !codex.quotaExhausted) {
-      return codex.lunaAccess ? "gpt-6-luna" : "gpt-5-6-terra";
+    if (codex?.state === "available") {
+      return accountAllowsModel(codex.account, CODEX_LUNA_MODEL) ? "gpt-6-luna" : "gpt-5-6-terra";
     }
     return null;
   }
@@ -404,24 +481,25 @@ export class ConciergeService {
     const runtime = selected
       ? null
       : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-    const state = this.deps.aiToolState.get();
+    const state = this.deps.accounts.read();
     // An Auto chat whose first turn failed has no recorded provider yet.
     const from =
       selected?.providerId ??
       runtime?.provider ??
       failure?.provider ??
-      soleExhaustedProvider(state);
+      soleProviderAtUsageLimit(state);
     if (from !== "openai" && from !== "anthropic") return null;
     if (failure && failure.provider !== from) return null;
-    const source = from === "openai" ? state.codex : state.claude;
-    if (from === "anthropic" ? claudeUsesApiKey(source) : source.accountType === "api_key")
-      return null;
-    reason ??= source.quotaExhausted
-      ? "quota"
-      : // Rome credits pay for Codex while its login is out, so that alone is no failure.
-        (from === "anthropic" && source.loggedIn === false) || source.needsReauth
-        ? "login"
-        : undefined;
+    const source = state[from];
+    // An account billed per use has no subscription to switch from.
+    if (source?.account.usageLimited === false) return null;
+    reason ??=
+      source?.state === "usage_limit_reached"
+        ? "quota"
+        : // Codex runs on Rome credits while the ChatGPT account is out, so that alone is no failure.
+          (from === "anthropic" && source?.state === "unauthorized") || source?.state === "expired"
+          ? "login"
+          : undefined;
     if (!reason) return null;
     const fromModel = selected?.model ?? runtime?.model ?? "";
     const same =
@@ -429,7 +507,7 @@ export class ConciergeService {
       (reason === "model_limit" || (reason === "quota" && ambiguousQuota(failure?.message ?? "")))
         ? sameProviderTarget(state, from, fromModel)
         : null;
-    const cross = quotaSwitchTarget(state, from, true);
+    const cross = usageSwitchTarget(state, from, true);
     const candidates = reason === "model_limit" ? [same, cross] : [cross, same];
     // A model each Concierge chat left, so one chat's move never blocks another's.
     const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;
@@ -519,7 +597,7 @@ export class ConciergeService {
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean; inputLabel?: string } = {},
+    options: SystemTurnOptions = {},
   ): Promise<boolean> {
     return (await this.systemTurnOutcome(chatId, prompt, options)) === "completed";
   }
@@ -528,7 +606,7 @@ export class ConciergeService {
   async systemTurnOutcome(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean; inputLabel?: string } = {},
+    options: SystemTurnOptions = {},
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,

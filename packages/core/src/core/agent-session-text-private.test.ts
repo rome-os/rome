@@ -1,3 +1,5 @@
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,8 +10,8 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -17,10 +19,11 @@ import {
 } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
+import { SkillLoader } from "../agent/index.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 describe("AgentSessionManager textPrivate", () => {
   let directory: string;
@@ -68,27 +71,33 @@ describe("AgentSessionManager textPrivate", () => {
       },
     };
     const state = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: true, quotaExhausted: false },
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("textPrivate test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("textPrivate test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
         webchatRepo: new ChatsWebChatRepository(testDb.db),
-        promptBuilder,
+        sessionSettings: new ChatSessionSettings({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+        }),
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          accounts: fakeAccounts(() => state),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },

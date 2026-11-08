@@ -11,13 +11,12 @@ export function agentsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
   app.get("/agents", async (c) => {
-    const records = deps.agentLoader.getAllRecords();
-    const agents = Array.from(records.entries()).map(([name, record]) => ({
-      name,
-      localName: record.config.name,
-      description: record.config.description,
-      ownerType: record.metadata.ownerType,
-      ownerId: record.metadata.ownerId,
+    const agents = deps.agentLoader.list().map((agent) => ({
+      name: agent.name,
+      localName: agent.localName,
+      description: agent.definition.description,
+      ownerType: agent.ownerType,
+      ownerId: agent.ownerId,
     }));
     agents.sort((a, b) => a.name.localeCompare(b.name));
     return c.json({ agents });

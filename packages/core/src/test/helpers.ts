@@ -1,3 +1,5 @@
+import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import {
   createActionEngineRepos,
@@ -11,7 +13,8 @@ import type { DrizzleDb } from "../db/index.js";
 import { givenGrant } from "../connections/connection.js";
 import type { GrantValue } from "../connections/grant.js";
 import type { Credential } from "../connections/types.js";
-import type { AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
+import type { AgentEvent, OutgoingMessage } from "../types.js";
+import type { Agent, AgentDefinition } from "../agent/index.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -20,19 +23,25 @@ import type {
   ModelSessionParams,
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
-import { AgentLoader } from "../core/agent-loader.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
-import { createAIToolState } from "../core/ai-tool-state.js";
-import { type ModelAccount, romeCreditsProxyRoutes } from "../agent/index.js";
-import { createModelResolver } from "../core/model-resolver.js";
+import { AgentLoader } from "../agent/index.js";
+import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
+import { SkillLoader } from "../agent/index.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
+import {
+  createModelAccounts,
+  ClaudeAccount,
+  type ModelAccount,
+  type CodexLogins,
+  romeCreditsProxyRoutes,
+} from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
@@ -384,9 +393,12 @@ export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMe
   };
 }
 
-// buildAgentConfig — AgentConfig factory with defaults
+// buildAgentConfig — an agent file's contents, with defaults
 
-export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
+/** What an agent's file holds: its definition and its local name. */
+export type TestAgentFile = AgentDefinition & { name: string };
+
+export function buildAgentConfig(overrides?: Partial<TestAgentFile>): TestAgentFile {
   return {
     name: "test-agent",
     description: "A test agent",
@@ -397,6 +409,15 @@ export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig 
     permissionMode: "default",
     ...overrides,
   };
+}
+
+/** An installed core agent, for tests that stub the catalog. Its local name is the id's last part unless `name` says otherwise. */
+export function buildAgent(id: string, overrides?: Partial<TestAgentFile>): Agent {
+  const { name: localName, ...definition } = buildAgentConfig({
+    name: id.split(":").pop() ?? id,
+    ...overrides,
+  });
+  return { name: id, localName, ownerType: "core", ownerId: "core", definition };
 }
 
 // buildTestDeps — wires real repos from a test DB plus mock channels
@@ -554,7 +575,7 @@ export async function buildTestDeps(
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const actionLoader = new ActionLoader(artifactIdentity);
   const agentLoader = new AgentLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
+  const skillCatalog = new SkillLoader(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -572,14 +593,19 @@ export async function buildTestDeps(
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
   const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
-  const promptBuilder = new PromptBuilder(appCatalog);
+  const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
-  const codexAccountService: ModelAccount = {
-    async status() {
-      return { loggedIn: true, authMode: "chatgpt", planType: "plus", accountType: "plus" };
-    },
-    async usage() {
-      return null;
+  const codexAccountService: ModelAccount & CodexLogins = {
+    async report() {
+      return {
+        state: "available" as const,
+        account: {
+          loggedIn: true,
+          authMode: "chatgpt" as const,
+          planType: "plus" as const,
+          accountType: "plus",
+        },
+      };
     },
     authorizationState() {
       return {
@@ -602,6 +628,8 @@ export async function buildTestDeps(
     },
     async cancelAuthorization() {},
     async revoke() {},
+    login: () => ({ kind: "subscription" }),
+    useLogin() {},
     onChanged(listener) {
       codexAccountChangedListeners.add(listener);
       return () => codexAccountChangedListeners.delete(listener);
@@ -610,18 +638,17 @@ export async function buildTestDeps(
       codexAccountChangedListeners.clear();
     },
   };
-  const aiToolState = createAIToolState({
-    settingsRepo,
-    probes: {
-      codexStatus: () => codexAccountService.status(),
-      codexUsage: () => codexAccountService.usage(),
-    },
+  // The real adapter: the dashboard route tests put a fake `claude` binary on
+  // PATH and mock the revoked marker, and read status through it.
+  const claudeAccount = new ClaudeAccount({ settingsRepo });
+  const modelAccounts = createModelAccounts({
+    accounts: { openai: codexAccountService, anthropic: claudeAccount },
     startRefresh: false,
     refreshIntervalMs: null,
   });
   const modelResolver = createModelResolver({
     providers: [new MockModelProvider()],
-    aiToolState,
+    accounts: modelAccounts,
   });
   const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
@@ -633,13 +660,16 @@ export async function buildTestDeps(
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
-    promptBuilder,
+    systemPrompts,
     actionRegistry,
     modelResolver,
     actionEngine,
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
+    turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
     channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,
@@ -761,6 +791,7 @@ export async function buildTestDeps(
     appStore,
     actionRegistry,
     agentLoader,
+    agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
     accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
@@ -773,8 +804,9 @@ export async function buildTestDeps(
     agentRunner,
     activeSubagentRegistry,
     agentTurnStreamRegistry,
-    aiToolState,
+    modelAccounts,
     codexAccountService,
+    claudeAccount,
     romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),
     publicAccessState,
     dashboardAccessState,
@@ -1020,7 +1052,7 @@ export interface AppLifecycleHarness {
   actionRegistry: ActionRegistryImpl;
   actionLoader: ActionLoader;
   agentLoader: AgentLoader;
-  skillCatalog: SkillCatalog;
+  skillCatalog: SkillLoader;
   fetch(path: string, init?: RequestInit): Promise<Response>;
   hasAction(name: string): boolean;
   /** Bypasses the ActionEngine subprocess fork — tests don't need a worker entry. */
@@ -1042,7 +1074,7 @@ interface HarnessRuntime {
   actionRegistry: ActionRegistryImpl;
   actionLoader: ActionLoader;
   agentLoader: AgentLoader;
-  skillCatalog: SkillCatalog;
+  skillCatalog: SkillLoader;
   router: Hono;
 }
 
@@ -1069,7 +1101,7 @@ export async function createAppLifecycleHarness(
     const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
     const agentLoader = new AgentLoader(artifactIdentity);
-    const skillCatalog = new SkillCatalog(artifactIdentity);
+    const skillCatalog = new SkillLoader(artifactIdentity);
 
     appCatalog.subscribe(async function agentLoaderSubscriber() {
       try {

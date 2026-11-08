@@ -28,6 +28,39 @@ describe("the Concierge agent", () => {
     expect(actionName("delete-routine")).toBe("delete_routine");
   });
 
+  it("preserves saved follow settings before applying the requested changes", () => {
+    const prompt = concierge.systemPromptPrefix;
+    for (const text of [
+      "find the service's entry and the matching target in its `capabilities.watch.follows`",
+      "For a NEW follow only, start with the catalog defaults",
+      "use its `kinds[].on`, `options` and `preference` for `defaults` and `defaultText`",
+      "Fall back to a catalog default only for a setting missing from that follow",
+      "Keep saved false values, empty lists and a cleared preference",
+      "Apply changes the guardian already asked for on top",
+      "Do not reset unmentioned settings",
+    ])
+      expect(prompt).toContain(text);
+    expect(prompt).not.toContain("with the catalog's default kinds in `defaults`");
+  });
+
+  it("uses the follow settings card after the Concierge connect card succeeds", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(concierge.actions).not.toContain("connector:connector_connect");
+    expect(concierge.actions).not.toContain("connector:connector_login");
+    for (const text of [
+      "show the guardian `connect_card` with the `service` name",
+      'After `<service_connected service="…"/>`, use this card flow when the guardian asked to follow the service',
+      "do not save a follow before their answer",
+      "ask with ONE `ask_question` card built from the list's watch catalog",
+      "Ask first when the target names something the guardian has not, such as which repositories",
+      "Include that target question in the card when its settings are known",
+      "otherwise ask for the target before building the settings card",
+      "Map selected labels back to kind keys",
+      "call `core:concierge_follow` to create the follow or `core:concierge_following_configure` to change it",
+    ])
+      expect(prompt).toContain(text);
+  });
+
   it("reads history and checks unfinished work on quota recovery", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(concierge.actions).toContain("system:fetch_channel_history");
@@ -39,6 +72,21 @@ describe("the Concierge agent", () => {
       "`say` only and end with `done`",
     ])
       expect(prompt).toContain(text);
+  });
+
+  it("keeps secrets out of the first message of a turn the guardian did not start", () => {
+    const section = concierge.systemPromptPrefix.slice(
+      concierge.systemPromptPrefix.indexOf("# How you speak"),
+      concierge.systemPromptPrefix.indexOf("# What you do yourself"),
+    );
+    for (const text of [
+      "a turn the guardian did not start",
+      "lock screen",
+      "before any `chat_forward` or card",
+      "Never put a code, password, token or other secret in it",
+      "attention or approval is needed",
+    ])
+      expect(section).toContain(text);
   });
 
   it("names every defer for a row with task:<id> and reads its wake-ups and batches", () => {

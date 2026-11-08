@@ -1,7 +1,7 @@
 import { Archive, Check, ChevronDown, ListChecks, MessageSquare, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import type { ConciergeTaskAction, ConciergeTaskDto } from "@rome/api-types/concierge";
 import {
@@ -19,7 +19,8 @@ import {
   ListRowDescription,
   ListRowTitle,
 } from "@/components/ui/list-row";
-import { activeSessionFromPath } from "@/lib/chat-session";
+import { useActiveSessionId } from "@/hooks/use-active-session-id";
+import { useConciergeName } from "@/hooks/use-concierge";
 import { cn } from "@/lib/utils";
 import { checkPresses } from "./check-presses";
 import { requestConciergeJump } from "./concierge-jump";
@@ -55,6 +56,7 @@ function TaskRow({
   onNavigate?: () => void;
 }) {
   const { t, i18n } = useTranslation("chat");
+  const name = useConciergeName();
   const action = rowAction(task);
   const finished = task.state === "done" || task.state === "dropped";
   const detail =
@@ -65,7 +67,7 @@ function TaskRow({
   const status = pending
     ? pending.phase === "pending"
       ? t(`concierge.tasks.pending.${pending.action}`)
-      : t(`concierge.tasks.${pending.phase}`)
+      : t(`concierge.tasks.${pending.phase}`, { name })
     : [detail, task.notSynced ? t("concierge.tasks.notSynced") : null].filter(Boolean).join(" · ");
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
@@ -194,8 +196,9 @@ export function ConciergeTaskPanel({
   onNavigate?: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const location = useLocation();
-  const openChatId = chatId === undefined ? activeSessionFromPath(location.pathname) : chatId;
+  const name = useConciergeName();
+  const activeSessionId = useActiveSessionId();
+  const openChatId = chatId === undefined ? activeSessionId : chatId;
   // Finished work is history, so that group starts folded.
   const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["done"]));
   const [showAllDone, setShowAllDone] = useState(false);
@@ -228,7 +231,9 @@ export function ConciergeTaskPanel({
           <ListChecks />
         </EmptyStateIcon>
         <EmptyStateTitle>{t("concierge.tasks.emptyTitle")}</EmptyStateTitle>
-        <EmptyStateDescription>{t("concierge.tasks.emptyDescription")}</EmptyStateDescription>
+        <EmptyStateDescription>
+          {t("concierge.tasks.emptyDescription", { name })}
+        </EmptyStateDescription>
       </EmptyState>
     );
   }

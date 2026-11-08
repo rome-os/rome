@@ -317,6 +317,10 @@ export interface GrantCustody {
 /** A connection kind declaration. */
 export interface ConnectionDescriptor {
   connectionKind: string;
+  /** The kind's display name, as a person reads it ("GitHub"). A connection's
+   *  own `label` is the kind id until someone renames it, so surfaces that name
+   *  a service read this instead. A kind that leaves it unset shows its id. */
+  label?: string;
   /** The name of the connection's one grant: the key the dashboard, the setup
    *  routes and the ledger know it by. */
   grant: GrantName;

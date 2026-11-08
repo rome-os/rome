@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { isChatPath } from "@/lib/chat-session";
 
 const HOST_NAVIGATE_EVENT = "rome:host-navigate";
 
@@ -41,7 +42,7 @@ export function useHostNavigation(): void {
       const data = event.data as { type?: unknown; detail?: HostNavigateDetail } | null;
       if (!data || typeof data !== "object" || data.type !== HOST_NAVIGATE_EVENT) return;
       const path = data.detail?.path;
-      if (path !== "/chat" && !path?.startsWith("/chat/") && !path?.startsWith("/sessions/")) {
+      if (!(path && isChatPath(path)) && !path?.startsWith("/sessions/")) {
         return;
       }
       navigateToDetail(data.detail);

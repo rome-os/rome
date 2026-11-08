@@ -33,7 +33,7 @@ const FavorRequirementSchema = z
  * (`action.yaml`, agent yamls). Unknown fields are rejected, not stripped:
  * packed bundles are immutable once published, so a field tolerated here
  * would have to be tolerated forever. One schema serves both gates — the
- * runtime loaders (`actions/loader.ts`, `core/agent-loader.ts`) and
+ * runtime loaders (`actions/loader.ts`, `agent/infrastructure/agent-loader.ts`) and
  * pack/install validation (`validate.ts`) — and the bundle's
  * `formatVersion` (in app.yaml) governs it.
  */
@@ -122,7 +122,7 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
-    // Overrides of the session policy (core/session-policy.ts). Each omitted
+    // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
     policy: z
       .object({

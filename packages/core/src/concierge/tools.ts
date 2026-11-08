@@ -1,6 +1,6 @@
-// Concierge's facade tools: `say` is its only way to speak, the `chat_*`
-// tools run its task chats and read its other Concierge chats, and
-// `topic_start` starts a topic chat.
+// Concierge's session tools: `say` is its only way to speak, the `chat_*`
+// tools run its task chats and read its other Concierge chats, `topic_start`
+// starts a topic chat, and `connect_card` shows a card that connects a service.
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import {
@@ -18,8 +18,7 @@ import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
 } from "../core/conversation-title.js";
-import type { FacadeToolDef } from "../core/mcp-facade.js";
-import { runFacadeTool } from "../core/mcp-facade.js";
+import { romeToolRunner, type RomeTool } from "../agent/index.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
@@ -35,6 +34,7 @@ import {
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 
 const log = createLogger("concierge-tools");
+const runTool = romeToolRunner(log);
 
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -90,15 +90,14 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
 
 /**
  * The Concierge tools for one session, or none when the session is not
- * Concierge's or the setting is off. Each handler acts on the session's
- * running turn and fails when none runs.
+ * Concierge's. Each handler acts on the session's running turn and fails
+ * when none runs.
  */
 export async function buildConciergeTools(
   service: ConciergeService,
   context: SessionToolContext,
-): Promise<FacadeToolDef[]> {
+): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
-  if (!(await service.isEnabled())) return [];
   const { webchatRepo, messages, tasks } = service.deps;
 
   const currentTurn = (): { chatId: string; turnId: string } => {
@@ -301,11 +300,18 @@ export async function buildConciergeTools(
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
+  // A message the guardian did not ask for may also reach their phone. Its
+  // lock-screen line is only ever words the Concierge wrote in this message,
+  // and null when it wrote none, which pushes a fixed line.
+  const said = (chatId: string, turnId: string, ownWords: string | null) =>
+    service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
+
   const say = async (text: string, format: "bubble" | "long") => {
     const { chatId, turnId } = currentTurn();
     const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
     ]);
+    said(chatId, turnId, text);
     return id;
   };
 
@@ -317,6 +323,10 @@ export async function buildConciergeTools(
       ...(intro ? [{ type: "text" as const, content: intro }] : []),
       { type: "text", content: text, format: "long", forwardedFrom: from },
     ]);
+    // Forwarded text is the task's, not the Concierge's, and so are a task's
+    // title and chat name, which can come from its output: none becomes the
+    // push's line, which could carry a code or password onto the lock screen.
+    said(chatId, turnId, intro ?? null);
     return id;
   };
 
@@ -326,6 +336,7 @@ export async function buildConciergeTools(
     const { id } = await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
       { type: "task_chat", chatId, title },
     ]);
+    said(conciergeChatId, turnId, null);
     return id;
   };
 
@@ -348,7 +359,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("say", input, async (args) => {
+        runTool("say", input, async (args) => {
           const messageId = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
@@ -419,7 +430,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("task_upsert", input, async (args) => {
+        runTool("task_upsert", input, async (args) => {
           currentTurn();
           if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
             throw new Error("tasks is required: an array with one entry per row to write");
@@ -458,7 +469,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("task_list", input, async (args) => ({
+        runTool("task_list", input, async (args) => ({
           tasks: (await ownRows(args.includeDone === true)).map(compactTask),
         })),
     },
@@ -508,12 +519,12 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_start", input, async (args) => {
+        runTool("chat_start", input, async (args) => {
           currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
           const requestedSkill = optionalString(args, "skill");
-          const skill = requestedSkill ? service.deps.skillCatalog.get(requestedSkill) : undefined;
+          const skill = requestedSkill ? service.deps.skillCatalog.find(requestedSkill) : undefined;
           // Like the other optional fields, null or empty means no skill.
           if (requestedSkill && !skill) {
             throw new Error(
@@ -601,7 +612,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_send", input, async (args) => {
+        runTool("chat_send", input, async (args) => {
           currentTurn();
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
@@ -628,7 +639,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_read", input, async (args) => {
+        runTool("chat_read", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireReadableChat(chatId);
           const limit =
@@ -667,7 +678,7 @@ export async function buildConciergeTools(
         properties: { chatId: { type: "string" } },
       },
       handler: (input) =>
-        runFacadeTool("chat_stop", input, async (args) => {
+        runTool("chat_stop", input, async (args) => {
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
           const { chats } = service.dashboard;
@@ -685,7 +696,7 @@ export async function buildConciergeTools(
         properties: { status: { type: "string", enum: [...TASK_STATUSES] } },
       },
       handler: (input) =>
-        runFacadeTool("chat_list", input, async (args) => {
+        runTool("chat_list", input, async (args) => {
           const wanted = TASK_STATUSES.find((status) => status === args.status);
           const { chats } = service.dashboard;
           const { chatId: here } = currentTurn();
@@ -736,7 +747,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("topic_start", input, async (args) => {
+        runTool("topic_start", input, async (args) => {
           currentTurn();
           const chat = await service.startTopicChat(await ownerHere(), requireString(args, "name"));
           return { chatId: chat.id, name: chat.name, link: `/chat/${chat.id}` };
@@ -756,7 +767,7 @@ export async function buildConciergeTools(
         },
       },
       handler: (input) =>
-        runFacadeTool("chat_forward", input, async (args) => {
+        runTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
           const [latest] = await latestSaid(
@@ -793,11 +804,50 @@ export async function buildConciergeTools(
         properties: { chatId: { type: "string" } },
       },
       handler: (input) =>
-        runFacadeTool("chat_card", input, async (args) => {
+        runTool("chat_card", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
           const messageId = await showCard(chatId, chat.name);
           return { sent: "Shown; the guardian sees the card.", messageId };
+        }),
+    },
+    {
+      name: "connect_card",
+      description:
+        "Show the guardian a card that connects a service that is not connected yet, so they do not have to find Settings. " +
+        "`service` is the name `core:concierge_following_list` gives it. A service that already works shows no card and the answer says so. " +
+        "When the guardian connects it, a `<service_connected/>` input arrives in this chat.",
+      inputSchema: {
+        type: "object",
+        required: ["service"],
+        properties: { service: { type: "string" } },
+      },
+      handler: (input) =>
+        runTool("connect_card", input, async (args) => {
+          const wanted = requireString(args, "service");
+          const { chatId, turnId } = currentTurn();
+          const { connectors } = await service.following.list(await ownerHere());
+          const connector = connectors.find((entry) => entry.service === wanted);
+          if (!connector) {
+            throw new Error(
+              `No service ${wanted}. Use core:concierge_following_list for the service names.`,
+            );
+          }
+          if (connector.state === "working") {
+            return { connected: true, note: "Already connected; no card shown." };
+          }
+          const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
+            {
+              type: "connect_card",
+              service: connector.service,
+              label: connector.label,
+              icon: connector.icon,
+              // A service with no entry can only be connected from Settings.
+              connect: connector.connect ?? { kind: "dashboard" },
+            },
+          ]);
+          said(chatId, turnId, null);
+          return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),
     },
   ];

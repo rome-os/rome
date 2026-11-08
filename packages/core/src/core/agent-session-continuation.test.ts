@@ -1,3 +1,5 @@
+import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { randomUUID } from "node:crypto";
@@ -15,8 +17,8 @@ import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AgentLoader } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,
@@ -32,12 +34,13 @@ import {
 } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "../agent/index.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -102,8 +105,8 @@ function createProvider(id: ProviderId) {
 
 function healthyState() {
   return {
-    codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-    claude: { loggedIn: true, quotaExhausted: false },
+    openai: reportOf("available"),
+    anthropic: reportOf("available"),
   };
 }
 
@@ -138,25 +141,29 @@ describe("continuation notice through AgentSessionManager", () => {
       inputSchema: { type: "object", properties: {} },
       execute: async () => ({ status: "ok", data: {} }),
     } as never);
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Continuation test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
         webchatRepo,
-        promptBuilder,
+        sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
+        systemPrompts,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
-          aiToolState: { get: () => state, refresh: async () => state },
-          romeCreditsPayer: { isUsingRomeCredits: () => false },
+          accounts: fakeAccounts(() => state),
+          codexLogins: loginsOn(false),
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
         channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
@@ -442,14 +449,13 @@ describe("continuation notice through AgentSessionManager", () => {
     }
     if (concierge) {
       const raw = healthyState();
-      raw.claude.quotaExhausted = source === "anthropic";
-      raw.codex.quotaExhausted = source === "openai";
+      raw[source] = reportOf("usage_limit_reached");
       await webchatRepo.updateSessionLargeModelSelection(chatId, from);
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
         agentSessionManager: manager,
-        aiToolState: { get: () => raw },
+        accounts: fakeAccounts(() => raw),
       } as unknown as ConciergeDeps);
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);

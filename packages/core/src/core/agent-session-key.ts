@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { type StoredRoot, walkToRoot } from "../agent/index.js";
 
 // Builds and reads channelThreadKeys. Each builder serializes to the exact
 // string stored in `sessions.channel_thread_key`, so existing rows keep
@@ -11,51 +12,35 @@ export function webchatSessionKey(chatId: string): string {
   return `${WEBCHAT_KEY_PREFIX}${chatId}`;
 }
 
-/** A fresh subagent's key, nested under its parent's so it never reuses the
- *  parent's provider context. */
-export function subagentSessionKey(parentKey: string): string {
-  return `${parentKey}:subagent:${uuidv4()}`;
-}
-
-/** The key subagents of a forked turn nest under. */
-export function forkSessionKey(parentKey: string, forkSessionId: string): string {
-  return `${parentKey}#fork:${forkSessionId}`;
-}
-
 /** A one-off key for a run that names no conversation. */
 export function adhocSessionKey(agentName: string): string {
   return `${agentName}:${uuidv4()}`;
 }
 
 const SENTINEL_KEY_PREFIX = "sentinel:";
-const SUBAGENT_SUFFIX = /^(.+):subagent:([^:#]+)$/;
-const FORK_SUFFIX = /^(.+)#fork:([^:#]+)$/;
 
 /**
- * A channelThreadKey's named parts. An ad-hoc key and a messaging channel's
- * key share the `<a>:<b>` shape, so an ad-hoc key parses as `channel` with its
- * agent name in `channel`.
+ * A root session's channelThreadKey, by its named parts. A subagent's or a
+ * fork's session stores its parent link after its root's key, which
+ * `walkToRoot` in the agent context reads. An ad-hoc key and a messaging
+ * channel's key share the `<a>:<b>` shape, so an ad-hoc key parses as
+ * `channel` with its agent name in `channel`.
  */
 export type ParsedSessionKey =
   | { kind: "webchat"; chatId: string }
   | { kind: "channel"; channel: string; threadId: string }
   | { kind: "sentinel"; watched: ParsedSessionKey }
-  | { kind: "subagent"; parent: ParsedSessionKey; subagentId: string }
-  | { kind: "fork"; parent: ParsedSessionKey; forkSessionId: string }
   | { kind: "other"; raw: string };
 
-/** The one reader of a channelThreadKey's parts. */
-export function parseSessionKey(key: string): ParsedSessionKey {
-  const subagent = SUBAGENT_SUFFIX.exec(key);
-  if (subagent) {
-    return { kind: "subagent", parent: parseSessionKey(subagent[1]!), subagentId: subagent[2]! };
-  }
-  const fork = FORK_SUFFIX.exec(key);
-  if (fork) {
-    return { kind: "fork", parent: parseSessionKey(fork[1]!), forkSessionId: fork[2]! };
-  }
+/** The one reader of a root session's channelThreadKey. It takes the end of
+ *  a `walkToRoot`, so a subagent's or a fork's key is never read as a root's. */
+export function parseSessionKey(root: StoredRoot): ParsedSessionKey {
+  return parseRootKey(root.stored);
+}
+
+function parseRootKey(key: string): ParsedSessionKey {
   if (key.startsWith(SENTINEL_KEY_PREFIX)) {
-    return { kind: "sentinel", watched: parseSessionKey(key.slice(SENTINEL_KEY_PREFIX.length)) };
+    return { kind: "sentinel", watched: parseRootKey(key.slice(SENTINEL_KEY_PREFIX.length)) };
   }
   const separator = key.indexOf(":");
   if (separator <= 0) return { kind: "other", raw: key };
@@ -68,20 +53,21 @@ export function parseSessionKey(key: string): ParsedSessionKey {
 }
 
 /**
- * The channel a key's turns are delivered on: subagent and fork keys take
- * their parent's. Undefined for a sentinel, which watches a channel without
- * replying on it, and for a key with no channel part.
+ * The channel a key's turns are delivered on: the root session's, so a
+ * subagent's or a fork's session takes its root's. Undefined for a sentinel,
+ * which watches a channel without replying on it, and for a key with no
+ * channel part.
  */
-export function sessionKeyChannel(key: string | ParsedSessionKey): string | undefined {
-  const parsed = typeof key === "string" ? parseSessionKey(key) : key;
+export function sessionKeyChannel(key: string): string | undefined {
+  return channelOf(parseSessionKey(walkToRoot(key)));
+}
+
+function channelOf(parsed: ParsedSessionKey): string | undefined {
   switch (parsed.kind) {
     case "webchat":
       return "webchat";
     case "channel":
       return parsed.channel;
-    case "subagent":
-    case "fork":
-      return sessionKeyChannel(parsed.parent);
     case "sentinel":
     case "other":
       return undefined;
@@ -91,6 +77,8 @@ export function sessionKeyChannel(key: string | ParsedSessionKey): string | unde
 /** The webchat conversation a key belongs to when it is that chat's own
  *  session, not a subagent or fork under it. */
 export function webchatConversationOfKey(key: string): string | undefined {
-  const parsed = parseSessionKey(key);
+  const root = walkToRoot(key);
+  if (root.hasParent) return undefined;
+  const parsed = parseSessionKey(root);
   return parsed.kind === "webchat" ? parsed.chatId : undefined;
 }

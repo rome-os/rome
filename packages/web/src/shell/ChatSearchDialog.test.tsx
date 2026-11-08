@@ -403,8 +403,8 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("uses the page search icon treatment only for the five first-party apps", async () => {
-    const ids = ["briefing", "inbox", "showcases", "skills", "welcome-to-rome"];
+  it("uses the page search icon treatment only for the four first-party apps", async () => {
+    const ids = ["briefing", "inbox", "showcases", "skills"];
     mockSessionSearch(
       [],
       [],
@@ -433,10 +433,6 @@ describe("ChatSearchDialog", () => {
       const row = await screen.findByRole("option", { name: `Icon ${id}`, exact: true });
       expect(row.querySelector("svg")?.parentElement?.className).toBe(pageIcon?.className);
       expect(row.querySelector("svg")?.getAttribute("class")).toContain("size-4");
-      if (id === "welcome-to-rome") {
-        expect(row.querySelector("mask")).toBeTruthy();
-        expect(row.querySelector("svg")?.getAttribute("class")).toContain("scale-80");
-      }
       expect(row.querySelector("img")).toBeNull();
     }
     for (const [name, src] of [

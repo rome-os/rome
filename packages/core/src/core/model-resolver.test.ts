@@ -1,141 +1,146 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider } from "./agent-runner.js";
 import {
-  createAIToolState,
-  type AIToolStateProbes,
-  type AIToolStateValue,
-} from "./ai-tool-state.js";
-import { createModelResolver, TIER_MODEL_MAPPINGS_SETTING_KEY } from "./model-resolver.js";
+  ClaudeAccount,
+  createModelResolver,
+  createTierModelsSetting,
+  MODEL_SELECTIONS,
+  TIER_MODEL_MAPPINGS_SETTING_KEY,
+  type ModelSelectionId,
+  createModelAccounts,
+  type ModelAccount,
+  type ModelAccountUsage,
+  type ModelAccountReports,
+} from "../agent/index.js";
+import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
 
 const codex = { id: "openai" } as ModelProvider;
+
+/** A model the guardian picked, as the exact ask it becomes. */
+function selected(id: ModelSelectionId) {
+  const { providerId, model } = MODEL_SELECTIONS[id];
+  return { kind: "exact" as const, providerId, model };
+}
 const claude = { id: "anthropic" } as ModelProvider;
 
 function resolver(
-  overrides: Partial<AIToolStateValue> = {},
+  overrides: Partial<ModelAccountReports> = {},
   settings: { tierModelMappings?: unknown } = {},
   usingRomeCredits = false,
   servedModels: readonly string[] | null = null,
 ) {
-  const value: AIToolStateValue = {
-    codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-    claude: { loggedIn: true, quotaExhausted: false },
+  const value: ModelAccountReports = {
+    openai: reportOf("available"),
+    anthropic: reportOf("available"),
     ...overrides,
   };
   return createModelResolver({
-    aiToolState: { get: () => value, refresh: async () => value },
+    accounts: fakeAccounts(() => value),
     providers: [claude, codex],
-    settingsRepo: {
+    tierModels: createTierModelsSetting({
       get: async <T = unknown>(key: string): Promise<T | null> =>
         (key === TIER_MODEL_MAPPINGS_SETTING_KEY
           ? (settings.tierModelMappings ?? null)
           : null) as T | null,
-    },
-    romeCreditsPayer: {
-      isUsingRomeCredits: () => usingRomeCredits,
-      servedModels: () => servedModels,
-    },
+    }),
+    codexLogins: loginsOn(usingRomeCredits, servedModels),
   });
 }
 
 describe("ModelResolver", () => {
   it("maps Codex tiers through Sol and Luna", async () => {
-    await expect(resolver().getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(resolver().resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6.1-sol",
     });
-    await expect(resolver().getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+    await expect(resolver().resolve({ kind: "tier", tier: "medium" })).resolves.toMatchObject({
       model: "gpt-6.1-sol",
     });
-    await expect(resolver().getModelProvider({ tier: "small" })).resolves.toMatchObject({
+    await expect(resolver().resolve({ kind: "tier", tier: "small" })).resolves.toMatchObject({
       model: "gpt-6-luna",
     });
   });
 
-  it("resolves Codex models the same way while Rome credits pay and the served list is unknown", async () => {
+  it("resolves Codex models the same way on Rome credits while the served list is unknown", async () => {
     const loggedOut = {
-      codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("unauthorized"),
     };
     const r = resolver(
       loggedOut,
       { tierModelMappings: { openai: { medium: "gpt-6-astra" } } },
       true,
     );
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6.1-sol",
     });
-    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "medium" })).resolves.toMatchObject({
       model: "gpt-6-astra",
     });
     await expect(
-      r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol" } }),
+      r.resolve({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol" }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
   });
 
-  describe("while Rome credits pay with a reported served list", () => {
+  describe("on Rome credits with a reported served list", () => {
     const loggedOut = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("unauthorized"),
     };
 
     it("falls a tier back to a model the gateway serves", async () => {
       const r = resolver(loggedOut, {}, true, ["gpt-5.6-terra", "gpt-6-luna"]);
-      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
         modelProvider: codex,
         model: "gpt-5.6-terra",
       });
-      await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "medium" })).resolves.toMatchObject({
         model: "gpt-5.6-terra",
       });
-      await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "small" })).resolves.toMatchObject({
         model: "gpt-6-luna",
       });
     });
 
     it("uses Sol and Luna when the gateway serves them", async () => {
       const r = resolver(loggedOut, {}, true, ["gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-terra"]);
-      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
         model: "gpt-6.1-sol",
       });
-      await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "small" })).resolves.toMatchObject({
         model: "gpt-6-luna",
       });
     });
 
     it("does not spend credits on a tier the gateway cannot serve", async () => {
       const r = resolver(loggedOut, {}, true, ["gpt-6.1-sol"]);
-      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
         model: "gpt-6.1-sol",
       });
-      await expect(r.getModelProvider({ tier: "small" })).rejects.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "small" })).rejects.toMatchObject({
         code: "no_model_provider_available",
       });
       await expect(
-        resolver(loggedOut, {}, true, []).getModelProvider({ tier: "large" }),
+        resolver(loggedOut, {}, true, []).resolve({ kind: "tier", tier: "large" }),
       ).rejects.toMatchObject({ code: "no_model_provider_available" });
     });
 
     it("prefers a connected Claude login over a tier the gateway cannot serve", async () => {
-      const r = resolver(
-        { ...loggedOut, claude: { loggedIn: true, quotaExhausted: false } },
-        {},
-        true,
-        [],
-      );
-      await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+      const r = resolver({ ...loggedOut, anthropic: reportOf("available") }, {}, true, []);
+      await expect(r.resolve({ kind: "tier", tier: "small" })).resolves.toMatchObject({
         modelProvider: claude,
       });
     });
 
     it.each([
-      { exact: { providerId: "openai" as const, model: "gpt-6.1-sol" } },
-      { exact: { providerId: "openai" as const, model: "gpt-6-astra" } },
-      { exact: { providerId: "openai" as const, model: "gpt-6.1-sol:high" } },
-      { tier: "large" as const, selectionId: "gpt-6-1-sol" as const },
+      { kind: "exact" as const, providerId: "openai" as const, model: "gpt-6.1-sol" },
+      { kind: "exact" as const, providerId: "openai" as const, model: "gpt-6-astra" },
+      { kind: "exact" as const, providerId: "openai" as const, model: "gpt-6.1-sol:high" },
+      selected("gpt-6-1-sol"),
     ])("fails an unserved pin or selection with model_unavailable: %o", async (request) => {
       const r = resolver(loggedOut, {}, true, ["gpt-5.6-terra"]);
-      await expect(r.getModelProvider(request)).rejects.toMatchObject({
+      await expect(r.resolve(request)).rejects.toMatchObject({
         code: "model_unavailable",
         provider: "openai",
         reason: "model_access_denied",
@@ -145,10 +150,10 @@ describe("ModelResolver", () => {
     it("runs a served pin by the exact name Codex sends", async () => {
       const r = resolver(loggedOut, {}, true, ["gpt-6.1-sol"]);
       await expect(
-        r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol:high" } }),
+        r.resolve({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol:high" }),
       ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol:high" });
       await expect(
-        r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol-2026-01-01" } }),
+        r.resolve({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol-2026-01-01" }),
       ).rejects.toMatchObject({ code: "model_unavailable" });
     });
 
@@ -159,133 +164,84 @@ describe("ModelResolver", () => {
         true,
         ["gpt-5.6-terra"],
       );
-      await expect(r.getModelProvider({ tier: "medium" })).rejects.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "medium" })).rejects.toMatchObject({
         code: "model_unavailable",
       });
     });
 
-    it("waits for the first served list before resolving", async () => {
-      let served: readonly string[] | null = null;
-      let finish: () => void = () => {};
-      const settled = new Promise<void>((resolve) => {
-        finish = () => {
-          served = ["gpt-5.6-terra"];
-          resolve();
-        };
-      });
-      const value: AIToolStateValue = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
-      };
-      const r = createModelResolver({
-        aiToolState: { get: () => value, refresh: async () => value },
-        providers: [claude, codex],
-        romeCreditsPayer: {
-          isUsingRomeCredits: () => true,
-          servedModels: () => served,
-          settled: () => settled,
-        },
-      });
-      const resolution = r.getModelProvider({ tier: "large" });
-      finish();
-      await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
-    });
-
-    it("waits for the first credits read to decide whether credits pay", async () => {
-      let paying = false;
-      let finish: () => void = () => {};
-      const settled = new Promise<void>((resolve) => {
-        finish = () => {
-          paying = true;
-          resolve();
-        };
-      });
-      const value: AIToolStateValue = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
-      };
-      const r = createModelResolver({
-        aiToolState: { get: () => value, refresh: async () => value },
-        providers: [claude, codex],
-        romeCreditsPayer: {
-          isUsingRomeCredits: () => paying,
-          servedModels: () => (paying ? ["gpt-5.6-terra"] : null),
-          settled: () => settled,
-        },
-      });
-      const resolution = r.getModelProvider({ tier: "large" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      finish();
-      await expect(resolution).resolves.toMatchObject({
+    it("resolves at once when the gateway has not said, and the gateway refuses what it does not serve", async () => {
+      const r = resolver(
+        { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+        {},
+        true,
+        null,
+      );
+      await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
         modelProvider: codex,
-        model: "gpt-5.6-terra",
+        model: "gpt-6.1-sol",
       });
     });
 
-    it("does not wait for the served list when Claude serves the turn", async () => {
-      const value: AIToolStateValue = {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+    it("leaves a turn Claude serves to Claude on Rome credits", async () => {
+      const value: ModelAccountReports = {
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available"),
       };
       const r = createModelResolver({
-        aiToolState: { get: () => value, refresh: async () => value },
+        accounts: fakeAccounts(() => value),
         providers: [claude, codex],
-        romeCreditsPayer: {
-          isUsingRomeCredits: () => true,
-          servedModels: () => null,
-          settled: () => new Promise<void>(() => {}),
-        },
+        codexLogins: loginsOn(true, null),
       });
-      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
         modelProvider: claude,
       });
       await expect(
-        r.getModelProvider({ exact: { providerId: "anthropic", model: "claude-sonnet-5-5" } }),
+        r.resolve({ kind: "exact", providerId: "anthropic", model: "claude-sonnet-5-5" }),
       ).resolves.toMatchObject({ modelProvider: claude });
     });
 
-    it("ignores the served list while ChatGPT pays", async () => {
+    it("ignores the served list on the guardian's own login", async () => {
       const r = resolver({}, {}, false, []);
-      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
         modelProvider: codex,
         model: "gpt-6.1-sol",
       });
       await expect(
-        r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-astra" } }),
+        r.resolve({ kind: "exact", providerId: "openai", model: "gpt-6-astra" }),
       ).resolves.toMatchObject({ model: "gpt-6-astra" });
     });
   });
 
-  it("keeps a Codex provider pin by tier on the ChatGPT login while Rome credits pay", async () => {
+  it("keeps a Codex provider pin by tier on the ChatGPT login while on Rome credits", async () => {
     const r = resolver(
       {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("unauthorized"),
       },
       {},
       true,
     );
-    await expect(r.getModelProvider({ tier: "small", providerId: "openai" })).rejects.toMatchObject(
-      {
-        code: "model_provider_unavailable",
-        provider: "openai",
-        reason: "not_logged_in",
-      },
-    );
+    await expect(
+      r.resolve({ kind: "tier", tier: "small", providerId: "openai" }),
+    ).rejects.toMatchObject({
+      code: "model_provider_unavailable",
+      provider: "openai",
+      reason: "not_logged_in",
+    });
   });
 
   it("fails a tier with no usable provider when credits do not pay", async () => {
-    const state: AIToolStateValue = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: false, quotaExhausted: false },
+    const state: ModelAccountReports = {
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("unauthorized"),
     };
     const r = createModelResolver({
       // Production returns a fresh copy on every read.
-      aiToolState: { get: () => structuredClone(state), refresh: async () => state },
+      accounts: { read: () => structuredClone(state), refresh: async () => {} },
       providers: [claude, codex],
-      romeCreditsPayer: { isUsingRomeCredits: () => false },
+      codexLogins: loginsOn(false),
     });
-    await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).rejects.toMatchObject({
       code: "no_model_provider_available",
     });
   });
@@ -293,18 +249,18 @@ describe("ModelResolver", () => {
   it("prefers a connected Claude login over spending Rome credits", async () => {
     const r = resolver(
       {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: true, quotaExhausted: false },
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available"),
       },
       {},
       true,
     );
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       modelProvider: claude,
     });
   });
 
-  it("uses the payer and provider state that are current after settings reads", async () => {
+  it("uses the login and provider state that are current after settings reads", async () => {
     let releaseSettings!: () => void;
     const settingsReady = new Promise<void>((resolve) => {
       releaseSettings = resolve;
@@ -314,29 +270,27 @@ describe("ModelResolver", () => {
       settingsRead = resolve;
     });
     let usingRomeCredits = false;
-    const state: AIToolStateValue = {
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-      claude: { loggedIn: false, quotaExhausted: false },
+    const state: ModelAccountReports = {
+      openai: reportOf("available"),
+      anthropic: reportOf("unauthorized"),
     };
     const r = createModelResolver({
-      aiToolState: { get: () => state, refresh: async () => state },
+      accounts: fakeAccounts(() => state),
       providers: [claude, codex],
-      settingsRepo: {
+      tierModels: createTierModelsSetting({
         get: async () => {
           settingsRead();
           await settingsReady;
           return null;
         },
-      },
-      romeCreditsPayer: {
-        isUsingRomeCredits: () => usingRomeCredits,
-      },
+      }),
+      codexLogins: { login: () => loginsOn(usingRomeCredits).login() },
     });
 
-    const resolution = r.getModelProvider({ tier: "large" });
+    const resolution = r.resolve({ kind: "tier", tier: "large" });
     await settingsStarted;
-    state.codex.loggedIn = false;
-    state.claude.loggedIn = true;
+    state.openai = reportOf("unauthorized");
+    state.anthropic = reportOf("available");
     usingRomeCredits = true;
     releaseSettings();
 
@@ -345,20 +299,15 @@ describe("ModelResolver", () => {
 
   it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {
     const r = resolver({
-      codex: {
-        loggedIn: true,
-        quotaExhausted: false,
-        solAccess: false,
-        lunaAccess: false,
-      },
+      openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
     });
-    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "medium" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
     });
-    await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "small" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
     });
   });
@@ -374,18 +323,18 @@ describe("ModelResolver", () => {
       },
     );
 
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
       model: "custom-codex",
     });
     await expect(
-      r.getModelProvider({ tier: "medium", providerId: "openai" }),
+      r.resolve({ kind: "tier", tier: "medium", providerId: "openai" }),
     ).resolves.toMatchObject({
       modelProvider: codex,
       model: "custom-codex-medium",
     });
     await expect(
-      r.getModelProvider({ tier: "small", providerId: "anthropic" }),
+      r.resolve({ kind: "tier", tier: "small", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
       model: "custom-claude",
@@ -403,51 +352,41 @@ describe("ModelResolver", () => {
       },
     );
 
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       model: "gpt-6.1-sol",
     });
     await expect(
-      r.getModelProvider({ tier: "medium", providerId: "anthropic" }),
+      r.resolve({ kind: "tier", tier: "medium", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       model: "claude-sonnet-5-5",
     });
   });
 
   it("prefers Codex, then Claude, and skips definite logout/quota", async () => {
-    await expect(resolver().getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(resolver().resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
     });
     await expect(
       resolver({
-        codex: {
-          loggedIn: false,
-          quotaExhausted: false,
-          solAccess: true,
-          lunaAccess: true,
-        },
-      }).getModelProvider({ tier: "large" }),
+        openai: reportOf("unauthorized"),
+      }).resolve({ kind: "tier", tier: "large" }),
     ).resolves.toMatchObject({ modelProvider: claude });
     await expect(
       resolver({
-        codex: {
-          loggedIn: true,
-          quotaExhausted: true,
-          solAccess: true,
-          lunaAccess: true,
-        },
-      }).getModelProvider({ tier: "large" }),
+        openai: reportOf("usage_limit_reached"),
+      }).resolve({ kind: "tier", tier: "large" }),
     ).resolves.toMatchObject({ modelProvider: claude });
   });
 
   it("keeps Codex preferred for a large tier when Claude large is mapped", async () => {
     const r = resolver({}, { tierModelMappings: { anthropic: { large: "claude-fable-5-1[1m]" } } });
 
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6.1-sol",
     });
     await expect(
-      r.getModelProvider({ tier: "large", providerId: "anthropic" }),
+      r.resolve({ kind: "tier", tier: "large", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
       model: "claude-fable-5-1[1m]",
@@ -456,13 +395,13 @@ describe("ModelResolver", () => {
 
   it("resolves a tier on the requested provider", async () => {
     await expect(
-      resolver().getModelProvider({ tier: "large", providerId: "anthropic" }),
+      resolver().resolve({ kind: "tier", tier: "large", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
       model: "claude-opus-5-5[1m]",
     });
     await expect(
-      resolver().getModelProvider({ tier: "small", providerId: "anthropic" }),
+      resolver().resolve({ kind: "tier", tier: "small", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
       model: "claude-haiku-5-5",
@@ -474,15 +413,15 @@ describe("ModelResolver", () => {
     // tier resolves on Codex, and a disconnected Codex is an error, never a
     // silent fallback to a provider without the pinned capability.
     await expect(
-      resolver().getModelProvider({ tier: "small", providerId: "openai" }),
+      resolver().resolve({ kind: "tier", tier: "small", providerId: "openai" }),
     ).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6-luna",
     });
     await expect(
       resolver({
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      }).getModelProvider({ tier: "small", providerId: "openai" }),
+        openai: reportOf("unauthorized"),
+      }).resolve({ kind: "tier", tier: "small", providerId: "openai" }),
     ).rejects.toMatchObject({
       message: "Selected model provider is unavailable: Codex (ChatGPT) is not signed in",
       code: "model_provider_unavailable",
@@ -494,23 +433,19 @@ describe("ModelResolver", () => {
   it("names the usage limit and when it ends for a pinned provider", async () => {
     // Summoned agents and apps receive only the message, so the cause has to
     // survive without the structured reason.
-    const codexState = {
-      loggedIn: true,
-      quotaExhausted: true,
-      solAccess: true,
-      lunaAccess: true,
-    };
     await expect(
       resolver({
-        codex: { ...codexState, quotaExhaustedUntil: "2026-10-21T14:59:00.000Z" },
-      }).getModelProvider({ tier: "large", providerId: "openai" }),
+        openai: reportOf("usage_limit_reached", {}, "2026-10-21T14:59:00.000Z"),
+      }).resolve({ kind: "tier", tier: "large", providerId: "openai" }),
     ).rejects.toMatchObject({
       message:
         "Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit until 2026-10-21T14:59:00.000Z",
       reason: "quota_exhausted",
     });
     await expect(
-      resolver({ codex: codexState }).getModelProvider({ tier: "large", providerId: "openai" }),
+      resolver({
+        openai: { state: "usage_limit_reached", account: { loggedIn: true } },
+      }).resolve({ kind: "tier", tier: "large", providerId: "openai" }),
     ).rejects.toMatchObject({
       message:
         "Selected model provider is unavailable: Codex (ChatGPT) has reached its usage limit",
@@ -520,28 +455,31 @@ describe("ModelResolver", () => {
 
   it("resolves GPT-6.1 Sol selections and exact aliases with Sol access", async () => {
     await expect(
-      resolver().getModelProvider({ tier: "large", providerId: "openai" }),
+      resolver().resolve({ kind: "tier", tier: "large", providerId: "openai" }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
-    await expect(
-      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
-    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
-    await expect(
-      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-sol" }),
-    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-sol" });
+    await expect(resolver().resolve(selected("gpt-6-1-sol"))).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6.1-sol",
+    });
+    await expect(resolver().resolve(selected("gpt-6-sol"))).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6-sol",
+    });
 
     const unavailable = resolver({
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
-    await expect(
-      unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
-    ).rejects.toMatchObject({ code: "model_unavailable", reason: "model_access_denied" });
+    await expect(unavailable.resolve(selected("gpt-6-1-sol"))).rejects.toMatchObject({
+      code: "model_unavailable",
+      reason: "model_access_denied",
+    });
 
     for (const model of ["gpt-6.1-sol", "gpt-6.1-sol:high", "gpt-6.1-sol-2026-10-01:high"]) {
       await expect(
-        resolver().getModelProvider({ exact: { providerId: "openai", model } }),
+        resolver().resolve({ kind: "exact", providerId: "openai", model }),
       ).resolves.toMatchObject({ modelProvider: codex, model });
       await expect(
-        unavailable.getModelProvider({ exact: { providerId: "openai", model } }),
+        unavailable.resolve({ kind: "exact", providerId: "openai", model }),
       ).rejects.toMatchObject({
         code: "model_unavailable",
         provider: "openai",
@@ -551,57 +489,48 @@ describe("ModelResolver", () => {
   });
 
   it("keeps explicit Astra/Sol/Luna exact and never falls back", async () => {
-    await expect(
-      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-astra" }),
-    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-astra" });
-    await expect(
-      resolver().getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
-    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-sol" });
-    await expect(
-      resolver().getModelProvider({ tier: "large", selectionId: "gpt-5-6-luna" }),
-    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-luna" });
+    await expect(resolver().resolve(selected("gpt-6-astra"))).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6-astra",
+    });
+    await expect(resolver().resolve(selected("gpt-5-6-sol"))).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-5.6-sol",
+    });
+    await expect(resolver().resolve(selected("gpt-5-6-luna"))).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-5.6-luna",
+    });
 
     const unavailable = resolver({
-      codex: {
-        loggedIn: true,
-        quotaExhausted: false,
-        solAccess: false,
-        lunaAccess: false,
-      },
+      openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
-    await expect(
-      unavailable.getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
-    ).rejects.toThrow("Selected model is unavailable");
-    await expect(
-      unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-astra" }),
-    ).rejects.toThrow("Selected model is unavailable");
+    await expect(unavailable.resolve(selected("gpt-5-6-sol"))).rejects.toThrow(
+      "Selected model is unavailable",
+    );
+    await expect(unavailable.resolve(selected("gpt-6-astra"))).rejects.toThrow(
+      "Selected model is unavailable",
+    );
   });
 
   it("classifies an unavailable explicit provider and refreshes it asynchronously", async () => {
-    const value: AIToolStateValue = {
-      codex: {
-        loggedIn: false,
-        quotaExhausted: false,
-        solAccess: true,
-        lunaAccess: true,
-      },
-      claude: { loggedIn: true, quotaExhausted: false },
+    const value: ModelAccountReports = {
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("available"),
     };
     let finishRefresh!: () => void;
     const refresh = rs.fn(
       () =>
-        new Promise<AIToolStateValue>((resolve) => {
-          finishRefresh = () => resolve(value);
+        new Promise<void>((resolve) => {
+          finishRefresh = () => resolve();
         }),
     );
     const r = createModelResolver({
       providers: [claude, codex],
-      aiToolState: { get: () => value, refresh },
+      accounts: { read: () => value, refresh },
     });
 
-    await expect(
-      r.getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
-    ).rejects.toMatchObject({
+    await expect(r.resolve(selected("gpt-5-6-sol"))).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
@@ -611,18 +540,16 @@ describe("ModelResolver", () => {
   });
 
   it("distinguishes quota exhaustion from a missing login", async () => {
-    const value: AIToolStateValue = {
-      codex: { loggedIn: true, quotaExhausted: true, solAccess: true, lunaAccess: true },
-      claude: { loggedIn: true, quotaExhausted: false },
+    const value: ModelAccountReports = {
+      openai: reportOf("usage_limit_reached"),
+      anthropic: reportOf("available"),
     };
     const r = createModelResolver({
       providers: [claude, codex],
-      aiToolState: { get: () => value, refresh: async () => value },
+      accounts: fakeAccounts(() => value),
     });
 
-    await expect(
-      r.getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
-    ).rejects.toMatchObject({
+    await expect(r.resolve(selected("gpt-5-6-sol"))).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "quota_exhausted",
@@ -631,15 +558,10 @@ describe("ModelResolver", () => {
 
   it("reports quota exhaustion when every connected provider is exhausted", async () => {
     const r = resolver({
-      codex: {
-        loggedIn: true,
-        quotaExhausted: true,
-        solAccess: true,
-        lunaAccess: true,
-      },
-      claude: { loggedIn: true, quotaExhausted: true },
+      openai: reportOf("usage_limit_reached"),
+      anthropic: reportOf("usage_limit_reached"),
     });
-    await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).rejects.toMatchObject({
       message: "All connected model providers have reached their usage limits",
       code: "no_model_provider_available",
       reason: "quota_exhausted",
@@ -649,58 +571,46 @@ describe("ModelResolver", () => {
   it("keeps Claude API-key-backed providers available despite stale quota state", async () => {
     await expect(
       resolver({
-        codex: {
-          loggedIn: false,
-          quotaExhausted: false,
-          solAccess: false,
-          lunaAccess: false,
-        },
-        claude: {
-          loggedIn: true,
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available", {
           authMethod: "stored-compatible",
-          quotaExhausted: true,
-        },
-      }).getModelProvider({ tier: "large" }),
+          usageLimited: false,
+        }),
+      }).resolve({ kind: "tier", tier: "large" }),
     ).resolves.toMatchObject({ modelProvider: claude });
   });
 
   it("returns exactly the requested provider/model for an exact request", async () => {
     // Tier resolution would prefer Codex (Sol); the exact request must win untouched.
     await expect(
-      resolver().getModelProvider({
-        exact: { providerId: "anthropic", model: "claude-sonnet-5" },
-      }),
+      resolver().resolve({ kind: "exact", providerId: "anthropic", model: "claude-sonnet-5" }),
     ).resolves.toMatchObject({ modelProvider: claude, model: "claude-sonnet-5" });
     // Sol entitlement would upgrade a large tier to Sol; an exact Terra pin stays Terra.
     await expect(
-      resolver().getModelProvider({
-        exact: { providerId: "openai", model: "gpt-5.6-terra" },
-      }),
+      resolver().resolve({ kind: "exact", providerId: "openai", model: "gpt-5.6-terra" }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-terra" });
   });
 
   it("runs an exact pin to a model no tier resolves to", async () => {
     await expect(
-      resolver().getModelProvider({
-        exact: { providerId: "anthropic", model: "claude-fable-5-1[1m]" },
-      }),
+      resolver().resolve({ kind: "exact", providerId: "anthropic", model: "claude-fable-5-1[1m]" }),
     ).resolves.toMatchObject({ modelProvider: claude, model: "claude-fable-5-1[1m]" });
   });
 
   it("fails an exact request closed when its provider is logged out, and refreshes it", async () => {
-    const value: AIToolStateValue = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: true, lunaAccess: true },
+    const value: ModelAccountReports = {
+      openai: reportOf("unauthorized"),
       // The other provider is fully usable — an exact request must not substitute it.
-      claude: { loggedIn: true, quotaExhausted: false },
+      anthropic: reportOf("available"),
     };
-    const refresh = rs.fn(async () => value);
+    const refresh = rs.fn(async () => {});
     const r = createModelResolver({
       providers: [claude, codex],
-      aiToolState: { get: () => value, refresh },
+      accounts: { read: () => value, refresh },
     });
 
     await expect(
-      r.getModelProvider({ exact: { providerId: "openai", model: "gpt-5.6-terra" } }),
+      r.resolve({ kind: "exact", providerId: "openai", model: "gpt-5.6-terra" }),
     ).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
@@ -712,8 +622,8 @@ describe("ModelResolver", () => {
   it("fails an exact request closed on quota exhaustion", async () => {
     await expect(
       resolver({
-        claude: { loggedIn: true, quotaExhausted: true },
-      }).getModelProvider({ exact: { providerId: "anthropic", model: "claude-sonnet-5" } }),
+        anthropic: reportOf("usage_limit_reached"),
+      }).resolve({ kind: "exact", providerId: "anthropic", model: "claude-sonnet-5" }),
     ).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "anthropic",
@@ -727,7 +637,7 @@ describe("ModelResolver", () => {
     rs.useFakeTimers({ shouldAdvanceTime: false });
     rs.setSystemTime(now);
     try {
-      const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => ({
+      const claudeUsage = rs.fn<() => Promise<ModelAccountUsage | null>>(async () => ({
         checkedAt: new Date().toISOString(),
         source: "test",
         error: "Claude usage request failed with HTTP 429",
@@ -737,28 +647,37 @@ describe("ModelResolver", () => {
         source: "test",
         fiveHour: { usedPercent: 100, resetsAt },
       });
-      const aiToolState = createAIToolState({
-        probes: {
-          codexStatus: async () => ({ loggedIn: false }),
-          codexUsage: async () => null,
-          claudeStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
-          claudeUsage,
-        },
+      const codexAccount: ModelAccount = {
+        report: async () => ({ state: "unauthorized", account: { loggedIn: false } }),
+        onChanged: () => () => {},
+        close: () => {},
+      };
+      const claudeAccount = new ClaudeAccount({
+        env: {},
+        readCliStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+        readUsage: claudeUsage,
+      });
+      const accounts = createModelAccounts({
+        accounts: { openai: codexAccount, anthropic: claudeAccount },
         startRefresh: false,
         refreshIntervalMs: null,
       });
-      await aiToolState.refresh("anthropic");
-      let failureRefresh: Promise<AIToolStateValue> | undefined;
+      await accounts.refresh("anthropic");
+      let failureRefresh: Promise<void> | undefined;
       const r = createModelResolver({
         providers: [claude, codex],
-        aiToolState: {
-          get: aiToolState.get,
-          refresh: (provider) => (failureRefresh = aiToolState.refresh(provider)),
+        accounts: {
+          read: accounts.read,
+          refresh: (provider) => (failureRefresh = accounts.refresh(provider)),
         },
       });
-      const request = { exact: { providerId: "anthropic" as const, model: "claude-sonnet-5-5" } };
+      const request = {
+        kind: "exact" as const,
+        providerId: "anthropic" as const,
+        model: "claude-sonnet-5-5",
+      };
 
-      await expect(r.getModelProvider(request)).rejects.toMatchObject({
+      await expect(r.resolve(request)).rejects.toMatchObject({
         provider: "anthropic",
         reason: "quota_exhausted",
       });
@@ -766,59 +685,60 @@ describe("ModelResolver", () => {
       expect(claudeUsage).toHaveBeenCalledTimes(2);
 
       rs.setSystemTime(Date.parse(resetsAt));
-      await expect(r.getModelProvider(request)).resolves.toMatchObject({ modelProvider: claude });
+      await expect(r.resolve(request)).resolves.toMatchObject({ modelProvider: claude });
       expect(claudeUsage).toHaveBeenCalledTimes(2);
     } finally {
       rs.useRealTimers();
     }
   });
 
-  it("rejects ambiguous exact-and-tier requests at the type level", () => {
-    type Request = Parameters<ReturnType<typeof resolver>["getModelProvider"]>[0];
-    const exact = { providerId: "openai", model: "gpt-5.6-terra" } as const;
-    // @ts-expect-error — the exact and tier arms are mutually exclusive; precedence stays with the caller
-    const ambiguous: Request = { tier: "large", exact };
+  it("rejects a tier ask that also names a model at the type level", () => {
+    type Request = Parameters<ReturnType<typeof resolver>["resolve"]>[0];
+    // @ts-expect-error — a tier ask and an exact ask are separate kinds; precedence stays with the caller
+    const ambiguous: Request = { kind: "tier", tier: "large", model: "gpt-5.6-terra" };
     void ambiguous;
   });
 
   it("denies an exact request for a model whose access was lost", async () => {
     const noEntitlements = resolver({
-      codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "anthropic", model: "gpt-6-sol" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "anthropic", model: "gpt-6-sol" }),
     ).resolves.toMatchObject({ modelProvider: claude, model: "gpt-6-sol" });
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-astra" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-6-astra" }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-sol" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-6-sol" }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-luna" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-6-luna" }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-sol:high" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-6-sol:high" }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({
-        exact: { providerId: "openai", model: "gpt-6-sol-2026-04-01:high" },
+      noEntitlements.resolve({
+        kind: "exact",
+        providerId: "openai",
+        model: "gpt-6-sol-2026-04-01:high",
       }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
@@ -826,8 +746,17 @@ describe("ModelResolver", () => {
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({
-        exact: { providerId: "openai", model: "gpt-6-luna:high" },
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-6-luna:high" }),
+    ).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await expect(
+      noEntitlements.resolve({
+        kind: "exact",
+        providerId: "openai",
+        model: "gpt-6-luna-2026-04-01:high",
       }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
@@ -835,23 +764,14 @@ describe("ModelResolver", () => {
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({
-        exact: { providerId: "openai", model: "gpt-6-luna-2026-04-01:high" },
-      }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-5.6-sol" }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
     });
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-5.6-sol" } }),
-    ).rejects.toMatchObject({
-      code: "model_unavailable",
-      provider: "openai",
-      reason: "model_access_denied",
-    });
-    await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-5.6-luna" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-5.6-luna" }),
     ).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
@@ -859,21 +779,16 @@ describe("ModelResolver", () => {
     });
     // Terra needs no entitlement and still resolves on the same state.
     await expect(
-      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-5.6-terra" } }),
+      noEntitlements.resolve({ kind: "exact", providerId: "openai", model: "gpt-5.6-terra" }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-terra" });
   });
 
   it("reports no available provider when every provider is logged out", async () => {
     const r = resolver({
-      codex: {
-        loggedIn: false,
-        quotaExhausted: false,
-        solAccess: true,
-        lunaAccess: true,
-      },
-      claude: { loggedIn: false, quotaExhausted: false },
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("unauthorized"),
     });
-    await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
+    await expect(r.resolve({ kind: "tier", tier: "large" })).rejects.toMatchObject({
       message: "No model provider is available",
       code: "no_model_provider_available",
       reason: "no_available_provider",

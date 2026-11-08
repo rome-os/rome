@@ -26,7 +26,6 @@ function setup() {
   let holdTurns = false;
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
-    isEnabled: async () => true,
     render: async (tasks: DirtyTask[]) => {
       rendered.push(tasks.flatMap((task) => task.changes.map((change) => change.kind)));
       return [
@@ -358,7 +357,6 @@ describe("TaskEventCoalescer", () => {
     const delivered: string[] = [];
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
-      isEnabled: async () => true,
       render: async (tasks) =>
         tasks.map((task) => ({
           chatId: task.taskId === "a" ? "topic-1" : null,
@@ -382,31 +380,10 @@ describe("TaskEventCoalescer", () => {
     expect(delivered).toEqual(["a", "b", "b", "a"]);
   });
 
-  it("drops marks when the setting turns off, without delivering", async () => {
-    const delivered: string[] = [];
-    const coalescer = new TaskEventCoalescer({
-      now: () => Date.now(),
-      isEnabled: async () => false,
-      render: async () => [
-        { chatId: null, owner: "guardian", taskIds: ["a"], prompt: "x", quiet: false },
-      ],
-      deliver: async ({ prompt }) => {
-        delivered.push(prompt);
-        return "completed";
-      },
-      giveUp: () => {},
-    });
-    coalescer.mark(urgent("a"));
-    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    expect(delivered).toEqual([]);
-    expect(coalescer.pending).toEqual([]);
-  });
-
   it("still delivers the other chats' turns when one chat's turn fails", async () => {
     const delivered: Array<string | null> = [];
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
-      isEnabled: async () => true,
       render: async () => [
         { chatId: "topic-1", owner: "guardian", taskIds: ["a"], prompt: "a", quiet: false },
         { chatId: null, owner: "guardian", taskIds: ["b"], prompt: "b", quiet: false },
@@ -427,7 +404,6 @@ describe("TaskEventCoalescer", () => {
     const delivered: Array<{ chatId: string | null; prompt: string; quiet: boolean }> = [];
     const coalescer = new TaskEventCoalescer({
       now: () => Date.now(),
-      isEnabled: async () => true,
       // Rows "a" and "b" came from a topic chat, "c" from the main chat.
       render: async (tasks) => {
         const topic = tasks.filter((task) => task.taskId !== "c");

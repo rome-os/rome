@@ -391,7 +391,7 @@ describe("isLockedByCard", () => {
   const card = (toolUseId: string, requiresCard?: boolean) => ({
     type: "pending_interaction",
     toolUseId,
-    appId: "welcome-to-rome",
+    appId: "some-app",
     render: {
       kind: "inline",
       componentId: "name-card",

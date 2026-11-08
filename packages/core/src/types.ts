@@ -3,7 +3,7 @@
 // re-exported from here exists in the SDK; types unique to core (sessions,
 // configs, policies, etc.) stay defined locally.
 
-import type { PolicyRule, ReasoningEffort } from "@rome-os/app-runtime";
+import type { PolicyRule } from "@rome-os/app-runtime";
 
 export type {
   Attachment,
@@ -30,51 +30,6 @@ export type {
 import type { McpServerConfig } from "./agent/index.js";
 
 export type { McpServerConfig };
-
-export interface AgentConfig {
-  name: string;
-  description: string;
-  /**
-   * Provider-agnostic capability tier. Required unless modelId is set.
-   * The loader normalizes legacy model: opus|sonnet|haiku to this field.
-   */
-  tier?: "large" | "medium" | "small";
-  /**
-   * Exact provider model ID. Requires providerId and excludes tier.
-   * Resolution uses this ID without tier mapping or automatic substitution.
-   */
-  modelId?: string;
-  /** Provider-agnostic reasoning effort. Defaults to `high` when omitted in YAML. */
-  reasoningEffort: ReasoningEffort;
-  /**
-   * Optional provider pin (yaml `provider: anthropic|openai`). Required for
-   * modelId. With tier, restricts model resolution to this provider.
-   * An unavailable pinned provider fails with ModelResolutionError instead
-   * of falling back to another provider.
-   */
-  providerId?: "anthropic" | "openai";
-  systemPromptPrefix: string;
-  tools: string[];
-  actions?: string[];
-  permissionMode: "acceptEdits" | "bypassPermissions" | "default";
-  maxTurns?: number;
-  allowedSubagents?: string[];
-  mcpServers?: Record<string, McpServerConfig>;
-  networkDiscovery?: boolean;
-  outputSchema?: Record<string, unknown>;
-  /**
-   * a code-backed agent. Its turns are always produced by a
-   * turn-middleware rather than a model, so its session opens a null model
-   * session (no provider query — nothing to resume or bill).
-   */
-  codeBacked?: boolean;
-  /** Per-field overrides of the chat's session policy. See `resolveSessionPolicy`. */
-  policy?: {
-    finalText?: "deliver" | "private";
-    autoTitle?: boolean;
-    loadMemory?: boolean;
-  };
-}
 
 export interface Policy {
   id: string;

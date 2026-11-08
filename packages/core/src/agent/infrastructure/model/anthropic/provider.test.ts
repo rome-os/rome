@@ -3,12 +3,9 @@ import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
   rstest: "importActual",
 };
-import * as anthropicLoginModule from "../../../../lib/anthropic-login.js" with {
-  rstest: "importActual",
-};
+import * as anthropicLoginModule from "./refused-credential.js" with { rstest: "importActual" };
 import { AnthropicProvider } from "./provider.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { FacadeParams } from "../../../../core/mcp-facade.js";
+import { testRomeTools, type TestRomeToolsOptions } from "../../../../test/tool-calls.js";
 import type { RomeTools } from "../../../domain/rome-tools.js";
 import type { AgentEvent } from "../../../../types.js";
 import type {
@@ -53,7 +50,7 @@ rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
   tool: sdkToolMock,
 }));
 
-rs.mock("../../../../lib/anthropic-login.js", () => ({
+rs.mock("./refused-credential.js", () => ({
   ...anthropicLoginModule,
   markAnthropicAuthRevoked: markAnthropicAuthRevokedMock,
   clearAnthropicAuthRevoked: clearAnthropicAuthRevokedMock,
@@ -116,16 +113,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 type ParamOverrides = Partial<Omit<ModelSessionParams, "config" | "tools">> & {
   config?: Partial<ModelSessionConfig>;
   /** What the session's Rome tools are built from. */
-  tools?: Partial<FacadeParams>;
+  tools?: TestRomeToolsOptions;
 };
 
-function buildTools(overrides: Partial<FacadeParams> = {}): RomeTools {
-  return createRomeTools({
-    getActionCatalog: () => [],
-    getSkillCatalog: () => [],
-    subagentTools: [],
-    executeAction: async () => ({ ok: true }),
-    executeSubagent: async () => "delegated",
+function buildTools(overrides: TestRomeToolsOptions = {}): RomeTools {
+  return testRomeTools({
     ...overrides,
   });
 }
@@ -477,8 +469,10 @@ describe("AnthropicProvider", () => {
         };
       });
       const session = await new AnthropicProvider({
-        onQuotaExhausted: () => {
-          quotaMarked = true;
+        account: {
+          refusedTurn: () => {
+            quotaMarked = true;
+          },
         },
       }).openSession(buildParams());
       const events: ModelSessionEvent[] = [];
@@ -1313,8 +1307,10 @@ describe("AnthropicProvider", () => {
     let quotaMarked = false;
     const provider = new AnthropicProvider({
       env: { PATH: "/usr/bin" },
-      onQuotaExhausted: () => {
-        quotaMarked = true;
+      account: {
+        refusedTurn: () => {
+          quotaMarked = true;
+        },
       },
     });
     const session = await provider.openSession(buildParams());
@@ -1340,16 +1336,19 @@ describe("AnthropicProvider", () => {
           duration_ms: 1,
         },
       ]);
-      const onQuotaExhausted = rs.fn();
+      const refusedTurn = rs.fn();
       const session = await new AnthropicProvider({
         env: { PATH: "/usr/bin" },
-        onQuotaExhausted,
+        account: { refusedTurn },
       }).openSession(buildParams());
       expect((await session.events[Symbol.asyncIterator]().next()).value).toMatchObject({
         type: "error",
         code: "usage_limit",
       });
-      expect(onQuotaExhausted).toHaveBeenCalledWith("2026-11-03T05:10:00.000Z");
+      expect(refusedTurn).toHaveBeenCalledWith({
+        kind: "usage",
+        until: "2026-11-03T05:10:00.000Z",
+      });
       await session.close();
     } finally {
       rs.useRealTimers();
@@ -1501,8 +1500,10 @@ describe("AnthropicProvider", () => {
       let quotaMarked = false;
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin" },
-        onQuotaExhausted: () => {
-          quotaMarked = true;
+        account: {
+          refusedTurn: () => {
+            quotaMarked = true;
+          },
         },
       });
       const session = await provider.openSession(buildParams());
@@ -1546,8 +1547,10 @@ describe("AnthropicProvider", () => {
       let authStateMarked = false;
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin" },
-        onAuthRevoked: () => {
-          authStateMarked = true;
+        account: {
+          refusedTurn: () => {
+            authStateMarked = true;
+          },
         },
       });
       const session = await provider.openSession(buildParams());
@@ -1756,7 +1759,7 @@ describe("AnthropicProvider", () => {
 
     it("turns the silent-turn reminder off for every session", async () => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const session = await provider.openSession(buildParams({ tools: { textPrivate: false } }));
+      const session = await provider.openSession(buildParams({ tools: {} }));
       await collectEvents(session);
       await session.close();
       expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_SILENT_TURN_REMINDER).toBe("0");
@@ -1765,7 +1768,9 @@ describe("AnthropicProvider", () => {
     it("drops the defer confirmation line for a private-text agent", async () => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
       const session = await provider.openSession(
-        buildParams({ tools: { textPrivate: true, executeDefer: async () => ({ ok: true }) } }),
+        buildParams({
+          tools: { defer: { schedule: async () => ({ ok: true }), finalText: "private" } },
+        }),
       );
       await collectEvents(session);
       await session.close();
@@ -1783,13 +1788,8 @@ describe("AnthropicProvider", () => {
     // The env and the handler must agree: a tool listed as terminal on a surface
     // where ask_question asks in prose would let an empty reply through.
     it.each([
-      ["an interactive surface", { supportsInteractiveSurface: true }, true],
-      ["a non-interactive surface", { supportsInteractiveSurface: false }, false],
-      [
-        "a detached interactive surface",
-        { supportsInteractiveSurface: true, interactiveSurfaceDetached: true },
-        false,
-      ],
+      ["a place where widgets show", { widgetsShow: true }, true],
+      ["a place where none do", { widgetsShow: false }, false],
     ])("lists ask_question as terminal exactly when it parks on a card, on %s", async (_label, overrides, parksOnCard) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
       const session = await provider.openSession(buildParams({ tools: overrides }));
@@ -1815,9 +1815,7 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: " mcp__x__y,,mcp__z__w " },
       });
-      const session = await provider.openSession(
-        buildParams({ tools: { supportsInteractiveSurface: true } }),
-      );
+      const session = await provider.openSession(buildParams({ tools: { widgetsShow: true } }));
       await collectEvents(session);
       await session.close();
 
@@ -1831,9 +1829,7 @@ describe("AnthropicProvider", () => {
           CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__ask_user__ask_question,mcp__x__y",
         },
       });
-      const session = await provider.openSession(
-        buildParams({ tools: { supportsInteractiveSurface: true } }),
-      );
+      const session = await provider.openSession(buildParams({ tools: { widgetsShow: true } }));
       await collectEvents(session);
       await session.close();
 

@@ -182,6 +182,12 @@ describe("/api/auth/verify", () => {
     expect(res.status).toBe(204);
   });
 
+  it("returns 204 for the instance adopt route without a cookie, and keeps its siblings private", async () => {
+    const host = buildHost(await stubDeps([]));
+    expect((await verifyRequest(host, "/api/instance/adopt")).status).toBe(204);
+    expect((await verifyRequest(host, "/api/instance/adopt/extra")).status).toBe(401);
+  });
+
   it("keeps the rest of /api/setups/* private", async () => {
     // The return leg is listed as an exact path, so the sibling routes a
     // browser must never reach on its own stay behind the cookie.

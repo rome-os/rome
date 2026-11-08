@@ -26,7 +26,7 @@ beforeEach(() => {
 
 // Local-first setup is the account step alone: creating the seat also names the
 // guardian from the username, gives the agent a preset identity, and marks
-// onboarding complete, so the box drops straight into the welcome conversation.
+// onboarding complete, so the box drops straight into the dashboard.
 describe("/api/onboard/create-account — finishes setup with defaults", () => {
   async function buildLocalApp(): Promise<Hono> {
     const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => false };
