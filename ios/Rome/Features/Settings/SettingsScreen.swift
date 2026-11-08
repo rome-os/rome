@@ -179,7 +179,9 @@ struct SettingsScreen: View {
                     // Pushes reach the guardian only.
                     if !workspace.isVisitor {
                         SettingsRow(systemImage: "bell", title: "Notifications") {
-                            Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: setNotifications))
+                            // A closure, not the method itself: Swift 6.3 crashes making the
+                            // thunk from a main-actor method to the setter's plain type.
+                            Toggle("Notifications", isOn: Binding(get: { notificationsOn }, set: { on in setNotifications(on) }))
                                 .labelsHidden()
                                 .tint(Palette.primary)
                         }

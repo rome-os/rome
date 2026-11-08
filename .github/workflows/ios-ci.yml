@@ -32,10 +32,12 @@ jobs:
         working-directory: ios
     steps:
       - uses: actions/checkout@v4
-      - name: Select the newest Xcode
+      # Pinned so a runner image update never changes the compiler under a
+      # green branch. Raise it on purpose, with a green run on the new one.
+      - name: Select Xcode 26.6
         run: |
-          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$latest"
+          xcode=$(ls -d /Applications/Xcode_26.6*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
           xcodebuild -version
       - name: Pick a simulator
         id: sim
