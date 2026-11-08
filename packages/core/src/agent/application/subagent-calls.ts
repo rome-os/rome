@@ -116,7 +116,7 @@ export function createSubagentCalls(deps: {
   turnLog: SubagentTurnLog;
   liveTurns: LiveTurns;
 }): SubagentCalls {
-  const held = new Map<string, SubagentCall>();
+  const held = new Set<string>();
 
   const openSession = async (
     subagent: AgentName,
@@ -187,7 +187,7 @@ export function createSubagentCalls(deps: {
           `Active subagent link already exists for parent ${dashboardSessionId}/${turnId}/${toolUseId}`,
         );
       }
-      held.set(key, call);
+      held.add(key);
 
       const log = deps.turnLog.open({
         agentName: subagent,
