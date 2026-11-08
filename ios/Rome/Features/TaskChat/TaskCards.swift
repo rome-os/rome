@@ -443,9 +443,10 @@ struct QuestionCardView: View {
                                 .lineLimit(1...4)
                                 .focused($focusedQuestion, equals: question.id)
                                 .padding(.vertical, 12)
-                            if single, !(typed[question.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                            if single, let answers = QuestionAnswers.inlineSend(question, choices: choices, typed: typed) {
                                 Button {
-                                    submit(typed: typed)
+                                    focusedQuestion = nil
+                                    onAnswer(answers)
                                 } label: {
                                     Image(systemName: "arrow.up")
                                         .romeFont(14, .bold)

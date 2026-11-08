@@ -291,6 +291,15 @@ enum QuestionAnswers {
         questions.allSatisfy { $0.optional || isAnswered($0, choices: choices, typed: typed) }
     }
 
+    /// What the send arrow beside a lone single-answer question sends, or nil
+    /// when it does not show: once something is typed, or at once for an
+    /// optional question, which may go blank (`[]`).
+    static func inlineSend(_ question: Question, choices: [String: [String]], typed: [String: String]) -> [JSONValue]? {
+        let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || question.optional else { return nil }
+        return answers([question], choices: choices, typed: typed)
+    }
+
     /// The `answers` the card sends; blank ones (optional questions) are left out.
     static func answers(_ questions: [Question], choices: [String: [String]], typed: [String: String]) -> [JSONValue] {
         questions.compactMap { question in

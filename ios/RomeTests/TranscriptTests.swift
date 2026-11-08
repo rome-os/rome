@@ -196,6 +196,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(backend.answeredSessions == ["topic-1"])
     }
 
+    /// A lone optional question shows its send arrow while blank, and the
+    /// arrow sends `{answers: []}`; a required one shows it only once typed.
+    @Test func aBlankOptionalQuestionHasItsSendArrow() {
+        var question = MessagePart.QuestionPart.Question(id: "s", text: "Anything else?", multi: false, freeTextOnly: true, options: [])
+        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: [:]) == nil)
+        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "  "]) == nil)
+        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "No"]) == [.object(["questionId": .string("s"), "value": .string("No")])])
+        question.optional = true
+        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: [:]) == [])
+        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "No"]) == [.object(["questionId": .string("s"), "value": .string("No")])])
+    }
+
     /// A card of only optional questions goes out blank: `{answers: []}`.
     @Test func anAllOptionalCardCanBeSentBlank() async {
         let backend = FakeBackend()
