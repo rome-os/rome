@@ -1483,6 +1483,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const source = await deps.agentSessionManager.acquire(
         { agentName, channelThreadKey },
         {
+          ...deps.sessionOpeningFor?.(channelThreadKey, threadContext),
           workingDir,
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
@@ -3702,6 +3703,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           channelThreadKey,
         },
         {
+          ...deps.sessionOpeningFor?.(channelThreadKey, threadContext),
           workingDir,
           threadContext,
           contextSuffix,
@@ -4486,22 +4488,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         await deps.webchatRepo.getMessageCount(chatId),
         undefined,
       );
+      const channelThreadKey = webchatSessionKey(chatId);
+      const threadContext: ThreadContext = {
+        channel: "webchat",
+        threadId: chatId,
+        romeSessionId: chatId,
+        threadPath: join(workingDir, ".threads", chatId),
+        channelUserId: guardian?.id ?? "guardian",
+        threadType: "private",
+        projectName: project.name,
+        projectPath,
+        ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
+        senderBondLevel: "guardian",
+      };
       const opened = await deps.agentSessionManager.acquire(
-        { agentName: session.agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) },
+        { agentName: session.agentName ?? "main", channelThreadKey },
         {
+          ...deps.sessionOpeningFor?.(channelThreadKey, threadContext),
           workingDir,
-          threadContext: {
-            channel: "webchat",
-            threadId: chatId,
-            romeSessionId: chatId,
-            threadPath: join(workingDir, ".threads", chatId),
-            channelUserId: guardian?.id ?? "guardian",
-            threadType: "private",
-            projectName: project.name,
-            projectPath,
-            ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-            senderBondLevel: "guardian",
-          },
+          threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id ?? null,
         },

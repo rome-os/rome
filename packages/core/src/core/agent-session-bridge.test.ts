@@ -14,6 +14,7 @@ import type {
   AgentTurnHandle,
 } from "./agent-session.js";
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
+import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { canOpen } from "../concierge/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
@@ -439,7 +440,11 @@ describe("AgentSessionBridge working dir", () => {
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function setup(callerWorkingDirs: Record<string, string> = {}, resetPolicyOf?: ChatResetPolicy) {
+  function setup(
+    callerWorkingDirs: Record<string, string> = {},
+    resetPolicyOf?: ChatResetPolicy,
+    openingFor?: SessionOpeningFor,
+  ) {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
@@ -475,6 +480,7 @@ describe("AgentSessionBridge working dir", () => {
       projectsRoot,
       undefined,
       resetPolicyOf,
+      openingFor,
     ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
@@ -538,6 +544,26 @@ describe("AgentSessionBridge working dir", () => {
     await runTurn({ init: { threadContext, resetPolicy: forged } });
 
     expect(acquired.map((init) => init.resetPolicy)).toEqual([policy, undefined]);
+  });
+
+  it("opens with what it states for the session, never what the worker sends", async () => {
+    const stated = {
+      drawsCards: false,
+      guardianFacing: true,
+      toolEnv: { ROME_CHANNEL: "telegram" },
+      spanAttributes: { "channel.name": "telegram" },
+    };
+    const { acquired, runTurn } = setup({}, undefined, () => stated);
+    const forged = {
+      drawsCards: true,
+      guardianFacing: false,
+      toolEnv: { ROME_CHANNEL: "discord" },
+      spanAttributes: { "channel.name": "discord" },
+    };
+
+    await runTurn({ init: forged });
+
+    expect(acquired[0]).toMatchObject(stated);
   });
 
   it("inherits the calling session's working dir for a summon run with none requested", async () => {

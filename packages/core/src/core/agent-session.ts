@@ -32,7 +32,6 @@ import {
   type PromptMessage,
   type TurnUsageReporting,
 } from "../agent/index.js";
-import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import {
   NO_ROME_TOOLS,
   Session,
@@ -131,12 +130,11 @@ import {
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import { isGuardianFacingChannel } from "./guardian-channel.js";
 import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-import { sessionKeyChannel } from "./agent-session-key.js";
+import { type ChannelSurface, surfaceOf } from "./session-opening.js";
 
 const log = createLogger("agent-session");
 
@@ -176,6 +174,21 @@ export interface AgentSessionInit {
    * reset under it is replaced before it opens.
    */
   resetPolicy?: ProviderSessionResetPolicy;
+  /**
+   * The conversation the session opens in shows interactive cards, so its
+   * agent may pause on one for a human reply. Fixed for the session's life,
+   * since it shapes the cached system prompt. Absent, it shows none.
+   */
+  drawsCards?: boolean;
+  /**
+   * The session's conversation faces the guardian, so a wake-up can be
+   * scheduled back into it. Absent, it cannot.
+   */
+  guardianFacing?: boolean;
+  /** Name-value pairs the model session's tools run with. The session passes them through. */
+  toolEnv?: Record<string, string | undefined>;
+  /** Attributes stamped on the spans of every turn. The session passes them through. */
+  spanAttributes?: Attributes;
 }
 
 export interface AgentTurnInput {
@@ -330,9 +343,6 @@ interface ManagerDeps {
   /** What the named channel's surface supports, or null for a name no channel
    *  has. A null result reads as a messaging channel. */
   channelSurface: (channel: string) => ChannelSurface | null;
-  /** The connection kind behind a channel id. When absent, every channel id reads as
-   *  its own connection kind, which holds only where no connection kind has a second channel. */
-  connectionKindOfChannel?: ConnectionKindOfChannel;
   /** App-declared event sources: an event `defer` subscribes through them.
    *  When absent, an event wait is created without any check. */
   eventSources?: EventSources;
@@ -340,21 +350,6 @@ interface ManagerDeps {
   sessionTools?: SessionToolsProvider;
 }
 
-/** The parts of a channel's surface that change how its sessions prompt. */
-export interface ChannelSurface {
-  /** The next human turn arrives on a surface that renders interactive cards. */
-  interactiveCards: boolean;
-  /** Prompts carry the stored messages the agent has not seen. */
-  promptContext: boolean;
-}
-
-const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
-  interactiveCards: false,
-  promptContext: true,
-};
-
-/** The surface a channel's talker declares, with an omitted fact read as a
- *  messaging channel's. */
 /** Whose a dashboard chat is, for work scheduled in it; undefined for any other thread. */
 async function dashboardChatOwner(
   webchatRepo: WebChatRepository | undefined,
@@ -363,23 +358,6 @@ async function dashboardChatOwner(
   if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
   const chat = await webchatRepo.getSession(thread.threadId);
   return chat ? (chat.ownerKey ?? "guardian") : undefined;
-}
-
-export function talkerChannelSurface(talker: {
-  interactiveCards?: boolean;
-  promptContext?: boolean;
-}): ChannelSurface {
-  return {
-    interactiveCards: talker.interactiveCards ?? MESSAGING_CHANNEL_SURFACE.interactiveCards,
-    promptContext: talker.promptContext ?? MESSAGING_CHANNEL_SURFACE.promptContext,
-  };
-}
-
-function channelSurfaceOf(
-  deps: Pick<ManagerDeps, "channelSurface">,
-  channel: string,
-): ChannelSurface {
-  return deps.channelSurface(channel) ?? MESSAGING_CHANNEL_SURFACE;
 }
 
 interface ManagerOptions {
@@ -898,19 +876,10 @@ async function openSession(
   // turn always routes to the main agent — so a suspended subagent call would
   // hang forever. Where this is false, an action that returns `renderComponent`
   // falls back to relaying its `promptText` as prose; see `actionToolOutput`.
-  // The answer feeds the cached system prompt, so the opening caller's
-  // channel decides it for the session's life. An opener without a thread
-  // context falls back to the channel the key names.
-  const keyChannel = sessionKeyChannel(key.channelThreadKey);
-  const openingChannel = init.threadContext?.channel ?? keyChannel;
-  if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
-    log.warn("session opener's channel differs from the channel its key names", {
-      channelThreadKey: key.channelThreadKey,
-      openingChannel,
-    });
-  }
+  // The answer feeds the cached system prompt, so the opener states it for
+  // the session's life.
   const widgets = widgetDrawingFor({
-    placeDrawsCards: !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards,
+    placeDrawsCards: init.drawsCards === true,
     isSubagent: !!opts.isSubagent,
   });
 
@@ -1036,8 +1005,7 @@ async function openSession(
   // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
-  const deferEnabled =
-    isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) && !opts.isSubagent;
+  const deferEnabled = init.guardianFacing === true && !opts.isSubagent;
   const eventSources = deps.eventSources;
   // Actions `defer` runs on the agent's behalf are attributed to its turn.
   const agentRunContext = (refs: TurnExecRefs) => ({
@@ -1111,6 +1079,8 @@ async function openSession(
             workingDir,
             threadContext: refs.getThreadContext(),
             sharedContext: refs.getSharedContext(),
+            toolEnv: init.toolEnv,
+            spanAttributes: init.spanAttributes,
           },
         );
         try {
@@ -1182,11 +1152,7 @@ async function openSession(
       outputSchema: config.outputSchema,
       workingDir,
       externalMcpServers,
-      // The channel the session's turns are delivered on, from its key. Shell
-      // tools such as the Discord CLI read it to act as that channel's
-      // account. Set even when undefined, so a value Rome itself inherited
-      // never leaks in.
-      env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
+      env: { ...init.toolEnv },
       maxTurns: config.maxTurns,
     },
     tools,
@@ -1276,8 +1242,8 @@ async function openSession(
             reasoningEffort,
             outputSchema: config.outputSchema,
             workingDir,
-            // Same channel as the source session's config, for the same reason.
-            env: { ROME_CHANNEL: sessionKeyChannel(key.channelThreadKey) },
+            // A fork's tools run with its source's.
+            env: { ...init.toolEnv },
           },
           thread: fork.thread,
           tools: NO_ROME_TOOLS,
@@ -1474,6 +1440,7 @@ async function openSession(
     owningAppId,
     threadContext: init.threadContext,
     sharedContext: init.sharedContext,
+    spanAttributes: init.spanAttributes,
     isNewSession,
     isSubagent: opts.isSubagent,
     selectionId,
@@ -1509,6 +1476,8 @@ async function openSession(
 
 interface ImplArgs {
   key: AgentSessionKey;
+  /** What the opener stamps on every turn's spans. */
+  spanAttributes?: Attributes;
   session: Session;
   modelSession: ModelSession;
   /** The provider of the session the run opened. Unset for a code-backed agent. */
@@ -1760,6 +1729,7 @@ class AgentSessionImpl implements AgentSession {
   // Captured at session open; passed through to per-turn span attrs.
   private isNewSession: boolean;
   private isSubagent: boolean;
+  private readonly spanAttributes: Attributes;
   // One-shot guard: the `<thread_context>` block is prepended to the FIRST user
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
@@ -1822,6 +1792,7 @@ class AgentSessionImpl implements AgentSession {
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
+    this.spanAttributes = args.spanAttributes ?? {};
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
     this.threadFresh = !args.threadResumed;
@@ -2971,10 +2942,6 @@ class AgentSessionImpl implements AgentSession {
     // sendTurn is invoked with no active OTel context (the webchat POST
     // case); when invoked inside one (channel adapter path), that span
     // becomes the parent.
-    const channelName = this.key.channelThreadKey
-      ? sessionKeyChannel(this.key.channelThreadKey)
-      : undefined;
-
     // Identifying attrs stamped on every span this turn creates. We pass
     // them explicitly at each span-creation site (rather than via W3C
     // baggage on the context) so they never escape into outbound HTTP
@@ -2984,7 +2951,7 @@ class AgentSessionImpl implements AgentSession {
       "session.id": this.sessionId,
       "turn.id": turnId,
       ...(this.key.channelThreadKey ? { "channel.thread_key": this.key.channelThreadKey } : {}),
-      ...(channelName ? { "channel.name": channelName } : {}),
+      ...this.spanAttributes,
     };
     sink.romeAttrs = romeAttrs;
 
@@ -3137,7 +3104,7 @@ class AgentSessionImpl implements AgentSession {
         sink.romeSessionId &&
         sink.threadContext &&
         channel &&
-        channelSurfaceOf(this.deps, channel).promptContext;
+        surfaceOf(this.deps.channelSurface, channel).promptContext;
       if (catchesUp && this.deps.promptFacts) {
         // The agent catches up on the messages said where its session stands
         // that no turn of it took, gave or saw (docs/domains/participation.md#projection).

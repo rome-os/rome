@@ -1,3 +1,4 @@
+import { sessionOpeningFor } from "../core/session-opening.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
@@ -796,6 +797,7 @@ export async function buildTestDeps(
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
     agentSessionManager,
+    sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
         return normalizeConversationTitle(firstMessage) ?? "New Chat";

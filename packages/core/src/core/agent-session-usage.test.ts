@@ -334,7 +334,8 @@ describe("AgentSession turn usage", () => {
         position: { provider: "openai", modelThreadId: "source-thread", checkpointId: "turn-1" },
       };
     };
-    const session = await manager.acquire(key);
+    // A web chat shows cards and faces the guardian.
+    const session = await manager.acquire(key, { drawsCards: true, guardianFacing: true });
     await drain(session.sendTurn({ prompt: "first" }).events);
     await drain(session.runForkedTurn!({ prompt: "side question", mode: "exact" }));
 

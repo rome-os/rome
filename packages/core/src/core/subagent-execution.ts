@@ -8,6 +8,7 @@ import {
   type SubagentOutcome,
 } from "../agent/index.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
+import type { Attributes } from "@opentelemetry/api";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { openedInChat } from "./session-conversation.js";
 import { createLogger } from "../logger.js";
@@ -49,6 +50,20 @@ export interface StartSubagentContext {
   workingDir: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
+  /** What the parent's tools run with; the subagent's run with the same. */
+  toolEnv?: Record<string, string | undefined>;
+  /** What the parent stamps on its turns' spans; the subagent's carry the same. */
+  spanAttributes?: Attributes;
+}
+
+/** A subagent's session shows no cards and takes no wake-ups; its tools and spans carry its parent's. */
+function subagentOpening(context: StartSubagentContext) {
+  return {
+    drawsCards: false,
+    guardianFacing: false,
+    toolEnv: context.toolEnv,
+    spanAttributes: context.spanAttributes,
+  };
 }
 
 export interface SubagentExecutionService {
@@ -94,6 +109,7 @@ export function createSubagentExecutionService(deps: {
           workingDir: context.workingDir,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
+          ...subagentOpening(context),
         });
         // Naming the chat lets the resume fill a row whose record failed when
         // the subagent was minted.
@@ -109,6 +125,7 @@ export function createSubagentExecutionService(deps: {
             workingDir: context.workingDir,
             threadContext: context.threadContext,
             sharedContext: context.sharedContext,
+            ...subagentOpening(context),
           },
         );
         await openedInChat(deps.webchatRepo, child, undefined);
