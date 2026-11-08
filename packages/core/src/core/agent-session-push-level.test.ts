@@ -132,7 +132,7 @@ describe("AgentSession turn push level", () => {
     );
     const handle = session.sendTurn({ prompt: "go" }, pushLevel ? { pushLevel } : {});
     let result: string | undefined;
-    for await (const event of handle.events) {
+    for await (const event of handle.events()) {
       if (event.type === "result") result = event.content;
     }
     return result;

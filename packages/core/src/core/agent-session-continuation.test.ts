@@ -203,7 +203,7 @@ describe("continuation notice through AgentSessionManager", () => {
       { prompt: text, inputId },
       { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
     );
-    for await (const _event of handle.events) {
+    for await (const _event of handle.events()) {
       // drain
     }
     at((now - START) / 1000 + 1);
@@ -212,7 +212,7 @@ describe("continuation notice through AgentSessionManager", () => {
       CHAT,
       "assistant",
       JSON.stringify([{ type: "text", content: `reply to ${text}` }]),
-      handle.turnId,
+      handle.id,
     );
   }
 
@@ -450,10 +450,9 @@ describe("continuation notice through AgentSessionManager", () => {
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, selectionId: from },
     );
-    for await (const _ of session.sendTurn(
-      { prompt: "first" },
-      { threadContext: context, romeSessionId: chatId },
-    ).events) {
+    for await (const _ of session
+      .sendTurn({ prompt: "first" }, { threadContext: context, romeSessionId: chatId })
+      .events()) {
     }
     if (concierge) {
       const raw = healthyState();

@@ -5,6 +5,24 @@ import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
 import type { ModelSession } from "../domain/model-port.js";
 import { AgentInputQueue } from "./agent-input-queue.js";
 
+/** A turn that says nothing and never ends; a stop goes to `stop`. */
+function fakeHandle(
+  id: string,
+  stop: (reason?: string) => Promise<void> = async () => {},
+): AgentTurnHandle {
+  return {
+    id,
+    hasEnded: false,
+    events: () => ({ async *[Symbol.asyncIterator]() {} }),
+    ended: () => new Promise(() => {}),
+    async stop(reason) {
+      await stop(reason);
+      return "requested";
+    },
+    turnContext: context.active(),
+  };
+}
+
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted")) {
@@ -15,11 +33,7 @@ function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolved
   const queue = new AgentInputQueue(
     (input) => {
       started.push(input);
-      return {
-        turnId: `turn-${started.length}`,
-        events: { async *[Symbol.asyncIterator]() {} },
-        turnContext: context.active(),
-      };
+      return fakeHandle(`turn-${started.length}`);
     },
     () => ({ steerUserInput: steer }),
     errors,
@@ -66,7 +80,7 @@ describe("conversational input lane", () => {
     await s.queue.seal("turn-1");
     s.queue.finish("turn-1");
     expect(s.started.map((input) => input.inputId)).toEqual(["a", "b"]);
-    expect(s.handles.map((handle) => handle.turnId)).toEqual(["turn-1", "turn-2"]);
+    expect(s.handles.map((handle) => handle.id)).toEqual(["turn-1", "turn-2"]);
     await tick();
     expect(s.statuses.at(-1)).toMatchObject({ inputId: "b", turnId: "turn-2", state: "queued" });
   });
@@ -145,14 +159,9 @@ function prioritySetup() {
     (input) => {
       started.push(input);
       const turnId = `turn-${started.length}`;
-      return {
-        turnId,
-        events: { async *[Symbol.asyncIterator]() {} },
-        turnContext: context.active(),
-        interrupt: async (reason) => {
-          interrupts.push({ turnId, reason });
-        },
-      };
+      return fakeHandle(turnId, async (reason) => {
+        interrupts.push({ turnId, reason });
+      });
     },
     () => ({ steerUserInput: steer }),
     rs.fn(),
