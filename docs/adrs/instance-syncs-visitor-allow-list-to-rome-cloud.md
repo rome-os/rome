@@ -14,7 +14,7 @@ Instances run on hardware Rome Cloud does not reach on demand. A desktop instanc
 
 ## Decision
 
-Each instance sends its whole dashboard allow-list to Rome Cloud whenever the guardian saves it, and once at start. Every save carries a revision that only grows, and Rome Cloud keeps the highest. Rome Cloud uses its copy only to list instances and issue visitor codes. The instance stays the final judge: it re-checks its own allow-list when it redeems a visitor code and on every request after.
+Each instance sends its whole dashboard allow-list to Rome Cloud whenever the guardian saves it, and once at start. Every save carries a revision that only grows. Rome Cloud applies a list whose revision is at least the one it holds, and answers whether it applied it. Rome Cloud uses its copy only to list instances and issue visitor codes. The instance stays the final judge: it re-checks its own allow-list when it redeems a visitor code and on every request after.
 
 ## Alternatives
 
@@ -26,7 +26,11 @@ Each instance sends its whole dashboard allow-list to Rome Cloud whenever the gu
 
 Rome Cloud holds a copy of every instance's visitor emails. The copy can lag the instance when a sync is still in flight or failed. A lagging copy can only show an instance its visitor cannot open, or hide one they can. It never lets anyone in, because the instance refuses a visitor its own list does not name.
 
-Delivery runs in the background and never fails or slows the save. A failed send retries with backoff, and only the newest list is ever sent. A newer revision that reaches Rome Cloud first wins over an older one that arrives late. When Rome Cloud holds a higher revision than the instance, as after a database reset or a restore from an older backup, the instance stores a revision past it and sends the list again. An unlinked instance sends nothing and sends its list once it links.
+Delivery runs in the background and never fails or slows the save. A failed send retries with backoff, and only the newest list is ever sent. A newer revision that reaches Rome Cloud first wins over an older one that arrives late. A list counts as delivered only when Rome Cloud says it applied it. When Rome Cloud holds a higher revision than the instance, as after a database reset or a restore from an older backup, it does not apply the list. The instance then stores a revision past Rome Cloud's and sends the list again. An unlinked instance sends nothing and sends its list once it links.
+
+Rome Cloud keeps nothing for a listed email that has no account yet, and reports those emails back. When one of them signs in as a visitor, the instance sends its list again so Rome Cloud can match the new account. Other sign-ins send nothing.
+
+Rome Cloud deploys the endpoint before instances start calling it. A Rome Cloud without it answers 404, which the instance does not retry until its next save, boot, or link.
 
 The instance refuses to save a list longer than Rome Cloud accepts, 500 addresses of up to 320 characters each, so a sync never fails on size.
 
