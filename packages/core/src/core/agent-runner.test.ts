@@ -2598,6 +2598,7 @@ describe("AgentRunner", () => {
 
       expect(terminalsOf(events)).toEqual([]);
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
+      expect(await turn.ended()).toEqual({ terminal: undefined, stoppedByRome: true });
     });
   });
 
