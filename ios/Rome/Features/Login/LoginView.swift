@@ -109,13 +109,18 @@ struct LoginView: View {
                     .background(Palette.dangerSoft, in: Capsule())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                if let site = model.browserSignIn {
-                    // Signed in to Rome Cloud already: the Rome itself wants one browser sign-in.
-                    PrimaryButton(title: "Open in browser") { openURL(site) }
-                    SecondaryButton(title: "Try again") { Task { await model.retry() } }
-                } else {
-                    PrimaryButton(title: "Sign in with Rome Cloud", loadingTitle: "Signing in", loading: model.phase == .signingIn) {
-                        signIn()
+                ForEach(Self.signedOutActions(browserSignIn: model.browserSignIn), id: \.self) { action in
+                    switch action {
+                    case .signIn:
+                        PrimaryButton(title: "Sign in with Rome Cloud", loadingTitle: "Signing in", loading: model.phase == .signingIn) {
+                            signIn()
+                        }
+                    case .openInBrowser:
+                        PrimaryButton(title: "Open in browser") { if let site = model.browserSignIn { openURL(site) } }
+                    case .tryAgain:
+                        SecondaryButton(title: "Try again") { Task { await model.retry() } }
+                    case .signOut:
+                        signOutButton
                     }
                 }
             case .stopped, .noInstance:
@@ -131,14 +136,27 @@ struct LoginView: View {
                     .background(Palette.dangerSoft, in: Capsule())
                 }
                 SecondaryButton(title: "Try again") { Task { await model.retry() } }
-                Button("Sign out") { Task { await model.signOut() } }
-                    .romeFont(17)
-                    .foregroundStyle(Palette.sub)
-                    .frame(height: 44)
+                signOutButton
             default:
                 EmptyView()
             }
         }
+    }
+
+    enum SignedOutAction: Hashable { case signIn, openInBrowser, tryAgain, signOut }
+
+    /// The buttons under a signed-out screen. Signed in to Rome Cloud but
+    /// refused by the Rome (not_owner): one browser sign-in, then again, or
+    /// sign out to use another account.
+    static func signedOutActions(browserSignIn: URL?) -> [SignedOutAction] {
+        browserSignIn == nil ? [.signIn] : [.openInBrowser, .tryAgain, .signOut]
+    }
+
+    private var signOutButton: some View {
+        Button("Sign out") { Task { await model.signOut() } }
+            .romeFont(17)
+            .foregroundStyle(Palette.sub)
+            .frame(height: 44)
     }
 
     private func signIn() {

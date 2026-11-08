@@ -180,6 +180,9 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         ]
         await #expect(throws: AuthError.notOwner) { try await auth().session(for: Self.ownInstance) }
         #expect(AuthError.notOwner.errorDescription == "Sign in to this Rome once in a browser, then try again")
+        // The screen has a way out: another account is a sign-out away.
+        #expect(LoginView.signedOutActions(browserSignIn: URL(string: "https://me.romeos.cc")) == [.openInBrowser, .tryAgain, .signOut])
+        #expect(LoginView.signedOutActions(browserSignIn: nil) == [.signIn])
         // Any other refusal keeps its old meaning.
         #expect(CloudAuth.completeError(status: 403, body: Data(#"{"error":"forbidden"}"#.utf8)) == .network)
         #expect(CloudAuth.completeError(status: 403, body: Data()) == .network)
