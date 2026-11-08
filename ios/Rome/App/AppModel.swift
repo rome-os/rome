@@ -402,6 +402,10 @@ final class AppModel {
             openDemo(.updateRequired)
             return
         }
+        if environment["ROME_DEMO"] == "visitor" {
+            openDemo(.visitor)
+            return
+        }
         if environment["ROME_DEMO"] == "many-apps" {
             openDemo(.manyApps)
             return
@@ -841,9 +845,12 @@ final class AppModel {
         workspace?.stop()
         let backend = DemoBackend(variant: variant)
         instances = DemoBackend.instances
-        currentInstanceID = DemoBackend.instances.first?.id
+        // A visitor opens the shared Rome; everyone else their own.
+        let current = variant == .visitor ? DemoBackend.instances[1] : DemoBackend.instances[0]
+        currentInstanceID = current.id
+        let name = variant == .visitor ? current.name : String(localized: "My Rome")
         Task {
-            await open(Workspace(backend: backend, instanceName: String(localized: "My Rome"), host: "me.romeos.cc", accountLabel: "lin@example.com", drafts: DraftStore(instance: DraftStore.demoInstance)))
+            await open(Workspace(backend: backend, instanceName: name, host: current.host, accountLabel: "lin@example.com", drafts: DraftStore(instance: DraftStore.demoInstance)))
         }
     }
 

@@ -127,16 +127,6 @@
         }
       }
     },
-    "After signing out, sign in with Rome Cloud to open Rome again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "退出后需要重新用 Rome Cloud 登录。"
-          }
-        }
-      }
-    },
     "Almost done…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1729,16 +1719,6 @@
         }
       }
     },
-    "Shared by %@ · %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 分享 · %@"
-          }
-        }
-      }
-    },
     "Show %lld older" : {
       "localizations" : {
         "en" : {
@@ -1853,6 +1833,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "退出登录"
+          }
+        }
+      }
+    },
+    "Sign out?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出登录？"
           }
         }
       }

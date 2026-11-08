@@ -77,8 +77,10 @@ struct UpdateScreen: View {
             }
             .presentationBackground(Palette.bg)
         }
-        .confirmationDialog("After signing out, sign in with Rome Cloud to open Rome again.", isPresented: $confirmSignOut, titleVisibility: .visible) {
+        // The same confirmation as Settings'.
+        .alert("Sign out?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

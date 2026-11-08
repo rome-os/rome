@@ -158,6 +158,16 @@ enum SnapshotRunner {
                 }
             }
             model.dynamicTypeOverride = nil
+            // A dashboard visitor of the shared Rome: the drawer footer, Settings and the instance list.
+            model.openDemo(.visitor)
+            try? await Task.sleep(for: .seconds(2))
+            await capture("45-visitor-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+            model.debugCommand = .drawer(false)
+            try? await Task.sleep(for: .seconds(0.8))
+            await capture("46-visitor-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
+            await capture("47-visitor-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("16-chat-empty", style: styleName, in: directory, wait: 2) { model.openDemo(.empty) }
             await capture("38-apps-empty", style: styleName, in: directory, wait: 2) {
                 model.openDemo(.empty)

@@ -29,7 +29,7 @@ final class LocalEventBus: LiveEventSource {
 final class DemoBackend: RomeBackend {
     static let instances = [
         CloudInstance(id: "demo-1", name: "我的 Rome", slug: "me", origin: "https://me.romeos.cc", status: "running"),
-        CloudInstance(id: "demo-2", name: "团队 Rome", slug: "team", origin: "https://team.romeos.cc", status: "running"),
+        CloudInstance(id: "demo-2", name: "团队 Rome", slug: "team", origin: "https://team.romeos.cc", status: "running", role: "visitor", ownerName: "Dev User"),
         CloudInstance(id: "demo-3", name: "测试实例", slug: "staging", origin: "https://staging.romeos.cc", status: "stopped"),
     ]
 
@@ -50,7 +50,8 @@ final class DemoBackend: RomeBackend {
     /// `updateRequired`: the full data on a Rome one release behind, so the
     /// update page shows; "Update now" brings it up to date after a few seconds.
     /// `manyApps`: the full data with a screenful of apps.
-    enum Variant { case full, empty, conciergeOff, updateRequired, manyApps }
+    /// `visitor`: the full demo, seen by a dashboard visitor of the shared Rome.
+    enum Variant { case full, empty, conciergeOff, updateRequired, manyApps, visitor }
     private let variant: Variant
 
     init(variant: Variant = .full) {
@@ -260,10 +261,9 @@ final class DemoBackend: RomeBackend {
         return hits.sorted { $0.message.createdAt > $1.message.createdAt }
     }
 
-    func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin") }
+    func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin", isGuardian: variant != .visitor) }
 
-    /// The demo's guardian sees Apps.
-    func isGuardian() async -> Bool { true }
+    func isGuardian() async -> Bool { variant != .visitor }
 
     func apps() async throws -> [InstalledApp] {
         try await pause(0.3)
@@ -275,7 +275,7 @@ final class DemoBackend: RomeBackend {
             InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
         ]
         switch variant {
-        case .full:
+        case .full, .visitor:
             return few
         case .manyApps:
             let names = ["记账本", "Recipes", "Workout plan", "家庭相册", "Plant care", "Budget", "单词卡片", "Meal planner",

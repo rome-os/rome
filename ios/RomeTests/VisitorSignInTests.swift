@@ -140,8 +140,6 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         let list = try await auth().listInstances()
         #expect(list.map(\.isVisitor) == [false, true])
         #expect(list[1].ownerName == "Dev User")
-        #expect(InstanceLine.detail(list[1]).contains("Dev User"))
-        #expect(InstanceLine.detail(list[0]) == "me.romeos.cc")
     }
 
     /// Plain http only when Rome Cloud itself is http: a Cloud on this Mac.

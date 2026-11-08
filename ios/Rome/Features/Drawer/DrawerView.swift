@@ -86,7 +86,7 @@ struct DrawerView: View {
                                 .lineLimit(1)
                             if model.currentInstance?.isVisitor == true { VisitorBadge() }
                         }
-                        Text(model.currentInstance.map(InstanceLine.detail) ?? workspace.host)
+                        Text(model.currentInstance?.host ?? workspace.host)
                             .romeFont(13)
                             .foregroundStyle(Palette.sub)
                             .lineLimit(1)

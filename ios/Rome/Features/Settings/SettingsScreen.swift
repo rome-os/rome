@@ -254,8 +254,11 @@ struct SettingsScreen: View {
         // The guardian may change it in the Settings app and come back.
         .onChange(of: model.push.isOn) { _, on in notificationsOn = on }
         .animation(.easeOut(duration: 0.2), value: model.push.needsSystemSettings)
-        .confirmationDialog("After signing out, sign in with Rome Cloud to open Rome again.", isPresented: $confirmSignOut, titleVisibility: .visible) {
+        // An alert, not an action sheet: on current iOS an action sheet opens
+        // as a popover at the button and drops Cancel.
+        .alert("Sign out?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+            Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $showFeedback) {
             FeedbackSheet(backend: workspace.backend)
@@ -270,10 +273,13 @@ struct SettingsScreen: View {
             HStack(spacing: 14) {
                 InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, size: 48)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(workspace.accountLabel)
-                        .romeFont(17, .semibold)
-                        .foregroundStyle(Palette.fg)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(workspace.accountLabel)
+                            .romeFont(17, .semibold)
+                            .foregroundStyle(Palette.fg)
+                            .lineLimit(1)
+                        if model.currentInstance?.isVisitor == true { VisitorBadge() }
+                    }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
                         Text(verbatim: "\(workspace.instanceName) · \(workspace.host)").lineLimit(1)

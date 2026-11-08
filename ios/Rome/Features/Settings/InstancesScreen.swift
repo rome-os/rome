@@ -77,7 +77,7 @@ struct InstancesScreen: View {
                             .foregroundStyle(Palette.fg)
                         if instance.isVisitor { VisitorBadge() }
                     }
-                    Text(InstanceLine.detail(instance))
+                    Text(instance.host)
                         .romeFont(14)
                         .foregroundStyle(Palette.sub)
                 }
@@ -283,12 +283,3 @@ struct VisitorBadge: View {
     }
 }
 
-/// The line under an instance's name: its host, and whose it is when shared.
-enum InstanceLine {
-    static func detail(_ instance: CloudInstance) -> String {
-        guard instance.isVisitor, let owner = instance.ownerName?.trimmingCharacters(in: .whitespacesAndNewlines), !owner.isEmpty else {
-            return instance.host
-        }
-        return String(localized: "Shared by \(owner) · \(instance.host)")
-    }
-}
