@@ -382,12 +382,26 @@ struct TopBanner: View {
 struct InitialAvatar: View {
     let text: String
     var imageURL: URL? = nil
+    /// Whose disk cache the picture lives in: the open instance's host.
+    var instance: String = ""
     var size: CGFloat = 40
+    @State private var image: UIImage?
+
+    init(text: String, imageURL: URL? = nil, instance: String = "", size: CGFloat = 40) {
+        self.text = text
+        self.imageURL = imageURL
+        self.instance = instance
+        self.size = size
+        // Last time's picture from disk, in the first frame.
+        _image = State(initialValue: imageURL.flatMap { CachedImage.cached(instance: instance, key: Self.cacheKey($0)) })
+    }
+
+    static func cacheKey(_ url: URL) -> String { "avatar-" + ImageDiskCache.hash(Data(url.absoluteString.utf8)).prefix(16) }
 
     var body: some View {
-        AsyncImage(url: imageURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
                 initial
             }
@@ -395,6 +409,31 @@ struct InitialAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityHidden(true)
+        .task(id: imageURL) {
+            guard let url = imageURL else { image = nil; return }
+            let key = Self.cacheKey(url)
+            if image == nil { image = CachedImage.cached(instance: instance, key: key) }
+            // Checked again in the background; replaced only when it changed.
+            let side = size
+            if let fresh = await CachedImage.refresh(
+                instance: instance, key: key, version: nil,
+                fetch: { try await URLSession.shared.data(from: url).0 },
+                draw: { data in Self.drawn(data, side: side) }
+            ) {
+                image = fresh
+            }
+        }
+    }
+
+    /// The picture at the size it shows, so the cache holds no more than that.
+    private static func drawn(_ data: Data, side: CGFloat) -> UIImage? {
+        guard let source = UIImage(data: data) else { return nil }
+        let size = CGSize(width: side, height: side)
+        let scale = max(size.width / source.size.width, size.height / source.size.height)
+        let drawSize = CGSize(width: source.size.width * scale, height: source.size.height * scale)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            source.draw(in: CGRect(x: (side - drawSize.width) / 2, y: (side - drawSize.height) / 2, width: drawSize.width, height: drawSize.height))
+        }
     }
 
     private var initial: some View {

@@ -9,8 +9,17 @@ struct AppsScreen: View {
     /// Puts a starting prompt in the main Chat's composer, unsent.
     let onStart: (String) -> Void
 
+    /// The list as last read on this instance, shown at once; refetched each time.
     @State private var apps: [InstalledApp]?
     @State private var failed = false
+
+    init(workspace: Workspace, onMenu: @escaping () -> Void, onOpen: @escaping (InstalledApp) -> Void, onStart: @escaping (String) -> Void) {
+        self.workspace = workspace
+        self.onMenu = onMenu
+        self.onOpen = onOpen
+        self.onStart = onStart
+        _apps = State(initialValue: workspace.appsCache)
+    }
     @State private var showIdeas = false
     /// The apps last opened from this phone, read again each time the page shows.
     @State private var recentIDs: [String] = []
@@ -54,7 +63,6 @@ struct AppsScreen: View {
         .pageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
-        .refreshable { await load() }
         .onAppear { recentIDs = RecentApps(host: workspace.host).ids() }
         .sheet(isPresented: $showIdeas) {
             AppIdeasSheet { prompt in
@@ -90,8 +98,9 @@ struct AppsScreen: View {
         failed = false
         do {
             let mine = AppLinks.mine(try await workspace.backend.apps())
-            apps = mine
-            Task { await workspace.shelve(mine) }
+            // Only a change redraws the grid.
+            if apps != mine { apps = mine }
+            await workspace.shelve(mine)
         } catch {
             if apps == nil { failed = true }
         }
@@ -249,7 +258,17 @@ struct AppIcon: View {
     let app: InstalledApp
     let backend: RomeBackend
     var size: CGFloat = AppGridMetrics.icon
+    /// The icon as drawn last time, from disk, so it shows in the first frame.
     @State private var image: UIImage?
+
+    init(app: InstalledApp, backend: RomeBackend, size: CGFloat = AppGridMetrics.icon) {
+        self.app = app
+        self.backend = backend
+        self.size = size
+        _image = State(initialValue: app.iconUrl == nil ? nil : CachedImage.cached(instance: backend.displayOrigin, key: Self.cacheKey(app)))
+    }
+
+    static func cacheKey(_ app: InstalledApp) -> String { "app-icon-\(app.id)" }
 
     var body: some View {
         Group {
@@ -267,13 +286,21 @@ struct AppIcon: View {
         .frame(width: size, height: size)
         .clipShape(AppGridMetrics.shape(size))
         .accessibilityHidden(true)
-        .task(id: app.iconUrl) {
+        .task(id: "\(app.id)|\(app.iconUrl ?? "")|\(app.version ?? "")") {
+            let key = Self.cacheKey(app)
+            let instance = backend.displayOrigin
             // Another app's icon never stays on a reused cell.
-            image = nil
+            image = app.iconUrl == nil ? nil : CachedImage.cached(instance: instance, key: key)
             guard let icon = app.iconUrl, icon.hasPrefix("/api/") else { return }
+            // Checked again in the background; replaced only when it changed.
             // Through the instance's client: the icon is the guardian's to see.
-            if let data = try? await backend.apiFile(path: String(icon.dropFirst(4)), query: nil) {
-                image = await AppIconImage.decode(data, side: size)
+            let side = size
+            if let fresh = await CachedImage.refresh(
+                instance: instance, key: key, version: app.version,
+                fetch: { try await backend.apiFile(path: String(icon.dropFirst(4)), query: nil) },
+                draw: { await AppIconImage.decode($0, side: side) }
+            ) {
+                image = fresh
             }
         }
     }

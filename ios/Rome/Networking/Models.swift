@@ -232,6 +232,8 @@ struct InstalledApp: Codable, Identifiable, Hashable, Sendable {
     var description: String?
     /// `/api/apps/<id>/icon` when the app has one.
     var iconUrl: String?
+    /// The installed version: a new one may bring a new icon.
+    var version: String?
     /// `/full/apps/<id>`, set only when the app is running and has a page.
     var fullHref: String?
     /// `local` (made here), `appstore` (installed) or `builtin` (ships with Rome).

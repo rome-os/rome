@@ -79,7 +79,7 @@ struct DrawerView: View {
 
             Button(action: onSettings) {
                 HStack(spacing: 12) {
-                    InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL)
+                    InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host)
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 6) {
                             Text(workspace.instanceName)

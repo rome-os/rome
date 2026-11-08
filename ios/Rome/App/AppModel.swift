@@ -268,12 +268,15 @@ final class Workspace {
         }
     }
 
-    /// The guardian's apps as last read, for links in chat text.
-    private(set) var apps: [InstalledApp] = []
+    /// The guardian's apps as last read, kept for this instance while the app
+    /// runs: Apps shows it at once when opened again, and links in chat text
+    /// look apps up in it. Nil until the first read.
+    private(set) var appsCache: [InstalledApp]?
+    var apps: [InstalledApp] { appsCache ?? [] }
 
-    /// Keeps the apps list for links in chat text.
+    /// Keeps the apps list; an unchanged list leaves it as it is.
     func shelve(_ apps: [InstalledApp]) async {
-        self.apps = apps
+        if appsCache != apps { appsCache = apps }
     }
 
     func stop() {
@@ -547,6 +550,7 @@ final class AppModel {
         pendingPush = nil
         await push.signOut { await cloud.signOut() }
         DraftStore.removeAll()
+        ImageDiskCache.shared.removeAll()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         instances = []
         currentInstanceID = nil
