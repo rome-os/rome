@@ -27,18 +27,21 @@ enum APIError: Error, Equatable, LocalizedError {
     }
 }
 
-/// HTTP to one Rome instance. It sends the instance session as the
-/// `rome_session` cookie, only to its own origin, and never follows redirects.
+/// HTTP to one Rome instance. It sends the instance session as its cookie
+/// (`rome_session` for the guardian, `rome_visitor` for a visitor, never both),
+/// only to its own origin, and never follows redirects.
 final class APIClient: Sendable {
     let origin: URL
     private let token: @Sendable () -> String?
+    private let cookieName: @Sendable () -> String
     private let session: URLSession
     private let onUnauthorized: @Sendable () -> Void
 
     /// `configuration`: tests pass one with a stub protocol.
-    init(origin: URL, token: @escaping @Sendable () -> String?, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}) {
+    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}) {
         self.origin = origin
         self.token = token
+        self.cookieName = cookieName
         self.onUnauthorized = onUnauthorized
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
@@ -75,7 +78,7 @@ final class APIClient: Sendable {
         request.httpMethod = "GET"
         request.setValue("image/*", forHTTPHeaderField: "Accept")
         if let token = token() {
-            request.setValue("rome_session=\(token)", forHTTPHeaderField: "Cookie")
+            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
         }
         return try await send(request, limit: Self.imageLimit)
     }
@@ -203,7 +206,7 @@ final class APIClient: Sendable {
         var properties: [HTTPCookiePropertyKey: Any] = [
             .domain: host,
             .path: "/",
-            .name: "rome_session",
+            .name: cookieName(),
             .value: token,
         ]
         if origin.scheme == "https" { properties[.secure] = "TRUE" }
@@ -216,7 +219,7 @@ final class APIClient: Sendable {
         components.scheme = origin.scheme == "https" ? "wss" : "ws"
         var request = URLRequest(url: components.url!)
         if let token = token() {
-            request.setValue("rome_session=\(token)", forHTTPHeaderField: "Cookie")
+            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
         }
         // The phone app's socket: a chat it subscribes to counts as watched on
         // the guardian's phone, and the Concierge does not push what it says there.
@@ -243,7 +246,7 @@ final class APIClient: Sendable {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token = token() {
-            request.setValue("rome_session=\(token)", forHTTPHeaderField: "Cookie")
+            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
         }
         return request
     }

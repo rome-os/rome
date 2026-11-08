@@ -59,3 +59,29 @@ enum Keychain {
         return try? JSONDecoder().decode(T.self, from: data)
     }
 }
+
+/// Where Cloud sign-in keeps its credential and instance sessions.
+protocol SecretStore: Sendable {
+    func data(for key: String) -> Data?
+    func set(_ data: Data, for key: String)
+    func remove(_ key: String)
+    func removeAll()
+}
+
+extension SecretStore {
+    func set<T: Encodable>(_ value: T, for key: String) {
+        if let data = try? JSONEncoder().encode(value) { set(data, for: key) }
+    }
+
+    func value<T: Decodable>(_ type: T.Type, for key: String) -> T? {
+        data(for: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+}
+
+/// The app's Keychain.
+struct KeychainStore: SecretStore {
+    func data(for key: String) -> Data? { Keychain.data(for: key) }
+    func set(_ data: Data, for key: String) { Keychain.set(data, for: key) }
+    func remove(_ key: String) { Keychain.remove(key) }
+    func removeAll() { Keychain.removeAll() }
+}

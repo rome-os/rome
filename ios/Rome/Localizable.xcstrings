@@ -1719,6 +1719,16 @@
         }
       }
     },
+    "Shared by %@ · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 分享 · %@"
+          }
+        }
+      }
+    },
     "Show %lld older" : {
       "localizations" : {
         "en" : {
@@ -2335,6 +2345,16 @@
         }
       }
     },
+    "Visitor" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "访客"
+          }
+        }
+      }
+    },
     "Waiting for your answer" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2421,6 +2441,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "昨天 %@"
+          }
+        }
+      }
+    },
+    "You no longer have access to this Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你已经不能访问这个 Rome 了"
           }
         }
       }

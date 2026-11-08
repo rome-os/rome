@@ -3,6 +3,7 @@ import SwiftUI
 /// Board 2: search, Chat, Apps (for the guardian), the topic chats, and the account row.
 struct DrawerView: View {
     let workspace: Workspace
+    @Environment(AppModel.self) private var model
     let section: MainSection
     let onSection: (MainSection) -> Void
     let onNewTopic: () -> Void
@@ -80,11 +81,14 @@ struct DrawerView: View {
                 HStack(spacing: 12) {
                     InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(workspace.instanceName)
-                            .romeFont(16, .semibold)
-                            .foregroundStyle(Palette.fg)
-                            .lineLimit(1)
-                        Text(workspace.host)
+                        HStack(spacing: 6) {
+                            Text(workspace.instanceName)
+                                .romeFont(16, .semibold)
+                                .foregroundStyle(Palette.fg)
+                                .lineLimit(1)
+                            if model.currentInstance?.isVisitor == true { VisitorBadge() }
+                        }
+                        Text(model.currentInstance.map(InstanceLine.detail) ?? workspace.host)
                             .romeFont(13)
                             .foregroundStyle(Palette.sub)
                             .lineLimit(1)

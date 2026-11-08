@@ -112,6 +112,17 @@ struct LoginView: View {
                     signIn()
                 }
             case .stopped, .noInstance:
+                // Why the list is short now: taken off a Rome's allow-list.
+                if let error = model.signInError {
+                    HStack(spacing: 6) {
+                        AlertGlyph(size: 14)
+                        Text(error).romeFont(14)
+                    }
+                    .foregroundStyle(Palette.destructive)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Palette.dangerSoft, in: Capsule())
+                }
                 SecondaryButton(title: "Try again") { Task { await model.retry() } }
                 Button("Sign out") { Task { await model.signOut() } }
                     .romeFont(17)

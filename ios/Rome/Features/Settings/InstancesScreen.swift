@@ -71,10 +71,13 @@ struct InstancesScreen: View {
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(instance.name)
-                        .romeFont(17, .semibold)
-                        .foregroundStyle(Palette.fg)
-                    Text(instance.host)
+                    HStack(spacing: 6) {
+                        Text(instance.name)
+                            .romeFont(17, .semibold)
+                            .foregroundStyle(Palette.fg)
+                        if instance.isVisitor { VisitorBadge() }
+                    }
+                    Text(InstanceLine.detail(instance))
                         .romeFont(14)
                         .foregroundStyle(Palette.sub)
                 }
@@ -264,5 +267,28 @@ struct SearchScreen: View {
             text[range].font = .system(size: 16, weight: .semibold)
         }
         return text
+    }
+}
+
+/// A Rome shared with this account: its owner put them on its allow-list.
+struct VisitorBadge: View {
+    var body: some View {
+        Text("Visitor")
+            .romeFont(11, .semibold)
+            .foregroundStyle(Palette.sub)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Palette.fill, in: Capsule())
+            .accessibilityLabel(Text("Visitor"))
+    }
+}
+
+/// The line under an instance's name: its host, and whose it is when shared.
+enum InstanceLine {
+    static func detail(_ instance: CloudInstance) -> String {
+        guard instance.isVisitor, let owner = instance.ownerName?.trimmingCharacters(in: .whitespacesAndNewlines), !owner.isEmpty else {
+            return instance.host
+        }
+        return String(localized: "Shared by \(owner) · \(instance.host)")
     }
 }

@@ -19,8 +19,14 @@ struct CloudInstance: Codable, Identifiable, Hashable, Sendable {
     var slug: String
     var origin: String
     var status: String
+    /// `owner`, or `visitor` for a Rome whose owner put this account on its
+    /// dashboard allow-list. Absent from an older Rome Cloud: the owner's.
+    var role: String? = nil
+    /// The owner's name, for a visitor's Rome.
+    var ownerName: String? = nil
 
     var isRunning: Bool { status == "running" }
+    var isVisitor: Bool { role == "visitor" }
     var host: String { URL(string: origin)?.host() ?? origin }
 }
 
@@ -28,6 +34,13 @@ struct InstanceSession: Codable, Sendable {
     var token: String
     var expiresAt: String
     var origin: String
+    /// `rome_session` for the guardian, `rome_visitor` for a visitor. Absent
+    /// from sessions stored before visitors: the guardian's.
+    var cookieName: String? = nil
+
+    var cookie: String { cookieName ?? InstanceSession.guardianCookie }
+    static let guardianCookie = "rome_session"
+    static let visitorCookie = "rome_visitor"
 
     var isFresh: Bool {
         guard let date = RomeDate.parse(expiresAt) else { return false }
@@ -40,6 +53,8 @@ enum AuthError: Error, Equatable, LocalizedError {
     case cloudUnauthorized
     case instanceNotReady
     case accessDenied
+    /// Taken off this Rome's allow-list: its owner no longer shares it.
+    case accessRevoked
     case sessionRejected
     case network
     case invalidResponse
@@ -50,6 +65,7 @@ enum AuthError: Error, Equatable, LocalizedError {
         case .cloudUnauthorized: return String(localized: "Rome Cloud sign-in expired")
         case .instanceNotReady: return String(localized: "This Rome is not ready yet")
         case .accessDenied: return String(localized: "No access to this Rome")
+        case .accessRevoked: return String(localized: "You no longer have access to this Rome")
         case .sessionRejected: return String(localized: "Sign-in did not finish")
         case .network: return String(localized: "Could not reach Rome Cloud")
         case .invalidResponse: return String(localized: "Invalid sign-in response")
@@ -74,15 +90,22 @@ final class CloudAuth {
     private enum Key {
         static let credential = "cloud.credential"
         static func session(_ origin: String) -> String { "instance.session.\(origin)" }
+        /// A visitor's session, apart from a guardian's: never both for one origin.
+        static func visitorSession(_ origin: String) -> String { "instance.visitorSession.\(origin)" }
+        static func session(for instance: CloudInstance) -> String {
+            instance.isVisitor ? visitorSession(instance.origin) : session(instance.origin)
+        }
     }
 
     let origin: URL
     private let http: URLSession
+    private let store: SecretStore
     private var inFlight: [String: Task<InstanceSession, Error>] = [:]
 
-    init(origin: URL) {
+    /// `configuration` and `store`: tests pass a stub protocol and memory.
+    init(origin: URL, configuration: URLSessionConfiguration = .ephemeral, store: SecretStore = KeychainStore()) {
         self.origin = origin
-        let configuration = URLSessionConfiguration.ephemeral
+        self.store = store
         configuration.httpShouldSetCookies = false
         http = URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
     }
@@ -92,7 +115,7 @@ final class CloudAuth {
         return URL(string: value ?? "") ?? URL(string: "https://romeos.cc")!
     }
 
-    var hasCredential: Bool { Keychain.data(for: Key.credential) != nil }
+    var hasCredential: Bool { store.data(for: Key.credential) != nil }
 
     // MARK: Cloud sign-in
 
@@ -143,7 +166,7 @@ final class CloudAuth {
               body["token_type"]?.string == "Bearer",
               let device = body["device_session_id"]?.string, !device.isEmpty
         else { throw AuthError.invalidResponse }
-        Keychain.set(CloudCredential(accessToken: token, deviceSessionId: device), for: Key.credential)
+        store.set(CloudCredential(accessToken: token, deviceSessionId: device), for: Key.credential)
     }
 
     nonisolated static func code(from callback: URL, state: String, issuer: URL) throws -> String {
@@ -170,16 +193,23 @@ final class CloudAuth {
         else { throw AuthError.invalidResponse }
         return items.compactMap { item in
             guard let instance = item.decoded(CloudInstance.self),
-                  let url = URL(string: instance.origin), url.scheme == "https",
-                  url.host() != origin.host()
+                  let url = URL(string: instance.origin), Self.opens(url, cloudOrigin: origin)
             else { return nil }
             return instance
         }
     }
 
+    /// An instance origin the app opens: https, never Rome Cloud's own host.
+    /// Plain http only when Rome Cloud itself is on http, which is a Cloud on
+    /// this Mac (Release always signs in with https).
+    nonisolated static func opens(_ url: URL, cloudOrigin: URL) -> Bool {
+        guard url.host() != nil, url.host() != cloudOrigin.host() else { return false }
+        return url.scheme == "https" || (url.scheme == "http" && cloudOrigin.scheme == "http")
+    }
+
     /// A fresh session for `instance`: the stored one when it has time left, else a new one.
     func session(for instance: CloudInstance, forceRefresh: Bool = false) async throws -> InstanceSession {
-        if !forceRefresh, let stored = Keychain.value(InstanceSession.self, for: Key.session(instance.origin)), stored.isFresh {
+        if !forceRefresh, let stored = store.value(InstanceSession.self, for: Key.session(for: instance)), stored.isFresh {
             return stored
         }
         if let running = inFlight[instance.origin] { return try await running.value }
@@ -192,6 +222,7 @@ final class CloudAuth {
     private func createSession(for instance: CloudInstance, retry: Bool = true) async throws -> InstanceSession {
         guard instance.isRunning else { throw AuthError.instanceNotReady }
         guard let instanceOrigin = URL(string: instance.origin) else { throw AuthError.invalidResponse }
+        if instance.isVisitor { return try await createVisitorSession(for: instance, at: instanceOrigin, retry: retry) }
 
         var start = URLRequest(url: instanceOrigin.appending(path: "api/auth/cloud/native/start"))
         start.httpMethod = "POST"
@@ -238,7 +269,70 @@ final class CloudAuth {
         else { throw AuthError.invalidResponse }
         let session = InstanceSession(token: token, expiresAt: expiresAt, origin: instance.origin)
         guard session.isFresh else { throw AuthError.invalidResponse }
-        Keychain.set(session, for: Key.session(instance.origin))
+        store.set(session, for: Key.session(instance.origin))
+        return session
+    }
+
+    /// A visitor's session, as the instance's dashboard sign-in for an
+    /// allow-listed account runs on the phone: the instance asks for a
+    /// sign-in, Rome Cloud issues the code for this account, and the instance
+    /// redeems it, checking its own allow-list, for a `rome_visitor` session.
+    private func createVisitorSession(for instance: CloudInstance, at instanceOrigin: URL, retry: Bool) async throws -> InstanceSession {
+        var start = URLRequest(url: instanceOrigin.appending(path: "api/auth/visitor/native/start"))
+        start.httpMethod = "POST"
+        start.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (startData, startStatus) = try await perform(start)
+        guard (200..<300).contains(startStatus) else {
+            // 404: the dashboard no longer lets visitors in at all.
+            throw startStatus == 404 ? AuthError.accessRevoked : AuthError.network
+        }
+        guard let startBody = try? JSONDecoder().decode(JSONValue.self, from: startData),
+              let authorizationRequest = startBody["visitor_authorization_request"],
+              authorizationRequest["intent"]?.string == "signin",
+              let state = authorizationRequest["state"]?.string,
+              startBody["origin"]?.string == instance.origin
+        else { throw AuthError.invalidResponse }
+
+        let (authorizationData, authorizationStatus) = try await cloudExchange(
+            "v1/instances/\(instance.id)/visitor-authorizations",
+            method: "POST",
+            body: .object(["authorization_request": authorizationRequest])
+        )
+        switch authorizationStatus {
+        case 200..<300: break
+        // Rome Cloud no longer has the instance for this account.
+        case 404: throw AuthError.accessRevoked
+        case 409: throw AuthError.instanceNotReady
+        default: throw AuthError.sessionRejected
+        }
+        guard let authorization = try? JSONDecoder().decode(JSONValue.self, from: authorizationData),
+              let code = authorization["code"]?.string,
+              authorization["state"]?.string == state
+        else { throw AuthError.invalidResponse }
+
+        var complete = URLRequest(url: instanceOrigin.appending(path: "api/auth/visitor/native/complete"))
+        complete.httpMethod = "POST"
+        complete.setValue("application/json", forHTTPHeaderField: "Accept")
+        complete.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        complete.httpBody = try JSONEncoder().encode(JSONValue.object(["state": .string(state), "code": .string(code)]))
+        let (sessionData, sessionStatus) = try await perform(complete)
+        // A stale attempt (the instance restarted between the calls): once more.
+        if sessionStatus == 400, retry { return try await createVisitorSession(for: instance, at: instanceOrigin, retry: false) }
+        switch sessionStatus {
+        case 200..<300: break
+        case 403, 404: throw AuthError.accessRevoked
+        default: throw AuthError.sessionRejected
+        }
+        guard let body = try? JSONDecoder().decode(JSONValue.self, from: sessionData),
+              body["cookie_name"]?.string == InstanceSession.visitorCookie,
+              body["role"]?.string == "visitor",
+              let token = body["session_token"]?.string,
+              let expiresAt = body["expires_at"]?.string,
+              body["origin"]?.string == instance.origin
+        else { throw AuthError.invalidResponse }
+        let session = InstanceSession(token: token, expiresAt: expiresAt, origin: instance.origin, cookieName: InstanceSession.visitorCookie)
+        guard session.isFresh else { throw AuthError.invalidResponse }
+        store.set(session, for: Key.visitorSession(instance.origin))
         return session
     }
 
@@ -261,7 +355,7 @@ final class CloudAuth {
     /// Rome Cloud without the device route, and `v1/instances` catches a
     /// credential that really expired.
     private func deviceCall(_ method: String, body: some Encodable) async throws {
-        guard let credential = Keychain.value(CloudCredential.self, for: Key.credential) else {
+        guard let credential = store.value(CloudCredential.self, for: Key.credential) else {
             throw AuthError.cloudUnauthorized
         }
         let request = Self.deviceRequest(origin: origin, accessToken: credential.accessToken, method: method, body: try JSONEncoder().encode(body))
@@ -270,19 +364,34 @@ final class CloudAuth {
     }
 
     func signOut() async {
-        if let credential = Keychain.value(CloudCredential.self, for: Key.credential) {
+        if let credential = store.value(CloudCredential.self, for: Key.credential) {
             var request = URLRequest(url: origin.appending(path: "v1/mobile/session"))
             request.httpMethod = "DELETE"
             request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
             _ = try? await perform(request)
         }
-        Keychain.removeAll()
+        store.removeAll()
     }
 
     // MARK: Plumbing
 
     private func cloudRequest(_ path: String, method: String = "GET", body: JSONValue? = nil) async throws -> Data {
-        guard let credential = Keychain.value(CloudCredential.self, for: Key.credential) else {
+        let (data, status) = try await cloudExchange(path, method: method, body: body)
+        switch status {
+        case 200..<300: return data
+        case 401:
+            store.remove(Key.credential)
+            throw AuthError.cloudUnauthorized
+        case 403: throw AuthError.accessDenied
+        case 409: throw AuthError.instanceNotReady
+        default: throw AuthError.sessionRejected
+        }
+    }
+
+    /// A call to Rome Cloud with this phone's credential, any status answered.
+    /// A 401 drops the credential: Rome Cloud's sign-in has ended.
+    private func cloudExchange(_ path: String, method: String = "GET", body: JSONValue? = nil) async throws -> (Data, Int) {
+        guard let credential = store.value(CloudCredential.self, for: Key.credential) else {
             throw AuthError.cloudUnauthorized
         }
         var request = URLRequest(url: origin.appending(path: path))
@@ -294,15 +403,11 @@ final class CloudAuth {
             request.httpBody = try JSONEncoder().encode(body)
         }
         let (data, status) = try await perform(request)
-        switch status {
-        case 200..<300: return data
-        case 401:
-            Keychain.remove(Key.credential)
+        if status == 401 {
+            store.remove(Key.credential)
             throw AuthError.cloudUnauthorized
-        case 403: throw AuthError.accessDenied
-        case 409: throw AuthError.instanceNotReady
-        default: throw AuthError.sessionRejected
         }
+        return (data, status)
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, Int) {

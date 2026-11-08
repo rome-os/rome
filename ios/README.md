@@ -105,6 +105,16 @@ ROME_PROFILE=ios-test pnpm --filter @rome/core start
 
 The API listens on `http://127.0.0.1:4141`. Create the guardian once with `POST /api/onboard/create-account` and turn on Concierge with `PUT /api/settings {"experimentalConcierge":true}`.
 
+
+### Against a local Rome Cloud
+
+To test Cloud sign-in, instance listing and visitors against a Rome Cloud on this Mac, build Debug with its origin on the command line, never in a committed file:
+
+```bash
+xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /tmp/rome-sim ROME_CLOUD_ORIGIN=http://cloud.rome.localhost:3000 build
+```
+
+Debug allows plain HTTP to names under `localhost`. The app opens an `http://` instance only while Rome Cloud itself is on `http://`, which is only ever a Cloud on this Mac: Release always signs in with `https://romeos.cc`.
 ## Tests
 
 Unit tests use Swift Testing. They run on a simulator, or on Mac Catalyst when no simulator is available:

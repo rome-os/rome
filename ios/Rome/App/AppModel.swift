@@ -7,10 +7,22 @@ import UserNotifications
 /// Holds the current instance session token for requests, safe to read from any thread.
 final class TokenBox: Sendable {
     private let state = OSAllocatedUnfairLock<String?>(initialState: nil)
+    private let name = OSAllocatedUnfairLock<String>(initialState: InstanceSession.guardianCookie)
 
     var token: String? {
         get { state.withLock { $0 } }
         set { state.withLock { $0 = newValue } }
+    }
+
+    /// The cookie the token goes in: `rome_session`, or `rome_visitor` for a visitor.
+    var cookieName: String {
+        get { name.withLock { $0 } }
+        set { name.withLock { $0 = newValue } }
+    }
+
+    func use(_ session: InstanceSession) {
+        cookieName = session.cookie
+        token = session.token
     }
 }
 
@@ -443,12 +455,12 @@ final class AppModel {
         phase = .connecting(host: instance.host)
         do {
             let session = try await cloud.session(for: instance)
-            token.token = session.token
+            token.use(session)
             UserDefaults.standard.set(instance.id, forKey: Defaults.lastInstance)
             currentInstanceID = instance.id
             // Signed in to Rome Cloud: this launch's token, if it has one yet.
             Task { await push.upload() }
-            let client = APIClient(origin: URL(string: instance.origin)!, token: { [token] in token.token }) { [weak self] in
+            let client = APIClient(origin: URL(string: instance.origin)!, token: { [token] in token.token }, cookieName: { [token] in token.cookieName }) { [weak self] in
                 Task { @MainActor in self?.handleUnauthorized() }
             }
             await open(Workspace(
@@ -466,9 +478,29 @@ final class AppModel {
             }
         } catch AuthError.cloudUnauthorized {
             phase = .signedOut
+        } catch AuthError.accessRevoked {
+            await lostAccess(to: instance)
         } catch {
             signInError = (error as? LocalizedError)?.errorDescription
             phase = .signedOut
+        }
+    }
+
+    /// Taken off a Rome's allow-list: it leaves the list, and another running
+    /// Rome opens with the reason said once; with none, the reason stays.
+    private func lostAccess(to instance: CloudInstance) async {
+        let reason = AuthError.accessRevoked.errorDescription
+        instances.removeAll { $0.id == instance.id }
+        if UserDefaults.standard.string(forKey: Defaults.lastInstance) == instance.id {
+            UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
+        }
+        currentInstanceID = nil
+        if let next = instances.first(where: \.isRunning) {
+            autoOpenHint = reason
+            await connect(to: next)
+        } else {
+            signInError = reason
+            phase = .noInstance
         }
     }
 
@@ -500,8 +532,12 @@ final class AppModel {
     }
 
     func retry() async {
+        signInError = nil
         await openInstance(preferring: nil, showHint: false)
     }
+
+    /// The instance open now, as Rome Cloud lists it.
+    var currentInstance: CloudInstance? { instances.first { $0.id == currentInstanceID } }
 
     func signOut() async {
         update.reset()
@@ -529,8 +565,9 @@ final class AppModel {
         Task {
             defer { refreshing = false }
             do {
+                // A visitor's session runs the visitor sign-in again, the guardian's the owner's.
                 let session = try await cloud.session(for: instance, forceRefresh: true)
-                token.token = session.token
+                token.use(session)
                 sessionExpired = false
             } catch {
                 sessionExpired = true
