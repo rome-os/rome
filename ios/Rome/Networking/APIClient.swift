@@ -80,9 +80,7 @@ final class APIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("image/*", forHTTPHeaderField: "Accept")
-        if let token = token() {
-            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
-        }
+        signIn(&request)
         return try await send(request, limit: Self.imageLimit)
     }
 
@@ -223,15 +221,22 @@ final class APIClient: Sendable {
         var components = URLComponents(url: origin.appending(path: path), resolvingAgainstBaseURL: false)!
         components.scheme = origin.scheme == "https" ? "wss" : "ws"
         var request = URLRequest(url: components.url!)
-        if let token = token() {
-            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
-        }
+        signIn(&request)
         // The phone app's socket: a chat it subscribes to counts as watched on
         // the guardian's phone, and the Concierge does not push what it says there.
         request.setValue(Self.phoneClient, forHTTPHeaderField: Self.clientHeader)
-        // The server takes a cookie on the socket only from its own origin.
-        request.setValue(Self.originString(origin), forHTTPHeaderField: "Origin")
         return request
+    }
+
+    /// Every request to the instance: the session cookie, and the instance's
+    /// own origin. The server takes a cookie on the socket, and a change on
+    /// guarded routes (approvals, connections), only from its own origin, and
+    /// a native request sends none of its own.
+    private func signIn(_ request: inout URLRequest) {
+        if let token = token() {
+            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
+        }
+        request.setValue(Self.originString(origin), forHTTPHeaderField: "Origin")
     }
 
     /// The live-events upgrade header that marks the phone app's socket.
@@ -250,9 +255,7 @@ final class APIClient: Sendable {
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let token = token() {
-            request.setValue("\(cookieName())=\(token)", forHTTPHeaderField: "Cookie")
-        }
+        signIn(&request)
         return request
     }
 
