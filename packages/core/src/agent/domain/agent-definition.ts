@@ -31,9 +31,8 @@ export interface AgentDefinition {
   policy?: Partial<AgentPolicy>;
   /**
    * On a cold resume, the model a chat saved replaces the model the session is
-   * pinned to. Rome sets it for the Concierge, whose quota failover must reach
-   * background turns (docs/adrs/concierge-provider-failover.md). No agent file
-   * declares it.
+   * pinned to. Rome gives it to the agents it names when it loads the catalog.
+   * No agent file declares it.
    */
   savedSelectionOutranksPin?: boolean;
 }
