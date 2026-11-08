@@ -1,3 +1,4 @@
+import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -681,7 +682,16 @@ export async function buildTestDeps(
     subagentExecutionService,
     activeSubagentRegistry,
   });
-  const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
+  const agentRunner = new AgentRunner(
+    agentSessionManager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
@@ -803,6 +813,7 @@ export async function buildTestDeps(
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
     agentSessionManager,
+    sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
         return normalizeConversationTitle(firstMessage) ?? "New Chat";

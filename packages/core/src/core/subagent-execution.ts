@@ -2,6 +2,7 @@
 // context and calls `SubagentCalls` itself.
 
 import { subagentRequest, type SubagentCalls, type SubagentOutcome } from "../agent/index.js";
+import type { Attributes } from "@opentelemetry/api";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import { subagentSessions } from "./subagent-call-ports.js";
@@ -36,6 +37,10 @@ export interface StartSubagentContext {
   workingDir: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
+  /** What the parent's tools run with; the subagent's run with the same. */
+  toolEnv?: Record<string, string | undefined>;
+  /** What the parent stamps on its turns' spans; the subagent's carry the same. */
+  spanAttributes?: Attributes;
 }
 
 export interface SubagentExecutionService {
@@ -64,6 +69,7 @@ export function createSubagentExecutionService(deps: {
           context.childManager,
           context.parentChannelThreadKey,
           deps.webchatRepo,
+          { toolEnv: context.toolEnv, spanAttributes: context.spanAttributes },
         ),
         at: {
           workingDir: context.workingDir,

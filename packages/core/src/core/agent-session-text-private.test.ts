@@ -117,7 +117,8 @@ describe("AgentSessionManager textPrivate", () => {
   ])("opens %s's model session with a defer tool that asks for a confirmation line: %s", async (agentName, textPrivate) => {
     await manager.acquire(
       { agentName, channelThreadKey: `webchat:${agentName}` },
-      { workingDir: directory },
+      // A web chat faces the guardian, so a wake-up can be scheduled into it.
+      { workingDir: directory, guardianFacing: true },
     );
     expect(opened).toHaveLength(1);
     // A private-text agent's words never reach the guardian, so `defer` asks

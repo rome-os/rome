@@ -1,3 +1,4 @@
+import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
@@ -117,7 +118,16 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     folders: agentFolders(),
     channelSurface: testChannelSurface,
   });
-  const runner = new AgentRunner(manager, agentLoader);
+  const runner = new AgentRunner(
+    manager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
 
   const transports = new Map<string, FakeTransport>();
   for (const name of options.channels) {

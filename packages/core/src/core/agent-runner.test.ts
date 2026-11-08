@@ -1,3 +1,4 @@
+import { sessionOpeningFor } from "./session-opening.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
@@ -2329,6 +2330,7 @@ describe("AgentRunner", () => {
       undefined,
       undefined,
       resetPolicy ? async () => resetPolicy : undefined,
+      sessionOpeningFor({ channelSurface: testChannelSurface }),
     );
   }
 

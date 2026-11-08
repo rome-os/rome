@@ -1,3 +1,4 @@
+import { sessionOpeningFor } from "../../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../../agent/index.js";
 import { agentFolders } from "../../paths.js";
@@ -294,7 +295,16 @@ async function buildHarness(
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );
-  const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
+  const agentRunner = new AgentRunner(
+    agentSessionManager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
 
   const channelEndpoints = new Map<string, FakeChannelEndpoint>();
   for (const name of options.channels ?? ["telegram", "webchat"]) {

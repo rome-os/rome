@@ -26,6 +26,7 @@ import type {
 } from "./agent-session.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import {
@@ -57,7 +58,10 @@ const SUMMON_ACTION = "system:summon";
 
 export interface RunTurnRequest {
   key: AgentSessionKey;
-  init?: Omit<AgentSessionInit, "resetPolicy"> & {
+  init?: Omit<
+    AgentSessionInit,
+    "resetPolicy" | "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes"
+  > & {
     /** The chat the caller names, which the bridge records as having the session. */
     romeSessionId?: string;
   };
@@ -109,6 +113,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private runLineDeps?: RunLineDeps,
     /** The reset policy of a connected account's chat. Absent, no session is reset. */
     private resetPolicyOf?: ChatResetPolicy,
+    /** What this opener states for a session it opens. Absent, no channel shows cards. */
+    private openingFor: SessionOpeningFor = sessionOpeningFor({
+      channelSurface: () => null,
+    }),
   ) {}
 
   /**
@@ -188,8 +196,13 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
         let session: AgentSession;
         try {
+          const openedKey = req.sessionId
+            ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
+            : req.key.channelThreadKey;
           const init = {
             ...sessionInit,
+            // Stated here, never taken from the worker's request.
+            ...this.openingFor(openedKey ?? "", sessionInit.threadContext),
             workingDir,
             isSubagent: true,
             // Read here, never taken from the worker's request.

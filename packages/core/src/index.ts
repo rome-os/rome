@@ -194,7 +194,12 @@ import {
 } from "./agent/index.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
+import { createAgentSessionManager } from "./core/agent-session.js";
+import {
+  type ChannelSurfaces,
+  sessionOpeningFor,
+  talkerChannelSurface,
+} from "./core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
@@ -1123,6 +1128,13 @@ async function main() {
     notify: notifyClient,
     phoneWatching,
   });
+  const channelSurface: ChannelSurfaces = (channel) => {
+    if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
+    const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
+      .talker;
+    return talker ? talkerChannelSurface(talker) : null;
+  };
+  const openingFor = sessionOpeningFor({ channelSurface, connectionKindOfChannel });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -1144,13 +1156,7 @@ async function main() {
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
-      channelSurface: (channel) => {
-        if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
-        const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
-          ?.capabilities.talker;
-        return talker ? talkerChannelSurface(talker) : null;
-      },
-      connectionKindOfChannel,
+      channelSurface,
       eventSources,
       sessionTools: (context) => buildConciergeTools(concierge, context),
     },
@@ -1168,6 +1174,7 @@ async function main() {
     undefined,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
+    openingFor,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1179,6 +1186,7 @@ async function main() {
     actionRegistry,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
+    openingFor,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
@@ -2081,6 +2089,7 @@ async function main() {
       actionExecutionsRepo,
       sessionRepository,
       agentSessionManager,
+      sessionOpeningFor: openingFor,
       conversationTitleGenerator,
       agentRunner,
       subagentCalls,

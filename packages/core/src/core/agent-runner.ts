@@ -17,6 +17,7 @@ import type { AgentSession, AgentSessionManager } from "./agent-session.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -239,6 +240,10 @@ export class AgentRunner {
     private runLineDeps?: RunLineDeps,
     /** The reset policy of a connected account's chat. Absent, no session is reset. */
     private resetPolicyOf?: ChatResetPolicy,
+    /** What this opener states for a session it opens. Absent, no channel shows cards. */
+    private openingFor: SessionOpeningFor = sessionOpeningFor({
+      channelSurface: () => null,
+    }),
   ) {}
 
   /**
@@ -280,7 +285,11 @@ export class AgentRunner {
     });
 
     const threadContext = await this.withChatId(params.threadContext);
+    const openedKey = explicitSessionId
+      ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
+      : requestedChannelThreadKey;
     const init = {
+      ...this.openingFor(openedKey ?? "", threadContext),
       workingDir: params.workingDir,
       threadContext,
       sharedContext: params.sharedContext,

@@ -11,7 +11,7 @@ import {
 } from "../agent/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
-import type { AgentSession, AgentSessionManager } from "./agent-session.js";
+import type { AgentSession, AgentSessionInit, AgentSessionManager } from "./agent-session.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { openedInChat } from "./session-conversation.js";
@@ -39,10 +39,17 @@ function subagentSession(child: AgentSession): SubagentSession {
   };
 }
 
-const opening = (at: SessionPlace) => ({
+/** What a parent hands its subagent's sessions: its tools' environment and its span attributes. */
+type Inherited = Pick<AgentSessionInit, "toolEnv" | "spanAttributes">;
+
+/** A subagent's session shows no cards and takes no wake-ups; its tools and spans carry its parent's. */
+const opening = (at: SessionPlace, inherited: Inherited): AgentSessionInit => ({
   workingDir: at.workingDir,
   threadContext: at.threadContext,
   sharedContext: at.sharedContext,
+  drawsCards: false,
+  guardianFacing: false,
+  ...inherited,
 });
 
 /** A calling session's subagent sessions, opened by its session manager under
@@ -51,18 +58,19 @@ export function subagentSessions(
   manager: AgentSessionManager,
   parentLink: string,
   webchatRepo: Pick<WebChatRepository, "recordSessionInChat">,
+  inherited: Inherited = {},
 ): SubagentSessions {
   return {
     async open(subagent, at) {
       const child = await manager.acquire(
         { agentName: subagent, channelThreadKey: storeSubagentParent(parentLink) },
-        opening(at),
+        opening(at, inherited),
       );
       await openedInChat(webchatRepo, child, undefined);
       return subagentSession(child);
     },
     async resume(id, subagent, at) {
-      const child = await manager.acquireBySessionId(id, subagent, opening(at));
+      const child = await manager.acquireBySessionId(id, subagent, opening(at, inherited));
       // Naming the chat lets the resume fill a row whose record failed when
       // the subagent was minted.
       await openedInChat(webchatRepo, child, id);

@@ -1,4 +1,5 @@
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
@@ -193,6 +194,8 @@ export interface ApiDeps {
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionRepository: SessionRepository;
   agentSessionManager: AgentSessionManager;
+  /** What a route states for a session it opens. */
+  sessionOpeningFor: SessionOpeningFor;
   /** Lightweight, tool-free small-model request used to name a new chat. */
   conversationTitleGenerator: ConversationTitleGenerator;
   /** Live agent runner used by API-owned background turns such as explicit
