@@ -2291,6 +2291,7 @@ class AgentSessionImpl implements AgentSession {
     if (sink.done) return;
     sink.done = true;
     sink.writer.end({ terminal, stoppedByRome: sink.lifecycleInterrupted });
+    this.clearSubagentLinks(sink);
     if (this.currentSink === sink) {
       this.currentSink = null;
     }
@@ -2388,12 +2389,6 @@ class AgentSessionImpl implements AgentSession {
         skillWritten: this.currentTurnSkillWritten,
       },
     });
-  }
-
-  /** The turn's events, clearing its subagent links once a reader has read to the end. */
-  private async *readTurn(sink: TurnSink, turn: Turn): AsyncIterable<StreamAgentEvent> {
-    yield* turn.events();
-    this.clearSubagentLinks(sink);
   }
 
   async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
@@ -2845,16 +2840,7 @@ class AgentSessionImpl implements AgentSession {
       )
       .finally(() => this.emitStatus());
 
-    return {
-      id: turn.id,
-      get hasEnded() {
-        return turn.hasEnded;
-      },
-      events: () => this.readTurn(sink, turn),
-      ended: () => turn.ended(),
-      stop: (reason) => turn.stop(reason),
-      turnContext: turnCtx,
-    };
+    return Object.assign(turn, { turnContext: turnCtx });
   }
 
   private async runOneTurn(
