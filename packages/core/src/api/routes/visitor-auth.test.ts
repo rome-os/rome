@@ -447,46 +447,50 @@ describe("/api/auth/visitor/native", () => {
   });
 });
 
-describe("/api/auth/visitor — telling the allow-list sync about sign-ins", () => {
-  function signInSpy(deps: TestDeps): string[] {
-    const seen: string[] = [];
-    deps.visitorAllowListSync.visitorSignedIn = (email: string) => void seen.push(email);
-    return seen;
-  }
-
-  async function routeWith(email: string): Promise<{ app: Hono; seen: string[] }> {
+describe("/api/auth/visitor — resending the allow-list after a first sign-in", () => {
+  async function routeWith(email: string): Promise<{ app: Hono; resends: () => number }> {
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
     const deps = { ...(await buildTestDeps(testDb.db)), dashboardAccessState: state };
-    const seen = signInSpy(deps);
+    // Clearing the list forgets earlier tests' sign-ins in this shared database.
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: [] });
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    let count = 0;
+    deps.visitorAllowListSync.requestResend = () => void (count += 1);
     const app = new Hono();
     app.route("/api", visitorAuthRoutes(deps, { fetchImpl: mockAccountSession(email) }));
-    return { app, seen };
+    return { app, resends: () => count };
   }
 
-  it("reports a browser and a native visitor sign-in", async () => {
-    const browser = await routeWith("Ada@Example.com");
-    const nonce = await startDashboardLogin(browser.app);
-    await browser.app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
-    expect(browser.seen).toEqual(["ada@example.com"]);
+  async function browserSignIn(app: Hono): Promise<void> {
+    const nonce = await startDashboardLogin(app);
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+  }
 
-    const native = await routeWith("ada@example.com");
-    const start = await native.app.request("/api/auth/visitor/native/start", { method: "POST" });
+  async function nativeSignIn(app: Hono): Promise<void> {
+    const start = await app.request("/api/auth/visitor/native/start", { method: "POST" });
     const { visitor_authorization_request: request } = (await start.json()) as {
       visitor_authorization_request: { state: string };
     };
-    await native.app.request("/api/auth/visitor/native/complete", {
+    await app.request("/api/auth/visitor/native/complete", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state: request.state, code: "abc" }),
     });
-    expect(native.seen).toEqual(["ada@example.com"]);
+  }
+
+  it("resends once on a listed email's first sign-in, browser or native, and never after", async () => {
+    const { app, resends } = await routeWith("Ada@Example.com");
+    await nativeSignIn(app);
+    expect(resends()).toBe(1);
+    await browserSignIn(app);
+    await nativeSignIn(app);
+    expect(resends()).toBe(1);
   });
 
-  it("reports nothing for a sign-in the allow-list refuses", async () => {
-    const { app, seen } = await routeWith("lin@example.com");
-    const nonce = await startDashboardLogin(app);
-    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
-    expect(seen).toEqual([]);
+  it("resends nothing for a sign-in the allow-list refuses", async () => {
+    const { app, resends } = await routeWith("lin@example.com");
+    await browserSignIn(app);
+    expect(resends()).toBe(0);
   });
 });

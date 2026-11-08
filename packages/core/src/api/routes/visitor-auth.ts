@@ -235,10 +235,18 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
         error: err instanceof Error ? err.message : String(err),
       });
     });
-    // An invited email that had no Rome Cloud account at the last sync may have
-    // just made one. The sync resends the list then, so Rome Cloud can list
-    // this instance to the new account.
-    deps.visitorAllowListSync.visitorSignedIn(email);
+    // A listed email's first sign-in may come from an account made after the
+    // last sync, which Rome Cloud could not match then. Resend the list once so
+    // it can list this instance to that account. A failed record costs only that.
+    const first = await deps.dashboardAccessStore
+      .recordVisitorSignIn(email)
+      .catch((err: unknown) => {
+        log.warn("visitor sign-in record failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      });
+    if (first) deps.visitorAllowListSync.requestResend();
     return { ok: true, accountId, email, avatarUrl, favorViewerToken };
   }
 

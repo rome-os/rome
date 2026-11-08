@@ -28,7 +28,7 @@ export interface VisitorAllowListSyncDeps {
   logger?: Pick<Logger, "debug" | "info" | "warn">;
   /** Wait before each retry. The last entry repeats until a send settles. */
   retryDelaysMs?: readonly number[];
-  /** Wait after a newly registered visitor signs in before resending, so a burst sends once. */
+  /** Wait after a requested resend before sending, so a burst of first sign-ins sends once. */
   resyncDelayMs?: number;
   timeoutMs?: number;
 }
@@ -40,8 +40,6 @@ type SendOutcome =
       cloudRevision: number | null;
       /** Whether Rome Cloud stored this list. Null from a Rome Cloud that predates the field. */
       applied: boolean | null;
-      /** Listed emails with no Rome Cloud account, when Rome Cloud reports them. */
-      unmatched: string[] | null;
     }
   | { kind: "rejected" | "skipped" | "retry" };
 
@@ -64,10 +62,6 @@ export class VisitorAllowListSync {
   // after it, and a send already in flight is sent again.
   private settled: { enrollment: string; generation: number; revision: number } | null = null;
   private generation = 0;
-  // Emails Rome Cloud last reported with no account. Rome Cloud keeps nothing
-  // for them, so when one of them signs in the list goes out again for Rome
-  // Cloud to match the new account.
-  private unmatched = new Set<string>();
   private resyncTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly unsubscribe: () => void;
   private draining = false;
@@ -84,19 +78,18 @@ export class VisitorAllowListSync {
   }
 
   /**
-   * Tells the sync that a visitor signed in. When Rome Cloud last reported
-   * their email with no account, they have made one since, so the list is sent
-   * again. Sign-ins in quick succession send it once. Every other sign-in does nothing.
+   * Sends the current list again shortly, even though Rome Cloud applied it.
+   * A listed email's first visitor sign-in calls this: Rome Cloud keeps nothing
+   * for an email without an account, so the person may have just made one.
+   * Requests in quick succession send once. A request that lands while a send
+   * is in flight sends again after it, so it is never lost.
    */
-  visitorSignedIn(email: string): void {
-    const normalized = normalizePublicAccessEmail(email);
-    if (!normalized || !this.unmatched.delete(normalized)) return;
+  requestResend(): void {
     if (this.resyncTimer) return;
     this.resyncTimer = setTimeout(() => {
       this.resyncTimer = null;
-      this.log.info("visitor allow-list resent after an invited visitor signed up", {
+      this.log.info("visitor allow-list resent after a first visitor sign-in", {
         revision: this.latest?.revision ?? null,
-        stillUnmatched: this.unmatched.size,
       });
       this.resend();
     }, this.deps.resyncDelayMs ?? DEFAULT_RESYNC_DELAY_MS);
@@ -189,21 +182,22 @@ export class VisitorAllowListSync {
           outcome.applied ??
           (outcome.cloudRevision === null || outcome.cloudRevision <= list.revision);
         if (!applied) {
-          if (!this.deps.raiseRevisionPast) return;
-          const floor = Math.max(outcome.cloudRevision ?? list.revision, list.revision);
+          // Raise only past a revision above the one sent. Any other refusal is
+          // treated as rejected, so an odd answer cannot loop raise and resend.
+          const floor = outcome.cloudRevision;
+          if (floor === null || floor <= list.revision || !this.deps.raiseRevisionPast) {
+            this.log.warn("visitor allow-list not applied", {
+              revision: list.revision,
+              cloudRevision: floor,
+            });
+            return;
+          }
           if (await this.raisePast(floor)) continue;
           this.scheduleRetry();
           return;
         }
         // Only an applied list settles.
         if (enrollment) this.settled = { enrollment, generation, revision: list.revision };
-        if (outcome.unmatched) {
-          this.unmatched = new Set(
-            outcome.unmatched
-              .map(normalizePublicAccessEmail)
-              .filter((email): email is string => email !== null),
-          );
-        }
         return;
       }
     } finally {
@@ -316,30 +310,22 @@ export class VisitorAllowListSync {
       return { kind: "retry" };
     }
     if (response.ok) {
-      // `revision` is what Rome Cloud now holds, and `applied` whether it stored
-      // this list. `unmatched` lists emails with no Rome Cloud account. It is
-      // kept in memory to resend the list when one of them signs in, and only
-      // its size is logged.
+      // `revision` is what Rome Cloud now holds, and `applied` whether it stored this list.
       const body = (await response.json().catch(() => null)) as {
         revision?: unknown;
         applied?: unknown;
-        unmatched?: unknown;
       } | null;
       const cloudRevision =
         typeof body?.revision === "number" && Number.isSafeInteger(body.revision)
           ? body.revision
           : null;
       const applied = typeof body?.applied === "boolean" ? body.applied : null;
-      const unmatched = Array.isArray(body?.unmatched)
-        ? body.unmatched.filter((email): email is string => typeof email === "string")
-        : null;
       this.log.info("visitor allow-list synced", {
         ...fields,
         outcome: applied === false ? "not_applied" : "ok",
         cloudRevision,
-        unmatched: unmatched?.length ?? null,
       });
-      return { kind: "ok", cloudRevision, applied, unmatched };
+      return { kind: "ok", cloudRevision, applied };
     }
     await response.body?.cancel().catch(() => {});
     const transient = response.status >= 500 || response.status === 408 || response.status === 429;

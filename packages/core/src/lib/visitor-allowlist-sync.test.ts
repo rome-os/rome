@@ -39,10 +39,7 @@ function fakeCloud(statuses: Array<number | "throw"> = [], opts: { held?: number
     if (status === "throw") throw new Error("connect ECONNREFUSED");
     const { emails, revision } = JSON.parse(String(init?.body)) as Sent["body"];
     if (status >= 200 && status < 300) held = Math.max(held, revision);
-    return new Response(
-      JSON.stringify({ revision: held, count: emails.length, unmatched: emails.slice(0, 1) }),
-      { status },
-    );
+    return new Response(JSON.stringify({ revision: held, count: emails.length }), { status });
   }) as typeof fetch;
   return {
     sent,
@@ -339,7 +336,7 @@ describe("VisitorAllowListSync", () => {
 
     expect(lines).toContainEqual({
       message: "visitor allow-list synced",
-      data: { revision: 6, count: 2, outcome: "ok", cloudRevision: 6, unmatched: 1 },
+      data: { revision: 6, count: 2, outcome: "ok", cloudRevision: 6 },
     });
     expect(lines).toContainEqual({
       message: "visitor allow-list sync failed",
@@ -402,6 +399,7 @@ describe("VisitorAllowListSync — Rome Cloud ahead", () => {
     expect(await settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
       cloudEmailAccess: ["ada@example.com"],
       revision: 8,
+      signedIn: [],
     });
 
     // The next save continues from there.
@@ -435,11 +433,12 @@ describe("DashboardAccessStore", () => {
 
 // A fake Rome Cloud with the agreed contract: it stores a list whose revision
 // is at least the stored one (an equal revision replaces it) and answers
-// `{revision, applied, unmatched}`. `accounts` are the emails with a Rome Cloud
+// `{revision, applied}`. `accounts` are the emails with a Rome Cloud
 // account. `hold` keeps the next send in flight until the test releases it.
 function appliedCloud(opts: { revision?: number; emails?: string[]; accounts?: string[] } = {}) {
   const state = { revision: opts.revision ?? -1, emails: opts.emails ?? [] };
   const accounts = new Set(opts.accounts ?? []);
+  const visitors: string[] = [];
   const sent: Array<{ emails: string[]; revision: number }> = [];
   let release: (() => void) | null = null;
   let holdNext = false;
@@ -451,13 +450,15 @@ function appliedCloud(opts: { revision?: number; emails?: string[]; accounts?: s
     // Rome Cloud decides when the request arrives; a held send only answers late.
     const applied = !failure && body.revision >= state.revision;
     if (applied) Object.assign(state, body);
-    const unmatched = applied ? body.emails.filter((email) => !accounts.has(email)) : [];
+    // Rome Cloud matches the listed emails to accounts as it applies the list.
+    const matched = applied ? body.emails.filter((email) => accounts.has(email)) : [];
+    if (applied) visitors.splice(0, visitors.length, ...matched);
     if (holdNext) {
       holdNext = false;
       await new Promise<void>((resolve) => (release = resolve));
     }
     if (failure) return new Response("{}", { status: failure });
-    return new Response(JSON.stringify({ revision: state.revision, applied, unmatched }), {
+    return new Response(JSON.stringify({ revision: state.revision, applied }), {
       status: 200,
     });
   }) as typeof fetch;
@@ -465,6 +466,7 @@ function appliedCloud(opts: { revision?: number; emails?: string[]; accounts?: s
     state,
     sent,
     accounts,
+    visitors,
     fetchImpl,
     failNext: (status: number) => failures.push(status),
     hold: () => (holdNext = true),
@@ -554,56 +556,100 @@ describe("VisitorAllowListSync — applied contract", () => {
     expect((await store.read()).revision).toBe(8);
   });
 
-  it("sends the list once more when an invited email without an account signs in, and only then", async () => {
-    const cloud = appliedCloud({ accounts: ["visitor@example.com"] });
-    const sync = linkedSync(cloud);
-
-    sync.push({
-      emails: ["visitor@example.com", "invitee@example.com", "invitee2@example.com"],
-      revision: 3,
+  it("raises nothing and stops when Rome Cloud does not apply a list without a higher revision", async () => {
+    const lines: unknown[] = [];
+    const record = (message: string, data?: unknown) => lines.push({ message, data });
+    let raises = 0;
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ revision: 2, applied: false }), {
+        status: 200,
+      })) as typeof fetch;
+    const sync = new VisitorAllowListSync({
+      getEnrollmentId: () => "enrollment-1",
+      getToken: () => "inst-token",
+      getOrigin: () => ORIGIN,
+      onLinkChanged: () => () => {},
+      raiseRevisionPast: async (floor) => {
+        raises += 1;
+        return { emails: [], revision: floor + 1 };
+      },
+      fetchImpl,
+      retryDelaysMs: [0],
+      logger: { debug: record, info: record, warn: record },
     });
+
+    sync.push({ emails: ["a@example.com"], revision: 2 });
+    await settle(sync);
+
+    expect(raises).toBe(0);
+    expect(lines).toContainEqual({
+      message: "visitor allow-list not applied",
+      data: { revision: 2, cloudRevision: 2 },
+    });
+    // Not delivered: the next push sends it again.
+    sync.push({ emails: ["a@example.com"], revision: 2 });
+    await settle(sync);
+    expect(
+      lines.filter((line) => (line as { message: string }).message === "visitor allow-list synced"),
+    ).toHaveLength(2);
+  });
+
+  it("sends the applied list once more on a requested resend, once per burst", async () => {
+    const cloud = appliedCloud();
+    const sync = linkedSync(cloud);
+    sync.push({ emails: ["invitee@example.com"], revision: 3 });
     await settle(sync);
     expect(cloud.sent).toHaveLength(1);
 
-    // A visitor Rome Cloud already matched: nothing to resend.
-    sync.visitorSignedIn("visitor@example.com");
-    await settle(sync);
-    expect(cloud.sent).toHaveLength(1);
-
-    // Both invitees sign up and sign in at once: one resend.
-    cloud.accounts.add("invitee@example.com");
-    cloud.accounts.add("invitee2@example.com");
-    sync.visitorSignedIn("Invitee@Example.com");
-    sync.visitorSignedIn("invitee@example.com");
-    sync.visitorSignedIn("invitee2@example.com");
+    sync.requestResend();
+    sync.requestResend();
+    sync.requestResend();
     await settle(sync);
     expect(cloud.sent).toHaveLength(2);
     expect(cloud.sent[1]).toEqual(cloud.sent[0]);
-
-    // Rome Cloud now matches them, so later sign-ins send nothing.
-    sync.visitorSignedIn("invitee@example.com");
-    await settle(sync);
-    expect(cloud.sent).toHaveLength(2);
   });
 
-  it("resends after a sign-in that lands while a send Rome Cloud answered before the sign-up is in flight", async () => {
+  it("keeps a first sign-in that lands while the first send is still in flight", async () => {
+    // No earlier sync: the very first PUT is held open across the sign-up and sign-in.
     const cloud = appliedCloud();
     const sync = linkedSync(cloud);
-    sync.push({ emails: ["invitee@example.com"], revision: 1 });
-    await settle(sync);
 
-    // A save goes out and Rome Cloud processes it before the invitee signs up.
     cloud.hold();
-    sync.push({ emails: ["invitee@example.com", "lin@example.com"], revision: 2 });
+    sync.push({ emails: ["invitee@example.com"], revision: 1 });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // The invitee signs up and signs in while that answer is still on its way.
     cloud.accounts.add("invitee@example.com");
-    sync.visitorSignedIn("invitee@example.com");
+    sync.requestResend();
     await new Promise((resolve) => setTimeout(resolve, 5));
     cloud.release();
     await settle(sync);
 
-    expect(cloud.sent.map((list) => list.revision)).toEqual([1, 2, 2]);
-    expect(cloud.state.revision).toBe(2);
+    expect(cloud.sent.map((list) => list.revision)).toEqual([1, 1]);
+    expect(cloud.visitors).toEqual(["invitee@example.com"]);
+  });
+});
+
+describe("DashboardAccessStore — visitor sign-ins", () => {
+  const testDb = createTestDb();
+  afterAll(() => testDb.close());
+
+  it("counts only a listed email's first sign-in, and forgets it when the email leaves the list", async () => {
+    const settingsRepo = new SettingsRepository(testDb.db);
+    const store = new DashboardAccessStore(settingsRepo);
+    await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
+
+    expect(await store.recordVisitorSignIn("Ada@Example.com")).toBe(true);
+    expect(await store.recordVisitorSignIn("ada@example.com")).toBe(false);
+    expect(await store.recordVisitorSignIn("stranger@example.com")).toBe(false);
+
+    // Survives a raise and a save that keeps the email.
+    await store.raisePast(5);
+    await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
+    expect(await store.recordVisitorSignIn("ada@example.com")).toBe(false);
+
+    // Removed, then added back: the next sign-in is a first one again.
+    await store.save({ cloudEmailAccess: ["lin@example.com"] });
+    await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
+    expect(await store.recordVisitorSignIn("ada@example.com")).toBe(true);
+    expect((await store.read()).emails).toEqual(["ada@example.com", "lin@example.com"]);
   });
 });
