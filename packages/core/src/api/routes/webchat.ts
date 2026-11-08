@@ -55,6 +55,7 @@ import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositorie
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../core/agent-lifecycle.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
+import { openedInChat } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
@@ -1479,12 +1480,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         {
           workingDir,
           threadContext,
-          romeSessionId: input.session.id,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id,
           reasoningEffort: await resolveRequestedReasoningEffort(undefined),
         },
       );
+      await openedInChat(deps.webchatRepo, source, input.session.id);
       sourceSessionId = source.sessionId;
       const storedCheckpoint = await deps.sessionRepository.deprecatedCheckpoint(
         source.sessionId,
@@ -3698,7 +3699,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         {
           workingDir,
           threadContext,
-          romeSessionId: sessionId,
           contextSuffix,
           // Null clears a selection an open session still holds, so a chat
           // switched back to Auto follows its pin again.
@@ -3706,6 +3706,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           reasoningEffort,
         },
       );
+      await openedInChat(deps.webchatRepo, agentSess, sessionId);
     } catch (err) {
       const modelError = toModelResolutionErrorPayload(err);
       if (modelError) {
@@ -4495,11 +4496,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
             senderBondLevel: "guardian",
           },
-          romeSessionId: chatId,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id ?? null,
         },
       );
+      await openedInChat(deps.webchatRepo, opened, chatId);
       return opened.sessionId;
     },
     async sendAsGuardian(chatId, text) {

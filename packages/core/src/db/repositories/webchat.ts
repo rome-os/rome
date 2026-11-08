@@ -1710,13 +1710,19 @@ export class WebChatRepository {
 
   /**
    * Record that a chat has an agent session, on the session's stored row.
-   * Never overwrites a chat the row already names.
+   * Answers the other chat it replaced, if any.
    */
-  async recordSessionInChat(sessionId: string, chatId: string): Promise<void> {
-    await this.db
-      .update(sessions)
-      .set({ chatId })
-      .where(and(eq(sessions.id, sessionId), isNull(sessions.chatId)));
+  async recordSessionInChat(sessionId: string, chatId: string): Promise<string | null> {
+    return this.db.transaction((tx) => {
+      const row = tx
+        .select({ chatId: sessions.chatId })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .get();
+      if (!row || row.chatId === chatId) return null;
+      tx.update(sessions).set({ chatId }).where(eq(sessions.id, sessionId)).run();
+      return row.chatId;
+    });
   }
 
   async markSessionRead(id: string) {

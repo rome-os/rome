@@ -20,7 +20,7 @@ import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import { noteOpenerChat } from "./session-conversation.js";
+import { openedInChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -1047,7 +1047,7 @@ describe("AgentRunner", () => {
         const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
         // The session is still open from a caller that named the chat. A
         // reopened one is the case above, which leaves the chat alone.
-        noteOpenerChat(session, "user-chat");
+        await openedInChat(undefined, session, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(

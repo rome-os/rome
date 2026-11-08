@@ -133,24 +133,21 @@ export class DrizzleSessionRepository implements SessionRepository {
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
-      // The inherited chat is the row's, not the instance's, as today's reset
-      // reads it: the instance can predate the chat's recording.
-      if (successorState.chatId === null) {
-        successorState.chatId =
-          tx
-            .select({ chatId: sessions.chatId })
-            .from(sessions)
-            .where(eq(sessions.id, retiredState.id))
-            .get()?.chatId ?? null;
-      }
-      tx.insert(sessions).values(toRow(successorState)).run();
+      // The successor stays in the chat that has the retired session. The chat
+      // side owns that link and may change it after the reset.
+      const chatId =
+        tx
+          .select({ chatId: sessions.chatId })
+          .from(sessions)
+          .where(eq(sessions.id, retiredState.id))
+          .get()?.chatId ?? null;
+      tx.insert(sessions)
+        .values({ ...toRow(successorState), chatId })
+        .run();
       for (const checkpoint of successorPending.checkpoints) upsertCheckpoint(tx, checkpoint);
     });
     retired.markSaved();
     successor.markSaved();
-    if (successorState.chatId !== null && successor.deprecatedChatId === null) {
-      successor.deprecatedInheritChat(successorState.chatId);
-    }
   }
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back
@@ -229,7 +226,6 @@ function restore(row: SessionRow): Session {
     workingDir: row.workingDir,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
-    chatId: row.chatId,
   });
 }
 
@@ -254,12 +250,6 @@ function writeChanges(
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
-  if (changes.has("chat") && state.chatId !== null) {
-    tx.update(sessions)
-      .set({ chatId: state.chatId })
-      .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
-      .run();
-  }
 }
 
 function toRow(state: SessionState): SessionRow {
@@ -267,7 +257,8 @@ function toRow(state: SessionState): SessionRow {
     id: state.id,
     agentName: state.agentName,
     channelThreadKey: state.continuityKey,
-    chatId: state.chatId,
+    // Which chat has the session is the chat side's to record.
+    chatId: null,
     provider: state.provider,
     modelThreadId: state.modelThreadId,
     model: state.model,

@@ -25,7 +25,7 @@ import {
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
-import { findChat, findSessionChat, openerChat } from "./session-conversation.js";
+import { findChat, findSessionChat, openedInChat, openerChat } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
@@ -280,7 +280,6 @@ export class AgentRunner {
     const init = {
       workingDir: params.workingDir,
       threadContext,
-      romeSessionId: params.romeSessionId,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
       applyProviderSessionReset: Boolean(params.platformMessageId),
@@ -291,6 +290,7 @@ export class AgentRunner {
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
           init,
         );
+    await openedInChat(this.webchatRepo, session, params.romeSessionId);
     const agentName = session.key.agentName;
     // An explicit sessionId is the source of truth for continuations. Use the
     // canonical key returned by the session row rather than requiring callers
@@ -439,6 +439,7 @@ export class AgentRunner {
     // route owns live webchat persistence, but no route owns a forked turn.
     let recorder: AgentTraceRecorder | null = null;
     let forkTurnId: string | undefined;
+    let forkSessionId: string | undefined;
     let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
     try {
       for await (const message of source.runForkedTurn({
@@ -451,6 +452,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
+          forkSessionId = message.sessionId;
           recorder = await this.createForkTraceRecorder(params, message, source);
           if (this.turnStreams) {
             try {
@@ -487,6 +489,18 @@ export class AgentRunner {
       }
     } finally {
       liveStream?.finish();
+    }
+    // A continuable fork's session is stored once its turn ends, and its chat
+    // is minted under the fork's own id. Nothing is stored for a one-shot fork.
+    if (forkSessionId && this.webchatRepo) {
+      try {
+        await this.webchatRepo.recordSessionInChat(forkSessionId, forkSessionId);
+      } catch (err) {
+        log.warn("failed to record the chat that has the fork's session", {
+          forkSessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     log.info("forked agent run completed", {

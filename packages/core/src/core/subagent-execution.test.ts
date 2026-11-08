@@ -280,6 +280,7 @@ describe("SubagentExecutionService", () => {
       parentTurnId: "original-parent-turn",
     });
     const resumed = fakeChildSession("child-resume", ["resumed-turn"]);
+    const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
       acquire: rs.fn(),
       acquireBySessionId: rs.fn(async () => resumed.session),
@@ -311,8 +312,9 @@ describe("SubagentExecutionService", () => {
     expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
-      expect.objectContaining({ romeSessionId: "child-resume" }),
+      expect.anything(),
     );
+    expect(recordSessionInChat).toHaveBeenCalledWith("child-resume", "child-resume");
     resumed.releases[0].resolve();
     await execution.completion;
 

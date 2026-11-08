@@ -176,7 +176,6 @@ describe("continuation notice through AgentSessionManager", () => {
     return manager.acquire(key, {
       workingDir: directory,
       threadContext,
-      romeSessionId: CHAT,
       ...(selectionId !== undefined ? { selectionId } : {}),
     });
   }
@@ -392,7 +391,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await first.shutdown();
 
     const retired = (await sessionRepository.current(key.channelThreadKey, AGENT))!;
-    await sessionRepository.replace(retired, retired.replace({ deprecatedChatId: CHAT }));
+    await sessionRepository.replace(retired, retired.replace());
     await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
   });
@@ -440,7 +439,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const context = { ...threadContext, threadId: chatId, romeSessionId: chatId };
     const session = await manager.acquire(
       { agentName, channelThreadKey: `webchat:${chatId}` },
-      { workingDir: directory, threadContext: context, romeSessionId: chatId, selectionId: from },
+      { workingDir: directory, threadContext: context, selectionId: from },
     );
     for await (const _ of session.sendTurn(
       { prompt: "first" },

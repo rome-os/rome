@@ -661,6 +661,7 @@ describe("AgentSessionBridge worker disconnect", () => {
   it("interrupts a turn whose message assignment fails, and only once", async () => {
     const turn = controllableTurn("turn-1");
     const webchatRepo = {
+      recordSessionInChat: async () => null,
       assignConversationMessageTurn: async () => {
         throw new Error("db down");
       },
